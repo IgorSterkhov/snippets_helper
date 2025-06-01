@@ -41,4 +41,8 @@ ehthumbs.db
 Thumbs.db
 
 # Project specific
-items.json 
+items.json
+.env
+
+# Environment variables
+.env 

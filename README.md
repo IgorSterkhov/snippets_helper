@@ -8,15 +8,17 @@ A Python application that helps you manage and quickly access text snippets usin
 - Search and filter text snippets
 - Copy snippets to clipboard
 - Create, edit, and delete snippets
-- Persistent storage in JSON format
+- Persistent storage in DuckDB database
 - Always-on-top window when activated
 
 ## Requirements
 
 - Python 3.6 or higher
 - Required packages (install using pip):
-  - keyboard
+  - pynput
   - pyperclip
+  - duckdb
+  - python-dotenv
 
 ## Installation
 
@@ -24,6 +26,14 @@ A Python application that helps you manage and quickly access text snippets usin
 2. Install the required packages:
    ```bash
    pip install -r requirements.txt
+   ```
+3. Create a `.env` file in the project root with the following content:
+   ```
+   DUCKDB_PATH=/path/to/your/database/file
+   ```
+4. Initialize the database:
+   ```bash
+   python create_duckdb.py
    ```
 
 ## Usage
@@ -47,6 +57,7 @@ A Python application that helps you manage and quickly access text snippets usin
 - **Delete**: Delete the selected snippet
 - **ShortCut Name**: Name/title of the snippet
 - **ShortCut Value**: Content of the snippet
+- **ShortCut Description**: Extended description of the snippet
 
 ### Keyboard Navigation
 
@@ -57,7 +68,10 @@ A Python application that helps you manage and quickly access text snippets usin
 
 ## Data Storage
 
-The program stores all snippets in a file called `items.json` in the same directory as the program. Each snippet has:
+The program stores all snippets in a DuckDB database. Each snippet has:
 - `id`: Unique identifier
 - `name`: Display name/title
-- `value`: The actual text content 
+- `value`: The actual text content
+- `description`: Extended description of the snippet
+
+The database path is configured in the `.env` file. 

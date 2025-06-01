@@ -1,10 +1,11 @@
-import json
+import os
+import duckdb
 import pyperclip
 import tkinter as tk
 from tkinter import ttk
-import os
 from pynput import keyboard
 from threading import Timer
+from dotenv import load_dotenv
 
 class KeyboardHelper:
     def __init__(self):
@@ -19,7 +20,13 @@ class KeyboardHelper:
         self.shift_pressed = False
         self.shift_timer = None
         
-        # Load items from JSON file
+        # Load environment variables
+        load_dotenv()
+        self.db_path = os.getenv('DUCKDB_PATH')
+        if not self.db_path:
+            raise ValueError("DUCKDB_PATH not found in .env file")
+        
+        # Initial data load
         self.load_items()
         
         # Setup keyboard listeners
@@ -29,18 +36,52 @@ class KeyboardHelper:
         self.keyboard_listener.start()
         
     def load_items(self):
+        conn = duckdb.connect(self.db_path)
         try:
-            if os.path.exists('items.json'):
-                with open('items.json', 'r', encoding='utf-8') as f:
-                    self.items_dict = json.load(f)
-            else:
-                self.items_dict = []
-        except Exception:
-            self.items_dict = []
+            # Get all items from database
+            result = conn.execute("SELECT * FROM shortcuts ORDER BY id").fetchall()
+            # Convert to list of dictionaries
+            self.items_dict = [
+                {
+                    'id': row[0],
+                    'name': row[1],
+                    'value': row[2],
+                    'description': row[3]
+                }
+                for row in result
+            ]
+        finally:
+            conn.close()
 
     def save_items(self):
-        with open('items.json', 'w', encoding='utf-8') as f:
-            json.dump(self.items_dict, f, ensure_ascii=False, indent=2)
+        conn = duckdb.connect(self.db_path)
+        try:
+            # Start transaction
+            conn.execute("BEGIN TRANSACTION")
+            
+            # Clear existing data
+            conn.execute("DELETE FROM shortcuts")
+            
+            # Insert all items
+            if self.items_dict:
+                values = [(item['id'], 
+                          item['name'], 
+                          item['value'], 
+                          item.get('description', '')) for item in self.items_dict]
+                
+                conn.executemany("""
+                    INSERT INTO shortcuts (id, name, value, description)
+                    VALUES (?, ?, ?, ?)
+                """, values)
+            
+            # Commit transaction
+            conn.execute("COMMIT")
+        except:
+            # Rollback on error
+            conn.execute("ROLLBACK")
+            raise
+        finally:
+            conn.close()
 
     def on_press(self, key):
         try:
