@@ -86,6 +86,8 @@ class KeyboardHelper:
                 self.shortcut_name.insert(0, item['name'])
                 self.shortcut_value.delete('1.0', tk.END)
                 self.shortcut_value.insert('1.0', item['value'])
+                self.shortcut_description.delete('1.0', tk.END)
+                self.shortcut_description.insert('1.0', item.get('description', ''))
                 break
 
     def copy_to_clipboard(self, event=None):
@@ -102,6 +104,7 @@ class KeyboardHelper:
                 if item['id'] == self.selected_item:
                     item['name'] = self.shortcut_name.get()
                     item['value'] = self.shortcut_value.get('1.0', tk.END).rstrip()
+                    item['description'] = self.shortcut_description.get('1.0', tk.END).rstrip()
                     break
             self.save_items()
             self.filter_items()
@@ -111,7 +114,8 @@ class KeyboardHelper:
         new_item = {
             'id': max_id + 1,
             'name': self.shortcut_name.get(),
-            'value': self.shortcut_value.get('1.0', tk.END).rstrip()
+            'value': self.shortcut_value.get('1.0', tk.END).rstrip(),
+            'description': self.shortcut_description.get('1.0', tk.END).rstrip()
         }
         self.items_dict.append(new_item)
         self.save_items()
@@ -124,6 +128,7 @@ class KeyboardHelper:
             self.selected_item = None
             self.shortcut_name.delete(0, tk.END)
             self.shortcut_value.delete('1.0', tk.END)
+            self.shortcut_description.delete('1.0', tk.END)
             self.filter_items()
 
     def create_window(self):
@@ -132,7 +137,7 @@ class KeyboardHelper:
 
         self.window = tk.Toplevel(self.root)
         self.window.title("Keyboard Helper")
-        self.window.geometry("600x400")
+        self.window.geometry("600x600")  # Увеличили высоту окна для нового поля
         
         # macOS specific window settings
         self.window.lift()
@@ -169,11 +174,29 @@ class KeyboardHelper:
         right_frame = ttk.Frame(self.window)
         right_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-        self.shortcut_name = ttk.Entry(right_frame)
-        self.shortcut_name.pack(fill=tk.X, pady=(0, 5))
+        # Name field
+        name_frame = ttk.Frame(right_frame)
+        name_frame.pack(fill=tk.X, pady=(0, 5))
+        name_label = ttk.Label(name_frame, text="Name:")
+        name_label.pack(anchor=tk.W)
+        self.shortcut_name = ttk.Entry(name_frame)
+        self.shortcut_name.pack(fill=tk.X)
 
-        self.shortcut_value = tk.Text(right_frame)
+        # Value field
+        value_frame = ttk.Frame(right_frame)
+        value_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 5))
+        value_label = ttk.Label(value_frame, text="Value:")
+        value_label.pack(anchor=tk.W)
+        self.shortcut_value = tk.Text(value_frame, height=10)
         self.shortcut_value.pack(fill=tk.BOTH, expand=True)
+
+        # Description field
+        description_frame = ttk.Frame(right_frame)
+        description_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 5))
+        description_label = ttk.Label(description_frame, text="Description:")
+        description_label.pack(anchor=tk.W)
+        self.shortcut_description = tk.Text(description_frame, height=10)
+        self.shortcut_description.pack(fill=tk.BOTH, expand=True)
 
         # Bind keyboard shortcuts
         self.window.bind('<Return>', self.copy_to_clipboard)
@@ -188,7 +211,8 @@ class KeyboardHelper:
             self.create_new_btn,
             self.delete_btn,
             self.shortcut_name,
-            self.shortcut_value
+            self.shortcut_value,
+            self.shortcut_description
         ]
         
         for i, widget in enumerate(widget_order):
