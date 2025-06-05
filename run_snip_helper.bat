@@ -1,0 +1,1 @@
+C:\Users\Sterhov.Igor\Dev\snippets_helper\.venv\Scripts\python.exe C:\Users\Sterhov.Igor\Dev\snippets_helper\main.py
