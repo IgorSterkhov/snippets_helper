@@ -48,34 +48,34 @@ class Database:
         finally:
             conn.close()
     
-    def save_items(self, items):
-        """Save all items to the database."""
+    def update_item(self, item):
+        """Update a single item in the database."""
         conn = duckdb.connect(self.db_path)
         try:
-            # Start transaction
-            conn.execute("BEGIN TRANSACTION")
-            
-            # Clear existing data
-            conn.execute("DELETE FROM shortcuts")
-            
-            # Insert all items
-            if items:
-                values = [(item['id'], 
-                          item['name'], 
-                          item['value'], 
-                          item.get('description', '')) for item in items]
-                
-                conn.executemany("""
-                    INSERT INTO shortcuts (id, name, value, description)
-                    VALUES (?, ?, ?, ?)
-                """, values)
-            
-            # Commit transaction
-            conn.execute("COMMIT")
-        except:
-            # Rollback on error
-            conn.execute("ROLLBACK")
-            raise
+            conn.execute("""
+                UPDATE shortcuts 
+                SET name = ?, value = ?, description = ?
+                WHERE id = ?
+            """, (item['name'], item['value'], item.get('description', ''), item['id']))
+        finally:
+            conn.close()
+    
+    def create_item(self, item):
+        """Create a new item in the database."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            conn.execute("""
+                INSERT INTO shortcuts (id, name, value, description)
+                VALUES (?, ?, ?, ?)
+            """, (item['id'], item['name'], item['value'], item.get('description', '')))
+        finally:
+            conn.close()
+    
+    def delete_item(self, item_id):
+        """Delete an item from the database."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            conn.execute("DELETE FROM shortcuts WHERE id = ?", (item_id,))
         finally:
             conn.close()
     
