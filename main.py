@@ -34,8 +34,41 @@ class KeyboardHelper:
     def load_items(self):
         self.items_dict = self.db.get_all_items()
 
-    def save_items(self):
-        self.db.save_items(self.items_dict)
+    def save_item(self):
+        if self.selected_item is not None:
+            for item in self.items_dict:
+                if item['id'] == self.selected_item:
+                    item['name'] = self.shortcut_name.get()
+                    item['value'] = self.shortcut_value.get('1.0', tk.END).rstrip()
+                    item['description'] = self.shortcut_description.get('1.0', tk.END).rstrip()
+                    # Update only the modified item in the database
+                    self.db.update_item(item)
+                    break
+            self.filter_items()
+
+    def create_new_item(self):
+        max_id = max([item['id'] for item in self.items_dict]) if self.items_dict else 0
+        new_item = {
+            'id': max_id + 1,
+            'name': self.shortcut_name.get(),
+            'value': self.shortcut_value.get('1.0', tk.END).rstrip(),
+            'description': self.shortcut_description.get('1.0', tk.END).rstrip()
+        }
+        # Create new item in the database
+        self.db.create_item(new_item)
+        self.items_dict.append(new_item)
+        self.filter_items()
+
+    def delete_item(self):
+        if self.selected_item is not None:
+            # Delete item from the database
+            self.db.delete_item(self.selected_item)
+            self.items_dict = [item for item in self.items_dict if item['id'] != self.selected_item]
+            self.selected_item = None
+            self.shortcut_name.delete(0, tk.END)
+            self.shortcut_value.delete('1.0', tk.END)
+            self.shortcut_description.delete('1.0', tk.END)
+            self.filter_items()
 
     def on_press(self, key):
         try:
@@ -92,39 +125,6 @@ class KeyboardHelper:
                     pyperclip.copy(item['value'])
                     break
         self.destroy_window(None)
-
-    def save_item(self):
-        if self.selected_item is not None:
-            for item in self.items_dict:
-                if item['id'] == self.selected_item:
-                    item['name'] = self.shortcut_name.get()
-                    item['value'] = self.shortcut_value.get('1.0', tk.END).rstrip()
-                    item['description'] = self.shortcut_description.get('1.0', tk.END).rstrip()
-                    break
-            self.save_items()
-            self.filter_items()
-
-    def create_new_item(self):
-        max_id = max([item['id'] for item in self.items_dict]) if self.items_dict else 0
-        new_item = {
-            'id': max_id + 1,
-            'name': self.shortcut_name.get(),
-            'value': self.shortcut_value.get('1.0', tk.END).rstrip(),
-            'description': self.shortcut_description.get('1.0', tk.END).rstrip()
-        }
-        self.items_dict.append(new_item)
-        self.save_items()
-        self.filter_items()
-
-    def delete_item(self):
-        if self.selected_item is not None:
-            self.items_dict = [item for item in self.items_dict if item['id'] != self.selected_item]
-            self.save_items()
-            self.selected_item = None
-            self.shortcut_name.delete(0, tk.END)
-            self.shortcut_value.delete('1.0', tk.END)
-            self.shortcut_description.delete('1.0', tk.END)
-            self.filter_items()
 
     def create_window(self):
         if self.window:
