@@ -1,11 +1,10 @@
 import os
-import duckdb
 import pyperclip
 import tkinter as tk
 from tkinter import ttk
 from pynput import keyboard
 from threading import Timer
-from dotenv import load_dotenv
+from database import Database
 
 class KeyboardHelper:
     def __init__(self):
@@ -20,11 +19,8 @@ class KeyboardHelper:
         self.shift_pressed = False
         self.shift_timer = None
         
-        # Load environment variables
-        load_dotenv()
-        self.db_path = os.getenv('DUCKDB_PATH')
-        if not self.db_path:
-            raise ValueError("DUCKDB_PATH not found in .env file")
+        # Initialize database
+        self.db = Database()
         
         # Initial data load
         self.load_items()
@@ -36,52 +32,10 @@ class KeyboardHelper:
         self.keyboard_listener.start()
         
     def load_items(self):
-        conn = duckdb.connect(self.db_path)
-        try:
-            # Get all items from database
-            result = conn.execute("SELECT * FROM shortcuts ORDER BY id").fetchall()
-            # Convert to list of dictionaries
-            self.items_dict = [
-                {
-                    'id': row[0],
-                    'name': row[1],
-                    'value': row[2],
-                    'description': row[3]
-                }
-                for row in result
-            ]
-        finally:
-            conn.close()
+        self.items_dict = self.db.get_all_items()
 
     def save_items(self):
-        conn = duckdb.connect(self.db_path)
-        try:
-            # Start transaction
-            conn.execute("BEGIN TRANSACTION")
-            
-            # Clear existing data
-            conn.execute("DELETE FROM shortcuts")
-            
-            # Insert all items
-            if self.items_dict:
-                values = [(item['id'], 
-                          item['name'], 
-                          item['value'], 
-                          item.get('description', '')) for item in self.items_dict]
-                
-                conn.executemany("""
-                    INSERT INTO shortcuts (id, name, value, description)
-                    VALUES (?, ?, ?, ?)
-                """, values)
-            
-            # Commit transaction
-            conn.execute("COMMIT")
-        except:
-            # Rollback on error
-            conn.execute("ROLLBACK")
-            raise
-        finally:
-            conn.close()
+        self.db.save_items(self.items_dict)
 
     def on_press(self, key):
         try:
@@ -261,26 +215,17 @@ class KeyboardHelper:
             widget.bind('<Tab>', lambda e, next_idx=(i + 1) % len(widget_order): 
                 widget_order[next_idx].focus_set())
         
-        # Fill the selector with items
-        self.filter_items()
-        
-        # Set focus to inputter
+        # Set initial focus
         self.inputter.focus_set()
         
-        # Handle window close
-        self.window.protocol("WM_DELETE_WINDOW", lambda: self.destroy_window(None))
+        # Load initial data
+        self.filter_items()
 
-    def destroy_window(self, e):
+    def destroy_window(self, event=None):
         if self.window:
             self.window.destroy()
             self.window = None
 
-    def run(self):
-        try:
-            self.root.mainloop()
-        finally:
-            self.keyboard_listener.stop()
-
 if __name__ == "__main__":
     app = KeyboardHelper()
-    app.run() 
+    app.root.mainloop() 
