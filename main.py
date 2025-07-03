@@ -5,6 +5,7 @@ from tkinter import ttk
 from pynput import keyboard
 from threading import Timer
 from database import Database
+from handlers.sql_parser import parse_sql
 
 class KeyboardHelper:
     def __init__(self):
@@ -140,16 +141,44 @@ class KeyboardHelper:
         
         # Ensure window appears on the active Space in macOS
         self.window.update_idletasks()
-        
+
+        # Notebook (tabs)
+        self.notebook = ttk.Notebook(self.window)
+        self.notebook.pack(fill=tk.BOTH, expand=True)
+
+        # --- Tab 1: Snippets ---
+        snippets_frame = ttk.Frame(self.notebook)
+        self.notebook.add(snippets_frame, text="Snippets")
+        self._build_snippets_tab(snippets_frame)
+
+        # --- Tab 2: SQL parser ---
+        sql_frame = ttk.Frame(self.notebook)
+        self.notebook.add(sql_frame, text="SQL parser")
+        self._build_sql_tab(sql_frame)
+
+        # Ctrl+Tab to switch tabs
+        self.window.bind_all('<Control-Tab>', self._ctrl_tab)
+
+        # Set initial focus
+        self.inputter.focus_set()
+        self.filter_items()
+
+    def _ctrl_tab(self, event):
+        current = self.notebook.index(self.notebook.select())
+        total = len(self.notebook.tabs())
+        self.notebook.select((current + 1) % total)
+        return "break"
+
+    def _build_snippets_tab(self, parent):
         # Left side
-        left_frame = ttk.Frame(self.window)
+        left_frame = ttk.Frame(parent)
         left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         self.inputter = ttk.Entry(left_frame)
         self.inputter.pack(fill=tk.X, pady=(0, 5))
         self.inputter.bind('<KeyRelease>', self.filter_items)
 
-        self.selector = tk.Listbox(left_frame, height=10)
+        self.selector = tk.Listbox(left_frame)
         self.selector.pack(fill=tk.BOTH, expand=True, pady=(0, 5))
         self.selector.bind('<<ListboxSelect>>', self.on_select)
 
@@ -166,7 +195,7 @@ class KeyboardHelper:
         self.delete_btn.pack(fill=tk.X)
 
         # Right side
-        right_frame = ttk.Frame(self.window)
+        right_frame = ttk.Frame(parent)
         right_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         # Name field
@@ -213,13 +242,27 @@ class KeyboardHelper:
         for i, widget in enumerate(widget_order):
             widget.lift()
             widget.bind('<Tab>', lambda e, next_idx=(i + 1) % len(widget_order): 
-                widget_order[next_idx].focus_set())
-        
-        # Set initial focus
-        self.inputter.focus_set()
-        
-        # Load initial data
-        self.filter_items()
+                       widget_order[next_idx].focus_set())
+
+    def _build_sql_tab(self, parent):
+        # SQL code input
+        self.sql_code_text = tk.Text(parent, height=10, name="sql_code_text")
+        self.sql_code_text.pack(fill=tk.X, padx=10, pady=(10, 5))
+        # Parse button
+        self.sql_parse_btn = ttk.Button(parent, text="Parse SQL", command=self._on_sql_parse, name="sql_parse_btn")
+        self.sql_parse_btn.pack(fill=tk.X, padx=10, pady=(0, 5))
+        # Result output (expand to fill all remaining space)
+        self.sql_parse_result_text = tk.Text(parent, name="sql_parse_result_text")
+        self.sql_parse_result_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+        self.sql_parse_result_text.config(state=tk.DISABLED)
+
+    def _on_sql_parse(self):
+        sql_code = self.sql_code_text.get("1.0", tk.END).strip()
+        result = parse_sql(sql_code)
+        self.sql_parse_result_text.config(state=tk.NORMAL)
+        self.sql_parse_result_text.delete("1.0", tk.END)
+        self.sql_parse_result_text.insert(tk.END, result)
+        self.sql_parse_result_text.config(state=tk.DISABLED)
 
     def destroy_window(self, event=None):
         if self.window:
