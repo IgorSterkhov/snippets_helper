@@ -156,13 +156,21 @@ class KeyboardHelper:
         self.notebook.add(sql_frame, text="SQL parser")
         self._build_sql_tab(sql_frame)
 
-        # Ctrl+Tab and Ctrl+Shift+Tab to switch tabs
-        self.notebook.bind_all('<Control-Tab>', self._ctrl_tab, add='+')
-        self.notebook.bind_all('<Control-ISO_Left_Tab>', self._ctrl_tab_reverse, add='+')
+        # Ctrl+Tab and Ctrl+Shift+Tab to switch tabs (универсально для всех виджетов)
+        self._bind_ctrl_tab_to_all(self.window)
 
         # Set initial focus
         # self.inputter.focus_set()
         self.filter_items()
+
+    def _bind_ctrl_tab_to_all(self, parent):
+        for child in parent.winfo_children():
+            # Рекурсивно для Frame/LabelFrame/ttk.Frame и т.д.
+            if isinstance(child, (tk.Frame, ttk.Frame, tk.LabelFrame)):
+                self._bind_ctrl_tab_to_all(child)
+            # Для всех виджетов, которые могут получать фокус
+            child.bind('<Control-Tab>', self._ctrl_tab, add='+')
+            child.bind('<Control-ISO_Left_Tab>', self._ctrl_tab_reverse, add='+')
 
     def _ctrl_tab(self, event):
         current = self.notebook.index(self.notebook.select())
@@ -248,8 +256,6 @@ class KeyboardHelper:
         
         for i, widget in enumerate(widget_order):
             widget.lift()
-            widget.bind('<Tab>', lambda e, next_idx=(i + 1) % len(widget_order): 
-                       widget_order[next_idx].focus_set())
 
     def _build_sql_tab(self, parent):
         # SQL code input
