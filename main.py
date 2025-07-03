@@ -156,17 +156,24 @@ class KeyboardHelper:
         self.notebook.add(sql_frame, text="SQL parser")
         self._build_sql_tab(sql_frame)
 
-        # Ctrl+Tab to switch tabs
-        self.window.bind_all('<Control-Tab>', self._ctrl_tab)
+        # Ctrl+Tab and Ctrl+Shift+Tab to switch tabs
+        self.notebook.bind_all('<Control-Tab>', self._ctrl_tab, add='+')
+        self.notebook.bind_all('<Control-ISO_Left_Tab>', self._ctrl_tab_reverse, add='+')
 
         # Set initial focus
-        self.inputter.focus_set()
+        # self.inputter.focus_set()
         self.filter_items()
 
     def _ctrl_tab(self, event):
         current = self.notebook.index(self.notebook.select())
         total = len(self.notebook.tabs())
         self.notebook.select((current + 1) % total)
+        return "break"
+
+    def _ctrl_tab_reverse(self, event):
+        current = self.notebook.index(self.notebook.select())
+        total = len(self.notebook.tabs())
+        self.notebook.select((current - 1) % total)
         return "break"
 
     def _build_snippets_tab(self, parent):
