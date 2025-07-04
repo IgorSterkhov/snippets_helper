@@ -170,7 +170,7 @@ class KeyboardHelper:
                 self._bind_ctrl_tab_to_all(child)
             # Для всех виджетов, которые могут получать фокус
             child.bind('<Control-Tab>', self._ctrl_tab, add='+')
-            child.bind('<Control-ISO_Left_Tab>', self._ctrl_tab_reverse, add='+')
+            # child.bind('<Control-ISO_Left_Tab>', self._ctrl_tab_reverse, add='+')
 
     def _ctrl_tab(self, event):
         current = self.notebook.index(self.notebook.select())
