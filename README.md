@@ -1,77 +1,89 @@
 # Keyboard Helper
 
-A Python application that helps you manage and quickly access text snippets using keyboard shortcuts.
+Приложение на Python для удобного хранения, поиска и быстрого доступа к текстовым сниппетам с помощью горячих клавиш. Также содержит вкладку для парсинга SQL-кода.
 
-## Features
+## Возможности
 
-- Global keyboard shortcut (double Shift) to show/hide the application
-- Search and filter text snippets
-- Copy snippets to clipboard
-- Create, edit, and delete snippets
-- Persistent storage in DuckDB database
-- Always-on-top window when activated
+- Глобальное горячее сочетание (двойной Shift) для показа/скрытия окна приложения
+- Поиск и фильтрация сниппетов
+- Копирование сниппета в буфер обмена
+- Создание, редактирование и удаление сниппетов
+- Хранение данных в базе DuckDB
+- Окно всегда поверх других окон
+- Вкладка для парсинга SQL-кода
 
-## Requirements
+## Требования
 
-- Python 3.6 or higher
-- Required packages (install using pip):
+- Python 3.6 или выше
+- Необходимые пакеты (установить через pip):
   - pynput
   - pyperclip
   - duckdb
   - python-dotenv
 
-## Installation
+## Установка
 
-1. Clone or download this repository
-2. Install the required packages:
+1. Клонируйте или скачайте репозиторий
+2. Установите зависимости:
    ```bash
    pip install -r requirements.txt
    ```
-3. Create a `.env` file in the project root with the following content:
+3. Создайте файл `.env` в корне проекта со следующим содержимым:
    ```
-   DUCKDB_PATH=/path/to/your/database/file
+   DUCKDB_PATH=/путь/к/вашей/базе/duckdb
    ```
-4. Initialize the database:
+4. Инициализируйте базу данных:
    ```bash
    python create_duckdb.py
    ```
 
-## Usage
+## Запуск
 
-1. Run the program:
+1. Запустите программу:
    ```bash
    python main.py
    ```
+2. Программа будет работать в фоне, ожидая горячих клавиш
+3. Для показа окна нажмите дважды Shift
+4. Для скрытия окна снова нажмите дважды Shift или Escape
 
-2. The program will run in the background, listening for keyboard shortcuts
-3. Press Shift twice quickly to show the application window
-4. Press Escape or double Shift again to hide the window
+## Описание интерфейса
 
-### Window Controls
+### Вкладка 1: Snippets
+- Строка поиска (Inputter)
+- Список сниппетов (Selector)
+- Кнопки: Copy to Clipboard, Save, Create New, Delete
+- Поля для редактирования: ShortCut Name, ShortCut Value, ShortCut Description
+- Все основные операции с текстовыми сниппетами
 
-- **Inputter**: Search box to filter snippets
-- **Selector**: List of available snippets
-- **Copy to Clipboard**: Copy selected snippet to clipboard (or press Enter)
-- **Save**: Save changes to the selected snippet
-- **Create New**: Create a new snippet
-- **Delete**: Delete the selected snippet
-- **ShortCut Name**: Name/title of the snippet
-- **ShortCut Value**: Content of the snippet
-- **ShortCut Description**: Extended description of the snippet
+### Вкладка 2: SQL parser
+- Многострочное поле для ввода SQL-кода (`sql_code_text`)
+- Кнопка "Parse SQL" (`sql_parse_btn`)
+- Многострочное поле для вывода результата (`sql_parse_result_text`), занимает всё оставшееся место по высоте вкладки
+- Все элементы имеют одинаковую ширину и расположены друг под другом
+- При нажатии на кнопку вызывается функция `parse_sql` из файла `handlers/sql_parser.py`, результат выводится в поле результата
 
-### Keyboard Navigation
+### Переключение между вкладками
+- Для быстрого переключения между вкладками используйте сочетание клавиш Ctrl+Tab
 
-- **Tab**: Cycle through window elements
-- **Enter**: Copy selected snippet to clipboard and close window
-- **Escape**: Close window
-- **Double Shift**: Show/hide window
+## Навигация с клавиатуры
 
-## Data Storage
+- **Tab** — переход между элементами окна
+- **Enter** — копировать выбранный сниппет в буфер обмена и закрыть окно
+- **Escape** — закрыть окно
+- **Двойной Shift** — показать/скрыть окно
+- **Ctrl+Tab** — переключение между вкладками
 
-The program stores all snippets in a DuckDB database. Each snippet has:
-- `id`: Unique identifier
-- `name`: Display name/title
-- `value`: The actual text content
-- `description`: Extended description of the snippet
+## Хранение данных
 
-The database path is configured in the `.env` file. 
+Все сниппеты хранятся в базе данных DuckDB. Каждый сниппет содержит:
+- `id` — уникальный идентификатор
+- `name` — название
+- `value` — текстовое содержимое
+- `description` — расширенное описание
+
+Путь к базе данных указывается в файле `.env` (переменная DUCKDB_PATH).
+
+## Авторы и лицензия
+
+Проект создан для личного использования. Используйте и дорабатывайте по своему усмотрению. 

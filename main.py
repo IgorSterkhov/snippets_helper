@@ -1,11 +1,11 @@
 import os
-import duckdb
 import pyperclip
 import tkinter as tk
 from tkinter import ttk
 from pynput import keyboard
 from threading import Timer
-from dotenv import load_dotenv
+from database import Database
+from handlers.sql_parser import parse_sql
 
 class KeyboardHelper:
     def __init__(self):
@@ -20,11 +20,8 @@ class KeyboardHelper:
         self.shift_pressed = False
         self.shift_timer = None
         
-        # Load environment variables
-        load_dotenv()
-        self.db_path = os.getenv('DUCKDB_PATH')
-        if not self.db_path:
-            raise ValueError("DUCKDB_PATH not found in .env file")
+        # Initialize database
+        self.db = Database()
         
         # Initial data load
         self.load_items()
@@ -36,52 +33,43 @@ class KeyboardHelper:
         self.keyboard_listener.start()
         
     def load_items(self):
-        conn = duckdb.connect(self.db_path)
-        try:
-            # Get all items from database
-            result = conn.execute("SELECT * FROM shortcuts ORDER BY id").fetchall()
-            # Convert to list of dictionaries
-            self.items_dict = [
-                {
-                    'id': row[0],
-                    'name': row[1],
-                    'value': row[2],
-                    'description': row[3]
-                }
-                for row in result
-            ]
-        finally:
-            conn.close()
+        self.items_dict = self.db.get_all_items()
 
-    def save_items(self):
-        conn = duckdb.connect(self.db_path)
-        try:
-            # Start transaction
-            conn.execute("BEGIN TRANSACTION")
-            
-            # Clear existing data
-            conn.execute("DELETE FROM shortcuts")
-            
-            # Insert all items
-            if self.items_dict:
-                values = [(item['id'], 
-                          item['name'], 
-                          item['value'], 
-                          item.get('description', '')) for item in self.items_dict]
-                
-                conn.executemany("""
-                    INSERT INTO shortcuts (id, name, value, description)
-                    VALUES (?, ?, ?, ?)
-                """, values)
-            
-            # Commit transaction
-            conn.execute("COMMIT")
-        except:
-            # Rollback on error
-            conn.execute("ROLLBACK")
-            raise
-        finally:
-            conn.close()
+    def save_item(self):
+        if self.selected_item is not None:
+            for item in self.items_dict:
+                if item['id'] == self.selected_item:
+                    item['name'] = self.shortcut_name.get()
+                    item['value'] = self.shortcut_value.get('1.0', tk.END).rstrip()
+                    item['description'] = self.shortcut_description.get('1.0', tk.END).rstrip()
+                    # Update only the modified item in the database
+                    self.db.update_item(item)
+                    break
+            self.filter_items()
+
+    def create_new_item(self):
+        max_id = max([item['id'] for item in self.items_dict]) if self.items_dict else 0
+        new_item = {
+            'id': max_id + 1,
+            'name': self.shortcut_name.get(),
+            'value': self.shortcut_value.get('1.0', tk.END).rstrip(),
+            'description': self.shortcut_description.get('1.0', tk.END).rstrip()
+        }
+        # Create new item in the database
+        self.db.create_item(new_item)
+        self.items_dict.append(new_item)
+        self.filter_items()
+
+    def delete_item(self):
+        if self.selected_item is not None:
+            # Delete item from the database
+            self.db.delete_item(self.selected_item)
+            self.items_dict = [item for item in self.items_dict if item['id'] != self.selected_item]
+            self.selected_item = None
+            self.shortcut_name.delete(0, tk.END)
+            self.shortcut_value.delete('1.0', tk.END)
+            self.shortcut_description.delete('1.0', tk.END)
+            self.filter_items()
 
     def on_press(self, key):
         try:
@@ -139,39 +127,6 @@ class KeyboardHelper:
                     break
         self.destroy_window(None)
 
-    def save_item(self):
-        if self.selected_item is not None:
-            for item in self.items_dict:
-                if item['id'] == self.selected_item:
-                    item['name'] = self.shortcut_name.get()
-                    item['value'] = self.shortcut_value.get('1.0', tk.END).rstrip()
-                    item['description'] = self.shortcut_description.get('1.0', tk.END).rstrip()
-                    break
-            self.save_items()
-            self.filter_items()
-
-    def create_new_item(self):
-        max_id = max([item['id'] for item in self.items_dict]) if self.items_dict else 0
-        new_item = {
-            'id': max_id + 1,
-            'name': self.shortcut_name.get(),
-            'value': self.shortcut_value.get('1.0', tk.END).rstrip(),
-            'description': self.shortcut_description.get('1.0', tk.END).rstrip()
-        }
-        self.items_dict.append(new_item)
-        self.save_items()
-        self.filter_items()
-
-    def delete_item(self):
-        if self.selected_item is not None:
-            self.items_dict = [item for item in self.items_dict if item['id'] != self.selected_item]
-            self.save_items()
-            self.selected_item = None
-            self.shortcut_name.delete(0, tk.END)
-            self.shortcut_value.delete('1.0', tk.END)
-            self.shortcut_description.delete('1.0', tk.END)
-            self.filter_items()
-
     def create_window(self):
         if self.window:
             return
@@ -186,16 +141,59 @@ class KeyboardHelper:
         
         # Ensure window appears on the active Space in macOS
         self.window.update_idletasks()
-        
+
+        # Notebook (tabs)
+        self.notebook = ttk.Notebook(self.window)
+        self.notebook.pack(fill=tk.BOTH, expand=True)
+
+        # --- Tab 1: Snippets ---
+        snippets_frame = ttk.Frame(self.notebook)
+        self.notebook.add(snippets_frame, text="Snippets")
+        self._build_snippets_tab(snippets_frame)
+
+        # --- Tab 2: SQL parser ---
+        sql_frame = ttk.Frame(self.notebook)
+        self.notebook.add(sql_frame, text="SQL parser")
+        self._build_sql_tab(sql_frame)
+
+        # Ctrl+Tab and Ctrl+Shift+Tab to switch tabs (универсально для всех виджетов)
+        self._bind_ctrl_tab_to_all(self.window)
+
+        # Set initial focus
+        # self.inputter.focus_set()
+        self.filter_items()
+
+    def _bind_ctrl_tab_to_all(self, parent):
+        for child in parent.winfo_children():
+            # Рекурсивно для Frame/LabelFrame/ttk.Frame и т.д.
+            if isinstance(child, (tk.Frame, ttk.Frame, tk.LabelFrame)):
+                self._bind_ctrl_tab_to_all(child)
+            # Для всех виджетов, которые могут получать фокус
+            child.bind('<Control-Tab>', self._ctrl_tab, add='+')
+            child.bind('<Control-ISO_Left_Tab>', self._ctrl_tab_reverse, add='+')
+
+    def _ctrl_tab(self, event):
+        current = self.notebook.index(self.notebook.select())
+        total = len(self.notebook.tabs())
+        self.notebook.select((current + 1) % total)
+        return "break"
+
+    def _ctrl_tab_reverse(self, event):
+        current = self.notebook.index(self.notebook.select())
+        total = len(self.notebook.tabs())
+        self.notebook.select((current - 1) % total)
+        return "break"
+
+    def _build_snippets_tab(self, parent):
         # Left side
-        left_frame = ttk.Frame(self.window)
+        left_frame = ttk.Frame(parent)
         left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         self.inputter = ttk.Entry(left_frame)
         self.inputter.pack(fill=tk.X, pady=(0, 5))
         self.inputter.bind('<KeyRelease>', self.filter_items)
 
-        self.selector = tk.Listbox(left_frame, height=10)
+        self.selector = tk.Listbox(left_frame)
         self.selector.pack(fill=tk.BOTH, expand=True, pady=(0, 5))
         self.selector.bind('<<ListboxSelect>>', self.on_select)
 
@@ -212,7 +210,7 @@ class KeyboardHelper:
         self.delete_btn.pack(fill=tk.X)
 
         # Right side
-        right_frame = ttk.Frame(self.window)
+        right_frame = ttk.Frame(parent)
         right_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         # Name field
@@ -258,29 +256,32 @@ class KeyboardHelper:
         
         for i, widget in enumerate(widget_order):
             widget.lift()
-            widget.bind('<Tab>', lambda e, next_idx=(i + 1) % len(widget_order): 
-                widget_order[next_idx].focus_set())
-        
-        # Fill the selector with items
-        self.filter_items()
-        
-        # Set focus to inputter
-        self.inputter.focus_set()
-        
-        # Handle window close
-        self.window.protocol("WM_DELETE_WINDOW", lambda: self.destroy_window(None))
 
-    def destroy_window(self, e):
+    def _build_sql_tab(self, parent):
+        # SQL code input
+        self.sql_code_text = tk.Text(parent, height=10, name="sql_code_text")
+        self.sql_code_text.pack(fill=tk.X, padx=10, pady=(10, 5))
+        # Parse button
+        self.sql_parse_btn = ttk.Button(parent, text="Parse SQL", command=self._on_sql_parse, name="sql_parse_btn")
+        self.sql_parse_btn.pack(fill=tk.X, padx=10, pady=(0, 5))
+        # Result output (expand to fill all remaining space)
+        self.sql_parse_result_text = tk.Text(parent, name="sql_parse_result_text")
+        self.sql_parse_result_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+        self.sql_parse_result_text.config(state=tk.DISABLED)
+
+    def _on_sql_parse(self):
+        sql_code = self.sql_code_text.get("1.0", tk.END).strip()
+        result = parse_sql(sql_code)
+        self.sql_parse_result_text.config(state=tk.NORMAL)
+        self.sql_parse_result_text.delete("1.0", tk.END)
+        self.sql_parse_result_text.insert(tk.END, result)
+        self.sql_parse_result_text.config(state=tk.DISABLED)
+
+    def destroy_window(self, event=None):
         if self.window:
             self.window.destroy()
             self.window = None
 
-    def run(self):
-        try:
-            self.root.mainloop()
-        finally:
-            self.keyboard_listener.stop()
-
 if __name__ == "__main__":
     app = KeyboardHelper()
-    app.run() 
+    app.root.mainloop() 
