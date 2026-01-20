@@ -2,7 +2,7 @@ import re
 
 def parse_sql(sql_content: str) -> str:
     # Регулярное выражение для поиска нужных подстрок
-    pattern_from_join = r'(?<!\n)(?:from|join)\s+([a-zA-Z_]*\.[a-zA-Z0-9_]*)'
+    pattern_from_join = r'(?<![a-zA-Z])(?:from|join)\s+([a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z0-9_]+)'
     pattern_dictget = r"dictGet\(\'([^\']*\.[^\']*)\'"
 
     unique_tables = set()
