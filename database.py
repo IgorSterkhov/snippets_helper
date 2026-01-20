@@ -28,6 +28,20 @@ class Database:
                     description TEXT
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS sql_table_analyzer_templates (
+                    id INTEGER PRIMARY KEY,
+                    template_text TEXT NOT NULL
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS superset_settings (
+                    computer_id VARCHAR NOT NULL,
+                    setting_key VARCHAR NOT NULL,
+                    setting_value TEXT NOT NULL,
+                    PRIMARY KEY (computer_id, setting_key)
+                )
+            """)
         finally:
             conn.close()
     
@@ -87,3 +101,55 @@ class Database:
             return result[0] if result[0] is not None else 0
         finally:
             conn.close() 
+
+    def get_sql_table_analyzer_templates(self):
+        """Get all SQL Table Analyzer templates."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            result = conn.execute("""
+                SELECT template_text
+                FROM sql_table_analyzer_templates
+                ORDER BY id
+            """).fetchall()
+            return [row[0] for row in result]
+        finally:
+            conn.close()
+
+    def save_sql_table_analyzer_templates(self, templates):
+        """Replace SQL Table Analyzer templates."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            conn.execute("DELETE FROM sql_table_analyzer_templates")
+            for index, template_text in enumerate(templates, start=1):
+                conn.execute("""
+                    INSERT INTO sql_table_analyzer_templates (id, template_text)
+                    VALUES (?, ?)
+                """, (index, template_text))
+        finally:
+            conn.close()
+
+    def get_superset_settings(self, computer_id):
+        """Get Superset settings for a specific computer."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            result = conn.execute("""
+                SELECT setting_key, setting_value
+                FROM superset_settings
+                WHERE computer_id = ?
+            """, (computer_id,)).fetchall()
+            return {row[0]: row[1] for row in result}
+        finally:
+            conn.close()
+
+    def upsert_superset_setting(self, computer_id, setting_key, setting_value):
+        """Upsert a single Superset setting for a computer."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            conn.execute("""
+                INSERT INTO superset_settings (computer_id, setting_key, setting_value)
+                VALUES (?, ?, ?)
+                ON CONFLICT (computer_id, setting_key) DO UPDATE
+                SET setting_value = excluded.setting_value
+            """, (computer_id, setting_key, setting_value))
+        finally:
+            conn.close()
