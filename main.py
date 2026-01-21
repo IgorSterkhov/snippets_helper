@@ -152,6 +152,11 @@ class KeyboardHelper:
         self.sql_table_analyzer_templates = self.db.get_sql_table_analyzer_templates()
         self.superset_computer_id = self._get_superset_computer_id()
         self.sql_parser_last_dir = str(Path.home())
+
+        # App settings
+        self.app_computer_id = self.superset_computer_id
+        self.app_settings = self.db.get_all_app_settings(self.app_computer_id)
+        self.settings_window = None
         
         # Initial data load
         self.load_items()
@@ -272,6 +277,12 @@ class KeyboardHelper:
         # Ensure window appears on the active Space in macOS
         self.window.update_idletasks()
 
+        # Settings button frame (above tabs)
+        top_frame = ttk.Frame(self.window)
+        top_frame.pack(fill=tk.X, padx=5, pady=5)
+        settings_btn = ttk.Button(top_frame, text="Settings", command=self._open_settings_window)
+        settings_btn.pack(side=tk.RIGHT)
+
         # Notebook (tabs)
         self.notebook = ttk.Notebook(self.window)
         self.notebook.pack(fill=tk.BOTH, expand=True)
@@ -298,6 +309,9 @@ class KeyboardHelper:
 
         # Ctrl+Tab and Ctrl+Shift+Tab to switch tabs (универсально для всех виджетов)
         self._bind_ctrl_tab_to_all(self.window)
+
+        # Apply saved settings
+        self._apply_snippets_settings()
 
         # Set initial focus
         # self.inputter.focus_set()
@@ -332,6 +346,7 @@ class KeyboardHelper:
         # Left side
         left_frame = ttk.Frame(parent)
         left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.snippets_left_frame = left_frame
 
         self.inputter = ttk.Entry(left_frame)
         self.inputter.pack(fill=tk.X, pady=(0, 5))
@@ -500,13 +515,7 @@ class KeyboardHelper:
             text="Parse and Analyze",
             command=self._on_sql_table_analyze
         )
-        self.sql_table_analyze_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
-        self.sql_table_settings_btn = ttk.Button(
-            buttons_frame,
-            text="Settings",
-            command=self._open_sql_table_analyzer_settings
-        )
-        self.sql_table_settings_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 0))
+        self.sql_table_analyze_btn.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         result_label = ttk.Label(parent, text="Result:")
         result_label.pack(anchor=tk.W, padx=10, pady=(0, 2))
@@ -515,7 +524,8 @@ class KeyboardHelper:
         self.sql_table_result_text.config(state=tk.DISABLED)
 
         self.sql_table_settings_window = None
-        self.sql_table_format_vertical_var = tk.BooleanVar(value=True)
+        format_vertical_value = self.app_settings.get('sql_analyzer_format_vertical', '1') == '1'
+        self.sql_table_format_vertical_var = tk.BooleanVar(value=format_vertical_value)
 
     def _build_superset_tab(self, parent):
         top_frame = ttk.Frame(parent)
@@ -1210,61 +1220,159 @@ class KeyboardHelper:
         except Exception as exc:
             self._set_superset_status(f"Export failed: {exc}")
 
-    def _open_sql_table_analyzer_settings(self):
-        if self.sql_table_settings_window and self.sql_table_settings_window.winfo_exists():
-            self.sql_table_settings_window.lift()
+    def _open_settings_window(self):
+        if self.settings_window and self.settings_window.winfo_exists():
+            self.settings_window.lift()
             return
 
         if self.window:
             self.window.attributes('-topmost', False)
-        self.sql_table_settings_window = tk.Toplevel(self.window)
-        self.sql_table_settings_window.title("SQL Table Analyzer Settings")
-        self.sql_table_settings_window.geometry("600x400")
-        self.sql_table_settings_window.transient(self.window)
-        self.sql_table_settings_window.attributes('-topmost', True)
-        self.sql_table_settings_window.lift()
-        self.sql_table_settings_window.focus_force()
-        self.sql_table_settings_window.protocol(
-            "WM_DELETE_WINDOW",
-            self._close_sql_table_analyzer_settings
-        )
+        self.settings_window = tk.Toplevel(self.window)
+        self.settings_window.title("Settings")
+        self.settings_window.geometry("600x450")
+        self.settings_window.transient(self.window)
+        self.settings_window.attributes('-topmost', True)
+        self.settings_window.lift()
+        self.settings_window.focus_force()
+        self.settings_window.protocol("WM_DELETE_WINDOW", self._close_settings_window)
 
+        # Notebook for settings tabs
+        settings_notebook = ttk.Notebook(self.settings_window)
+        settings_notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # General tab
+        general_frame = ttk.Frame(settings_notebook)
+        settings_notebook.add(general_frame, text="General")
+        self._build_settings_general_tab(general_frame)
+
+        # Snippets tab
+        snippets_frame = ttk.Frame(settings_notebook)
+        settings_notebook.add(snippets_frame, text="Snippets")
+        self._build_settings_snippets_tab(snippets_frame)
+
+        # SQL Table Analyser tab
+        sql_analyzer_frame = ttk.Frame(settings_notebook)
+        settings_notebook.add(sql_analyzer_frame, text="SQL Table Analyser")
+        self._build_settings_sql_analyzer_tab(sql_analyzer_frame)
+
+        # Buttons frame
+        buttons_frame = ttk.Frame(self.settings_window)
+        buttons_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
+        cancel_btn = ttk.Button(buttons_frame, text="Cancel", command=self._close_settings_window)
+        cancel_btn.pack(side=tk.RIGHT, padx=(5, 0))
+        save_btn = ttk.Button(buttons_frame, text="Save", command=self._save_settings)
+        save_btn.pack(side=tk.RIGHT)
+
+    def _build_settings_general_tab(self, parent):
+        placeholder_label = ttk.Label(parent, text="General settings (placeholder)")
+        placeholder_label.pack(anchor=tk.W, padx=10, pady=10)
+
+    def _build_settings_snippets_tab(self, parent):
+        # Font size
+        font_size_frame = ttk.Frame(parent)
+        font_size_frame.pack(fill=tk.X, padx=10, pady=(10, 5))
+        font_size_label = ttk.Label(font_size_frame, text="Font size:")
+        font_size_label.pack(side=tk.LEFT)
+        current_font_size = self.app_settings.get('snippets_font_size', '12')
+        self.settings_font_size_var = tk.StringVar(value=current_font_size)
+        font_size_spinbox = ttk.Spinbox(
+            font_size_frame,
+            from_=8,
+            to=24,
+            width=5,
+            textvariable=self.settings_font_size_var
+        )
+        font_size_spinbox.pack(side=tk.LEFT, padx=(10, 0))
+
+        # Left panel width
+        panel_width_frame = ttk.Frame(parent)
+        panel_width_frame.pack(fill=tk.X, padx=10, pady=(5, 5))
+        panel_width_label = ttk.Label(panel_width_frame, text="Left panel width:")
+        panel_width_label.pack(side=tk.LEFT)
+        current_panel_width = self.app_settings.get('snippets_left_panel_width', '200')
+        self.settings_panel_width_var = tk.StringVar(value=current_panel_width)
+        panel_width_spinbox = ttk.Spinbox(
+            panel_width_frame,
+            from_=150,
+            to=500,
+            width=5,
+            textvariable=self.settings_panel_width_var
+        )
+        panel_width_spinbox.pack(side=tk.LEFT, padx=(10, 0))
+        panel_width_px_label = ttk.Label(panel_width_frame, text="px")
+        panel_width_px_label.pack(side=tk.LEFT, padx=(5, 0))
+
+    def _build_settings_sql_analyzer_tab(self, parent):
+        # Format Vertical checkbox
+        current_format_vertical = self.app_settings.get('sql_analyzer_format_vertical', '1')
+        self.settings_format_vertical_var = tk.BooleanVar(value=current_format_vertical == '1')
         format_vertical_check = ttk.Checkbutton(
-            self.sql_table_settings_window,
+            parent,
             text="Format Vertical",
-            variable=self.sql_table_format_vertical_var
+            variable=self.settings_format_vertical_var
         )
         format_vertical_check.pack(anchor=tk.W, padx=10, pady=(10, 2))
 
-        templates_label = ttk.Label(self.sql_table_settings_window, text="Templates (one per line):")
+        # Templates
+        templates_label = ttk.Label(parent, text="Templates (one per line):")
         templates_label.pack(anchor=tk.W, padx=10, pady=(10, 2))
-
-        self.sql_table_settings_text = tk.Text(self.sql_table_settings_window, height=15)
-        self.sql_table_settings_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 8))
-
-        save_btn = ttk.Button(
-            self.sql_table_settings_window,
-            text="Save",
-            command=self._save_sql_table_analyzer_settings
-        )
-        save_btn.pack(fill=tk.X, padx=10, pady=(0, 10))
+        self.settings_templates_text = tk.Text(parent, height=15)
+        self.settings_templates_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 8))
 
         self.sql_table_analyzer_templates = self.db.get_sql_table_analyzer_templates()
         templates_text = "\n".join(self.sql_table_analyzer_templates)
         if templates_text:
-            self.sql_table_settings_text.insert("1.0", templates_text)
+            self.settings_templates_text.insert("1.0", templates_text)
 
-    def _save_sql_table_analyzer_settings(self):
-        templates_text = self.sql_table_settings_text.get("1.0", tk.END).strip()
+    def _save_settings(self):
+        # Save Snippets settings
+        font_size = self.settings_font_size_var.get()
+        panel_width = self.settings_panel_width_var.get()
+        self.db.save_app_setting(self.app_computer_id, 'snippets_font_size', font_size)
+        self.db.save_app_setting(self.app_computer_id, 'snippets_left_panel_width', panel_width)
+        self.app_settings['snippets_font_size'] = font_size
+        self.app_settings['snippets_left_panel_width'] = panel_width
+
+        # Save SQL Table Analyser settings
+        format_vertical = '1' if self.settings_format_vertical_var.get() else '0'
+        self.db.save_app_setting(self.app_computer_id, 'sql_analyzer_format_vertical', format_vertical)
+        self.app_settings['sql_analyzer_format_vertical'] = format_vertical
+        self.sql_table_format_vertical_var.set(format_vertical == '1')
+
+        templates_text = self.settings_templates_text.get("1.0", tk.END).strip()
         templates = [line.strip() for line in templates_text.splitlines() if line.strip()]
         self.db.save_sql_table_analyzer_templates(templates)
         self.sql_table_analyzer_templates = templates
-        self._close_sql_table_analyzer_settings()
 
-    def _close_sql_table_analyzer_settings(self):
-        if self.sql_table_settings_window and self.sql_table_settings_window.winfo_exists():
-            self.sql_table_settings_window.destroy()
-            self.sql_table_settings_window = None
+        # Apply Snippets settings
+        self._apply_snippets_settings()
+        self._close_settings_window()
+
+    def _apply_snippets_settings(self):
+        font_size = int(self.app_settings.get('snippets_font_size', '12'))
+        panel_width = int(self.app_settings.get('snippets_left_panel_width', '200'))
+
+        # Apply font size to widgets
+        font_spec = ('TkDefaultFont', font_size)
+        if hasattr(self, 'inputter'):
+            self.inputter.configure(font=font_spec)
+        if hasattr(self, 'selector'):
+            self.selector.configure(font=font_spec)
+        if hasattr(self, 'shortcut_name'):
+            self.shortcut_name.configure(font=font_spec)
+        if hasattr(self, 'shortcut_value'):
+            self.shortcut_value.configure(font=font_spec)
+        if hasattr(self, 'shortcut_description'):
+            self.shortcut_description.configure(font=font_spec)
+
+        # Apply left panel width
+        if hasattr(self, 'snippets_left_frame'):
+            self.snippets_left_frame.configure(width=panel_width)
+
+    def _close_settings_window(self):
+        if self.settings_window and self.settings_window.winfo_exists():
+            self.settings_window.destroy()
+            self.settings_window = None
         if self.window:
             self.window.attributes('-topmost', True)
 

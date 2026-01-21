@@ -42,6 +42,14 @@ class Database:
                     PRIMARY KEY (computer_id, setting_key)
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS app_settings (
+                    computer_id VARCHAR NOT NULL,
+                    setting_key VARCHAR NOT NULL,
+                    setting_value TEXT NOT NULL,
+                    PRIMARY KEY (computer_id, setting_key)
+                )
+            """)
         finally:
             conn.close()
     
@@ -151,5 +159,44 @@ class Database:
                 ON CONFLICT (computer_id, setting_key) DO UPDATE
                 SET setting_value = excluded.setting_value
             """, (computer_id, setting_key, setting_value))
+        finally:
+            conn.close()
+
+    def get_app_setting(self, computer_id, key):
+        """Get a single app setting."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            result = conn.execute("""
+                SELECT setting_value
+                FROM app_settings
+                WHERE computer_id = ? AND setting_key = ?
+            """, (computer_id, key)).fetchone()
+            return result[0] if result else None
+        finally:
+            conn.close()
+
+    def save_app_setting(self, computer_id, key, value):
+        """Save a single app setting."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            conn.execute("""
+                INSERT INTO app_settings (computer_id, setting_key, setting_value)
+                VALUES (?, ?, ?)
+                ON CONFLICT (computer_id, setting_key) DO UPDATE
+                SET setting_value = excluded.setting_value
+            """, (computer_id, key, value))
+        finally:
+            conn.close()
+
+    def get_all_app_settings(self, computer_id):
+        """Get all app settings for a computer."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            result = conn.execute("""
+                SELECT setting_key, setting_value
+                FROM app_settings
+                WHERE computer_id = ?
+            """, (computer_id,)).fetchall()
+            return {row[0]: row[1] for row in result}
         finally:
             conn.close()
