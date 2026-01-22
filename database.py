@@ -59,6 +59,16 @@ class Database:
                     UNIQUE(computer_id, tag_name)
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS sql_macrosing_templates (
+                    id INTEGER PRIMARY KEY,
+                    template_name VARCHAR NOT NULL UNIQUE,
+                    template_text TEXT NOT NULL,
+                    placeholders_config TEXT NOT NULL,
+                    combination_mode VARCHAR NOT NULL DEFAULT 'cartesian',
+                    separator VARCHAR NOT NULL DEFAULT ';\\n'
+                )
+            """)
         finally:
             conn.close()
     
@@ -260,3 +270,79 @@ class Database:
             ]
             for tag in default_tags:
                 self.add_commit_tag(computer_id, tag, is_default=False)
+
+    def get_sql_macrosing_templates(self) -> list[dict]:
+        """Get all SQL Macrosing templates."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            result = conn.execute("""
+                SELECT id, template_name, template_text, placeholders_config, combination_mode, separator
+                FROM sql_macrosing_templates
+                ORDER BY template_name
+            """).fetchall()
+            return [
+                {
+                    'id': row[0],
+                    'template_name': row[1],
+                    'template_text': row[2],
+                    'placeholders_config': row[3],
+                    'combination_mode': row[4],
+                    'separator': row[5]
+                }
+                for row in result
+            ]
+        finally:
+            conn.close()
+
+    def get_sql_macrosing_template_by_name(self, name: str) -> dict | None:
+        """Get a SQL Macrosing template by name."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            result = conn.execute("""
+                SELECT id, template_name, template_text, placeholders_config, combination_mode, separator
+                FROM sql_macrosing_templates
+                WHERE template_name = ?
+            """, (name,)).fetchone()
+            if result:
+                return {
+                    'id': result[0],
+                    'template_name': result[1],
+                    'template_text': result[2],
+                    'placeholders_config': result[3],
+                    'combination_mode': result[4],
+                    'separator': result[5]
+                }
+            return None
+        finally:
+            conn.close()
+
+    def save_sql_macrosing_template(self, name, template_text, placeholders_config, combination_mode, separator):
+        """Save or update a SQL Macrosing template."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            existing = conn.execute(
+                "SELECT id FROM sql_macrosing_templates WHERE template_name = ?", (name,)
+            ).fetchone()
+            if existing:
+                conn.execute("""
+                    UPDATE sql_macrosing_templates
+                    SET template_text = ?, placeholders_config = ?, combination_mode = ?, separator = ?
+                    WHERE template_name = ?
+                """, (template_text, placeholders_config, combination_mode, separator, name))
+            else:
+                max_id_result = conn.execute("SELECT MAX(id) FROM sql_macrosing_templates").fetchone()
+                new_id = (max_id_result[0] or 0) + 1
+                conn.execute("""
+                    INSERT INTO sql_macrosing_templates (id, template_name, template_text, placeholders_config, combination_mode, separator)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (new_id, name, template_text, placeholders_config, combination_mode, separator))
+        finally:
+            conn.close()
+
+    def delete_sql_macrosing_template(self, name):
+        """Delete a SQL Macrosing template by name."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            conn.execute("DELETE FROM sql_macrosing_templates WHERE template_name = ?", (name,))
+        finally:
+            conn.close()
