@@ -50,6 +50,15 @@ class Database:
                     PRIMARY KEY (computer_id, setting_key)
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS commit_tags (
+                    id INTEGER PRIMARY KEY,
+                    computer_id VARCHAR NOT NULL,
+                    tag_name VARCHAR NOT NULL,
+                    is_default INTEGER DEFAULT 0,
+                    UNIQUE(computer_id, tag_name)
+                )
+            """)
         finally:
             conn.close()
     
@@ -200,3 +209,54 @@ class Database:
             return {row[0]: row[1] for row in result}
         finally:
             conn.close()
+
+    def get_commit_tags(self, computer_id):
+        """Get all commit tags for a computer."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            result = conn.execute("""
+                SELECT tag_name, is_default
+                FROM commit_tags
+                WHERE computer_id = ?
+                ORDER BY id
+            """, (computer_id,)).fetchall()
+            return [{'tag_name': row[0], 'is_default': bool(row[1])} for row in result]
+        finally:
+            conn.close()
+
+    def add_commit_tag(self, computer_id, tag_name, is_default=False):
+        """Add a commit tag for a computer."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            max_id_result = conn.execute("SELECT MAX(id) FROM commit_tags").fetchone()
+            new_id = (max_id_result[0] or 0) + 1
+            conn.execute("""
+                INSERT INTO commit_tags (id, computer_id, tag_name, is_default)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT (computer_id, tag_name) DO NOTHING
+            """, (new_id, computer_id, tag_name, 1 if is_default else 0))
+        finally:
+            conn.close()
+
+    def delete_commit_tag(self, computer_id, tag_name):
+        """Delete a commit tag for a computer."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            conn.execute("""
+                DELETE FROM commit_tags
+                WHERE computer_id = ? AND tag_name = ?
+            """, (computer_id, tag_name))
+        finally:
+            conn.close()
+
+    def init_default_commit_tags(self, computer_id):
+        """Initialize default commit tags if none exist."""
+        existing = self.get_commit_tags(computer_id)
+        if not existing:
+            default_tags = [
+                "@dataops-dags",
+                "@dataops-click",
+                "@kravcov.artemiy @inchenko.ilona"
+            ]
+            for tag in default_tags:
+                self.add_commit_tag(computer_id, tag, is_default=False)
