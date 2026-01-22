@@ -6,11 +6,13 @@ import re
 import shutil
 import tempfile
 import zipfile
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 import pyperclip
 import tkinter as tk
-from tkinter import ttk, filedialog
+from tkinter import ttk, filedialog, simpledialog, messagebox
+import json
+from itertools import product
 from pynput import keyboard
 from threading import Timer
 from database import Database
@@ -293,15 +295,24 @@ class KeyboardHelper:
         self.notebook.add(snippets_frame, text="Snippets")
         self._build_snippets_tab(snippets_frame)
 
-        # --- Tab 2: SQL parser ---
-        sql_frame = ttk.Frame(self.notebook)
-        self.notebook.add(sql_frame, text="SQL parser")
-        self._build_sql_tab(sql_frame)
+        # --- Tab 2: SQL (with nested tabs) ---
+        sql_main_frame = ttk.Frame(self.notebook)
+        self.notebook.add(sql_main_frame, text="SQL")
 
-        # --- Tab 3: SQL Table Analyzer ---
-        sql_table_analyzer_frame = ttk.Frame(self.notebook)
-        self.notebook.add(sql_table_analyzer_frame, text="SQL Table Analyzer")
-        self._build_sql_table_analyzer_tab(sql_table_analyzer_frame)
+        self.sql_notebook = ttk.Notebook(sql_main_frame)
+        self.sql_notebook.pack(fill="both", expand=True)
+
+        sql_parser_frame = ttk.Frame(self.sql_notebook)
+        self.sql_notebook.add(sql_parser_frame, text="Parser")
+        self._build_sql_tab(sql_parser_frame)
+
+        sql_analyzer_frame = ttk.Frame(self.sql_notebook)
+        self.sql_notebook.add(sql_analyzer_frame, text="Table Analyzer")
+        self._build_sql_table_analyzer_tab(sql_analyzer_frame)
+
+        sql_macrosing_frame = ttk.Frame(self.sql_notebook)
+        self.sql_notebook.add(sql_macrosing_frame, text="Macrosing")
+        self._build_sql_macrosing_tab(sql_macrosing_frame)
 
         # --- Tab 4: Superset ---
         superset_frame = ttk.Frame(self.notebook)
@@ -532,6 +543,398 @@ class KeyboardHelper:
         self.sql_table_settings_window = None
         format_vertical_value = self.app_settings.get('sql_analyzer_format_vertical', '1') == '1'
         self.sql_table_format_vertical_var = tk.BooleanVar(value=format_vertical_value)
+
+    def _build_sql_macrosing_tab(self, parent):
+        # Templates row
+        templates_frame = ttk.Frame(parent)
+        templates_frame.pack(fill=tk.X, padx=10, pady=(10, 5))
+
+        ttk.Label(templates_frame, text="Templates:").pack(side=tk.LEFT)
+        self.macrosing_template_combo = ttk.Combobox(templates_frame, width=30)
+        self.macrosing_template_combo.pack(side=tk.LEFT, padx=(5, 5))
+        self.macrosing_template_combo.bind("<<ComboboxSelected>>", self._on_macrosing_template_selected)
+
+        ttk.Button(templates_frame, text="Save", command=self._on_save_macrosing_template).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(templates_frame, text="Delete", command=self._on_delete_macrosing_template).pack(side=tk.LEFT)
+
+        # SQL Template
+        sql_label = ttk.Label(parent, text="SQL Template:")
+        sql_label.pack(anchor=tk.W, padx=10, pady=(5, 2))
+        self.macrosing_sql_text = tk.Text(parent, height=6)
+        self.macrosing_sql_text.pack(fill=tk.X, padx=10, pady=(0, 5))
+        self.macrosing_sql_text.bind("<KeyRelease>", self._on_macrosing_sql_change)
+
+        # Placeholders frame with header
+        placeholders_header = ttk.Frame(parent)
+        placeholders_header.pack(fill=tk.X, padx=10, pady=(5, 2))
+        ttk.Label(placeholders_header, text="Placeholders:").pack(side=tk.LEFT)
+        ttk.Button(placeholders_header, text="Refresh from SQL", command=self._refresh_macrosing_placeholders).pack(side=tk.RIGHT)
+
+        # Scrollable frame for placeholders
+        placeholders_container = ttk.Frame(parent)
+        placeholders_container.pack(fill=tk.BOTH, expand=False, padx=10, pady=(0, 5))
+
+        placeholders_canvas = tk.Canvas(placeholders_container, height=150)
+        placeholders_scrollbar = ttk.Scrollbar(placeholders_container, orient="vertical", command=placeholders_canvas.yview)
+        self.macrosing_placeholders_frame = ttk.Frame(placeholders_canvas)
+
+        self.macrosing_placeholders_frame.bind(
+            "<Configure>",
+            lambda e: placeholders_canvas.configure(scrollregion=placeholders_canvas.bbox("all"))
+        )
+        placeholders_canvas.create_window((0, 0), window=self.macrosing_placeholders_frame, anchor="nw")
+        placeholders_canvas.configure(yscrollcommand=placeholders_scrollbar.set)
+
+        placeholders_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        placeholders_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Combination mode and separator
+        options_frame = ttk.Frame(parent)
+        options_frame.pack(fill=tk.X, padx=10, pady=(5, 5))
+
+        ttk.Label(options_frame, text="Combination:").pack(side=tk.LEFT)
+        self.macrosing_combination_var = tk.StringVar(value="cartesian")
+        ttk.Radiobutton(options_frame, text="Cartesian", variable=self.macrosing_combination_var, value="cartesian").pack(side=tk.LEFT, padx=(5, 10))
+        ttk.Radiobutton(options_frame, text="Zip", variable=self.macrosing_combination_var, value="zip").pack(side=tk.LEFT, padx=(0, 20))
+
+        ttk.Label(options_frame, text="Separator:").pack(side=tk.LEFT)
+        self.macrosing_separator_entry = ttk.Entry(options_frame, width=10)
+        self.macrosing_separator_entry.pack(side=tk.LEFT, padx=(5, 0))
+        self.macrosing_separator_entry.insert(0, ";\\n")
+
+        # Generate button
+        ttk.Button(parent, text="Generate SQL", command=self._on_generate_macrosing).pack(fill=tk.X, padx=10, pady=(5, 5))
+
+        # Result
+        result_header = ttk.Frame(parent)
+        result_header.pack(fill=tk.X, padx=10, pady=(5, 2))
+        ttk.Label(result_header, text="Result:").pack(side=tk.LEFT)
+        ttk.Button(result_header, text="Copy", command=self._copy_macrosing_result).pack(side=tk.RIGHT)
+
+        self.macrosing_result_text = tk.Text(parent, height=8)
+        self.macrosing_result_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+        self.macrosing_result_text.config(state=tk.DISABLED)
+
+        # Initialize
+        self.macrosing_placeholder_widgets = {}
+        self._refresh_macrosing_templates()
+
+    def _refresh_macrosing_templates(self):
+        templates = self.db.get_sql_macrosing_templates()
+        names = [t['template_name'] for t in templates]
+        self.macrosing_template_combo['values'] = names
+        if names:
+            self.macrosing_template_combo.set('')
+
+    def _on_macrosing_template_selected(self, event=None):
+        name = self.macrosing_template_combo.get()
+        if not name:
+            return
+        template = self.db.get_sql_macrosing_template_by_name(name)
+        if template:
+            self.macrosing_sql_text.delete("1.0", "end")
+            self.macrosing_sql_text.insert("1.0", template['template_text'])
+            self.macrosing_combination_var.set(template['combination_mode'])
+            self.macrosing_separator_entry.delete(0, "end")
+            self.macrosing_separator_entry.insert(0, template['separator'])
+            self._load_placeholders_config(json.loads(template['placeholders_config']))
+
+    def _on_save_macrosing_template(self):
+        name = self.macrosing_template_combo.get().strip()
+        if not name:
+            name = simpledialog.askstring("Save Template", "Enter template name:", parent=self.window)
+            if not name:
+                return
+
+        self.db.save_sql_macrosing_template(
+            name=name,
+            template_text=self.macrosing_sql_text.get("1.0", "end-1c"),
+            placeholders_config=json.dumps(self._collect_placeholders_config()),
+            combination_mode=self.macrosing_combination_var.get(),
+            separator=self.macrosing_separator_entry.get()
+        )
+        self._refresh_macrosing_templates()
+        self.macrosing_template_combo.set(name)
+
+    def _on_delete_macrosing_template(self):
+        name = self.macrosing_template_combo.get().strip()
+        if not name:
+            return
+        self.db.delete_sql_macrosing_template(name)
+        self._refresh_macrosing_templates()
+        self.macrosing_template_combo.set('')
+
+    def _on_macrosing_sql_change(self, event=None):
+        self._refresh_macrosing_placeholders()
+
+    def _extract_placeholders(self, sql_text: str) -> list[str]:
+        return list(dict.fromkeys(re.findall(r'\{\{(\w+)\}\}', sql_text)))
+
+    def _refresh_macrosing_placeholders(self):
+        sql_text = self.macrosing_sql_text.get("1.0", "end-1c")
+        placeholders = self._extract_placeholders(sql_text)
+
+        old_config = self._collect_placeholders_config()
+
+        for widget in self.macrosing_placeholders_frame.winfo_children():
+            widget.destroy()
+        self.macrosing_placeholder_widgets = {}
+
+        for ph in placeholders:
+            self._create_placeholder_row(ph, old_config.get(f'{{{{{ph}}}}}', {}))
+
+    def _create_placeholder_row(self, placeholder_name: str, config: dict = None):
+        if config is None:
+            config = {}
+
+        frame = ttk.Frame(self.macrosing_placeholders_frame)
+        frame.pack(fill=tk.X, pady=2)
+
+        ttk.Label(frame, text=f"{{{{{placeholder_name}}}}}:", width=15).pack(side=tk.LEFT)
+
+        type_var = tk.StringVar(value=config.get('type', 'static'))
+        type_combo = ttk.Combobox(frame, textvariable=type_var, values=['static', 'sequence', 'date'], width=10, state="readonly")
+        type_combo.pack(side=tk.LEFT, padx=(5, 5))
+
+        fields_frame = ttk.Frame(frame)
+        fields_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        widgets = {
+            'type_var': type_var,
+            'fields_frame': fields_frame,
+            'config': config
+        }
+        self.macrosing_placeholder_widgets[placeholder_name] = widgets
+
+        type_combo.bind("<<ComboboxSelected>>", lambda e, ph=placeholder_name: self._on_placeholder_type_change(ph))
+        self._build_placeholder_fields(placeholder_name)
+
+    def _on_placeholder_type_change(self, placeholder_name: str):
+        self._build_placeholder_fields(placeholder_name)
+
+    def _build_placeholder_fields(self, placeholder_name: str):
+        widgets = self.macrosing_placeholder_widgets[placeholder_name]
+        fields_frame = widgets['fields_frame']
+        type_val = widgets['type_var'].get()
+        config = widgets.get('config', {})
+
+        for child in fields_frame.winfo_children():
+            child.destroy()
+
+        if type_val == 'static':
+            ttk.Label(fields_frame, text="Values:").pack(side=tk.LEFT)
+            values_entry = ttk.Entry(fields_frame, width=30)
+            values_entry.pack(side=tk.LEFT, padx=(5, 0), fill=tk.X, expand=True)
+            values_entry.insert(0, config.get('values', ''))
+            widgets['values_entry'] = values_entry
+
+        elif type_val == 'sequence':
+            ttk.Label(fields_frame, text="Start:").pack(side=tk.LEFT)
+            start_entry = ttk.Entry(fields_frame, width=8)
+            start_entry.pack(side=tk.LEFT, padx=(2, 5))
+            start_entry.insert(0, str(config.get('start', '1')))
+
+            ttk.Label(fields_frame, text="End:").pack(side=tk.LEFT)
+            end_entry = ttk.Entry(fields_frame, width=8)
+            end_entry.pack(side=tk.LEFT, padx=(2, 5))
+            end_entry.insert(0, str(config.get('end', '10')))
+
+            ttk.Label(fields_frame, text="Step:").pack(side=tk.LEFT)
+            step_entry = ttk.Entry(fields_frame, width=5)
+            step_entry.pack(side=tk.LEFT, padx=(2, 0))
+            step_entry.insert(0, str(config.get('step', '1')))
+
+            widgets['start_entry'] = start_entry
+            widgets['end_entry'] = end_entry
+            widgets['step_entry'] = step_entry
+
+        elif type_val == 'date':
+            ttk.Label(fields_frame, text="Start:").pack(side=tk.LEFT)
+            start_entry = ttk.Entry(fields_frame, width=10)
+            start_entry.pack(side=tk.LEFT, padx=(2, 5))
+            start_entry.insert(0, config.get('start', '2024-01-01'))
+
+            ttk.Label(fields_frame, text="End:").pack(side=tk.LEFT)
+            end_entry = ttk.Entry(fields_frame, width=10)
+            end_entry.pack(side=tk.LEFT, padx=(2, 5))
+            end_entry.insert(0, config.get('end', '2024-12-01'))
+
+            ttk.Label(fields_frame, text="Step:").pack(side=tk.LEFT)
+            step_var = tk.StringVar(value=config.get('step', 'month'))
+            step_combo = ttk.Combobox(fields_frame, textvariable=step_var, values=['days', 'weeks', 'month', 'half_year', 'year'], width=8, state="readonly")
+            step_combo.pack(side=tk.LEFT, padx=(2, 5))
+
+            ttk.Label(fields_frame, text="Format:").pack(side=tk.LEFT)
+            format_var = tk.StringVar(value=config.get('format', 'ISO'))
+            format_combo = ttk.Combobox(fields_frame, textvariable=format_var, values=['ISO', 'YYYYMM'], width=8, state="readonly")
+            format_combo.pack(side=tk.LEFT, padx=(2, 0))
+
+            widgets['start_entry'] = start_entry
+            widgets['end_entry'] = end_entry
+            widgets['step_var'] = step_var
+            widgets['format_var'] = format_var
+
+    def _collect_placeholders_config(self) -> dict:
+        config = {}
+        for ph_name, widgets in self.macrosing_placeholder_widgets.items():
+            ph_key = f'{{{{{ph_name}}}}}'
+            type_val = widgets['type_var'].get()
+            ph_config = {'type': type_val}
+
+            if type_val == 'static':
+                ph_config['values'] = widgets.get('values_entry', ttk.Entry()).get()
+            elif type_val == 'sequence':
+                ph_config['start'] = widgets.get('start_entry', ttk.Entry()).get()
+                ph_config['end'] = widgets.get('end_entry', ttk.Entry()).get()
+                ph_config['step'] = widgets.get('step_entry', ttk.Entry()).get()
+            elif type_val == 'date':
+                ph_config['start'] = widgets.get('start_entry', ttk.Entry()).get()
+                ph_config['end'] = widgets.get('end_entry', ttk.Entry()).get()
+                ph_config['step'] = widgets.get('step_var', tk.StringVar()).get()
+                ph_config['format'] = widgets.get('format_var', tk.StringVar()).get()
+
+            config[ph_key] = ph_config
+        return config
+
+    def _load_placeholders_config(self, config: dict):
+        for widget in self.macrosing_placeholders_frame.winfo_children():
+            widget.destroy()
+        self.macrosing_placeholder_widgets = {}
+
+        for ph_key, ph_config in config.items():
+            ph_name = ph_key.strip('{}')
+            self._create_placeholder_row(ph_name, ph_config)
+
+    def _generate_values(self, config: dict) -> list:
+        type_val = config.get('type', 'static')
+
+        if type_val == 'static':
+            values_str = config.get('values', '')
+            values_str = values_str.strip().strip('[]')
+            if not values_str:
+                return []
+            values = [v.strip() for v in values_str.split(',')]
+            return [v for v in values if v]
+
+        elif type_val == 'sequence':
+            try:
+                start = int(config.get('start', 1))
+                end = int(config.get('end', 10))
+                step = int(config.get('step', 1))
+                if step == 0:
+                    step = 1
+                return list(range(start, end + 1, step))
+            except ValueError:
+                return []
+
+        elif type_val == 'date':
+            try:
+                start_str = config.get('start', '2024-01-01')
+                end_str = config.get('end', '2024-12-01')
+                step = config.get('step', 'month')
+                date_format = config.get('format', 'ISO')
+
+                start_date = datetime.strptime(start_str, '%Y-%m-%d')
+                end_date = datetime.strptime(end_str, '%Y-%m-%d')
+
+                dates = []
+                current = start_date
+                while current <= end_date:
+                    if date_format == 'ISO':
+                        dates.append(current.strftime('%Y-%m-%d'))
+                    else:  # YYYYMM
+                        dates.append(current.strftime('%Y%m'))
+
+                    if step == 'days':
+                        current += timedelta(days=1)
+                    elif step == 'weeks':
+                        current += timedelta(weeks=1)
+                    elif step == 'month':
+                        current = self._add_months(current, 1)
+                    elif step == 'half_year':
+                        current = self._add_months(current, 6)
+                    elif step == 'year':
+                        current = self._add_months(current, 12)
+                    else:
+                        current = self._add_months(current, 1)
+
+                return dates
+            except (ValueError, TypeError):
+                return []
+
+        return []
+
+    def _add_months(self, dt: datetime, months: int) -> datetime:
+        month = dt.month - 1 + months
+        year = dt.year + month // 12
+        month = month % 12 + 1
+        day = min(dt.day, [31, 29 if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0) else 28,
+                          31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1])
+        return dt.replace(year=year, month=month, day=day)
+
+    def _combine_values(self, placeholders_values: dict, mode: str) -> list[dict]:
+        if not placeholders_values:
+            return [{}]
+
+        keys = list(placeholders_values.keys())
+        values = [placeholders_values[k] for k in keys]
+
+        if mode == 'cartesian':
+            return [dict(zip(keys, combo)) for combo in product(*values)]
+        else:  # zip
+            return [dict(zip(keys, combo)) for combo in zip(*values)]
+
+    def _on_generate_macrosing(self):
+        sql_template = self.macrosing_sql_text.get("1.0", "end-1c")
+        separator = self.macrosing_separator_entry.get()
+        mode = self.macrosing_combination_var.get()
+
+        placeholders_config = self._collect_placeholders_config()
+        sql_placeholders = self._extract_placeholders(sql_template)
+
+        for ph in sql_placeholders:
+            ph_key = f'{{{{{ph}}}}}'
+            if ph_key not in placeholders_config:
+                messagebox.showerror("Error", f"Placeholder {ph_key} is not configured", parent=self.window)
+                return
+
+        placeholders_values = {}
+        for name, config in placeholders_config.items():
+            values = self._generate_values(config)
+            if not values:
+                messagebox.showerror("Error", f"No values generated for {name}", parent=self.window)
+                return
+            placeholders_values[name] = values
+
+        combinations = self._combine_values(placeholders_values, mode)
+
+        queries = []
+        for combo in combinations:
+            query = sql_template
+            for placeholder, value in combo.items():
+                query = query.replace(placeholder, str(value))
+            queries.append(query)
+
+        try:
+            decoded_separator = separator.encode().decode('unicode_escape')
+        except Exception:
+            decoded_separator = separator
+
+        result = decoded_separator.join(queries)
+        self._set_macrosing_result(result)
+
+    def _set_macrosing_result(self, text):
+        self.macrosing_result_text.config(state=tk.NORMAL)
+        self.macrosing_result_text.delete("1.0", tk.END)
+        self.macrosing_result_text.insert(tk.END, text)
+        self.macrosing_result_text.config(state=tk.DISABLED)
+
+    def _copy_macrosing_result(self):
+        self.macrosing_result_text.config(state=tk.NORMAL)
+        result = self.macrosing_result_text.get("1.0", "end-1c")
+        self.macrosing_result_text.config(state=tk.DISABLED)
+        if result:
+            pyperclip.copy(result)
 
     def _build_superset_tab(self, parent):
         top_frame = ttk.Frame(parent)
