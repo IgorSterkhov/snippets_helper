@@ -1,6 +1,7 @@
 import os
 import duckdb
 from dotenv import load_dotenv
+from typing import Optional, List, Dict
 
 class Database:
     def __init__(self):
@@ -271,7 +272,7 @@ class Database:
             for tag in default_tags:
                 self.add_commit_tag(computer_id, tag, is_default=False)
 
-    def get_sql_macrosing_templates(self) -> list[dict]:
+    def get_sql_macrosing_templates(self) -> List[Dict]:
         """Get all SQL Macrosing templates."""
         conn = duckdb.connect(self.db_path)
         try:
@@ -294,7 +295,7 @@ class Database:
         finally:
             conn.close()
 
-    def get_sql_macrosing_template_by_name(self, name: str) -> dict | None:
+    def get_sql_macrosing_template_by_name(self, name: str) -> Optional[Dict]:
         """Get a SQL Macrosing template by name."""
         conn = duckdb.connect(self.db_path)
         try:
