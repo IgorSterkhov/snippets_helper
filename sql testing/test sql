@@ -1,0 +1,182 @@
+SELECT office_id AS office_id,
+       office_name AS office_name,
+       country_name AS country_name,
+       poo_type AS poo_type,
+       region_name AS region_name,
+       region_type AS region_type,
+       is_site_active AS is_site_active,
+       not_on_shelf_rids AS not_on_shelf_rids,
+       on_shelf_rids_1 AS on_shelf_rids_1,
+       count_0 AS count_0,
+       count_90 AS count_90,
+       count_300 AS count_300,
+       count_720 AS count_720,
+       count_4320 AS count_4320,
+       not_on_shelf_rids_write_off_shks AS not_on_shelf_rids_write_off_shks,
+       on_shelf_rids AS on_shelf_rids,
+       on_shelf_rids_3 AS on_shelf_rids_3,
+       n2o_interest AS n2o_interest,
+       area AS area,
+       work_time AS work_time,
+       hour_offset AS hour_offset,
+       concat('<a href="http://do-superset.wb.ru/superset/dashboard/report_002_2/?native_filters=(NATIVE_FILTER-1HpFAjhhR:(__cache:(label:''', office_id, ''',validateStatus:!f,value:!(''', office_id, ''')),extraFormData:(filters:!((col:dst_office_id,op:IN,val:!(''', office_id, ''')))),filterState:(label:''', office_id, ''',validateStatus:!f,value:!(''', office_id, ''')),id:NATIVE_FILTER-1HpFAjhhR,ownState:()))" target="_blank">', 'Подробнее...', '</a>') AS "Детлизация"
+FROM
+  (SELECT toString(office_id) as office_id ,
+          office_name ,
+          poo_type ,
+          type_point_name ,
+          if(region_name = '', '-', region_name) as region_name ,
+          region_type ,
+          if(country_name = '', '-', country_name) as country_name ,
+          is_site_active ,
+          not_on_shelf_rids ,
+          not_on_shelf_rids_write_off_shks ,
+          on_shelf_rids ,
+          round(if(on_shelf_rids + on_shelf_rids_1 = 0, -1, (not_on_shelf_rids / (on_shelf_rids + on_shelf_rids_1))), 2) AS n2o_interest ,
+          count_0 ,
+          count_90 ,
+          count_300 ,
+          count_720 ,
+          count_4320 ,
+          on_shelf_rids_3 ,
+          on_shelf_rids_1 ,
+          area ,
+          hour_offset ,
+          work_time
+   FROM
+     (with dictGet('dict.branch_office', 'office_name', office_id) as office_name,
+           dictGet('dict.branch_office', 'type_point', office_id) as type_point,
+           multiIf(type_point in (1, 10, 34), 'собственный', type_point in (5, 6, 7), 'франшизный', type_point in (8, 9), 'партнерский', type_point in (14), 'почта России', 'другое') as poo_type,
+           dictGet('dict.branch_office', 'type_point_name', office_id) as type_point_name,
+           dictGet('dict.branch_office', 'city_id', office_id) as city_id,
+           dictGet('dict.kladr_tree', 'id_region', city_id) as id_region,
+           dictGet('dict.branch_office', 'country_id', office_id) as country_id,
+           dictGet('dict.branch_office', 'is_site_active', office_id) as is_site_active,
+           multiIf(type_point in (1, 10, 34), 'собственный', type_point in (5, 6, 7), 'франшизный', type_point in (8, 9), 'партнерский', type_point in (14), 'почта России', 'другое') as poo_type,
+           multiIf(id_region IN (50, 77)
+                   and country_id = 1643, 'МСК и МО', id_region not IN (50, 77)
+                   and country_id = 1643, 'Рег. РФ', 'Ост. страны') as region_type,
+           dictGet('dict.kladr_tree', 'region_name', city_id) as _region_name,
+           dictGet('dict.kladr_tree', 'district_name', city_id) as district_name,
+           dictGet('dict.branch_office', 'country_name', office_id) as country_name,
+           case
+               when assumeNotNull(_region_name) = ''
+                    and assumeNotNull(district_name) = '' then country_name
+               when assumeNotNull(_region_name) = '' then district_name
+               else _region_name
+           end as region_name,
+           dictGet('dict.branch_office', 'area', office_id) as area,
+           dictGet('dict.branch_office', 'hour_offset', office_id) as hour_offset,
+           dictGet('dict.branch_office', 'work_time', office_id) as _work_time,
+           coalesce(nullIf(replaceRegexpAll(replaceRegexpAll(_work_time , '[^a-zA-Zа-яА-Я0-9,\s\:\;\p{Pd}]|([Ее]жедневно)\s?:?\s?|[."]|\n', '') , '(\d)(\s)?\p{Pd}(\s)?(\d)', '\1 - \4'), ''), 'НЕ ОПРЕДЕЛЕНО') as work_time SELECT nosh.office_id as office_id ,
+                                                                                                                                                                                                                                    office_name ,
+                                                                                                                                                                                                                                    type_point ,
+                                                                                                                                                                                                                                    type_point_name ,
+                                                                                                                                                                                                                                    city_id ,
+                                                                                                                                                                                                                                    country_name ,
+                                                                                                                                                                                                                                    country_id ,
+                                                                                                                                                                                                                                    is_site_active ,
+                                                                                                                                                                                                                                    poo_type ,
+                                                                                                                                                                                                                                    _region_name ,
+                                                                                                                                                                                                                                    district_name ,
+                                                                                                                                                                                                                                    id_region ,
+                                                                                                                                                                                                                                    region_name ,
+                                                                                                                                                                                                                                    region_type ,
+                                                                                                                                                                                                                                    countIf(now() - toDateTime(ts+interval '3' HOUR) < 259200
+                                                                                                                                                                                                                                            and nosh.shk_id <> lost.shk_id) as not_on_shelf_rids ,
+                                                                                                                                                                                                                                    countIf(now() - toDateTime(ts+interval '3' HOUR) < 5400
+                                                                                                                                                                                                                                            and nosh.shk_id <> lost.shk_id) AS count_0 ,
+                                                                                                                                                                                                                                    countIf(now() - toDateTime(ts+interval '3' HOUR) >= 5400
+                                                                                                                                                                                                                                            and now() - toDateTime(ts+interval '3' HOUR) < 18000
+                                                                                                                                                                                                                                            and nosh.shk_id <> lost.shk_id) AS count_90 ,
+                                                                                                                                                                                                                                    countIf(now() - toDateTime(ts+interval '3' HOUR) >= 18000
+                                                                                                                                                                                                                                            and now() - toDateTime(ts+interval '3' HOUR) < 43200
+                                                                                                                                                                                                                                            and nosh.shk_id <> lost.shk_id) AS count_300 ,
+                                                                                                                                                                                                                                    countIf(now() - toDateTime(ts+interval '3' HOUR) >= 43200
+                                                                                                                                                                                                                                            and now() - toDateTime(ts+interval '3' HOUR) < 259200
+                                                                                                                                                                                                                                            and nosh.shk_id <> lost.shk_id) AS count_720 ,
+                                                                                                                                                                                                                                    countIf(now() - toDateTime(ts+interval '3' HOUR) >= 259200
+                                                                                                                                                                                                                                            and nosh.shk_id <> lost.shk_id) AS count_4320 ,
+                                                                                                                                                                                                                                    countIf(lost.shk_id <> 0) as not_on_shelf_rids_write_off_shks ,
+                                                                                                                                                                                                                                    max(osh.on_shelf_rids) as on_shelf_rids ,
+                                                                                                                                                                                                                                    round(max(osh3.on_shelf_rids) / 3) as on_shelf_rids_3 ,
+                                                                                                                                                                                                                                    max(osh1.on_shelf_rids_1) as on_shelf_rids_1 ,
+                                                                                                                                                                                                                                    area ,
+                                                                                                                                                                                                                                    hour_offset ,
+                                                                                                                                                                                                                                    work_time
+      FROM datamart.srid_tracker_tangle as nosh
+      left join
+        (select shk_id
+         from datamart.inventory_lost_shk_8
+         where shk_id in
+             (with dictGet('dict.branch_office', 'type_point', office_id) as _type_point,
+                   multiIf(_type_point in (1, 10, 34), 'собственный', _type_point in (5, 6, 7), 'франшизный', _type_point in (8, 9), 'партнерский', _type_point in (14), 'почта России', 'другое') as _poo_type select shk_id
+              from datamart.srid_tracker_tangle
+              where action_id in (900,
+                                  910)
+                and _poo_type in ('партнерский',
+                                  'собственный',
+                                  'франшизный') ) ) as lost on nosh.shk_id=lost.shk_id left any
+      join
+        (select office_id,
+                sum(cnt_rids) as on_shelf_rids
+         from datamart.not_on_shelf_rids_on_day
+         where ts_date=toDate(now()-interval '1' day)
+         group by office_id) as osh on nosh.office_id = osh.office_id left any
+      join
+        (select office_id,
+                sum(cnt_rids) as on_shelf_rids
+         from datamart.not_on_shelf_rids_on_day
+         where ts_date>toDate(now()-interval '4' day)
+         group by office_id) as osh3 ON nosh.office_id = osh3.office_id left any
+      join
+        (select office_id,
+                uniqCombined(srid) as on_shelf_rids_1
+         from core_wh.srid_tracker_ttl
+         where toDate(row_created) = toDate(now())
+           and toDate(ts + interval '3' hour) = toDate(now())
+           and action_id=1000
+           and office_id in
+             (with dictGet('dict.branch_office', 'type_point', office_id) as _type_point,
+                   multiIf(_type_point in (1, 10, 34), 'собственный', _type_point in (5, 6, 7), 'франшизный', _type_point in (8, 9), 'партнерский', _type_point in (14), 'почта России', 'другое') as _poo_type select office_id
+              from datamart.srid_tracker_tangle t
+              where _type_point in (1,
+                                    5,
+                                    6,
+                                    7,
+                                    8,
+                                    9,
+                                    10,
+                                    14,
+                                    34)
+                and action_id in (900,
+                                  910)
+                and _poo_type in ('партнерский',
+                                  'собственный',
+                                  'франшизный') )
+         group by office_id) as osh1 ON nosh.office_id = osh1.office_id
+      where type_point in (1,
+                           5,
+                           6,
+                           7,
+                           8,
+                           9,
+                           10,
+                           14,
+                           34)
+        and nosh.action_id in (900,
+                               910)
+        and poo_type in ('партнерский',
+                         'собственный',
+                         'франшизный')
+      group by office_id ,
+               office_name ,
+               poo_type ,
+               type_point_name ,
+               region_name ,
+               region_type ,
+               country_name ,
+               is_site_active) as main) AS virtual_table
+ORDER BY not_on_shelf_rids DESC,
+         on_shelf_rids DESC
+LIMIT 50000;

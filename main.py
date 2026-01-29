@@ -17,6 +17,7 @@ from pynput import keyboard
 from threading import Timer
 from database import Database
 from handlers.sql_parser import parse_sql
+from handlers.sql_formatter import format_sql
 
 faulthandler.enable()
 
@@ -159,7 +160,8 @@ class KeyboardHelper:
         self.app_computer_id = self.superset_computer_id
         self.app_settings = self.db.get_all_app_settings(self.app_computer_id)
         self.settings_window = None
-        
+        self._load_clickhouse_functions()
+
         # Initial data load
         self.load_items()
         
@@ -313,6 +315,10 @@ class KeyboardHelper:
         sql_macrosing_frame = ttk.Frame(self.sql_notebook)
         self.sql_notebook.add(sql_macrosing_frame, text="Macrosing")
         self._build_sql_macrosing_tab(sql_macrosing_frame)
+
+        sql_format_frame = ttk.Frame(self.sql_notebook)
+        self.sql_notebook.add(sql_format_frame, text="Format SQL")
+        self._build_sql_format_tab(sql_format_frame)
 
         # --- Tab 4: Superset ---
         superset_frame = ttk.Frame(self.notebook)
@@ -618,6 +624,96 @@ class KeyboardHelper:
         # Initialize
         self.macrosing_placeholder_widgets = {}
         self._refresh_macrosing_templates()
+
+    def _build_sql_format_tab(self, parent):
+        """Build the SQL Format subtab."""
+        # Input label
+        input_label = ttk.Label(parent, text="SQL Input (supports Jinja):")
+        input_label.pack(anchor=tk.W, padx=10, pady=(10, 2))
+
+        # SQL input text
+        self.sql_format_input_text = tk.Text(parent, height=12)
+        self.sql_format_input_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 5))
+
+        # Buttons row
+        buttons_frame = ttk.Frame(parent)
+        buttons_frame.pack(fill=tk.X, padx=10, pady=5)
+
+        self.sql_format_btn = ttk.Button(
+            buttons_frame,
+            text="Format",
+            command=self._on_sql_format
+        )
+        self.sql_format_btn.pack(side=tk.LEFT, padx=(0, 5))
+
+        self.sql_format_copy_btn = ttk.Button(
+            buttons_frame,
+            text="Copy Result",
+            command=self._copy_sql_format_result
+        )
+        self.sql_format_copy_btn.pack(side=tk.LEFT, padx=(0, 5))
+
+        self.sql_format_clear_btn = ttk.Button(
+            buttons_frame,
+            text="Clear",
+            command=self._clear_sql_format
+        )
+        self.sql_format_clear_btn.pack(side=tk.LEFT)
+
+        # Keywords case selector
+        ttk.Label(buttons_frame, text="Keywords:").pack(side=tk.LEFT, padx=(20, 5))
+        self.sql_keywords_case_var = tk.StringVar(value="lower")
+        self.sql_keywords_case_combo = ttk.Combobox(
+            buttons_frame,
+            textvariable=self.sql_keywords_case_var,
+            values=["lower", "UPPER"],
+            state="readonly",
+            width=8
+        )
+        self.sql_keywords_case_combo.pack(side=tk.LEFT)
+
+        # Output label
+        output_label = ttk.Label(parent, text="Formatted SQL:")
+        output_label.pack(anchor=tk.W, padx=10, pady=(5, 2))
+
+        # SQL output text (readonly)
+        self.sql_format_output_text = tk.Text(parent, height=12)
+        self.sql_format_output_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+        self.sql_format_output_text.config(state=tk.DISABLED)
+
+    def _on_sql_format(self):
+        """Handle Format button click."""
+        sql_code = self.sql_format_input_text.get("1.0", "end-1c")
+        if not sql_code.strip():
+            return
+
+        keywords_case = self.sql_keywords_case_var.get().lower()
+        formatted_sql, error = format_sql(sql_code, keywords_case=keywords_case)
+
+        self.sql_format_output_text.config(state=tk.NORMAL)
+        self.sql_format_output_text.delete("1.0", tk.END)
+
+        if error:
+            self.sql_format_output_text.insert("1.0", f"Error: {error}\n\n{formatted_sql}")
+        else:
+            self.sql_format_output_text.insert("1.0", formatted_sql)
+
+        self.sql_format_output_text.config(state=tk.DISABLED)
+
+    def _copy_sql_format_result(self):
+        """Copy formatted SQL to clipboard."""
+        self.sql_format_output_text.config(state=tk.NORMAL)
+        result = self.sql_format_output_text.get("1.0", "end-1c")
+        self.sql_format_output_text.config(state=tk.DISABLED)
+        if result:
+            pyperclip.copy(result)
+
+    def _clear_sql_format(self):
+        """Clear both input and output fields."""
+        self.sql_format_input_text.delete("1.0", tk.END)
+        self.sql_format_output_text.config(state=tk.NORMAL)
+        self.sql_format_output_text.delete("1.0", tk.END)
+        self.sql_format_output_text.config(state=tk.DISABLED)
 
     def _refresh_macrosing_templates(self):
         templates = self.db.get_sql_macrosing_templates()
@@ -1608,6 +1704,15 @@ class KeyboardHelper:
         self._set_readonly_entry(self.commits_selected_tags_entry, "")
         self._update_commits_chat_preview()
 
+    def _load_clickhouse_functions(self):
+        """Load custom ClickHouse functions from settings."""
+        saved_functions = self.app_settings.get('clickhouse_functions', '')
+        if saved_functions:
+            from handlers.sql_formatter import set_custom_functions
+            functions_list = [f.strip() for f in saved_functions.split(',') if f.strip()]
+            if functions_list:
+                set_custom_functions(functions_list)
+
     def _get_superset_computer_id(self):
         return f"{getpass.getuser()}@{platform.node()}"
 
@@ -2013,6 +2118,11 @@ class KeyboardHelper:
         settings_notebook.add(commits_settings_frame, text="Commits")
         self._build_settings_commits_tab(commits_settings_frame)
 
+        # SQL Formatter tab
+        sql_formatter_frame = ttk.Frame(settings_notebook)
+        settings_notebook.add(sql_formatter_frame, text="SQL Formatter")
+        self._build_settings_sql_formatter_tab(sql_formatter_frame)
+
         # Buttons frame
         buttons_frame = ttk.Frame(self.settings_window)
         buttons_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
@@ -2149,6 +2259,62 @@ class KeyboardHelper:
             if hasattr(self, 'commits_tags_combo'):
                 self._load_commits_tags()
 
+    def _build_settings_sql_formatter_tab(self, parent):
+        """Build the SQL Formatter settings tab."""
+        from handlers.sql_formatter import CLICKHOUSE_FUNCTIONS, set_custom_functions
+
+        # Description
+        desc_label = ttk.Label(
+            parent,
+            text="Функции ClickHouse (каждая на новой строке).\nРегистр будет сохранён при форматировании SQL:"
+        )
+        desc_label.pack(anchor=tk.W, padx=10, pady=(10, 5))
+
+        # Text widget for functions list
+        text_frame = ttk.Frame(parent)
+        text_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 5))
+
+        scrollbar = ttk.Scrollbar(text_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.settings_clickhouse_functions_text = tk.Text(text_frame, height=15, yscrollcommand=scrollbar.set)
+        self.settings_clickhouse_functions_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.config(command=self.settings_clickhouse_functions_text.yview)
+
+        # Load saved functions or use defaults
+        saved_functions = self.app_settings.get('clickhouse_functions', '')
+        if saved_functions:
+            functions_list = saved_functions.split(',')
+        else:
+            functions_list = CLICKHOUSE_FUNCTIONS
+
+        self.settings_clickhouse_functions_text.insert("1.0", '\n'.join(functions_list))
+
+        # Buttons frame
+        buttons_frame = ttk.Frame(parent)
+        buttons_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
+
+        ttk.Button(
+            buttons_frame,
+            text="Сбросить к умолчанию",
+            command=self._reset_clickhouse_functions
+        ).pack(side=tk.LEFT)
+
+        # Info label
+        info_label = ttk.Label(
+            parent,
+            text="Примеры: dictGet, multiIf, toDate, countIf",
+            foreground="gray"
+        )
+        info_label.pack(anchor=tk.W, padx=10, pady=(0, 10))
+
+    def _reset_clickhouse_functions(self):
+        """Reset ClickHouse functions to defaults."""
+        from handlers.sql_formatter import CLICKHOUSE_FUNCTIONS_DEFAULT
+
+        self.settings_clickhouse_functions_text.delete("1.0", tk.END)
+        self.settings_clickhouse_functions_text.insert("1.0", '\n'.join(CLICKHOUSE_FUNCTIONS_DEFAULT))
+
     def _save_settings(self):
         # Save General settings
         window_width = self.settings_window_width_var.get()
@@ -2173,6 +2339,16 @@ class KeyboardHelper:
         templates = [line.strip() for line in templates_text.splitlines() if line.strip()]
         self.db.save_sql_table_analyzer_templates(templates)
         self.sql_table_analyzer_templates = templates
+
+        # Save SQL Formatter settings
+        if hasattr(self, 'settings_clickhouse_functions_text'):
+            from handlers.sql_formatter import set_custom_functions
+            functions_text = self.settings_clickhouse_functions_text.get("1.0", tk.END).strip()
+            functions_list = [f.strip() for f in functions_text.splitlines() if f.strip()]
+            functions_str = ','.join(functions_list)
+            self.db.save_app_setting(self.app_computer_id, 'clickhouse_functions', functions_str)
+            self.app_settings['clickhouse_functions'] = functions_str
+            set_custom_functions(functions_list)
 
         # Apply Snippets settings
         self._apply_snippets_settings()
