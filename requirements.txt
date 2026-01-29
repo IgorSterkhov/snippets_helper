@@ -3,3 +3,5 @@ pyperclip>=1.8.2
 duckdb>=0.10.0
 python-dotenv>=1.0.0
 shandy-sqlfmt>=0.28.0
+tkhtmlview>=0.2.0
+markdown>=3.4.0

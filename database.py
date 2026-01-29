@@ -70,6 +70,24 @@ class Database:
                     separator VARCHAR NOT NULL DEFAULT ';\\n'
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS note_folders (
+                    id INTEGER PRIMARY KEY,
+                    name VARCHAR NOT NULL,
+                    sort_order INTEGER DEFAULT 0
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS notes (
+                    id INTEGER PRIMARY KEY,
+                    folder_id INTEGER,
+                    title VARCHAR NOT NULL,
+                    content TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    is_pinned INTEGER DEFAULT 0
+                )
+            """)
         finally:
             conn.close()
     
@@ -345,5 +363,190 @@ class Database:
         conn = duckdb.connect(self.db_path)
         try:
             conn.execute("DELETE FROM sql_macrosing_templates WHERE template_name = ?", (name,))
+        finally:
+            conn.close()
+
+    # ==================== Note Folders ====================
+
+    def get_all_note_folders(self) -> List[Dict]:
+        """Get all note folders."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            result = conn.execute("""
+                SELECT id, name, sort_order
+                FROM note_folders
+                ORDER BY sort_order, name
+            """).fetchall()
+            return [
+                {'id': row[0], 'name': row[1], 'sort_order': row[2]}
+                for row in result
+            ]
+        finally:
+            conn.close()
+
+    def create_note_folder(self, name: str, sort_order: int = 0) -> int:
+        """Create a new note folder and return its id."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            max_id_result = conn.execute("SELECT MAX(id) FROM note_folders").fetchone()
+            new_id = (max_id_result[0] or 0) + 1
+            conn.execute("""
+                INSERT INTO note_folders (id, name, sort_order)
+                VALUES (?, ?, ?)
+            """, (new_id, name, sort_order))
+            return new_id
+        finally:
+            conn.close()
+
+    def update_note_folder(self, folder_id: int, name: str):
+        """Update a note folder name."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            conn.execute("""
+                UPDATE note_folders SET name = ? WHERE id = ?
+            """, (name, folder_id))
+        finally:
+            conn.close()
+
+    def delete_note_folder(self, folder_id: int):
+        """Delete a note folder. Notes in this folder will have folder_id set to NULL."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            conn.execute("UPDATE notes SET folder_id = NULL WHERE folder_id = ?", (folder_id,))
+            conn.execute("DELETE FROM note_folders WHERE id = ?", (folder_id,))
+        finally:
+            conn.close()
+
+    def init_default_note_folder(self):
+        """Initialize default 'General' folder if no folders exist."""
+        existing = self.get_all_note_folders()
+        if not existing:
+            self.create_note_folder("General", sort_order=0)
+
+    # ==================== Notes ====================
+
+    def get_all_notes(self) -> List[Dict]:
+        """Get all notes."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            result = conn.execute("""
+                SELECT id, folder_id, title, content, created_at, updated_at, is_pinned
+                FROM notes
+                ORDER BY is_pinned DESC, updated_at DESC
+            """).fetchall()
+            return [
+                {
+                    'id': row[0],
+                    'folder_id': row[1],
+                    'title': row[2],
+                    'content': row[3],
+                    'created_at': row[4],
+                    'updated_at': row[5],
+                    'is_pinned': bool(row[6])
+                }
+                for row in result
+            ]
+        finally:
+            conn.close()
+
+    def get_notes_by_folder(self, folder_id: int) -> List[Dict]:
+        """Get all notes in a specific folder."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            if folder_id is None:
+                result = conn.execute("""
+                    SELECT id, folder_id, title, content, created_at, updated_at, is_pinned
+                    FROM notes
+                    WHERE folder_id IS NULL
+                    ORDER BY is_pinned DESC, updated_at DESC
+                """).fetchall()
+            else:
+                result = conn.execute("""
+                    SELECT id, folder_id, title, content, created_at, updated_at, is_pinned
+                    FROM notes
+                    WHERE folder_id = ?
+                    ORDER BY is_pinned DESC, updated_at DESC
+                """, (folder_id,)).fetchall()
+            return [
+                {
+                    'id': row[0],
+                    'folder_id': row[1],
+                    'title': row[2],
+                    'content': row[3],
+                    'created_at': row[4],
+                    'updated_at': row[5],
+                    'is_pinned': bool(row[6])
+                }
+                for row in result
+            ]
+        finally:
+            conn.close()
+
+    def create_note(self, folder_id: Optional[int], title: str, content: str) -> int:
+        """Create a new note and return its id."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            max_id_result = conn.execute("SELECT MAX(id) FROM notes").fetchone()
+            new_id = (max_id_result[0] or 0) + 1
+            conn.execute("""
+                INSERT INTO notes (id, folder_id, title, content, created_at, updated_at, is_pinned)
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0)
+            """, (new_id, folder_id, title, content))
+            return new_id
+        finally:
+            conn.close()
+
+    def update_note(self, note_id: int, folder_id: Optional[int], title: str, content: str):
+        """Update a note."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            conn.execute("""
+                UPDATE notes
+                SET folder_id = ?, title = ?, content = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (folder_id, title, content, note_id))
+        finally:
+            conn.close()
+
+    def delete_note(self, note_id: int):
+        """Delete a note."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            conn.execute("DELETE FROM notes WHERE id = ?", (note_id,))
+        finally:
+            conn.close()
+
+    def toggle_note_pin(self, note_id: int):
+        """Toggle the is_pinned status of a note."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            conn.execute("""
+                UPDATE notes
+                SET is_pinned = CASE WHEN is_pinned = 1 THEN 0 ELSE 1 END
+                WHERE id = ?
+            """, (note_id,))
+        finally:
+            conn.close()
+
+    def get_note_by_id(self, note_id: int) -> Optional[Dict]:
+        """Get a note by its id."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            result = conn.execute("""
+                SELECT id, folder_id, title, content, created_at, updated_at, is_pinned
+                FROM notes
+                WHERE id = ?
+            """, (note_id,)).fetchone()
+            if result:
+                return {
+                    'id': result[0],
+                    'folder_id': result[1],
+                    'title': result[2],
+                    'content': result[3],
+                    'created_at': result[4],
+                    'updated_at': result[5],
+                    'is_pinned': bool(result[6])
+                }
+            return None
         finally:
             conn.close()

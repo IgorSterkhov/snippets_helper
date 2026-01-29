@@ -11,6 +11,7 @@ from pathlib import Path
 import pyperclip
 import tkinter as tk
 from tkinter import ttk, filedialog, simpledialog, messagebox
+import tkinter.font as tkfont
 import json
 from itertools import product
 from pynput import keyboard
@@ -18,6 +19,7 @@ from threading import Timer
 from database import Database
 from handlers.sql_parser import parse_sql
 from handlers.sql_formatter import format_sql
+from notes_tab import NotesTab
 
 faulthandler.enable()
 
@@ -146,9 +148,13 @@ class KeyboardHelper:
         self.window = None
         self.items_dict = []
         self.selected_item = None
+        # Hotkey state variables
         self.last_shift_press = 0
         self.shift_pressed = False
-        self.shift_timer = None
+        self.last_ctrl_press = 0
+        self.ctrl_pressed = False
+        self.ctrl_held = False
+        self.shift_held = False
         
         # Initialize database
         self.db = Database()
@@ -160,7 +166,11 @@ class KeyboardHelper:
         self.app_computer_id = self.superset_computer_id
         self.app_settings = self.db.get_all_app_settings(self.app_computer_id)
         self.settings_window = None
+        self.current_hotkey = self.app_settings.get('hotkey', 'ctrl_space')
         self._load_clickhouse_functions()
+
+        # Initialize default note folder
+        self.db.init_default_note_folder()
 
         # Initial data load
         self.load_items()
@@ -211,28 +221,61 @@ class KeyboardHelper:
             self.filter_items()
 
     def on_press(self, key):
+        import time
         try:
+            # Track modifier states
             if key == keyboard.Key.shift:
-                import time
-                current_time = time.time()
-                
-                if not self.shift_pressed:
-                    self.shift_pressed = True
-                    if current_time - self.last_shift_press < 0.3:
-                        # Double shift detected
-                        if self.window:
-                            self._schedule_destroy_window()
-                        else:
-                            self._schedule_create_window()
-                    self.last_shift_press = current_time
-            elif key == keyboard.Key.esc and self.window:
-                self._schedule_destroy_window()
+                self.shift_held = True
+                # Double Shift detection
+                if self.current_hotkey == 'double_shift':
+                    current_time = time.time()
+                    if not self.shift_pressed:
+                        self.shift_pressed = True
+                        if current_time - self.last_shift_press < 0.3:
+                            self._toggle_window()
+                        self.last_shift_press = current_time
+
+            elif key == keyboard.Key.ctrl or key == keyboard.Key.ctrl_l or key == keyboard.Key.ctrl_r:
+                self.ctrl_held = True
+                # Double Ctrl detection
+                if self.current_hotkey == 'double_ctrl':
+                    current_time = time.time()
+                    if not self.ctrl_pressed:
+                        self.ctrl_pressed = True
+                        if current_time - self.last_ctrl_press < 0.3:
+                            self._toggle_window()
+                        self.last_ctrl_press = current_time
+
+            elif key == keyboard.Key.space:
+                # Ctrl + Space
+                if self.current_hotkey == 'ctrl_space' and self.ctrl_held and not self.shift_held:
+                    self._toggle_window()
+                # Ctrl + Shift + Space
+                elif self.current_hotkey == 'ctrl_shift_space' and self.ctrl_held and self.shift_held:
+                    self._toggle_window()
+
+            elif hasattr(key, 'char') and key.char == '`':
+                # Ctrl + `
+                if self.current_hotkey == 'ctrl_backtick' and self.ctrl_held:
+                    self._toggle_window()
+
         except AttributeError:
             pass
 
     def on_release(self, key):
         if key == keyboard.Key.shift:
             self.shift_pressed = False
+            self.shift_held = False
+        elif key == keyboard.Key.ctrl or key == keyboard.Key.ctrl_l or key == keyboard.Key.ctrl_r:
+            self.ctrl_pressed = False
+            self.ctrl_held = False
+
+    def _toggle_window(self):
+        """Toggle window visibility."""
+        if self.window:
+            self._schedule_destroy_window()
+        else:
+            self._schedule_create_window()
 
     def filter_items(self, *args):
         search_text = self.inputter.get().lower()
@@ -259,6 +302,15 @@ class KeyboardHelper:
                 break
 
     def copy_to_clipboard(self, event=None):
+        # Only process Enter on Snippets tab with focus on inputter or selector
+        if event is not None:
+            current_tab = self.notebook.index(self.notebook.select())
+            if current_tab != 0:  # Not Snippets tab
+                return
+            focused = self.window.focus_get()
+            if focused not in (self.inputter, self.selector):
+                return
+
         if self.selected_item is not None:
             for item in self.items_dict:
                 if item['id'] == self.selected_item:
@@ -297,7 +349,12 @@ class KeyboardHelper:
         self.notebook.add(snippets_frame, text="Snippets")
         self._build_snippets_tab(snippets_frame)
 
-        # --- Tab 2: SQL (with nested tabs) ---
+        # --- Tab 2: Notes ---
+        notes_frame = ttk.Frame(self.notebook)
+        self.notebook.add(notes_frame, text="Notes")
+        self.notes_tab = NotesTab(notes_frame, self.db, self.app_settings)
+
+        # --- Tab 3: SQL (with nested tabs) ---
         sql_main_frame = ttk.Frame(self.notebook)
         self.notebook.add(sql_main_frame, text="SQL")
 
@@ -334,6 +391,7 @@ class KeyboardHelper:
         self._bind_ctrl_tab_to_all(self.window)
 
         # Apply saved settings
+        self._apply_ui_font_size()
         self._apply_snippets_settings()
 
         # Set initial focus
@@ -421,7 +479,7 @@ class KeyboardHelper:
 
         # Bind keyboard shortcuts
         self.window.bind('<Return>', self.copy_to_clipboard)
-        self.window.bind('<Escape>', self._schedule_destroy_window)
+        self.window.bind('<Control-KeyPress>', lambda e: self._schedule_destroy_window() if e.keycode == 87 else None)
         
         # Setup tab order
         widget_order = [
@@ -2093,6 +2151,8 @@ class KeyboardHelper:
         self.settings_window.lift()
         self.settings_window.focus_force()
         self.settings_window.protocol("WM_DELETE_WINDOW", self._close_settings_window)
+        self.settings_window.bind('<Escape>', lambda e: self._close_settings_window())
+        self.settings_window.bind('<Control-KeyPress>', lambda e: self._close_settings_window() if e.keycode == 87 else None)
 
         # Notebook for settings tabs
         settings_notebook = ttk.Notebook(self.settings_window)
@@ -2146,6 +2206,58 @@ class KeyboardHelper:
             textvariable=self.settings_window_width_var
         ).pack(side=tk.LEFT, padx=(10, 0))
         ttk.Label(window_width_frame, text="px").pack(side=tk.LEFT, padx=(5, 0))
+
+        # Hotkey setting
+        hotkey_frame = ttk.Frame(parent)
+        hotkey_frame.pack(fill=tk.X, padx=10, pady=(10, 5))
+        ttk.Label(hotkey_frame, text="Hotkey:").pack(side=tk.LEFT)
+
+        self.hotkey_options = {
+            'ctrl_space': 'Ctrl + Space',
+            'double_shift': 'Double Shift',
+            'double_ctrl': 'Double Ctrl',
+            'ctrl_backtick': 'Ctrl + `',
+            'ctrl_shift_space': 'Ctrl + Shift + Space'
+        }
+        current_hotkey = self.app_settings.get('hotkey', 'ctrl_space')
+        self.settings_hotkey_var = tk.StringVar(value=current_hotkey)
+
+        hotkey_combo = ttk.Combobox(
+            hotkey_frame,
+            textvariable=self.settings_hotkey_var,
+            values=list(self.hotkey_options.keys()),
+            state='readonly',
+            width=20
+        )
+        hotkey_combo.pack(side=tk.LEFT, padx=(10, 0))
+
+        # Display label showing readable hotkey name
+        self.hotkey_display_label = ttk.Label(
+            hotkey_frame,
+            text=f"({self.hotkey_options.get(current_hotkey, '')})"
+        )
+        self.hotkey_display_label.pack(side=tk.LEFT, padx=(10, 0))
+
+        def on_hotkey_change(event):
+            selected = self.settings_hotkey_var.get()
+            self.hotkey_display_label.config(text=f"({self.hotkey_options.get(selected, '')})")
+
+        hotkey_combo.bind('<<ComboboxSelected>>', on_hotkey_change)
+
+        # UI Font size setting
+        ui_font_frame = ttk.Frame(parent)
+        ui_font_frame.pack(fill=tk.X, padx=10, pady=(10, 5))
+        ttk.Label(ui_font_frame, text="Font size:").pack(side=tk.LEFT)
+        current_ui_font = self.app_settings.get('ui_font_size', '12')
+        self.settings_ui_font_var = tk.StringVar(value=current_ui_font)
+        ttk.Spinbox(
+            ui_font_frame,
+            from_=8,
+            to=20,
+            width=5,
+            textvariable=self.settings_ui_font_var
+        ).pack(side=tk.LEFT, padx=(10, 0))
+        ttk.Label(ui_font_frame, text="pt").pack(side=tk.LEFT, padx=(5, 0))
 
     def _build_settings_snippets_tab(self, parent):
         # Font size
@@ -2321,6 +2433,17 @@ class KeyboardHelper:
         self.db.save_app_setting(self.app_computer_id, 'window_width', window_width)
         self.app_settings['window_width'] = window_width
 
+        # Save Hotkey setting
+        hotkey = self.settings_hotkey_var.get()
+        self.db.save_app_setting(self.app_computer_id, 'hotkey', hotkey)
+        self.app_settings['hotkey'] = hotkey
+        self.current_hotkey = hotkey
+
+        # Save UI Font size setting
+        ui_font_size = self.settings_ui_font_var.get()
+        self.db.save_app_setting(self.app_computer_id, 'ui_font_size', ui_font_size)
+        self.app_settings['ui_font_size'] = ui_font_size
+
         # Save Snippets settings
         font_size = self.settings_font_size_var.get()
         panel_width = self.settings_panel_width_var.get()
@@ -2350,9 +2473,17 @@ class KeyboardHelper:
             self.app_settings['clickhouse_functions'] = functions_str
             set_custom_functions(functions_list)
 
-        # Apply Snippets settings
+        # Apply settings
+        self._apply_ui_font_size()
         self._apply_snippets_settings()
         self._close_settings_window()
+
+    def _apply_ui_font_size(self):
+        ui_font_size = int(self.app_settings.get('ui_font_size', '12'))
+        default_font = tkfont.nametofont('TkDefaultFont')
+        default_font.configure(size=ui_font_size)
+        text_font = tkfont.nametofont('TkTextFont')
+        text_font.configure(size=ui_font_size)
 
     def _apply_snippets_settings(self):
         font_size = int(self.app_settings.get('snippets_font_size', '12'))
