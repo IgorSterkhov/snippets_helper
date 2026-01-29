@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir:*)",
+      "Bash(pip show:*)",
+      "Bash(findstr:*)",
+      "Bash(python:*)",
+      "Bash(pip install:*)",
+      "Bash(pip uninstall:*)"
+    ]
+  }
+}
