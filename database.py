@@ -88,6 +88,25 @@ class Database:
                     is_pinned INTEGER DEFAULT 0
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS commit_history (
+                    id INTEGER PRIMARY KEY,
+                    computer_id VARCHAR NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    task_link TEXT,
+                    task_id VARCHAR,
+                    commit_type VARCHAR,
+                    object_category VARCHAR,
+                    object_value VARCHAR,
+                    message TEXT,
+                    selected_tags TEXT,
+                    mr_link TEXT,
+                    test_report TEXT,
+                    prod_report TEXT,
+                    transfer_connect TEXT,
+                    test_dag TEXT
+                )
+            """)
         finally:
             conn.close()
     
@@ -550,3 +569,86 @@ class Database:
             return None
         finally:
             conn.close()
+
+    # ==================== Commit History ====================
+
+    def get_commit_history(self, computer_id: str) -> List[Dict]:
+        """Get last 30 commit history entries for a computer."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            result = conn.execute("""
+                SELECT id, computer_id, created_at, task_link, task_id, commit_type,
+                       object_category, object_value, message, selected_tags, mr_link,
+                       test_report, prod_report, transfer_connect, test_dag
+                FROM commit_history
+                WHERE computer_id = ?
+                ORDER BY created_at DESC
+                LIMIT 30
+            """, (computer_id,)).fetchall()
+            return [
+                {
+                    'id': row[0],
+                    'computer_id': row[1],
+                    'created_at': row[2],
+                    'task_link': row[3],
+                    'task_id': row[4],
+                    'commit_type': row[5],
+                    'object_category': row[6],
+                    'object_value': row[7],
+                    'message': row[8],
+                    'selected_tags': row[9],
+                    'mr_link': row[10],
+                    'test_report': row[11],
+                    'prod_report': row[12],
+                    'transfer_connect': row[13],
+                    'test_dag': row[14]
+                }
+                for row in result
+            ]
+        finally:
+            conn.close()
+
+    def save_commit_history(self, computer_id: str, data: Dict):
+        """Save a commit history entry, keeping only last 5."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            max_id_result = conn.execute("SELECT MAX(id) FROM commit_history").fetchone()
+            new_id = (max_id_result[0] or 0) + 1
+            conn.execute("""
+                INSERT INTO commit_history (
+                    id, computer_id, created_at, task_link, task_id, commit_type,
+                    object_category, object_value, message, selected_tags, mr_link,
+                    test_report, prod_report, transfer_connect, test_dag
+                )
+                VALUES (?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                new_id,
+                computer_id,
+                data.get('task_link', ''),
+                data.get('task_id', ''),
+                data.get('commit_type', ''),
+                data.get('object_category', ''),
+                data.get('object_value', ''),
+                data.get('message', ''),
+                data.get('selected_tags', ''),
+                data.get('mr_link', ''),
+                data.get('test_report', ''),
+                data.get('prod_report', ''),
+                data.get('transfer_connect', ''),
+                data.get('test_dag', '')
+            ))
+            self._cleanup_old_commit_history(conn, computer_id)
+        finally:
+            conn.close()
+
+    def _cleanup_old_commit_history(self, conn, computer_id: str):
+        """Delete old commit history entries, keeping only last 30."""
+        conn.execute("""
+            DELETE FROM commit_history
+            WHERE computer_id = ? AND id NOT IN (
+                SELECT id FROM commit_history
+                WHERE computer_id = ?
+                ORDER BY created_at DESC
+                LIMIT 30
+            )
+        """, (computer_id, computer_id))
