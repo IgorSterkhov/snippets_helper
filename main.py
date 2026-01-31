@@ -340,8 +340,31 @@ class KeyboardHelper:
 
         self.window = tk.Toplevel(self.root)
         self.window.title("Keyboard Helper")
+
+        # Restore window geometry (size and position)
         window_width = int(self.app_settings.get('window_width', '600'))
-        self.window.geometry(f"{window_width}x600")
+        window_height = int(self.app_settings.get('window_height', '600'))
+        window_x = self.app_settings.get('window_x', '')
+        window_y = self.app_settings.get('window_y', '')
+
+        if window_x and window_y:
+            # Validate position is within screen bounds
+            screen_width = self.window.winfo_screenwidth()
+            screen_height = self.window.winfo_screenheight()
+            x = int(window_x)
+            y = int(window_y)
+            # Ensure window is at least partially visible
+            if x < -window_width + 50:
+                x = 0
+            if x > screen_width - 50:
+                x = screen_width - window_width
+            if y < 0:
+                y = 0
+            if y > screen_height - 50:
+                y = screen_height - window_height
+            self.window.geometry(f"{window_width}x{window_height}+{x}+{y}")
+        else:
+            self.window.geometry(f"{window_width}x{window_height}")
 
         # Minimize to tray instead of closing
         self.window.protocol("WM_DELETE_WINDOW", self._minimize_to_tray)
@@ -1470,157 +1493,131 @@ class KeyboardHelper:
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        # --- Block: Данные задачи ---
-        task_frame = ttk.LabelFrame(scrollable_frame, text="Данные задачи")
+        # --- Block: Задача (История + Данные в одной строке) ---
+        task_frame = ttk.LabelFrame(scrollable_frame, text="Задача")
         task_frame.pack(fill=tk.X, padx=10, pady=(10, 5))
 
-        task_link_row = ttk.Frame(task_frame)
-        task_link_row.pack(fill=tk.X, padx=5, pady=(5, 2))
-        ttk.Label(task_link_row, text="Task Link:").pack(side=tk.LEFT)
-        self.commits_task_link_entry = ttk.Entry(task_link_row)
-        self.commits_task_link_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 0))
-        self.commits_task_link_entry.bind("<KeyRelease>", self._on_commits_task_link_change)
+        task_row = ttk.Frame(task_frame)
+        task_row.pack(fill=tk.X, padx=5, pady=5)
 
-        task_id_row = ttk.Frame(task_frame)
-        task_id_row.pack(fill=tk.X, padx=5, pady=(2, 5))
-        ttk.Label(task_id_row, text="Task ID:").pack(side=tk.LEFT)
-        self.commits_task_id_entry = ttk.Entry(task_id_row, state="readonly")
-        self.commits_task_id_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 0))
+        # История (30% слева)
+        history_subframe = ttk.Frame(task_row)
+        history_subframe.pack(side=tk.LEFT)
+        ttk.Label(history_subframe, text="История:").pack(side=tk.LEFT)
+        self.commits_history_combo = ttk.Combobox(history_subframe, state="readonly", width=22)
+        self.commits_history_combo.pack(side=tk.LEFT, padx=(3, 3))
+        self.commits_history_combo.bind("<<ComboboxSelected>>", self._on_commit_history_select)
+        ttk.Button(history_subframe, text="Save", command=self._save_to_commit_history).pack(side=tk.LEFT)
+
+        # Разделитель
+        ttk.Label(task_row, text=" | ").pack(side=tk.LEFT, padx=5)
+
+        # Данные задачи (70% справа)
+        ttk.Label(task_row, text="Link:").pack(side=tk.LEFT)
+        self.commits_task_link_entry = ttk.Entry(task_row)
+        self.commits_task_link_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(3, 8))
+        self.commits_task_link_entry.bind("<KeyRelease>", self._on_commits_task_link_change)
+        ttk.Label(task_row, text="ID:").pack(side=tk.LEFT)
+        self.commits_task_id_entry = ttk.Entry(task_row, state="readonly", width=8)
+        self.commits_task_id_entry.pack(side=tk.LEFT, padx=(3, 0))
 
         # --- Block: Объект ---
         object_frame = ttk.LabelFrame(scrollable_frame, text="Объект")
         object_frame.pack(fill=tk.X, padx=10, pady=5)
 
-        type_row = ttk.Frame(object_frame)
-        type_row.pack(fill=tk.X, padx=5, pady=(5, 2))
-        ttk.Label(type_row, text="Type:").pack(side=tk.LEFT)
-        self.commits_type_combo = ttk.Combobox(type_row, values=self.COMMIT_TYPES, state="readonly", width=10)
-        self.commits_type_combo.pack(side=tk.LEFT, padx=(5, 0))
+        # Type + Category + Object in one row
+        type_cat_obj_row = ttk.Frame(object_frame)
+        type_cat_obj_row.pack(fill=tk.X, padx=5, pady=5)
+        ttk.Label(type_cat_obj_row, text="Type:").pack(side=tk.LEFT)
+        self.commits_type_combo = ttk.Combobox(type_cat_obj_row, values=self.COMMIT_TYPES, state="readonly", width=7)
+        self.commits_type_combo.pack(side=tk.LEFT, padx=(3, 8))
         self.commits_type_combo.set("fix")
         self.commits_type_combo.bind("<<ComboboxSelected>>", self._update_commits_preview)
-
-        category_row = ttk.Frame(object_frame)
-        category_row.pack(fill=tk.X, padx=5, pady=2)
-        ttk.Label(category_row, text="Object category:").pack(side=tk.LEFT)
-        self.commits_category_combo = ttk.Combobox(category_row, values=self.COMMIT_CATEGORIES, state="readonly", width=15)
-        self.commits_category_combo.pack(side=tk.LEFT, padx=(5, 0))
+        ttk.Label(type_cat_obj_row, text="Cat:").pack(side=tk.LEFT)
+        self.commits_category_combo = ttk.Combobox(type_cat_obj_row, values=self.COMMIT_CATEGORIES, state="readonly", width=10)
+        self.commits_category_combo.pack(side=tk.LEFT, padx=(3, 8))
         self.commits_category_combo.set("отчет")
         self.commits_category_combo.bind("<<ComboboxSelected>>", self._on_commits_category_change)
+        ttk.Label(type_cat_obj_row, text="Obj:").pack(side=tk.LEFT)
+        self.commits_object_entry = ttk.Entry(type_cat_obj_row)
+        self.commits_object_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(3, 0))
+        self.commits_object_entry.bind("<KeyRelease>", self._update_commits_preview)
+
+        # Object hint
+        self.commits_object_hint_label = ttk.Label(object_frame, text='Пример: "004.1"', foreground="gray")
+        self.commits_object_hint_label.pack(anchor=tk.W, padx=5, pady=(0, 2))
 
         # Conditional fields container
         self.commits_conditional_frame = ttk.Frame(object_frame)
         self.commits_conditional_frame.pack(fill=tk.X, padx=5, pady=2)
 
-        # Test report field (conditional)
-        self.commits_test_report_frame = ttk.Frame(self.commits_conditional_frame)
-        test_report_row = ttk.Frame(self.commits_test_report_frame)
-        test_report_row.pack(fill=tk.X, pady=2)
-        ttk.Label(test_report_row, text="Тестовый отчет:").pack(side=tk.LEFT)
-        self.commits_test_report_entry = ttk.Entry(test_report_row)
-        self.commits_test_report_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 0))
+        # Reports row (conditional, for "отчет") - Тест + Прод + Коннект в одной строке
+        self.commits_reports_frame = ttk.Frame(self.commits_conditional_frame)
+        ttk.Label(self.commits_reports_frame, text="Тест:").pack(side=tk.LEFT)
+        self.commits_test_report_entry = ttk.Entry(self.commits_reports_frame)
+        self.commits_test_report_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(3, 8))
         self.commits_test_report_entry.bind("<KeyRelease>", self._on_commits_test_report_change)
-
-        # Prod report field (conditional)
-        self.commits_prod_report_frame = ttk.Frame(self.commits_conditional_frame)
-        prod_report_row = ttk.Frame(self.commits_prod_report_frame)
-        prod_report_row.pack(fill=tk.X, pady=2)
-        ttk.Label(prod_report_row, text="Продовый отчет:").pack(side=tk.LEFT)
-        self.commits_prod_report_entry = ttk.Entry(prod_report_row)
-        self.commits_prod_report_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 0))
+        ttk.Label(self.commits_reports_frame, text="Прод:").pack(side=tk.LEFT)
+        self.commits_prod_report_entry = ttk.Entry(self.commits_reports_frame)
+        self.commits_prod_report_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(3, 8))
         self.commits_prod_report_entry.bind("<KeyRelease>", self._update_commits_chat_preview)
-
-        # Transfer connect field (conditional, for "отчет")
-        self.commits_transfer_connect_frame = ttk.Frame(self.commits_conditional_frame)
-        transfer_connect_row = ttk.Frame(self.commits_transfer_connect_frame)
-        transfer_connect_row.pack(fill=tk.X, pady=2)
-        ttk.Label(transfer_connect_row, text="Перенести коннект:").pack(side=tk.LEFT)
-        self.commits_transfer_connect_entry = ttk.Entry(transfer_connect_row)
-        self.commits_transfer_connect_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 0))
+        ttk.Label(self.commits_reports_frame, text="Коннект:").pack(side=tk.LEFT)
+        self.commits_transfer_connect_entry = ttk.Entry(self.commits_reports_frame, width=8)
+        self.commits_transfer_connect_entry.pack(side=tk.LEFT, padx=(3, 0))
         self.commits_transfer_connect_entry.bind("<KeyRelease>", self._update_commits_chat_preview)
 
-        # Test dag field (conditional)
+        # Test dag field (conditional, for "даг")
         self.commits_test_dag_frame = ttk.Frame(self.commits_conditional_frame)
-        test_dag_row = ttk.Frame(self.commits_test_dag_frame)
-        test_dag_row.pack(fill=tk.X, pady=2)
-        ttk.Label(test_dag_row, text="Тестовый даг:").pack(side=tk.LEFT)
-        self.commits_test_dag_entry = ttk.Entry(test_dag_row)
-        self.commits_test_dag_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 0))
+        ttk.Label(self.commits_test_dag_frame, text="Тест даг:").pack(side=tk.LEFT)
+        self.commits_test_dag_entry = ttk.Entry(self.commits_test_dag_frame)
+        self.commits_test_dag_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(3, 0))
         self.commits_test_dag_entry.bind("<KeyRelease>", self._update_commits_chat_preview)
 
-        # Object hint and entry
-        hint_row = ttk.Frame(object_frame)
-        hint_row.pack(fill=tk.X, padx=5, pady=(5, 2))
-        self.commits_object_hint_label = ttk.Label(hint_row, text='Пример: "004.1"', foreground="gray")
-        self.commits_object_hint_label.pack(anchor=tk.W)
-
-        object_row = ttk.Frame(object_frame)
-        object_row.pack(fill=tk.X, padx=5, pady=(0, 5))
-        ttk.Label(object_row, text="Object:").pack(side=tk.LEFT)
-        self.commits_object_entry = ttk.Entry(object_row)
-        self.commits_object_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 0))
-        self.commits_object_entry.bind("<KeyRelease>", self._update_commits_preview)
-
         # --- Block: Формирование коммита ---
-        commit_frame = ttk.LabelFrame(scrollable_frame, text="Формирование коммита")
+        commit_frame = ttk.LabelFrame(scrollable_frame, text="Коммит")
         commit_frame.pack(fill=tk.X, padx=10, pady=5)
 
-        message_row = ttk.Frame(commit_frame)
-        message_row.pack(fill=tk.X, padx=5, pady=(5, 2))
-        ttk.Label(message_row, text="Message:").pack(side=tk.LEFT)
-        self.commits_message_entry = ttk.Entry(message_row)
-        self.commits_message_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 0))
+        # Message + Result + Copy button in one row
+        commit_row = ttk.Frame(commit_frame)
+        commit_row.pack(fill=tk.X, padx=5, pady=5)
+        ttk.Label(commit_row, text="Msg:").pack(side=tk.LEFT)
+        self.commits_message_entry = ttk.Entry(commit_row, width=20)
+        self.commits_message_entry.pack(side=tk.LEFT, padx=(3, 8))
         self.commits_message_entry.bind("<KeyRelease>", self._update_commits_preview)
-
-        result_row = ttk.Frame(commit_frame)
-        result_row.pack(fill=tk.X, padx=5, pady=2)
-        ttk.Label(result_row, text="Результат:").pack(side=tk.LEFT)
-        self.commits_result_entry = ttk.Entry(result_row, state="readonly")
-        self.commits_result_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 0))
-
-        copy_commit_btn = ttk.Button(commit_frame, text="Копировать коммит", command=self._copy_commit_string)
-        copy_commit_btn.pack(fill=tk.X, padx=5, pady=(2, 5))
+        self.commits_result_entry = ttk.Entry(commit_row, state="readonly")
+        self.commits_result_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        ttk.Button(commit_row, text="Copy", command=self._copy_commit_string).pack(side=tk.LEFT)
 
         # --- Block: Сообщение в чат ---
         chat_frame = ttk.LabelFrame(scrollable_frame, text="Сообщение в чат")
         chat_frame.pack(fill=tk.X, padx=10, pady=5)
 
-        # Tags selection
+        # Tags + MR: all in one row
         tags_row = ttk.Frame(chat_frame)
-        tags_row.pack(fill=tk.X, padx=5, pady=(5, 2))
+        tags_row.pack(fill=tk.X, padx=5, pady=5)
         ttk.Label(tags_row, text="Теги:").pack(side=tk.LEFT)
-        self.commits_tags_combo = ttk.Combobox(tags_row, state="readonly", width=25)
-        self.commits_tags_combo.pack(side=tk.LEFT, padx=(5, 5))
-        add_tag_btn = ttk.Button(tags_row, text="+ Добавить", command=self._on_commits_add_selected_tag)
-        add_tag_btn.pack(side=tk.LEFT)
-
-        # Selected tags entry (readonly)
-        selected_tags_row = ttk.Frame(chat_frame)
-        selected_tags_row.pack(fill=tk.X, padx=5, pady=2)
-        ttk.Label(selected_tags_row, text="Выбранные теги:").pack(side=tk.LEFT)
-        self.commits_selected_tags_entry = ttk.Entry(selected_tags_row, state="readonly")
-        self.commits_selected_tags_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 5))
-        ttk.Button(selected_tags_row, text="Очистить", command=self._on_commits_clear_tags).pack(side=tk.LEFT)
-
-        # MR field
-        mr_row = ttk.Frame(chat_frame)
-        mr_row.pack(fill=tk.X, padx=5, pady=2)
-        ttk.Label(mr_row, text="MR:").pack(side=tk.LEFT)
-        self.commits_mr_entry = ttk.Entry(mr_row)
-        self.commits_mr_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 0))
+        self.commits_tags_combo = ttk.Combobox(tags_row, state="readonly", width=18)
+        self.commits_tags_combo.pack(side=tk.LEFT, padx=(3, 2))
+        ttk.Button(tags_row, text="+", width=2, command=self._on_commits_add_selected_tag).pack(side=tk.LEFT)
+        self.commits_selected_tags_entry = ttk.Entry(tags_row, state="readonly")
+        self.commits_selected_tags_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(3, 2))
+        ttk.Button(tags_row, text="X", width=2, command=self._on_commits_clear_tags).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Label(tags_row, text="MR:").pack(side=tk.LEFT)
+        self.commits_mr_entry = ttk.Entry(tags_row, width=8)
+        self.commits_mr_entry.pack(side=tk.LEFT, padx=(3, 0))
         self.commits_mr_entry.bind("<KeyRelease>", self._update_commits_chat_preview)
 
-        # Chat preview
-        preview_label = ttk.Label(chat_frame, text="Превью сообщения:")
-        preview_label.pack(anchor=tk.W, padx=5, pady=(5, 2))
-        self.commits_chat_preview = tk.Text(chat_frame, height=6)
-        self.commits_chat_preview.pack(fill=tk.X, padx=5, pady=(0, 2))
-
-        copy_chat_btn = ttk.Button(chat_frame, text="Копировать сообщение", command=self._copy_chat_message)
-        copy_chat_btn.pack(fill=tk.X, padx=5, pady=(2, 5))
+        # Chat preview + copy button
+        preview_row = ttk.Frame(chat_frame)
+        preview_row.pack(fill=tk.X, padx=5, pady=(0, 5))
+        self.commits_chat_preview = tk.Text(preview_row, height=5)
+        self.commits_chat_preview.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(preview_row, text="Copy", command=self._copy_chat_message).pack(side=tk.LEFT, padx=(5, 0))
 
         # Initialize UI state
         self._load_commits_tags()
         self._on_commits_category_change()
+        self._load_commit_history()
 
     def _set_readonly_entry(self, entry, value):
         """Set value in a readonly entry widget."""
@@ -1655,18 +1652,14 @@ class KeyboardHelper:
         self.commits_object_hint_label.config(text=f'Пример: "{hint}"')
 
         # Hide all conditional fields
-        self.commits_test_report_frame.pack_forget()
-        self.commits_prod_report_frame.pack_forget()
-        self.commits_transfer_connect_frame.pack_forget()
+        self.commits_reports_frame.pack_forget()
         self.commits_test_dag_frame.pack_forget()
 
         # Show relevant fields
         if category == "отчет":
-            self.commits_test_report_frame.pack(fill=tk.X)
-            self.commits_prod_report_frame.pack(fill=tk.X)
-            self.commits_transfer_connect_frame.pack(fill=tk.X)
+            self.commits_reports_frame.pack(fill=tk.X, pady=2)
         elif category == "даг":
-            self.commits_test_dag_frame.pack(fill=tk.X)
+            self.commits_test_dag_frame.pack(fill=tk.X, pady=2)
 
         self._update_commits_chat_preview()
 
@@ -1747,12 +1740,14 @@ class KeyboardHelper:
         result = self.commits_result_entry.get()
         if result:
             pyperclip.copy(result)
+            self._save_to_commit_history()
 
     def _copy_chat_message(self):
         """Copy chat message to clipboard."""
         message = self.commits_chat_preview.get("1.0", tk.END).strip()
         if message:
             pyperclip.copy(message)
+            self._save_to_commit_history()
 
     def _load_commits_tags(self):
         """Load saved tags from database."""
@@ -1780,6 +1775,107 @@ class KeyboardHelper:
         """Clear all selected tags."""
         self._set_readonly_entry(self.commits_selected_tags_entry, "")
         self._update_commits_chat_preview()
+
+    def _get_commit_form_data(self):
+        """Get all current commit form data as a dictionary."""
+        return {
+            'task_link': self.commits_task_link_entry.get().strip(),
+            'task_id': self.commits_task_id_entry.get().strip(),
+            'commit_type': self.commits_type_combo.get(),
+            'object_category': self.commits_category_combo.get(),
+            'object_value': self.commits_object_entry.get().strip(),
+            'message': self.commits_message_entry.get().strip(),
+            'selected_tags': self.commits_selected_tags_entry.get().strip(),
+            'mr_link': self.commits_mr_entry.get().strip(),
+            'test_report': self.commits_test_report_entry.get().strip(),
+            'prod_report': self.commits_prod_report_entry.get().strip(),
+            'transfer_connect': self.commits_transfer_connect_entry.get().strip(),
+            'test_dag': self.commits_test_dag_entry.get().strip()
+        }
+
+    def _set_commit_form_data(self, data):
+        """Fill commit form with data from history."""
+        # Task link and ID
+        self.commits_task_link_entry.delete(0, tk.END)
+        self.commits_task_link_entry.insert(0, data.get('task_link', ''))
+        self._set_readonly_entry(self.commits_task_id_entry, data.get('task_id', ''))
+
+        # Type, Category, Object
+        self.commits_type_combo.set(data.get('commit_type', 'fix'))
+        self.commits_category_combo.set(data.get('object_category', 'отчет'))
+        self.commits_object_entry.delete(0, tk.END)
+        self.commits_object_entry.insert(0, data.get('object_value', ''))
+
+        # Message
+        self.commits_message_entry.delete(0, tk.END)
+        self.commits_message_entry.insert(0, data.get('message', ''))
+
+        # Tags
+        self._set_readonly_entry(self.commits_selected_tags_entry, data.get('selected_tags', ''))
+
+        # MR
+        self.commits_mr_entry.delete(0, tk.END)
+        self.commits_mr_entry.insert(0, data.get('mr_link', ''))
+
+        # Conditional fields
+        self.commits_test_report_entry.delete(0, tk.END)
+        self.commits_test_report_entry.insert(0, data.get('test_report', ''))
+        self.commits_prod_report_entry.delete(0, tk.END)
+        self.commits_prod_report_entry.insert(0, data.get('prod_report', ''))
+        self.commits_transfer_connect_entry.delete(0, tk.END)
+        self.commits_transfer_connect_entry.insert(0, data.get('transfer_connect', ''))
+        self.commits_test_dag_entry.delete(0, tk.END)
+        self.commits_test_dag_entry.insert(0, data.get('test_dag', ''))
+
+        # Update conditional fields visibility and previews
+        self._on_commits_category_change()
+        self._update_commits_preview()
+        self._update_commits_chat_preview()
+
+    def _load_commit_history(self):
+        """Load commit history into combobox and restore last values."""
+        self.commits_history_data = self.db.get_commit_history(self.app_computer_id)
+
+        # Format display values for combobox
+        display_values = []
+        for item in self.commits_history_data:
+            task_id = item.get('task_id', '') or 'no-task'
+            created_at = item.get('created_at', '')
+            # Format date
+            if created_at:
+                try:
+                    if hasattr(created_at, 'strftime'):
+                        date_str = created_at.strftime('%d.%m %H:%M')
+                    else:
+                        date_str = str(created_at)[:16].replace('-', '.').replace('T', ' ')
+                except:
+                    date_str = ''
+            else:
+                date_str = ''
+            display = f"[{task_id}] {date_str}"
+            display_values.append(display)
+
+        self.commits_history_combo['values'] = display_values
+
+        # If there's history, select first item and load its data
+        if self.commits_history_data:
+            self.commits_history_combo.current(0)
+            self._set_commit_form_data(self.commits_history_data[0])
+
+    def _on_commit_history_select(self, event=None):
+        """Handle commit history selection - fill form with selected data."""
+        idx = self.commits_history_combo.current()
+        if idx >= 0 and idx < len(self.commits_history_data):
+            self._set_commit_form_data(self.commits_history_data[idx])
+
+    def _save_to_commit_history(self):
+        """Save current commit form data to history."""
+        data = self._get_commit_form_data()
+
+        # Only save if there's meaningful data (at least task_id or object)
+        if data.get('task_id') or data.get('object_value'):
+            self.db.save_commit_history(self.app_computer_id, data)
+            self._load_commit_history()
 
     def _load_clickhouse_functions(self):
         """Load custom ClickHouse functions from settings."""
@@ -2841,9 +2937,32 @@ class KeyboardHelper:
         if self.root:
             self.root.after(0, self.root.quit)
 
+    def _save_window_geometry(self):
+        """Save window size and position."""
+        if self.window and self.window.winfo_exists():
+            geometry = self.window.geometry()
+            # Parse geometry string: WIDTHxHEIGHT+X+Y
+            import re
+            match = re.match(r'(\d+)x(\d+)\+(-?\d+)\+(-?\d+)', geometry)
+            if match:
+                width, height, x, y = match.groups()
+                self.db.save_app_setting(self.app_computer_id, 'window_width', width)
+                self.db.save_app_setting(self.app_computer_id, 'window_height', height)
+                self.db.save_app_setting(self.app_computer_id, 'window_x', x)
+                self.db.save_app_setting(self.app_computer_id, 'window_y', y)
+                self.app_settings['window_width'] = width
+                self.app_settings['window_height'] = height
+                self.app_settings['window_x'] = x
+                self.app_settings['window_y'] = y
+
     def _minimize_to_tray(self):
         """Minimize window to tray instead of closing."""
         if self.window:
+            # Save window geometry before minimizing
+            self._save_window_geometry()
+            # Save commit history before minimizing
+            if hasattr(self, 'commits_task_id_entry'):
+                self._save_to_commit_history()
             self.window.withdraw()
 
             # Show notification on first minimize
