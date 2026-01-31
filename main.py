@@ -15,8 +15,11 @@ import tkinter.font as tkfont
 import json
 from itertools import product
 from pynput import keyboard
-from threading import Timer
+from threading import Timer, Thread
 from database import Database
+from autostart import AutostartManager
+import pystray
+from PIL import Image
 from handlers.sql_parser import parse_sql
 from handlers.sql_formatter import format_sql
 from notes_tab import NotesTab
@@ -180,7 +183,20 @@ class KeyboardHelper:
             on_press=self.on_press,
             on_release=self.on_release)
         self.keyboard_listener.start()
-        
+
+        # Setup autostart manager
+        self.autostart_manager = AutostartManager(
+            "KeyboardHelper",
+            str(Path(__file__).resolve())
+        )
+
+        # Setup system tray
+        self.tray_icon = None
+        self._setup_tray()
+
+        # Check first run for autostart prompt
+        self._check_first_run()
+
     def load_items(self):
         self.items_dict = self.db.get_all_items()
 
@@ -326,7 +342,10 @@ class KeyboardHelper:
         self.window.title("Keyboard Helper")
         window_width = int(self.app_settings.get('window_width', '600'))
         self.window.geometry(f"{window_width}x600")
-        
+
+        # Minimize to tray instead of closing
+        self.window.protocol("WM_DELETE_WINDOW", self._minimize_to_tray)
+
         # macOS specific window settings
         self.window.lift()
         self.window.attributes('-topmost', True)
@@ -2259,6 +2278,20 @@ class KeyboardHelper:
         ).pack(side=tk.LEFT, padx=(10, 0))
         ttk.Label(ui_font_frame, text="pt").pack(side=tk.LEFT, padx=(5, 0))
 
+        # Autostart setting
+        autostart_frame = ttk.Frame(parent)
+        autostart_frame.pack(fill=tk.X, padx=10, pady=(10, 5))
+
+        current_autostart = self.autostart_manager.is_enabled()
+        self.settings_autostart_var = tk.BooleanVar(value=current_autostart)
+
+        autostart_check = ttk.Checkbutton(
+            autostart_frame,
+            text="Запускать при старте системы",
+            variable=self.settings_autostart_var
+        )
+        autostart_check.pack(side=tk.LEFT)
+
     def _build_settings_snippets_tab(self, parent):
         # Font size
         font_size_frame = ttk.Frame(parent)
@@ -2443,6 +2476,16 @@ class KeyboardHelper:
         ui_font_size = self.settings_ui_font_var.get()
         self.db.save_app_setting(self.app_computer_id, 'ui_font_size', ui_font_size)
         self.app_settings['ui_font_size'] = ui_font_size
+
+        # Save Autostart setting
+        autostart_enabled = self.settings_autostart_var.get()
+        if autostart_enabled:
+            self.autostart_manager.enable()
+            self.app_settings['autostart_enabled'] = '1'
+        else:
+            self.autostart_manager.disable()
+            self.app_settings['autostart_enabled'] = '0'
+        self.db.save_app_setting(self.app_computer_id, 'autostart_enabled', self.app_settings['autostart_enabled'])
 
         # Save Snippets settings
         font_size = self.settings_font_size_var.get()
@@ -2726,6 +2769,122 @@ class KeyboardHelper:
             self.window.destroy()
             self.window = None
 
+    # === System Tray Methods ===
+
+    def _setup_tray(self):
+        """Setup system tray icon and menu."""
+        icon_image = self._load_tray_icon()
+        menu = pystray.Menu(
+            pystray.MenuItem("Открыть", self._tray_open_window, default=True),
+            pystray.MenuItem(
+                "Автозапуск",
+                self._tray_toggle_autostart,
+                checked=lambda item: self.autostart_manager.is_enabled()
+            ),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Выход", self._tray_quit)
+        )
+        self.tray_icon = pystray.Icon("keyboard_helper", icon_image, "Keyboard Helper", menu)
+
+        # Run tray in separate thread
+        tray_thread = Thread(target=self.tray_icon.run, daemon=True)
+        tray_thread.start()
+
+    def _load_tray_icon(self):
+        """Load icon for system tray."""
+        app_dir = Path(__file__).parent
+
+        # Try Windows .ico first
+        ico_path = app_dir / "AppIcon.ico"
+        if ico_path.exists():
+            return Image.open(ico_path)
+
+        # Fallback to PNG
+        png_path = app_dir / "AppIcon.iconset" / "icon_32x32.png"
+        if png_path.exists():
+            return Image.open(png_path)
+
+        # Create simple fallback icon
+        img = Image.new('RGB', (64, 64), color='#0066cc')
+        return img
+
+    def _tray_open_window(self, icon=None, item=None):
+        """Open window from tray."""
+        if self.root:
+            self.root.after(0, self._show_window)
+
+    def _show_window(self):
+        """Show or create window."""
+        if self.window and self.window.winfo_exists():
+            self.window.deiconify()
+            self.window.lift()
+            self.window.focus_force()
+        else:
+            self.create_window()
+
+    def _tray_toggle_autostart(self, icon=None, item=None):
+        """Toggle autostart from tray menu."""
+        if self.autostart_manager.is_enabled():
+            self.autostart_manager.disable()
+            self.app_settings['autostart_enabled'] = '0'
+        else:
+            self.autostart_manager.enable()
+            self.app_settings['autostart_enabled'] = '1'
+        self.db.save_app_setting(self.app_computer_id, 'autostart_enabled', self.app_settings['autostart_enabled'])
+
+    def _tray_quit(self, icon=None, item=None):
+        """Quit application from tray."""
+        if self.tray_icon:
+            self.tray_icon.stop()
+        if self.keyboard_listener:
+            self.keyboard_listener.stop()
+        if self.root:
+            self.root.after(0, self.root.quit)
+
+    def _minimize_to_tray(self):
+        """Minimize window to tray instead of closing."""
+        if self.window:
+            self.window.withdraw()
+
+            # Show notification on first minimize
+            if self.app_settings.get('tray_hint_shown', '0') == '0':
+                if self.tray_icon:
+                    self.tray_icon.notify(
+                        "Keyboard Helper свёрнут в трей",
+                        "Приложение продолжает работать в фоне"
+                    )
+                self.db.save_app_setting(self.app_computer_id, 'tray_hint_shown', '1')
+                self.app_settings['tray_hint_shown'] = '1'
+
+    def _check_first_run(self):
+        """Check if this is first run and offer to enable autostart."""
+        first_run_shown = self.app_settings.get('first_run_autostart_shown', '0')
+
+        if first_run_shown == '0':
+            # Schedule dialog after mainloop starts
+            self.root.after(1000, self._show_first_run_dialog)
+
+            # Mark as shown
+            self.db.save_app_setting(self.app_computer_id, 'first_run_autostart_shown', '1')
+            self.app_settings['first_run_autostart_shown'] = '1'
+
+    def _show_first_run_dialog(self):
+        """Show first run autostart dialog."""
+        result = messagebox.askyesno(
+            "Автозапуск",
+            "Хотите, чтобы Keyboard Helper запускался автоматически при старте системы?",
+            parent=self.root
+        )
+        if result:
+            if self.autostart_manager.enable():
+                self.app_settings['autostart_enabled'] = '1'
+                self.db.save_app_setting(self.app_computer_id, 'autostart_enabled', '1')
+                messagebox.showinfo("Автозапуск", "Автозапуск включён", parent=self.root)
+            else:
+                messagebox.showerror("Ошибка", "Не удалось включить автозапуск", parent=self.root)
+
+
 if __name__ == "__main__":
     app = KeyboardHelper()
+    app.create_window()  # Open window on start
     app.root.mainloop() 

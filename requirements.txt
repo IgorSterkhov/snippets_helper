@@ -5,3 +5,6 @@ python-dotenv>=1.0.0
 shandy-sqlfmt>=0.28.0
 tkhtmlview>=0.2.0
 markdown>=3.4.0
+pystray>=0.19.0
+Pillow>=9.0.0
+pywin32>=306; sys_platform == "win32"
