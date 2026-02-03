@@ -22,6 +22,10 @@ import pystray
 from PIL import Image
 from handlers.sql_parser import parse_sql
 from handlers.sql_formatter import format_sql
+from handlers.sql_obfuscator import (
+    extract_entities, generate_obfuscated_names, apply_replacements,
+    generate_session_name, export_to_json, export_to_csv, load_from_file
+)
 from notes_tab import NotesTab
 
 faulthandler.enable()
@@ -418,6 +422,10 @@ class KeyboardHelper:
         sql_format_frame = ttk.Frame(self.sql_notebook)
         self.sql_notebook.add(sql_format_frame, text="Format SQL")
         self._build_sql_format_tab(sql_format_frame)
+
+        sql_obfuscation_frame = ttk.Frame(self.sql_notebook)
+        self.sql_notebook.add(sql_obfuscation_frame, text="Obfuscation")
+        self._build_sql_obfuscation_tab(sql_obfuscation_frame)
 
         # --- Tab 4: Superset ---
         superset_frame = ttk.Frame(self.notebook)
@@ -1131,6 +1139,336 @@ class KeyboardHelper:
         self.macrosing_result_text.config(state=tk.DISABLED)
         if result:
             pyperclip.copy(result)
+
+    # ==================== SQL Obfuscation Tab ====================
+
+    def _build_sql_obfuscation_tab(self, parent):
+        # Input frame
+        input_label = ttk.Label(parent, text="Input (DAG/SQL code):")
+        input_label.pack(anchor=tk.W, padx=10, pady=(10, 2))
+        self.obfuscation_input_text = tk.Text(parent, height=8)
+        self.obfuscation_input_text.pack(fill=tk.X, padx=10, pady=(0, 5))
+
+        # Find entities button
+        ttk.Button(parent, text="Find Entities", command=self._on_find_entities).pack(fill=tk.X, padx=10, pady=(0, 5))
+
+        # Progress bar frame
+        progress_frame = ttk.Frame(parent)
+        progress_frame.pack(fill=tk.X, padx=10, pady=(0, 5))
+        self.obfuscation_progress = ttk.Progressbar(progress_frame, mode='determinate', maximum=100)
+        self.obfuscation_progress.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.obfuscation_progress_label = ttk.Label(progress_frame, text="", width=20)
+        self.obfuscation_progress_label.pack(side=tk.LEFT, padx=(5, 0))
+
+        # Scrollable frame for entity mappings
+        mappings_container = ttk.Frame(parent)
+        mappings_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 5))
+
+        mappings_canvas = tk.Canvas(mappings_container, height=200)
+        mappings_scrollbar = ttk.Scrollbar(mappings_container, orient="vertical", command=mappings_canvas.yview)
+        self.obfuscation_mappings_frame = ttk.Frame(mappings_canvas)
+
+        self.obfuscation_mappings_frame.bind(
+            "<Configure>",
+            lambda e: mappings_canvas.configure(scrollregion=mappings_canvas.bbox("all"))
+        )
+        mappings_canvas.create_window((0, 0), window=self.obfuscation_mappings_frame, anchor="nw")
+        mappings_canvas.configure(yscrollcommand=mappings_scrollbar.set)
+
+        mappings_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        mappings_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Buttons row
+        buttons_frame = ttk.Frame(parent)
+        buttons_frame.pack(fill=tk.X, padx=10, pady=(0, 5))
+
+        ttk.Button(buttons_frame, text="Apply Replacements", command=self._on_apply_obfuscation).pack(side=tk.LEFT, padx=(0, 5))
+
+        # Save menu button
+        self.obfuscation_save_menubutton = ttk.Menubutton(buttons_frame, text="Save Mapping")
+        self.obfuscation_save_menu = tk.Menu(self.obfuscation_save_menubutton, tearoff=0)
+        self.obfuscation_save_menu.add_command(label="To Database", command=self._on_save_obfuscation_to_db)
+        self.obfuscation_save_menu.add_command(label="To JSON", command=self._on_save_obfuscation_to_json)
+        self.obfuscation_save_menu.add_command(label="To CSV", command=self._on_save_obfuscation_to_csv)
+        self.obfuscation_save_menubutton["menu"] = self.obfuscation_save_menu
+        self.obfuscation_save_menubutton.pack(side=tk.LEFT, padx=(0, 5))
+
+        ttk.Button(buttons_frame, text="Load Mapping", command=self._on_load_obfuscation_mapping).pack(side=tk.LEFT)
+
+        # Output frame
+        output_header = ttk.Frame(parent)
+        output_header.pack(fill=tk.X, padx=10, pady=(5, 2))
+        ttk.Label(output_header, text="Output (obfuscated):").pack(side=tk.LEFT)
+        ttk.Button(output_header, text="Copy", command=self._copy_obfuscation_result).pack(side=tk.RIGHT)
+
+        self.obfuscation_output_text = tk.Text(parent, height=8)
+        self.obfuscation_output_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+        self.obfuscation_output_text.config(state=tk.DISABLED)
+
+        # Initialize state
+        self.obfuscation_mappings = []
+        self.obfuscation_widgets = []
+
+    def _on_find_entities(self):
+        code = self.obfuscation_input_text.get("1.0", tk.END).strip()
+        if not code:
+            return
+
+        # Reset progress
+        self.obfuscation_progress['value'] = 0
+        self.obfuscation_progress_label.config(text="Parsing...")
+        self.window.update()
+
+        # Step 1: Extract entities
+        self.obfuscation_progress['value'] = 20
+        self.obfuscation_progress_label.config(text="Finding tables...")
+        self.window.update()
+
+        entities = extract_entities(code)
+
+        self.obfuscation_progress['value'] = 50
+        self.obfuscation_progress_label.config(text="Finding variables...")
+        self.window.update()
+
+        # Step 2: Generate obfuscated names
+        self.obfuscation_progress['value'] = 70
+        self.obfuscation_progress_label.config(text="Generating names...")
+        self.window.update()
+
+        self.obfuscation_mappings = generate_obfuscated_names(entities)
+
+        self.obfuscation_progress['value'] = 85
+        self.obfuscation_progress_label.config(text="Building UI...")
+        self.window.update()
+
+        # Step 3: Build UI
+        self._build_obfuscation_mapping_ui()
+
+        self.obfuscation_progress['value'] = 100
+        total = len(self.obfuscation_mappings)
+        self.obfuscation_progress_label.config(text=f"Found: {total}")
+        self.window.update()
+
+    def _build_obfuscation_mapping_ui(self):
+        # Clear existing widgets
+        for widget in self.obfuscation_mappings_frame.winfo_children():
+            widget.destroy()
+        self.obfuscation_widgets = []
+
+        # Group by entity type
+        groups = {}
+        for mapping in self.obfuscation_mappings:
+            t = mapping['entity_type']
+            if t not in groups:
+                groups[t] = []
+            groups[t].append(mapping)
+
+        type_labels = {
+            'schema': 'Schemas',
+            'table': 'Tables/Dicts',
+            'column': 'Columns',
+            'dag': 'DAG IDs',
+            'task': 'Task IDs',
+            'literal': 'Literals',
+            'variable': 'Variables'
+        }
+
+        for entity_type in ['schema', 'table', 'column', 'dag', 'task', 'variable', 'literal']:
+            if entity_type not in groups:
+                continue
+
+            # Section header
+            header = ttk.LabelFrame(self.obfuscation_mappings_frame, text=type_labels.get(entity_type, entity_type))
+            header.pack(fill=tk.X, padx=5, pady=(5, 2))
+
+            for mapping in groups[entity_type]:
+                row = ttk.Frame(header)
+                row.pack(fill=tk.X, padx=5, pady=2)
+
+                enabled_var = tk.BooleanVar(value=mapping.get('enabled', True))
+                cb = ttk.Checkbutton(row, variable=enabled_var)
+                cb.pack(side=tk.LEFT)
+
+                # Use display versions if available (for variables)
+                orig_text = mapping.get('original_display', mapping['original_value'])
+                obf_text = mapping.get('obfuscated_display', mapping['obfuscated_value'])
+
+                orig_label = ttk.Label(row, text=orig_text, width=30, anchor=tk.W)
+                orig_label.pack(side=tk.LEFT, padx=(0, 5))
+
+                ttk.Label(row, text="→").pack(side=tk.LEFT, padx=5)
+
+                obf_entry = ttk.Entry(row, width=25)
+                obf_entry.pack(side=tk.LEFT, padx=(5, 0))
+                obf_entry.insert(0, obf_text)
+
+                # Variables have complex format, make entry readonly
+                if entity_type == 'variable':
+                    obf_entry.config(state='readonly')
+
+                self.obfuscation_widgets.append({
+                    'mapping': mapping,
+                    'enabled_var': enabled_var,
+                    'obf_entry': obf_entry,
+                    'is_variable': entity_type == 'variable'
+                })
+
+    def _collect_obfuscation_mappings(self):
+        mappings = []
+        for widget_info in self.obfuscation_widgets:
+            mapping = widget_info['mapping'].copy()
+            mapping['enabled'] = widget_info['enabled_var'].get()
+            # For variables, keep original obfuscated_value (entry is readonly)
+            if not widget_info.get('is_variable', False):
+                mapping['obfuscated_value'] = widget_info['obf_entry'].get()
+            mappings.append(mapping)
+        return mappings
+
+    def _on_apply_obfuscation(self):
+        code = self.obfuscation_input_text.get("1.0", tk.END).strip()
+        if not code:
+            return
+
+        mappings = self._collect_obfuscation_mappings()
+        result = apply_replacements(code, mappings)
+
+        self.obfuscation_output_text.config(state=tk.NORMAL)
+        self.obfuscation_output_text.delete("1.0", tk.END)
+        self.obfuscation_output_text.insert(tk.END, result)
+        self.obfuscation_output_text.config(state=tk.DISABLED)
+
+    def _copy_obfuscation_result(self):
+        self.obfuscation_output_text.config(state=tk.NORMAL)
+        result = self.obfuscation_output_text.get("1.0", "end-1c")
+        self.obfuscation_output_text.config(state=tk.DISABLED)
+        if result:
+            pyperclip.copy(result)
+
+    def _on_save_obfuscation_to_db(self):
+        mappings = self._collect_obfuscation_mappings()
+        enabled_mappings = [m for m in mappings if m.get('enabled', True)]
+        if not enabled_mappings:
+            messagebox.showwarning("Warning", "No enabled mappings to save", parent=self.window)
+            return
+
+        session_name = generate_session_name()
+        db_mappings = [
+            {
+                'entity_type': m['entity_type'],
+                'original_value': m['original_value'],
+                'obfuscated_value': m['obfuscated_value']
+            }
+            for m in enabled_mappings
+        ]
+        self.db.save_obfuscation_mapping(session_name, db_mappings)
+        messagebox.showinfo("Saved", f"Mapping saved as: {session_name}", parent=self.window)
+
+    def _on_save_obfuscation_to_json(self):
+        mappings = self._collect_obfuscation_mappings()
+        if not mappings:
+            return
+
+        if self.window:
+            self.window.attributes('-topmost', False)
+        try:
+            filepath = filedialog.asksaveasfilename(
+                parent=self.window,
+                defaultextension=".json",
+                filetypes=[("JSON files", "*.json")],
+                initialfile=f"{generate_session_name()}.json"
+            )
+        finally:
+            if self.window:
+                self.window.attributes('-topmost', True)
+
+        if filepath:
+            export_to_json(mappings, filepath)
+            messagebox.showinfo("Saved", f"Mapping saved to: {filepath}", parent=self.window)
+
+    def _on_save_obfuscation_to_csv(self):
+        mappings = self._collect_obfuscation_mappings()
+        if not mappings:
+            return
+
+        if self.window:
+            self.window.attributes('-topmost', False)
+        try:
+            filepath = filedialog.asksaveasfilename(
+                parent=self.window,
+                defaultextension=".csv",
+                filetypes=[("CSV files", "*.csv")],
+                initialfile=f"{generate_session_name()}.csv"
+            )
+        finally:
+            if self.window:
+                self.window.attributes('-topmost', True)
+
+        if filepath:
+            export_to_csv(mappings, filepath)
+            messagebox.showinfo("Saved", f"Mapping saved to: {filepath}", parent=self.window)
+
+    def _on_load_obfuscation_mapping(self):
+        # Show menu with options: from DB or from file
+        load_menu = tk.Menu(self.window, tearoff=0)
+        load_menu.add_command(label="From Database...", command=self._load_obfuscation_from_db)
+        load_menu.add_command(label="From File...", command=self._load_obfuscation_from_file)
+
+        # Get button position
+        try:
+            x = self.window.winfo_pointerx()
+            y = self.window.winfo_pointery()
+            load_menu.tk_popup(x, y)
+        finally:
+            load_menu.grab_release()
+
+    def _load_obfuscation_from_db(self):
+        sessions = self.db.get_obfuscation_sessions()
+        if not sessions:
+            messagebox.showinfo("Info", "No saved sessions found", parent=self.window)
+            return
+
+        # Simple selection dialog
+        dialog = tk.Toplevel(self.window)
+        dialog.title("Select Session")
+        dialog.geometry("300x200")
+        dialog.transient(self.window)
+        dialog.grab_set()
+
+        ttk.Label(dialog, text="Select session:").pack(pady=(10, 5))
+
+        listbox = tk.Listbox(dialog)
+        listbox.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        for s in sessions:
+            listbox.insert(tk.END, s)
+
+        def on_select():
+            sel = listbox.curselection()
+            if sel:
+                session_name = listbox.get(sel[0])
+                mappings = self.db.get_obfuscation_mapping(session_name)
+                self.obfuscation_mappings = [
+                    {**m, 'enabled': True} for m in mappings
+                ]
+                self._build_obfuscation_mapping_ui()
+            dialog.destroy()
+
+        ttk.Button(dialog, text="Load", command=on_select).pack(pady=10)
+
+    def _load_obfuscation_from_file(self):
+        if self.window:
+            self.window.attributes('-topmost', False)
+        try:
+            filepath = filedialog.askopenfilename(
+                parent=self.window,
+                filetypes=[("JSON/CSV files", "*.json *.csv"), ("JSON files", "*.json"), ("CSV files", "*.csv")]
+            )
+        finally:
+            if self.window:
+                self.window.attributes('-topmost', True)
+
+        if filepath:
+            self.obfuscation_mappings = load_from_file(filepath)
+            self._build_obfuscation_mapping_ui()
 
     def _build_superset_tab(self, parent):
         top_frame = ttk.Frame(parent)

@@ -107,6 +107,16 @@ class Database:
                     test_dag TEXT
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS obfuscation_mappings (
+                    id INTEGER PRIMARY KEY,
+                    session_name VARCHAR NOT NULL,
+                    entity_type VARCHAR NOT NULL,
+                    original_value VARCHAR NOT NULL,
+                    obfuscated_value VARCHAR NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
         finally:
             conn.close()
     
@@ -652,3 +662,64 @@ class Database:
                 LIMIT 30
             )
         """, (computer_id, computer_id))
+
+    # ==================== Obfuscation Mappings ====================
+
+    def save_obfuscation_mapping(self, session_name: str, mappings: List[Dict]):
+        """Save obfuscation mappings for a session."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            max_id_result = conn.execute("SELECT MAX(id) FROM obfuscation_mappings").fetchone()
+            current_id = (max_id_result[0] or 0)
+
+            for mapping in mappings:
+                current_id += 1
+                conn.execute("""
+                    INSERT INTO obfuscation_mappings (id, session_name, entity_type, original_value, obfuscated_value)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (current_id, session_name, mapping['entity_type'],
+                      mapping['original_value'], mapping['obfuscated_value']))
+        finally:
+            conn.close()
+
+    def get_obfuscation_sessions(self) -> List[str]:
+        """Get all unique session names."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            result = conn.execute("""
+                SELECT DISTINCT session_name
+                FROM obfuscation_mappings
+                ORDER BY session_name DESC
+            """).fetchall()
+            return [row[0] for row in result]
+        finally:
+            conn.close()
+
+    def get_obfuscation_mapping(self, session_name: str) -> List[Dict]:
+        """Get all mappings for a session."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            result = conn.execute("""
+                SELECT entity_type, original_value, obfuscated_value
+                FROM obfuscation_mappings
+                WHERE session_name = ?
+                ORDER BY entity_type, original_value
+            """, (session_name,)).fetchall()
+            return [
+                {
+                    'entity_type': row[0],
+                    'original_value': row[1],
+                    'obfuscated_value': row[2]
+                }
+                for row in result
+            ]
+        finally:
+            conn.close()
+
+    def delete_obfuscation_session(self, session_name: str):
+        """Delete all mappings for a session."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            conn.execute("DELETE FROM obfuscation_mappings WHERE session_name = ?", (session_name,))
+        finally:
+            conn.close()
