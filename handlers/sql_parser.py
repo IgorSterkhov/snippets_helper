@@ -1,8 +1,14 @@
 import re
 
 def parse_sql(sql_content: str) -> str:
+    # Убираем Python-импорты, чтобы избежать ложных срабатываний из-за backtracking в regex
+    cleaned = '\n'.join(
+        line for line in sql_content.splitlines()
+        if not re.match(r'\s*(?:from\s+\S+\s+import\b|import\s+)', line)
+    )
+
     # Регулярное выражение для поиска нужных подстрок
-    pattern_from_join = r'(?<![a-zA-Z])(?:from|join)\s+([a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z0-9_]+)'
+    pattern_from_join = r'(?<![a-zA-Z])(?:from|join|insert\s+into|truncate(?:\s+table)?)\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z0-9_]+)+)'
     pattern_dictget = r"dictGet\(\'([^\']*\.[^\']*)\'"
 
     unique_tables = set()
@@ -11,8 +17,8 @@ def parse_sql(sql_content: str) -> str:
 
     # Ищем все совпадения по регулярному выражению
     matches_all = set()
-    matches_from_join = re.findall(pattern_from_join, sql_content, re.IGNORECASE)
-    matches_dictget = re.findall(pattern_dictget, sql_content, re.IGNORECASE)
+    matches_from_join = re.findall(pattern_from_join, cleaned, re.IGNORECASE)
+    matches_dictget = re.findall(pattern_dictget, cleaned, re.IGNORECASE)
     matches_all.update(matches_from_join)
     matches_all.update(matches_dictget)
 
