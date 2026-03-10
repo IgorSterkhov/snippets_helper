@@ -27,6 +27,7 @@ from handlers.sql_obfuscator import (
     generate_session_name, export_to_json, export_to_csv, load_from_file
 )
 from notes_tab import NotesTab
+from exec_tab import ExecTab
 
 faulthandler.enable()
 
@@ -436,6 +437,11 @@ class KeyboardHelper:
         commits_frame = ttk.Frame(self.notebook)
         self.notebook.add(commits_frame, text="Commits")
         self._build_commits_tab(commits_frame)
+
+        # --- Tab 6: Exec ---
+        exec_frame = ttk.Frame(self.notebook)
+        self.notebook.add(exec_frame, text="Exec")
+        self.exec_tab = ExecTab(exec_frame, self.db, self.app_settings, hide_window_callback=self._minimize_to_tray)
 
         # Ctrl+Tab and Ctrl+Shift+Tab to switch tabs (универсально для всех виджетов)
         self._bind_ctrl_tab_to_all(self.window)

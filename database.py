@@ -117,6 +117,29 @@ class Database:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS exec_categories (
+                    id INTEGER PRIMARY KEY,
+                    name VARCHAR NOT NULL,
+                    sort_order INTEGER DEFAULT 0
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS exec_commands (
+                    id INTEGER PRIMARY KEY,
+                    category_id INTEGER NOT NULL,
+                    name VARCHAR NOT NULL,
+                    command TEXT NOT NULL,
+                    description TEXT,
+                    sort_order INTEGER DEFAULT 0,
+                    hide_after_run INTEGER DEFAULT 0
+                )
+            """)
+            # Migration: add hide_after_run column if it doesn't exist
+            try:
+                conn.execute("ALTER TABLE exec_commands ADD COLUMN hide_after_run INTEGER DEFAULT 0")
+            except Exception:
+                pass  # Column already exists
         finally:
             conn.close()
     
@@ -716,10 +739,176 @@ class Database:
         finally:
             conn.close()
 
+    # ==================== Exec Categories ====================
+
+    def get_all_exec_categories(self) -> List[Dict]:
+        """Get all exec categories."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            result = conn.execute("""
+                SELECT id, name, sort_order
+                FROM exec_categories
+                ORDER BY sort_order, name
+            """).fetchall()
+            return [
+                {'id': row[0], 'name': row[1], 'sort_order': row[2]}
+                for row in result
+            ]
+        finally:
+            conn.close()
+
+    def create_exec_category(self, name: str) -> int:
+        """Create a new exec category and return its id."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            max_id_result = conn.execute("SELECT MAX(id) FROM exec_categories").fetchone()
+            new_id = (max_id_result[0] or 0) + 1
+            max_order = conn.execute("SELECT MAX(sort_order) FROM exec_categories").fetchone()
+            new_order = (max_order[0] or 0) + 1
+            conn.execute("""
+                INSERT INTO exec_categories (id, name, sort_order)
+                VALUES (?, ?, ?)
+            """, (new_id, name, new_order))
+            return new_id
+        finally:
+            conn.close()
+
+    def update_exec_category(self, category_id: int, name: str):
+        """Update an exec category name."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            conn.execute("""
+                UPDATE exec_categories SET name = ? WHERE id = ?
+            """, (name, category_id))
+        finally:
+            conn.close()
+
+    def delete_exec_category(self, category_id: int):
+        """Delete an exec category and all its commands."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            conn.execute("DELETE FROM exec_commands WHERE category_id = ?", (category_id,))
+            conn.execute("DELETE FROM exec_categories WHERE id = ?", (category_id,))
+        finally:
+            conn.close()
+
+    # ==================== Exec Commands ====================
+
+    def get_all_exec_commands(self) -> List[Dict]:
+        """Get all exec commands."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            result = conn.execute("""
+                SELECT id, category_id, name, command, description, sort_order, hide_after_run
+                FROM exec_commands
+                ORDER BY category_id, sort_order, name
+            """).fetchall()
+            return [
+                {
+                    'id': row[0],
+                    'category_id': row[1],
+                    'name': row[2],
+                    'command': row[3],
+                    'description': row[4],
+                    'sort_order': row[5],
+                    'hide_after_run': bool(row[6])
+                }
+                for row in result
+            ]
+        finally:
+            conn.close()
+
     def delete_obfuscation_session(self, session_name: str):
         """Delete all mappings for a session."""
         conn = duckdb.connect(self.db_path)
         try:
             conn.execute("DELETE FROM obfuscation_mappings WHERE session_name = ?", (session_name,))
+        finally:
+            conn.close()
+
+    def get_exec_commands_by_category(self, category_id: int) -> List[Dict]:
+        """Get all exec commands in a specific category."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            result = conn.execute("""
+                SELECT id, category_id, name, command, description, sort_order, hide_after_run
+                FROM exec_commands
+                WHERE category_id = ?
+                ORDER BY sort_order, name
+            """, (category_id,)).fetchall()
+            return [
+                {
+                    'id': row[0],
+                    'category_id': row[1],
+                    'name': row[2],
+                    'command': row[3],
+                    'description': row[4],
+                    'sort_order': row[5],
+                    'hide_after_run': bool(row[6])
+                }
+                for row in result
+            ]
+        finally:
+            conn.close()
+
+    def create_exec_command(self, category_id: int, name: str, command: str, description: str = '', hide_after_run: bool = False) -> int:
+        """Create a new exec command and return its id."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            max_id_result = conn.execute("SELECT MAX(id) FROM exec_commands").fetchone()
+            new_id = (max_id_result[0] or 0) + 1
+            max_order = conn.execute(
+                "SELECT MAX(sort_order) FROM exec_commands WHERE category_id = ?",
+                (category_id,)
+            ).fetchone()
+            new_order = (max_order[0] or 0) + 1
+            conn.execute("""
+                INSERT INTO exec_commands (id, category_id, name, command, description, sort_order, hide_after_run)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (new_id, category_id, name, command, description, new_order, 1 if hide_after_run else 0))
+            return new_id
+        finally:
+            conn.close()
+
+    def update_exec_command(self, cmd_id: int, category_id: int, name: str, command: str, description: str = '', hide_after_run: bool = False):
+        """Update an exec command."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            conn.execute("""
+                UPDATE exec_commands
+                SET category_id = ?, name = ?, command = ?, description = ?, hide_after_run = ?
+                WHERE id = ?
+            """, (category_id, name, command, description, 1 if hide_after_run else 0, cmd_id))
+        finally:
+            conn.close()
+
+    def delete_exec_command(self, cmd_id: int):
+        """Delete an exec command."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            conn.execute("DELETE FROM exec_commands WHERE id = ?", (cmd_id,))
+        finally:
+            conn.close()
+
+    def get_exec_command_by_id(self, cmd_id: int) -> Optional[Dict]:
+        """Get an exec command by its id."""
+        conn = duckdb.connect(self.db_path)
+        try:
+            result = conn.execute("""
+                SELECT id, category_id, name, command, description, sort_order, hide_after_run
+                FROM exec_commands
+                WHERE id = ?
+            """, (cmd_id,)).fetchone()
+            if result:
+                return {
+                    'id': result[0],
+                    'category_id': result[1],
+                    'name': result[2],
+                    'command': result[3],
+                    'description': result[4],
+                    'sort_order': result[5],
+                    'hide_after_run': bool(result[6])
+                }
+            return None
         finally:
             conn.close()
