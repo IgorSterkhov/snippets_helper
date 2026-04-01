@@ -1139,5 +1139,5 @@ dict.suppliers_warehouse
 dict.office_links
 ```
 как видимшь, найдены не все таблицы, а также видно ложноположительные срабатывания, к примеру 
-"utils.data_exchange"
+"utils.data_exchang e"
 давай поправим работу модуля

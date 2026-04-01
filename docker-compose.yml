@@ -1,0 +1,34 @@
+services:
+  migrate:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    container_name: snippets_migrate
+    command: ["python", "-m", "alembic", "-c", "api/alembic/alembic.ini", "upgrade", "head"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://snippets_sync:${POSTGRES_PASSWORD}@isterapp_db:5432/snippets_sync
+    networks:
+      - isterapp_net
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    container_name: snippets_api
+    environment:
+      DATABASE_URL: postgresql+asyncpg://snippets_sync:${POSTGRES_PASSWORD}@isterapp_db:5432/snippets_sync
+      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
+    expose:
+      - "8001"
+    networks:
+      - isterapp_net
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+networks:
+  isterapp_net:
+    external: true
+    name: backend_default

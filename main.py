@@ -199,8 +199,42 @@ class KeyboardHelper:
         self.tray_icon = None
         self._setup_tray()
 
+        # Setup sync engine
+        self.sync_engine = None
+        self._init_sync()
+
         # Check first run for autostart prompt
         self._check_first_run()
+
+    def _init_sync(self):
+        """Initialize sync engine if configured."""
+        sync_enabled = os.getenv('SYNC_ENABLED', '0')
+        api_url = os.getenv('SYNC_API_URL', '')
+        api_key = os.getenv('SYNC_API_KEY', '')
+
+        if sync_enabled != '1' or not api_url or not api_key:
+            return
+
+        interval = int(os.getenv('SYNC_INTERVAL_SECONDS', '60')) * 1000
+
+        from sync.engine import SyncEngine
+        self.sync_engine = SyncEngine(
+            db=self.db,
+            root=self.root,
+            api_url=api_url,
+            api_key=api_key,
+            computer_id=self.app_computer_id,
+            interval_ms=interval,
+        )
+        self.sync_engine.set_status_callback(self._on_sync_status)
+        self.sync_engine.start()
+
+    def _on_sync_status(self, status: str, detail: str = ""):
+        """Handle sync status updates (called from sync thread via root.after)."""
+        if hasattr(self, 'sync_status_label') and self.sync_status_label.winfo_exists():
+            icons = {'ok': '\u2713', 'syncing': '\u21BB', 'offline': '\u2715', 'error': '\u26A0'}
+            icon = icons.get(status, '')
+            self.sync_status_label.config(text=f"Sync: {icon} {detail}")
 
     def load_items(self):
         self.items_dict = self.db.get_all_items()
@@ -386,6 +420,14 @@ class KeyboardHelper:
         top_frame.pack(fill=tk.X, padx=5, pady=5)
         settings_btn = ttk.Button(top_frame, text="Settings", command=self._open_settings_window)
         settings_btn.pack(side=tk.RIGHT)
+
+        # Sync status indicator
+        self.sync_status_label = ttk.Label(top_frame, text="")
+        self.sync_status_label.pack(side=tk.LEFT, padx=(0, 5))
+        if self.sync_engine:
+            sync_btn = ttk.Button(top_frame, text="Sync", width=5,
+                                  command=lambda: self.sync_engine.trigger())
+            sync_btn.pack(side=tk.LEFT)
 
         # Notebook (tabs)
         self.notebook = ttk.Notebook(self.window)
@@ -2642,6 +2684,11 @@ class KeyboardHelper:
         settings_notebook.add(sql_formatter_frame, text="SQL Formatter")
         self._build_settings_sql_formatter_tab(sql_formatter_frame)
 
+        # Sync tab
+        sync_frame = ttk.Frame(settings_notebook)
+        settings_notebook.add(sync_frame, text="Sync")
+        self._build_settings_sync_tab(sync_frame)
+
         # Buttons frame
         buttons_frame = ttk.Frame(self.settings_window)
         buttons_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
@@ -2899,6 +2946,140 @@ class KeyboardHelper:
 
         self.settings_clickhouse_functions_text.delete("1.0", tk.END)
         self.settings_clickhouse_functions_text.insert("1.0", '\n'.join(CLICKHOUSE_FUNCTIONS_DEFAULT))
+
+    def _build_settings_sync_tab(self, parent):
+        """Build Sync settings tab with registration and config."""
+        # Status
+        status_frame = ttk.LabelFrame(parent, text="Status")
+        status_frame.pack(fill=tk.X, padx=10, pady=(10, 5))
+
+        sync_enabled = os.getenv('SYNC_ENABLED', '0') == '1'
+        api_url = os.getenv('SYNC_API_URL', '')
+        api_key = os.getenv('SYNC_API_KEY', '')
+
+        if sync_enabled and api_url and api_key:
+            ttk.Label(status_frame, text=f"Connected to: {api_url}").pack(anchor=tk.W, padx=10, pady=5)
+            last_sync = self.db.get_app_setting(self.app_computer_id, 'last_sync_at')
+            ttk.Label(status_frame, text=f"Last sync: {last_sync or 'never'}").pack(anchor=tk.W, padx=10, pady=(0, 5))
+
+            # Manual sync button
+            ttk.Button(status_frame, text="Sync Now",
+                       command=lambda: self.sync_engine.trigger() if self.sync_engine else None
+                       ).pack(anchor=tk.W, padx=10, pady=(0, 10))
+        else:
+            ttk.Label(status_frame, text="Sync is not configured").pack(anchor=tk.W, padx=10, pady=5)
+
+        # Registration
+        reg_frame = ttk.LabelFrame(parent, text="Register / Connect")
+        reg_frame.pack(fill=tk.X, padx=10, pady=5)
+
+        url_frame = ttk.Frame(reg_frame)
+        url_frame.pack(fill=tk.X, padx=10, pady=(10, 5))
+        ttk.Label(url_frame, text="Server URL:").pack(side=tk.LEFT)
+        self.sync_url_entry = ttk.Entry(url_frame, width=40)
+        self.sync_url_entry.pack(side=tk.LEFT, padx=(10, 0), fill=tk.X, expand=True)
+        self.sync_url_entry.insert(0, api_url)
+
+        name_frame = ttk.Frame(reg_frame)
+        name_frame.pack(fill=tk.X, padx=10, pady=5)
+        ttk.Label(name_frame, text="Your name:").pack(side=tk.LEFT)
+        self.sync_name_entry = ttk.Entry(name_frame, width=40)
+        self.sync_name_entry.pack(side=tk.LEFT, padx=(10, 0), fill=tk.X, expand=True)
+        import getpass as gp
+        self.sync_name_entry.insert(0, gp.getuser())
+
+        key_frame = ttk.Frame(reg_frame)
+        key_frame.pack(fill=tk.X, padx=10, pady=5)
+        ttk.Label(key_frame, text="API Key:").pack(side=tk.LEFT)
+        self.sync_key_entry = ttk.Entry(key_frame, width=40)
+        self.sync_key_entry.pack(side=tk.LEFT, padx=(10, 0), fill=tk.X, expand=True)
+        self.sync_key_entry.insert(0, api_key)
+
+        btn_frame = ttk.Frame(reg_frame)
+        btn_frame.pack(fill=tk.X, padx=10, pady=(5, 10))
+        ttk.Button(btn_frame, text="Register New", command=self._sync_register).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(btn_frame, text="Test Connection", command=self._sync_test).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(btn_frame, text="Save & Enable", command=self._sync_save_config).pack(side=tk.LEFT)
+
+        self.sync_msg_label = ttk.Label(reg_frame, text="")
+        self.sync_msg_label.pack(anchor=tk.W, padx=10, pady=(0, 10))
+
+    def _sync_register(self):
+        """Register a new user on the sync server."""
+        url = self.sync_url_entry.get().strip()
+        name = self.sync_name_entry.get().strip()
+        if not url or not name:
+            self.sync_msg_label.config(text="Fill in Server URL and Your name")
+            return
+        try:
+            from sync.client import SyncClient
+            client = SyncClient(url, "")
+            # For registration, no auth needed — use requests directly
+            import requests
+            r = requests.post(f"{url.rstrip('/')}/auth/register", json={"name": name}, timeout=10)
+            r.raise_for_status()
+            data = r.json()
+            self.sync_key_entry.delete(0, tk.END)
+            self.sync_key_entry.insert(0, data['api_key'])
+            self.sync_msg_label.config(text=f"Registered! User ID: {data['user_id']}")
+        except Exception as e:
+            self.sync_msg_label.config(text=f"Error: {str(e)[:80]}")
+
+    def _sync_test(self):
+        """Test connection to sync server."""
+        url = self.sync_url_entry.get().strip()
+        api_key = self.sync_key_entry.get().strip()
+        if not url or not api_key:
+            self.sync_msg_label.config(text="Fill in Server URL and API Key")
+            return
+        try:
+            from sync.client import SyncClient
+            client = SyncClient(url, api_key)
+            user_info = client.check_auth()
+            if user_info:
+                self.sync_msg_label.config(text=f"OK! User: {user_info.get('name', '?')}")
+            else:
+                self.sync_msg_label.config(text="Auth failed — invalid API key")
+        except Exception as e:
+            self.sync_msg_label.config(text=f"Error: {str(e)[:80]}")
+
+    def _sync_save_config(self):
+        """Save sync config to .env file and restart sync engine."""
+        url = self.sync_url_entry.get().strip()
+        api_key = self.sync_key_entry.get().strip()
+        if not url or not api_key:
+            self.sync_msg_label.config(text="Fill in Server URL and API Key")
+            return
+
+        # Update .env file
+        env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+        env_lines = []
+        if os.path.exists(env_path):
+            with open(env_path, 'r') as f:
+                env_lines = f.readlines()
+
+        # Remove existing SYNC_ lines
+        env_lines = [l for l in env_lines if not l.strip().startswith('SYNC_')]
+        # Add new sync config
+        env_lines.append(f'\nSYNC_API_URL={url}\n')
+        env_lines.append(f'SYNC_API_KEY={api_key}\n')
+        env_lines.append('SYNC_ENABLED=1\n')
+        env_lines.append('SYNC_INTERVAL_SECONDS=60\n')
+
+        with open(env_path, 'w') as f:
+            f.writelines(env_lines)
+
+        # Set env vars for current session
+        os.environ['SYNC_API_URL'] = url
+        os.environ['SYNC_API_KEY'] = api_key
+        os.environ['SYNC_ENABLED'] = '1'
+
+        # Restart sync engine
+        if self.sync_engine:
+            self.sync_engine.stop()
+        self._init_sync()
+
+        self.sync_msg_label.config(text="Saved! Sync enabled.")
 
     def _save_settings(self):
         # Save General settings
@@ -3274,6 +3455,8 @@ class KeyboardHelper:
 
     def _tray_quit(self, icon=None, item=None):
         """Quit application from tray."""
+        if self.sync_engine:
+            self.sync_engine.stop()
         if self.tray_icon:
             self.tray_icon.stop()
         if self.keyboard_listener:
