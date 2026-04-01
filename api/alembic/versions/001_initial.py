@@ -6,7 +6,6 @@ Create Date: 2026-03-11
 """
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import UUID
 
 revision = "001"
 down_revision = None
@@ -17,7 +16,7 @@ depends_on = None
 def upgrade():
     op.create_table(
         "users",
-        sa.Column("id", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
+        sa.Column("id", sa.Uuid, primary_key=True, server_default=sa.text("gen_random_uuid()")),
         sa.Column("api_key", sa.String(64), unique=True, nullable=False),
         sa.Column("name", sa.String(255)),
         sa.Column("created_at", sa.DateTime, server_default=sa.func.now()),
@@ -26,8 +25,8 @@ def upgrade():
     # --- shortcuts ---
     op.create_table(
         "shortcuts",
-        sa.Column("uuid", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
-        sa.Column("user_id", UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("uuid", sa.Uuid, primary_key=True, server_default=sa.text("gen_random_uuid()")),
+        sa.Column("user_id", sa.Uuid, sa.ForeignKey("users.id"), nullable=False),
         sa.Column("id", sa.Integer),
         sa.Column("name", sa.String, nullable=False),
         sa.Column("value", sa.Text, nullable=False),
@@ -40,8 +39,8 @@ def upgrade():
     # --- sql_table_analyzer_templates ---
     op.create_table(
         "sql_table_analyzer_templates",
-        sa.Column("uuid", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
-        sa.Column("user_id", UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("uuid", sa.Uuid, primary_key=True, server_default=sa.text("gen_random_uuid()")),
+        sa.Column("user_id", sa.Uuid, sa.ForeignKey("users.id"), nullable=False),
         sa.Column("id", sa.Integer),
         sa.Column("template_text", sa.Text, nullable=False),
         sa.Column("updated_at", sa.DateTime, nullable=False, server_default=sa.func.now()),
@@ -52,8 +51,8 @@ def upgrade():
     # --- sql_macrosing_templates ---
     op.create_table(
         "sql_macrosing_templates",
-        sa.Column("uuid", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
-        sa.Column("user_id", UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("uuid", sa.Uuid, primary_key=True, server_default=sa.text("gen_random_uuid()")),
+        sa.Column("user_id", sa.Uuid, sa.ForeignKey("users.id"), nullable=False),
         sa.Column("id", sa.Integer),
         sa.Column("template_name", sa.String, nullable=False),
         sa.Column("template_text", sa.Text, nullable=False),
@@ -68,8 +67,8 @@ def upgrade():
     # --- note_folders ---
     op.create_table(
         "note_folders",
-        sa.Column("uuid", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
-        sa.Column("user_id", UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("uuid", sa.Uuid, primary_key=True, server_default=sa.text("gen_random_uuid()")),
+        sa.Column("user_id", sa.Uuid, sa.ForeignKey("users.id"), nullable=False),
         sa.Column("id", sa.Integer),
         sa.Column("name", sa.String, nullable=False),
         sa.Column("sort_order", sa.Integer, server_default="0"),
@@ -81,11 +80,11 @@ def upgrade():
     # --- notes ---
     op.create_table(
         "notes",
-        sa.Column("uuid", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
-        sa.Column("user_id", UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("uuid", sa.Uuid, primary_key=True, server_default=sa.text("gen_random_uuid()")),
+        sa.Column("user_id", sa.Uuid, sa.ForeignKey("users.id"), nullable=False),
         sa.Column("id", sa.Integer),
         sa.Column("folder_id", sa.Integer),
-        sa.Column("folder_uuid", UUID(as_uuid=True)),
+        sa.Column("folder_uuid", sa.Uuid),
         sa.Column("title", sa.String, nullable=False),
         sa.Column("content", sa.Text),
         sa.Column("created_at", sa.DateTime, server_default=sa.func.now()),
@@ -98,8 +97,8 @@ def upgrade():
     # --- obfuscation_mappings ---
     op.create_table(
         "obfuscation_mappings",
-        sa.Column("uuid", UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
-        sa.Column("user_id", UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=False),
+        sa.Column("uuid", sa.Uuid, primary_key=True, server_default=sa.text("gen_random_uuid()")),
+        sa.Column("user_id", sa.Uuid, sa.ForeignKey("users.id"), nullable=False),
         sa.Column("id", sa.Integer),
         sa.Column("session_name", sa.String, nullable=False),
         sa.Column("entity_type", sa.String, nullable=False),
