@@ -2974,19 +2974,23 @@ class KeyboardHelper:
         interval = _get('sync_interval', 'SYNC_INTERVAL_SECONDS', '60')
         ca_cert = _get('sync_ca_cert', 'SYNC_CA_CERT')
 
+        # Message label at the top for visibility
+        self.sync_msg_label = ttk.Label(parent, text="", foreground="blue")
+        self.sync_msg_label.pack(anchor=tk.W, padx=10, pady=(10, 0))
+
         # --- Server ---
         server_frame = ttk.LabelFrame(parent, text="Server")
-        server_frame.pack(fill=tk.X, padx=10, pady=(10, 5))
+        server_frame.pack(fill=tk.X, padx=10, pady=(5, 5))
 
         url_frame = ttk.Frame(server_frame)
-        url_frame.pack(fill=tk.X, padx=10, pady=(10, 5))
-        ttk.Label(url_frame, text="Server URL:").pack(side=tk.LEFT)
+        url_frame.pack(fill=tk.X, padx=10, pady=(5, 3))
+        ttk.Label(url_frame, text="URL:").pack(side=tk.LEFT)
         self.sync_url_entry = ttk.Entry(url_frame, width=40)
         self.sync_url_entry.pack(side=tk.LEFT, padx=(10, 0), fill=tk.X, expand=True)
         self.sync_url_entry.insert(0, api_url)
 
         cert_frame = ttk.Frame(server_frame)
-        cert_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
+        cert_frame.pack(fill=tk.X, padx=10, pady=(0, 5))
         ttk.Label(cert_frame, text="CA Cert:").pack(side=tk.LEFT)
         self.sync_ca_cert_entry = ttk.Entry(cert_frame, width=35)
         self.sync_ca_cert_entry.pack(side=tk.LEFT, padx=(10, 0), fill=tk.X, expand=True)
@@ -2994,39 +2998,35 @@ class KeyboardHelper:
         ttk.Button(cert_frame, text="...", width=3,
                    command=self._sync_browse_cert).pack(side=tk.LEFT, padx=(5, 0))
 
-        # --- Registration ---
-        reg_frame = ttk.LabelFrame(parent, text="Registration")
-        reg_frame.pack(fill=tk.X, padx=10, pady=5)
+        # --- Registration + API Key (compact) ---
+        auth_frame = ttk.LabelFrame(parent, text="Authentication")
+        auth_frame.pack(fill=tk.X, padx=10, pady=5)
 
-        name_frame = ttk.Frame(reg_frame)
-        name_frame.pack(fill=tk.X, padx=10, pady=(10, 5))
+        name_frame = ttk.Frame(auth_frame)
+        name_frame.pack(fill=tk.X, padx=10, pady=(5, 3))
         ttk.Label(name_frame, text="Name:").pack(side=tk.LEFT)
-        self.sync_name_entry = ttk.Entry(name_frame, width=40)
-        self.sync_name_entry.pack(side=tk.LEFT, padx=(10, 0), fill=tk.X, expand=True)
+        self.sync_name_entry = ttk.Entry(name_frame, width=30)
+        self.sync_name_entry.pack(side=tk.LEFT, padx=(10, 5), fill=tk.X, expand=True)
         import getpass as gp
         self.sync_name_entry.insert(0, gp.getuser())
-
-        reg_btn_frame = ttk.Frame(reg_frame)
-        reg_btn_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
-        ttk.Button(reg_btn_frame, text="Register",
+        ttk.Button(name_frame, text="Register",
                    command=self._sync_register).pack(side=tk.LEFT)
 
-        # --- API Key ---
-        key_frame = ttk.LabelFrame(parent, text="API Key")
-        key_frame.pack(fill=tk.X, padx=10, pady=5)
-
-        key_inner = ttk.Frame(key_frame)
-        key_inner.pack(fill=tk.X, padx=10, pady=10)
-        self.sync_key_entry = ttk.Entry(key_inner, width=50)
-        self.sync_key_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        key_frame = ttk.Frame(auth_frame)
+        key_frame.pack(fill=tk.X, padx=10, pady=(0, 5))
+        ttk.Label(key_frame, text="API Key:").pack(side=tk.LEFT)
+        self.sync_key_entry = ttk.Entry(key_frame, width=45)
+        self.sync_key_entry.pack(side=tk.LEFT, padx=(10, 5), fill=tk.X, expand=True)
         self.sync_key_entry.insert(0, api_key)
+        ttk.Button(key_frame, text="Test",
+                   command=self._sync_test).pack(side=tk.LEFT)
 
         # --- Sync control ---
         ctrl_frame = ttk.LabelFrame(parent, text="Sync")
         ctrl_frame.pack(fill=tk.X, padx=10, pady=5)
 
         ctrl_inner = ttk.Frame(ctrl_frame)
-        ctrl_inner.pack(fill=tk.X, padx=10, pady=10)
+        ctrl_inner.pack(fill=tk.X, padx=10, pady=5)
 
         self.sync_enabled_var = tk.BooleanVar(value=sync_enabled == '1')
         ttk.Checkbutton(ctrl_inner, text="Enable sync",
@@ -3038,28 +3038,12 @@ class KeyboardHelper:
         self.sync_interval_entry.insert(0, interval)
         ttk.Label(ctrl_inner, text="sec").pack(side=tk.LEFT, padx=(3, 0))
 
-        # --- Status ---
-        status_frame = ttk.LabelFrame(parent, text="Status")
-        status_frame.pack(fill=tk.X, padx=10, pady=5)
-
         last_sync = self.db.get_app_setting(self.app_computer_id, 'last_sync_at')
-        self.sync_settings_status = ttk.Label(
-            status_frame,
-            text=f"Last sync: {last_sync or 'never'}"
-        )
-        self.sync_settings_status.pack(anchor=tk.W, padx=10, pady=10)
+        ttk.Label(ctrl_inner, text=f"  Last: {last_sync or 'never'}").pack(side=tk.LEFT, padx=(20, 0))
 
-        # --- Buttons ---
-        btn_frame = ttk.Frame(parent)
-        btn_frame.pack(fill=tk.X, padx=10, pady=(5, 10))
-        ttk.Button(btn_frame, text="Test Connection",
-                   command=self._sync_test).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(btn_frame, text="Save Settings",
-                   command=self._sync_save_config).pack(side=tk.LEFT)
-
-        # Message label for feedback
-        self.sync_msg_label = ttk.Label(parent, text="")
-        self.sync_msg_label.pack(anchor=tk.W, padx=10, pady=(0, 5))
+        # --- Save button ---
+        ttk.Button(parent, text="Save Settings",
+                   command=self._sync_save_config).pack(anchor=tk.W, padx=10, pady=(5, 5))
 
     def _sync_browse_cert(self):
         """Browse for CA certificate file."""
@@ -3079,6 +3063,8 @@ class KeyboardHelper:
         if not url or not name:
             self.sync_msg_label.config(text="Fill in Server URL and Name")
             return
+        self.sync_msg_label.config(text="Registering...")
+        self.settings_window.update_idletasks()
         try:
             ca_cert = self.sync_ca_cert_entry.get().strip()
             if ca_cert:
@@ -3090,7 +3076,7 @@ class KeyboardHelper:
             self.sync_key_entry.insert(0, data['api_key'])
             self.sync_msg_label.config(text=f"Registered! User ID: {data['user_id']}")
         except Exception as e:
-            self.sync_msg_label.config(text=f"Error: {str(e)[:80]}")
+            self.sync_msg_label.config(text=f"Error: {str(e)[:100]}")
 
     def _sync_test(self):
         """Test connection to sync server."""
@@ -3099,6 +3085,8 @@ class KeyboardHelper:
         if not url or not api_key:
             self.sync_msg_label.config(text="Fill in Server URL and API Key")
             return
+        self.sync_msg_label.config(text="Testing...")
+        self.settings_window.update_idletasks()
         try:
             ca_cert = self.sync_ca_cert_entry.get().strip()
             if ca_cert:
@@ -3111,7 +3099,7 @@ class KeyboardHelper:
             else:
                 self.sync_msg_label.config(text="Auth failed - invalid API key")
         except Exception as e:
-            self.sync_msg_label.config(text=f"Error: {str(e)[:80]}")
+            self.sync_msg_label.config(text=f"Error: {str(e)[:100]}")
 
     def _sync_save_config(self):
         """Save sync config to app_settings and restart sync engine."""
