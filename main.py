@@ -529,6 +529,27 @@ class KeyboardHelper:
         self.notebook.select((current + 1) % total)
         return "break"
 
+    def _fix_non_latin_shortcuts(self, event):
+        """Fix Ctrl+C/V/X/A in non-Latin keyboard layouts (e.g. Russian).
+
+        Tkinter binds shortcuts by character, so Ctrl+V becomes Ctrl+М in Russian.
+        This handler fires on any Ctrl+KeyPress and generates the correct virtual
+        event based on the hardware keycode which is layout-independent.
+        """
+        if not (event.state & 0x4):  # Ctrl not held
+            return
+        keycode_map = {
+            67: '<<Copy>>',    # C
+            86: '<<Paste>>',   # V
+            88: '<<Cut>>',     # X
+            65: '<<SelectAll>>',  # A
+        }
+        virtual = keycode_map.get(event.keycode)
+        if virtual and event.char != chr(event.keycode).lower():
+            # Non-Latin layout: character doesn't match keycode
+            event.widget.event_generate(virtual)
+            return "break"
+
     def _ctrl_tab_reverse(self, event):
         current = self.notebook.index(self.notebook.select())
         total = len(self.notebook.tabs())
@@ -592,6 +613,9 @@ class KeyboardHelper:
         # Bind keyboard shortcuts
         self.window.bind('<Return>', self.copy_to_clipboard)
         self.window.bind('<Control-KeyPress>', lambda e: self._schedule_destroy_window() if e.keycode == 87 else None)
+
+        # Fix Ctrl+C/V/X/A in non-Latin keyboard layouts
+        self.window.bind_all('<Control-KeyPress>', self._fix_non_latin_shortcuts, add='+')
         
         # Setup tab order
         widget_order = [
