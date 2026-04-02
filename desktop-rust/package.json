@@ -1,0 +1,9 @@
+{
+  "name": "keyboard-helper",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "echo 'no build step needed for vanilla JS'",
+    "build": "echo 'no build step needed for vanilla JS'"
+  }
+}
