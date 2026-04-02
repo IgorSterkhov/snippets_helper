@@ -7,6 +7,7 @@
     "frontendDist": "../src"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "title": "Keyboard Helper",
@@ -15,7 +16,8 @@
         "visible": false,
         "resizable": true,
         "decorations": true,
-        "alwaysOnTop": true
+        "alwaysOnTop": true,
+        "devtools": true
       }
     ],
     "security": {
