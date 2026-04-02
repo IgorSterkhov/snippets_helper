@@ -45,4 +45,4 @@ items.json
 .env
 
 # Environment variables
-.env 
+.env .superpowers/
