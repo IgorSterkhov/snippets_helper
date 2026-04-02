@@ -1,7 +1,8 @@
 """Sync engine: background synchronization with the API server."""
 import logging
-from datetime import datetime
-from threading import Thread
+import time
+import threading
+from datetime import datetime, timezone
 from typing import Optional, Callable
 from shared.sync_schema import SYNCED_TABLES
 from sync.client import SyncClient
@@ -10,79 +11,69 @@ logger = logging.getLogger(__name__)
 
 
 class SyncEngine:
-    """Manages background sync between local DuckDB and remote API.
+    """Background sync between local DuckDB and remote API.
 
-    Usage:
-        engine = SyncEngine(db, root, api_url, api_key, computer_id)
-        engine.start()   # begin periodic sync
-        engine.stop()    # stop sync (on app exit)
-        engine.trigger()  # manual sync now
+    Simple loop: push pending -> pull new -> sleep.
     """
 
-    def __init__(self, db, root, api_url: str, api_key: str,
-                 computer_id: str, interval_ms: int = 60_000):
+    def __init__(self, db, client: SyncClient, computer_id: str,
+                 interval: int = 60, on_status: Optional[Callable] = None):
+        """
+        Args:
+            db: Database instance (thread-safe via Lock)
+            client: SyncClient instance
+            computer_id: unique identifier for this device
+            interval: sync interval in seconds
+            on_status: callback(status: str, detail: str) for UI updates
+        """
         self.db = db
-        self.root = root
-        self.client = SyncClient(api_url, api_key)
+        self.client = client
         self.computer_id = computer_id
-        self.interval_ms = interval_ms
-        self.running = False
-        self.sync_in_progress = False
-        self._schedule_id = None
-        self._status_callback: Optional[Callable] = None
-
-    def set_status_callback(self, callback: Callable[[str, str], None]):
-        """Set callback for sync status updates: callback(status, detail)."""
-        self._status_callback = callback
+        self.interval = interval
+        self.on_status = on_status
+        self._running = False
+        self._thread: Optional[threading.Thread] = None
 
     def start(self):
-        """Start periodic sync."""
-        self.running = True
-        self._schedule_next()
+        """Start background sync loop."""
+        if self._running:
+            return
+        self._running = True
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+        logger.info("Sync engine started (interval=%ds)", self.interval)
 
     def stop(self):
-        """Stop periodic sync."""
-        self.running = False
-        if self._schedule_id:
-            try:
-                self.root.after_cancel(self._schedule_id)
-            except Exception:
-                pass
-            self._schedule_id = None
+        """Stop background sync loop."""
+        self._running = False
+        logger.info("Sync engine stopped")
 
-    def trigger(self):
-        """Trigger immediate sync (from UI button)."""
-        if not self.sync_in_progress:
-            Thread(target=self._do_sync, daemon=True).start()
-
-    def _schedule_next(self):
-        if self.running:
-            self._schedule_id = self.root.after(self.interval_ms, self._on_timer)
-
-    def _on_timer(self):
-        if not self.sync_in_progress:
-            Thread(target=self._do_sync, daemon=True).start()
-        self._schedule_next()
+    def _loop(self):
+        """Main sync loop. Runs in daemon thread."""
+        while self._running:
+            self._do_sync()
+            # Interruptible sleep: check _running every second
+            for _ in range(self.interval):
+                if not self._running:
+                    return
+                time.sleep(1)
 
     def _do_sync(self):
-        self.sync_in_progress = True
-        self._notify("syncing")
+        """Execute one sync cycle: push then pull."""
+        self._notify("syncing", "")
         try:
             self._push()
             self._pull()
-            self._notify("ok", f"Last sync: {datetime.now().strftime('%H:%M:%S')}")
-        except ConnectionError:
-            self._notify("offline", "Server unreachable")
+            now = datetime.now(timezone.utc).strftime('%H:%M:%S UTC')
+            self._notify("ok", f"Last sync: {now}")
         except Exception as e:
             logger.exception("Sync error")
             self._notify("error", str(e)[:100])
-        finally:
-            self.sync_in_progress = False
 
     def _push(self):
         """Push all pending local changes to server."""
         changes = {}
-        deleted_uuids = {}  # track for purge after successful push
+        deleted_uuids = {}
 
         for table_name in SYNCED_TABLES:
             pending = self.db.get_pending_changes(table_name)
@@ -90,38 +81,57 @@ class SyncEngine:
                 continue
 
             rows_to_push = []
-            table_deleted_uuids = []
+            table_deleted = []
             for row in pending:
-                row_data = {k: _serialize(v) for k, v in row.items() if k != 'sync_status'}
+                row_data = {k: v for k, v in row.items() if k != 'sync_status'}
+
                 if row.get('sync_status') == 'deleted':
                     row_data['is_deleted'] = True
-                    table_deleted_uuids.append(row['uuid'])
+                    table_deleted.append(row['uuid'])
                 else:
                     row_data['is_deleted'] = False
+
+                # Resolve folder_id -> folder_uuid for notes
+                if table_name == 'notes' and row_data.get('folder_id') is not None:
+                    folder_uuid = self.db.get_folder_uuid_by_id(row_data['folder_id'])
+                    row_data['folder_uuid'] = folder_uuid
+
                 rows_to_push.append(row_data)
 
             if rows_to_push:
                 changes[table_name] = rows_to_push
-                if table_deleted_uuids:
-                    deleted_uuids[table_name] = table_deleted_uuids
+                if table_deleted:
+                    deleted_uuids[table_name] = table_deleted
 
         if not changes:
             return
 
         result = self.client.push(changes)
 
-        # Mark successfully pushed rows as synced
-        conflict_uuids = {c['uuid'] for c in result.get('conflicts', [])}
+        # Validate response
+        if not isinstance(result, dict):
+            logger.error("Push returned invalid response: %s", type(result))
+            return
+
+        conflict_uuids = set()
+        for c in result.get('conflicts', []):
+            if isinstance(c, dict) and 'uuid' in c:
+                conflict_uuids.add(c['uuid'])
+
+        # Mark synced (with race guard: only if updated_at unchanged)
         for table_name, rows in changes.items():
-            synced_uuids = [r['uuid'] for r in rows
-                            if r['uuid'] not in conflict_uuids and not r.get('is_deleted')]
-            self.db.mark_as_synced(table_name, synced_uuids)
+            synced = [
+                (r['uuid'], r.get('updated_at'))
+                for r in rows
+                if r['uuid'] not in conflict_uuids and not r.get('is_deleted')
+            ]
+            self.db.mark_as_synced(table_name, synced)
 
             # Purge confirmed deletes
             if table_name in deleted_uuids:
-                confirmed_deletes = [u for u in deleted_uuids[table_name]
-                                     if u not in conflict_uuids]
-                self.db.purge_deleted(table_name, confirmed_deletes)
+                confirmed = [u for u in deleted_uuids[table_name]
+                             if u not in conflict_uuids]
+                self.db.purge_deleted(table_name, confirmed)
 
     def _pull(self):
         """Pull changes from server and apply locally."""
@@ -129,26 +139,37 @@ class SyncEngine:
 
         result = self.client.pull(last_sync)
 
-        for table_name, rows in result.get('changes', {}).items():
-            if table_name in SYNCED_TABLES and rows:
-                self.db.upsert_from_server(table_name, rows)
+        if not isinstance(result, dict):
+            logger.error("Pull returned invalid response: %s", type(result))
+            return
 
-        # Update last sync timestamp
+        for table_name, rows in result.get('changes', {}).items():
+            if table_name not in SYNCED_TABLES or not rows:
+                continue
+
+            # Resolve folder_uuid -> local folder_id for notes
+            if table_name == 'notes':
+                for row in rows:
+                    if row.get('folder_uuid'):
+                        row['folder_id'] = self.db.get_folder_id_by_uuid(
+                            row['folder_uuid']
+                        )
+                    elif 'folder_id' not in row:
+                        row['folder_id'] = None
+
+            self.db.upsert_from_server(table_name, rows)
+
+        # Update last sync timestamp only after successful pull
         server_time = result.get('server_time')
         if server_time:
-            self.db.save_app_setting(self.computer_id, 'last_sync_at', server_time)
+            self.db.save_app_setting(
+                self.computer_id, 'last_sync_at', server_time
+            )
 
     def _notify(self, status: str, detail: str = ""):
-        """Thread-safe UI notification via root.after."""
-        if self._status_callback:
+        """Notify UI about sync status."""
+        if self.on_status:
             try:
-                self.root.after(0, lambda: self._status_callback(status, detail))
+                self.on_status(status, detail)
             except Exception:
                 pass
-
-
-def _serialize(value):
-    """Convert value to JSON-serializable format."""
-    if isinstance(value, datetime):
-        return value.isoformat()
-    return value
