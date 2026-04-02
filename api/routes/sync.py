@@ -61,7 +61,8 @@ async def push(
             )
             existing = result.scalar_one_or_none()
 
-            client_updated = row_data.updated_at
+            # Strip timezone info: DB uses TIMESTAMP WITHOUT TIME ZONE
+            client_updated = row_data.updated_at.replace(tzinfo=None) if row_data.updated_at else None
             is_deleted = row_data.is_deleted
 
             if existing:
@@ -110,13 +111,16 @@ async def pull(
     db: AsyncSession = Depends(get_db),
 ):
     """Return changes since client's last sync timestamp."""
-    server_time = datetime.now(timezone.utc)
+    server_time = datetime.utcnow()
     changes: dict[str, list[dict]] = {}
+
+    # Strip timezone info: DB uses TIMESTAMP WITHOUT TIME ZONE
+    last_sync = req.last_sync_at.replace(tzinfo=None) if req.last_sync_at else None
 
     for table_name, model in TABLE_MODELS.items():
         query = select(model).where(model.user_id == user.id)
-        if req.last_sync_at:
-            query = query.where(model.updated_at > req.last_sync_at)
+        if last_sync:
+            query = query.where(model.updated_at > last_sync)
         query = query.order_by(model.updated_at)
 
         result = await db.execute(query)
