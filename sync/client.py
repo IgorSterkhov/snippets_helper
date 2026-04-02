@@ -21,17 +21,21 @@ class SyncClient:
     def health(self) -> bool:
         """Check if server is reachable."""
         try:
-            r = self.session.get(f"{self.api_url}/health", timeout=5)
+            r = self.session.get(f"{self.api_url}/v1/health", timeout=5)
             return r.status_code == 200
         except Exception:
             return False
 
     def register(self, name: str) -> dict:
-        """Register a new user. Returns {user_id, api_key, name}."""
-        r = self.session.post(
-            f"{self.api_url}/auth/register",
+        """Register a new user. Returns {user_id, api_key, name}.
+
+        Uses a separate request without Authorization header.
+        """
+        r = requests.post(
+            f"{self.api_url}/v1/auth/register",
             json={"name": name},
             timeout=self.timeout,
+            verify=self.session.verify,
         )
         r.raise_for_status()
         return r.json()
@@ -39,7 +43,7 @@ class SyncClient:
     def check_auth(self) -> Optional[dict]:
         """Verify API key. Returns user info or None."""
         try:
-            r = self.session.get(f"{self.api_url}/auth/me", timeout=self.timeout)
+            r = self.session.get(f"{self.api_url}/v1/auth/me", timeout=self.timeout)
             if r.status_code == 200:
                 return r.json()
             return None
@@ -55,7 +59,7 @@ class SyncClient:
             {status, accepted, conflicts}
         """
         r = self.session.post(
-            f"{self.api_url}/sync/push",
+            f"{self.api_url}/v1/sync/push",
             json={"changes": changes},
             timeout=self.timeout,
         )
@@ -69,7 +73,7 @@ class SyncClient:
             {changes: {table_name: [row_dicts]}, server_time: str}
         """
         r = self.session.post(
-            f"{self.api_url}/sync/pull",
+            f"{self.api_url}/v1/sync/pull",
             json={"last_sync_at": last_sync_at},
             timeout=self.timeout,
         )

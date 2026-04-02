@@ -1,10 +1,16 @@
 import os
 import threading
 import uuid as uuid_mod
+from datetime import datetime, timezone
 import duckdb
 from contextlib import contextmanager
 from dotenv import load_dotenv
 from typing import Optional, List, Dict
+
+
+def _utc_now() -> str:
+    """Return current UTC time as ISO string for DuckDB."""
+    return datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
 
 class Database:
     def __init__(self):
@@ -202,26 +208,26 @@ class Database:
             conn.execute("""
                 UPDATE shortcuts
                 SET name = ?, value = ?, description = ?,
-                    sync_status = 'pending', updated_at = CURRENT_TIMESTAMP
+                    sync_status = 'pending', updated_at = ?
                 WHERE id = ?
-            """, (item['name'], item['value'], item.get('description', ''), item['id']))
+            """, (item['name'], item['value'], item.get('description', ''), _utc_now(), item['id']))
     
     def create_item(self, item):
         """Create a new item in the database."""
         with self._connect() as conn:
             conn.execute("""
                 INSERT INTO shortcuts (id, name, value, description, uuid, updated_at, sync_status)
-                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 'pending')
+                VALUES (?, ?, ?, ?, ?, ?, 'pending')
             """, (item['id'], item['name'], item['value'], item.get('description', ''),
-                  str(uuid_mod.uuid4())))
+                  str(uuid_mod.uuid4()), _utc_now()))
     
     def delete_item(self, item_id):
         """Soft-delete an item from the database."""
         with self._connect() as conn:
             conn.execute("""
-                UPDATE shortcuts SET sync_status = 'deleted', updated_at = CURRENT_TIMESTAMP
+                UPDATE shortcuts SET sync_status = 'deleted', updated_at = ?
                 WHERE id = ?
-            """, (item_id,))
+            """, (_utc_now(), item_id))
     
     def get_max_id(self):
         """Get the maximum ID from the database."""
@@ -260,24 +266,24 @@ class Database:
                         conn.execute("""
                             UPDATE sql_table_analyzer_templates
                             SET template_text = ?, sync_status = 'pending',
-                                updated_at = CURRENT_TIMESTAMP
+                                updated_at = ?
                             WHERE id = ?
-                        """, (template_text, index))
+                        """, (template_text, _utc_now(), index))
                 else:
                     conn.execute("""
                         INSERT INTO sql_table_analyzer_templates
                             (id, template_text, uuid, updated_at, sync_status)
-                        VALUES (?, ?, ?, CURRENT_TIMESTAMP, 'pending')
-                    """, (index, template_text, str(uuid_mod.uuid4())))
+                        VALUES (?, ?, ?, ?, 'pending')
+                    """, (index, template_text, str(uuid_mod.uuid4()), _utc_now()))
 
             # Soft-delete templates that are no longer in the list
             for old_id in existing_by_id:
                 if old_id not in incoming_ids:
                     conn.execute("""
                         UPDATE sql_table_analyzer_templates
-                        SET sync_status = 'deleted', updated_at = CURRENT_TIMESTAMP
+                        SET sync_status = 'deleted', updated_at = ?
                         WHERE id = ?
-                    """, (old_id,))
+                    """, (_utc_now(), old_id))
 
     def get_superset_settings(self, computer_id):
         """Get Superset settings for a specific computer."""
@@ -414,9 +420,9 @@ class Database:
                 conn.execute("""
                     UPDATE sql_macrosing_templates
                     SET template_text = ?, placeholders_config = ?, combination_mode = ?, separator = ?,
-                        sync_status = 'pending', updated_at = CURRENT_TIMESTAMP
+                        sync_status = 'pending', updated_at = ?
                     WHERE template_name = ?
-                """, (template_text, placeholders_config, combination_mode, separator, name))
+                """, (template_text, placeholders_config, combination_mode, separator, _utc_now(), name))
             else:
                 max_id_result = conn.execute("SELECT MAX(id) FROM sql_macrosing_templates").fetchone()
                 new_id = (max_id_result[0] or 0) + 1
@@ -424,18 +430,18 @@ class Database:
                     INSERT INTO sql_macrosing_templates
                         (id, template_name, template_text, placeholders_config, combination_mode, separator,
                          uuid, updated_at, sync_status)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 'pending')
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')
                 """, (new_id, name, template_text, placeholders_config, combination_mode, separator,
-                      str(uuid_mod.uuid4())))
+                      str(uuid_mod.uuid4()), _utc_now()))
 
     def delete_sql_macrosing_template(self, name):
         """Soft-delete a SQL Macrosing template by name."""
         with self._connect() as conn:
             conn.execute("""
                 UPDATE sql_macrosing_templates
-                SET sync_status = 'deleted', updated_at = CURRENT_TIMESTAMP
+                SET sync_status = 'deleted', updated_at = ?
                 WHERE template_name = ?
-            """, (name,))
+            """, (_utc_now(), name))
 
     # ==================== Note Folders ====================
 
@@ -460,8 +466,8 @@ class Database:
             new_id = (max_id_result[0] or 0) + 1
             conn.execute("""
                 INSERT INTO note_folders (id, name, sort_order, uuid, updated_at, sync_status)
-                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, 'pending')
-            """, (new_id, name, sort_order, str(uuid_mod.uuid4())))
+                VALUES (?, ?, ?, ?, ?, 'pending')
+            """, (new_id, name, sort_order, str(uuid_mod.uuid4()), _utc_now()))
             return new_id
 
     def update_note_folder(self, folder_id: int, name: str):
@@ -469,23 +475,23 @@ class Database:
         with self._connect() as conn:
             conn.execute("""
                 UPDATE note_folders
-                SET name = ?, sync_status = 'pending', updated_at = CURRENT_TIMESTAMP
+                SET name = ?, sync_status = 'pending', updated_at = ?
                 WHERE id = ?
-            """, (name, folder_id))
+            """, (name, _utc_now(), folder_id))
 
     def delete_note_folder(self, folder_id: int):
         """Soft-delete a note folder. Notes in this folder will have folder_id set to NULL."""
         with self._connect() as conn:
             conn.execute("""
                 UPDATE notes SET folder_id = NULL, sync_status = 'pending',
-                    updated_at = CURRENT_TIMESTAMP
+                    updated_at = ?
                 WHERE folder_id = ?
-            """, (folder_id,))
+            """, (_utc_now(), folder_id))
             conn.execute("""
                 UPDATE note_folders
-                SET sync_status = 'deleted', updated_at = CURRENT_TIMESTAMP
+                SET sync_status = 'deleted', updated_at = ?
                 WHERE id = ?
-            """, (folder_id,))
+            """, (_utc_now(), folder_id))
 
     def init_default_note_folder(self):
         """Initialize default 'General' folder if no folders exist."""
@@ -539,8 +545,8 @@ class Database:
             conn.execute("""
                 INSERT INTO notes (id, folder_id, title, content, created_at, updated_at,
                                    is_pinned, uuid, sync_status)
-                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0, ?, 'pending')
-            """, (new_id, folder_id, title, content, str(uuid_mod.uuid4())))
+                VALUES (?, ?, ?, ?, ?, ?, 0, ?, 'pending')
+            """, (new_id, folder_id, title, content, _utc_now(), _utc_now(), str(uuid_mod.uuid4())))
             return new_id
 
     def update_note(self, note_id: int, folder_id: Optional[int], title: str, content: str):
@@ -548,18 +554,18 @@ class Database:
         with self._connect() as conn:
             conn.execute("""
                 UPDATE notes
-                SET folder_id = ?, title = ?, content = ?, updated_at = CURRENT_TIMESTAMP,
+                SET folder_id = ?, title = ?, content = ?, updated_at = ?,
                     sync_status = 'pending'
                 WHERE id = ?
-            """, (folder_id, title, content, note_id))
+            """, (folder_id, title, content, _utc_now(), note_id))
 
     def delete_note(self, note_id: int):
         """Soft-delete a note."""
         with self._connect() as conn:
             conn.execute("""
-                UPDATE notes SET sync_status = 'deleted', updated_at = CURRENT_TIMESTAMP
+                UPDATE notes SET sync_status = 'deleted', updated_at = ?
                 WHERE id = ?
-            """, (note_id,))
+            """, (_utc_now(), note_id))
 
     def toggle_note_pin(self, note_id: int):
         """Toggle the is_pinned status of a note."""
@@ -567,9 +573,9 @@ class Database:
             conn.execute("""
                 UPDATE notes
                 SET is_pinned = CASE WHEN is_pinned = 1 THEN 0 ELSE 1 END,
-                    sync_status = 'pending', updated_at = CURRENT_TIMESTAMP
+                    sync_status = 'pending', updated_at = ?
                 WHERE id = ?
-            """, (note_id,))
+            """, (_utc_now(), note_id))
 
     def get_note_by_id(self, note_id: int) -> Optional[Dict]:
         """Get a note by its id."""
@@ -655,10 +661,10 @@ class Database:
                     INSERT INTO obfuscation_mappings
                         (id, session_name, entity_type, original_value, obfuscated_value,
                          uuid, updated_at, sync_status)
-                    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 'pending')
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
                 """, (current_id, session_name, mapping['entity_type'],
                       mapping['original_value'], mapping['obfuscated_value'],
-                      str(uuid_mod.uuid4())))
+                      str(uuid_mod.uuid4()), _utc_now()))
 
     def get_obfuscation_sessions(self) -> List[str]:
         """Get all unique session names."""
@@ -744,9 +750,9 @@ class Database:
         with self._connect() as conn:
             conn.execute("""
                 UPDATE obfuscation_mappings
-                SET sync_status = 'deleted', updated_at = CURRENT_TIMESTAMP
+                SET sync_status = 'deleted', updated_at = ?
                 WHERE session_name = ?
-            """, (session_name,))
+            """, (_utc_now(), session_name))
 
     def get_exec_commands_by_category(self, category_id: int) -> List[Dict]:
         """Get all exec commands in a specific category."""
@@ -799,6 +805,29 @@ class Database:
             """, (cmd_id,)).fetchone()
             return self._exec_cmd_from_row(result) if result else None
 
+    # ==================== Folder UUID Resolution ====================
+
+    def get_folder_uuid_by_id(self, folder_id: int) -> Optional[str]:
+        """Get folder UUID by local folder_id (for sync push)."""
+        if folder_id is None:
+            return None
+        with self._connect() as conn:
+            result = conn.execute(
+                "SELECT uuid FROM note_folders WHERE id = ?", (folder_id,)
+            ).fetchone()
+            return result[0] if result else None
+
+    def get_folder_id_by_uuid(self, folder_uuid: str) -> Optional[int]:
+        """Get local folder_id by folder UUID (for sync pull)."""
+        if not folder_uuid:
+            return None
+        with self._connect() as conn:
+            result = conn.execute(
+                "SELECT id FROM note_folders WHERE uuid = ? AND sync_status != 'deleted'",
+                (folder_uuid,)
+            ).fetchone()
+            return result[0] if result else None
+
     # ==================== Sync Helpers ====================
 
     def get_pending_changes(self, table_name: str) -> List[Dict]:
@@ -812,18 +841,33 @@ class Database:
             result = conn.execute(
                 f"SELECT {cols} FROM {table_name} WHERE sync_status IN ('pending', 'deleted')"
             ).fetchall()
-            return [dict(zip(fields, row)) for row in result]
+            rows = []
+            for row in result:
+                d = dict(zip(fields, row))
+                # Serialize datetime to ISO string
+                if d.get('updated_at') and hasattr(d['updated_at'], 'isoformat'):
+                    d['updated_at'] = d['updated_at'].isoformat()
+                if d.get('created_at') and hasattr(d['created_at'], 'isoformat'):
+                    d['created_at'] = d['created_at'].isoformat()
+                rows.append(d)
+            return rows
 
-    def mark_as_synced(self, table_name: str, uuids: List[str]):
-        """Mark rows as synced after successful push."""
-        if not uuids:
+    def mark_as_synced(self, table_name: str, uuids_with_ts: List[tuple]):
+        """Mark rows as synced after successful push.
+
+        Args:
+            uuids_with_ts: list of (uuid, updated_at) tuples.
+                Only marks as synced if updated_at hasn't changed (race protection).
+        """
+        if not uuids_with_ts:
             return
-        placeholders = ', '.join(['?'] * len(uuids))
         with self._connect() as conn:
-            conn.execute(
-                f"UPDATE {table_name} SET sync_status = 'synced' WHERE uuid IN ({placeholders})",
-                uuids
-            )
+            for uuid_val, updated_at in uuids_with_ts:
+                conn.execute(
+                    f"UPDATE {table_name} SET sync_status = 'synced' "
+                    f"WHERE uuid = ? AND updated_at = ?",
+                    (uuid_val, updated_at)
+                )
 
     def purge_deleted(self, table_name: str, uuids: List[str]):
         """Physically delete soft-deleted rows after server confirmed deletion."""
@@ -851,21 +895,37 @@ class Database:
 
                 if row.get('is_deleted'):
                     if existing:
-                        conn.execute(f"DELETE FROM {table_name} WHERE uuid = ?", (row['uuid'],))
+                        conn.execute(
+                            f"DELETE FROM {table_name} WHERE uuid = ?",
+                            (row['uuid'],)
+                        )
                     continue
 
                 if existing:
                     local_status = existing[0]
                     local_updated = existing[1]
-                    # If local is pending and local is newer, skip (local wins)
+                    # LWW: if local is pending and local is newer, skip
                     if local_status == 'pending' and local_updated and row.get('updated_at'):
-                        if str(local_updated) > str(row['updated_at']):
+                        local_dt = (
+                            local_updated if isinstance(local_updated, datetime)
+                            else datetime.fromisoformat(str(local_updated))
+                        )
+                        server_dt = (
+                            datetime.fromisoformat(row['updated_at'])
+                            if isinstance(row['updated_at'], str)
+                            else row['updated_at']
+                        )
+                        if local_dt > server_dt:
                             continue
                     # Update from server
-                    set_parts = [f"{f} = ?" for f in data_fields if f in row]
+                    set_parts = []
+                    values = []
+                    for f in data_fields:
+                        if f in row:
+                            set_parts.append(f"{f} = ?")
+                            values.append(row[f])
                     set_parts.append("sync_status = 'synced'")
                     set_parts.append("updated_at = ?")
-                    values = [row[f] for f in data_fields if f in row]
                     values.append(row.get('updated_at'))
                     values.append(row['uuid'])
                     conn.execute(
@@ -874,7 +934,9 @@ class Database:
                     )
                 else:
                     # Insert new row from server
-                    max_id_result = conn.execute(f"SELECT MAX(id) FROM {table_name}").fetchone()
+                    max_id_result = conn.execute(
+                        f"SELECT MAX(id) FROM {table_name}"
+                    ).fetchone()
                     new_id = (max_id_result[0] or 0) + 1
                     insert_fields = ['id', 'uuid', 'sync_status', 'updated_at']
                     insert_values = [new_id, row['uuid'], 'synced', row.get('updated_at')]

@@ -207,26 +207,44 @@ class KeyboardHelper:
         self._check_first_run()
 
     def _init_sync(self):
-        """Initialize sync engine if configured."""
-        sync_enabled = os.getenv('SYNC_ENABLED', '0')
-        api_url = os.getenv('SYNC_API_URL', '')
-        api_key = os.getenv('SYNC_API_KEY', '')
+        """Initialize sync engine from app_settings (with .env fallback)."""
+        sync_enabled = self.db.get_app_setting(self.app_computer_id, 'sync_enabled')
+        if sync_enabled is None:
+            sync_enabled = os.getenv('SYNC_ENABLED', '0')
+
+        api_url = self.db.get_app_setting(self.app_computer_id, 'sync_api_url')
+        if not api_url:
+            api_url = os.getenv('SYNC_API_URL', '')
+
+        api_key = self.db.get_app_setting(self.app_computer_id, 'sync_api_key')
+        if not api_key:
+            api_key = os.getenv('SYNC_API_KEY', '')
 
         if sync_enabled != '1' or not api_url or not api_key:
             return
 
-        interval = int(os.getenv('SYNC_INTERVAL_SECONDS', '60')) * 1000
+        interval_str = self.db.get_app_setting(self.app_computer_id, 'sync_interval')
+        if not interval_str:
+            interval_str = os.getenv('SYNC_INTERVAL_SECONDS', '60')
+        interval = int(interval_str)
 
+        ca_cert = self.db.get_app_setting(self.app_computer_id, 'sync_ca_cert')
+        if not ca_cert:
+            ca_cert = os.getenv('SYNC_CA_CERT', '')
+        if ca_cert:
+            os.environ['SYNC_CA_CERT'] = ca_cert
+
+        from sync.client import SyncClient
         from sync.engine import SyncEngine
+
+        client = SyncClient(api_url, api_key)
         self.sync_engine = SyncEngine(
             db=self.db,
-            root=self.root,
-            api_url=api_url,
-            api_key=api_key,
+            client=client,
             computer_id=self.app_computer_id,
-            interval_ms=interval,
+            interval=interval,
+            on_status=lambda s, d: self.root.after(0, self._on_sync_status, s, d),
         )
-        self.sync_engine.set_status_callback(self._on_sync_status)
         self.sync_engine.start()
 
     def _on_sync_status(self, status: str, detail: str = ""):
@@ -424,10 +442,6 @@ class KeyboardHelper:
         # Sync status indicator
         self.sync_status_label = ttk.Label(top_frame, text="")
         self.sync_status_label.pack(side=tk.LEFT, padx=(0, 5))
-        if self.sync_engine:
-            sync_btn = ttk.Button(top_frame, text="Sync", width=5,
-                                  command=lambda: self.sync_engine.trigger())
-            sync_btn.pack(side=tk.LEFT)
 
         # Notebook (tabs)
         self.notebook = ttk.Notebook(self.window)
@@ -2949,76 +2963,129 @@ class KeyboardHelper:
 
     def _build_settings_sync_tab(self, parent):
         """Build Sync settings tab with registration and config."""
-        # Status
-        status_frame = ttk.LabelFrame(parent, text="Status")
-        status_frame.pack(fill=tk.X, padx=10, pady=(10, 5))
+        # Read current settings from DB with .env fallback
+        def _get(key, env_key, default=''):
+            val = self.db.get_app_setting(self.app_computer_id, key)
+            return val if val else os.getenv(env_key, default)
 
-        sync_enabled = os.getenv('SYNC_ENABLED', '0') == '1'
-        api_url = os.getenv('SYNC_API_URL', '')
-        api_key = os.getenv('SYNC_API_KEY', '')
+        api_url = _get('sync_api_url', 'SYNC_API_URL')
+        api_key = _get('sync_api_key', 'SYNC_API_KEY')
+        sync_enabled = _get('sync_enabled', 'SYNC_ENABLED', '0')
+        interval = _get('sync_interval', 'SYNC_INTERVAL_SECONDS', '60')
+        ca_cert = _get('sync_ca_cert', 'SYNC_CA_CERT')
 
-        if sync_enabled and api_url and api_key:
-            ttk.Label(status_frame, text=f"Connected to: {api_url}").pack(anchor=tk.W, padx=10, pady=5)
-            last_sync = self.db.get_app_setting(self.app_computer_id, 'last_sync_at')
-            ttk.Label(status_frame, text=f"Last sync: {last_sync or 'never'}").pack(anchor=tk.W, padx=10, pady=(0, 5))
+        # --- Server ---
+        server_frame = ttk.LabelFrame(parent, text="Server")
+        server_frame.pack(fill=tk.X, padx=10, pady=(10, 5))
 
-            # Manual sync button
-            ttk.Button(status_frame, text="Sync Now",
-                       command=lambda: self.sync_engine.trigger() if self.sync_engine else None
-                       ).pack(anchor=tk.W, padx=10, pady=(0, 10))
-        else:
-            ttk.Label(status_frame, text="Sync is not configured").pack(anchor=tk.W, padx=10, pady=5)
-
-        # Registration
-        reg_frame = ttk.LabelFrame(parent, text="Register / Connect")
-        reg_frame.pack(fill=tk.X, padx=10, pady=5)
-
-        url_frame = ttk.Frame(reg_frame)
+        url_frame = ttk.Frame(server_frame)
         url_frame.pack(fill=tk.X, padx=10, pady=(10, 5))
         ttk.Label(url_frame, text="Server URL:").pack(side=tk.LEFT)
         self.sync_url_entry = ttk.Entry(url_frame, width=40)
         self.sync_url_entry.pack(side=tk.LEFT, padx=(10, 0), fill=tk.X, expand=True)
         self.sync_url_entry.insert(0, api_url)
 
+        cert_frame = ttk.Frame(server_frame)
+        cert_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
+        ttk.Label(cert_frame, text="CA Cert:").pack(side=tk.LEFT)
+        self.sync_ca_cert_entry = ttk.Entry(cert_frame, width=35)
+        self.sync_ca_cert_entry.pack(side=tk.LEFT, padx=(10, 0), fill=tk.X, expand=True)
+        self.sync_ca_cert_entry.insert(0, ca_cert)
+        ttk.Button(cert_frame, text="...", width=3,
+                   command=self._sync_browse_cert).pack(side=tk.LEFT, padx=(5, 0))
+
+        # --- Registration ---
+        reg_frame = ttk.LabelFrame(parent, text="Registration")
+        reg_frame.pack(fill=tk.X, padx=10, pady=5)
+
         name_frame = ttk.Frame(reg_frame)
-        name_frame.pack(fill=tk.X, padx=10, pady=5)
-        ttk.Label(name_frame, text="Your name:").pack(side=tk.LEFT)
+        name_frame.pack(fill=tk.X, padx=10, pady=(10, 5))
+        ttk.Label(name_frame, text="Name:").pack(side=tk.LEFT)
         self.sync_name_entry = ttk.Entry(name_frame, width=40)
         self.sync_name_entry.pack(side=tk.LEFT, padx=(10, 0), fill=tk.X, expand=True)
         import getpass as gp
         self.sync_name_entry.insert(0, gp.getuser())
 
-        key_frame = ttk.Frame(reg_frame)
+        reg_btn_frame = ttk.Frame(reg_frame)
+        reg_btn_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
+        ttk.Button(reg_btn_frame, text="Register",
+                   command=self._sync_register).pack(side=tk.LEFT)
+
+        # --- API Key ---
+        key_frame = ttk.LabelFrame(parent, text="API Key")
         key_frame.pack(fill=tk.X, padx=10, pady=5)
-        ttk.Label(key_frame, text="API Key:").pack(side=tk.LEFT)
-        self.sync_key_entry = ttk.Entry(key_frame, width=40)
-        self.sync_key_entry.pack(side=tk.LEFT, padx=(10, 0), fill=tk.X, expand=True)
+
+        key_inner = ttk.Frame(key_frame)
+        key_inner.pack(fill=tk.X, padx=10, pady=10)
+        self.sync_key_entry = ttk.Entry(key_inner, width=50)
+        self.sync_key_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.sync_key_entry.insert(0, api_key)
 
-        btn_frame = ttk.Frame(reg_frame)
-        btn_frame.pack(fill=tk.X, padx=10, pady=(5, 10))
-        ttk.Button(btn_frame, text="Register New", command=self._sync_register).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(btn_frame, text="Test Connection", command=self._sync_test).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(btn_frame, text="Save & Enable", command=self._sync_save_config).pack(side=tk.LEFT)
+        # --- Sync control ---
+        ctrl_frame = ttk.LabelFrame(parent, text="Sync")
+        ctrl_frame.pack(fill=tk.X, padx=10, pady=5)
 
-        self.sync_msg_label = ttk.Label(reg_frame, text="")
-        self.sync_msg_label.pack(anchor=tk.W, padx=10, pady=(0, 10))
+        ctrl_inner = ttk.Frame(ctrl_frame)
+        ctrl_inner.pack(fill=tk.X, padx=10, pady=10)
+
+        self.sync_enabled_var = tk.BooleanVar(value=sync_enabled == '1')
+        ttk.Checkbutton(ctrl_inner, text="Enable sync",
+                        variable=self.sync_enabled_var).pack(side=tk.LEFT)
+
+        ttk.Label(ctrl_inner, text="  Interval:").pack(side=tk.LEFT, padx=(20, 0))
+        self.sync_interval_entry = ttk.Entry(ctrl_inner, width=5)
+        self.sync_interval_entry.pack(side=tk.LEFT, padx=(5, 0))
+        self.sync_interval_entry.insert(0, interval)
+        ttk.Label(ctrl_inner, text="sec").pack(side=tk.LEFT, padx=(3, 0))
+
+        # --- Status ---
+        status_frame = ttk.LabelFrame(parent, text="Status")
+        status_frame.pack(fill=tk.X, padx=10, pady=5)
+
+        last_sync = self.db.get_app_setting(self.app_computer_id, 'last_sync_at')
+        self.sync_settings_status = ttk.Label(
+            status_frame,
+            text=f"Last sync: {last_sync or 'never'}"
+        )
+        self.sync_settings_status.pack(anchor=tk.W, padx=10, pady=10)
+
+        # --- Buttons ---
+        btn_frame = ttk.Frame(parent)
+        btn_frame.pack(fill=tk.X, padx=10, pady=(5, 10))
+        ttk.Button(btn_frame, text="Test Connection",
+                   command=self._sync_test).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(btn_frame, text="Save Settings",
+                   command=self._sync_save_config).pack(side=tk.LEFT)
+
+        # Message label for feedback
+        self.sync_msg_label = ttk.Label(parent, text="")
+        self.sync_msg_label.pack(anchor=tk.W, padx=10, pady=(0, 5))
+
+    def _sync_browse_cert(self):
+        """Browse for CA certificate file."""
+        from tkinter import filedialog
+        path = filedialog.askopenfilename(
+            title="Select CA Certificate",
+            filetypes=[("PEM files", "*.pem"), ("CRT files", "*.crt"), ("All files", "*.*")]
+        )
+        if path:
+            self.sync_ca_cert_entry.delete(0, tk.END)
+            self.sync_ca_cert_entry.insert(0, path)
 
     def _sync_register(self):
         """Register a new user on the sync server."""
         url = self.sync_url_entry.get().strip()
         name = self.sync_name_entry.get().strip()
         if not url or not name:
-            self.sync_msg_label.config(text="Fill in Server URL and Your name")
+            self.sync_msg_label.config(text="Fill in Server URL and Name")
             return
         try:
+            ca_cert = self.sync_ca_cert_entry.get().strip()
+            if ca_cert:
+                os.environ['SYNC_CA_CERT'] = ca_cert
             from sync.client import SyncClient
             client = SyncClient(url, "")
-            # For registration, no auth needed — use requests directly
-            import requests
-            r = requests.post(f"{url.rstrip('/')}/auth/register", json={"name": name}, timeout=10)
-            r.raise_for_status()
-            data = r.json()
+            data = client.register(name)
             self.sync_key_entry.delete(0, tk.END)
             self.sync_key_entry.insert(0, data['api_key'])
             self.sync_msg_label.config(text=f"Registered! User ID: {data['user_id']}")
@@ -3033,53 +3100,53 @@ class KeyboardHelper:
             self.sync_msg_label.config(text="Fill in Server URL and API Key")
             return
         try:
+            ca_cert = self.sync_ca_cert_entry.get().strip()
+            if ca_cert:
+                os.environ['SYNC_CA_CERT'] = ca_cert
             from sync.client import SyncClient
             client = SyncClient(url, api_key)
             user_info = client.check_auth()
             if user_info:
                 self.sync_msg_label.config(text=f"OK! User: {user_info.get('name', '?')}")
             else:
-                self.sync_msg_label.config(text="Auth failed — invalid API key")
+                self.sync_msg_label.config(text="Auth failed - invalid API key")
         except Exception as e:
             self.sync_msg_label.config(text=f"Error: {str(e)[:80]}")
 
     def _sync_save_config(self):
-        """Save sync config to .env file and restart sync engine."""
+        """Save sync config to app_settings and restart sync engine."""
         url = self.sync_url_entry.get().strip()
         api_key = self.sync_key_entry.get().strip()
-        if not url or not api_key:
-            self.sync_msg_label.config(text="Fill in Server URL and API Key")
+        enabled = '1' if self.sync_enabled_var.get() else '0'
+        interval = self.sync_interval_entry.get().strip() or '60'
+        ca_cert = self.sync_ca_cert_entry.get().strip()
+
+        if enabled == '1' and (not url or not api_key):
+            self.sync_msg_label.config(text="Fill in Server URL and API Key to enable sync")
             return
 
-        # Update .env file
-        env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
-        env_lines = []
-        if os.path.exists(env_path):
-            with open(env_path, 'r') as f:
-                env_lines = f.readlines()
+        # Save to app_settings DB
+        cid = self.app_computer_id
+        self.db.save_app_setting(cid, 'sync_api_url', url)
+        self.db.save_app_setting(cid, 'sync_api_key', api_key)
+        self.db.save_app_setting(cid, 'sync_enabled', enabled)
+        self.db.save_app_setting(cid, 'sync_interval', interval)
+        self.db.save_app_setting(cid, 'sync_ca_cert', ca_cert)
 
-        # Remove existing SYNC_ lines
-        env_lines = [l for l in env_lines if not l.strip().startswith('SYNC_')]
-        # Add new sync config
-        env_lines.append(f'\nSYNC_API_URL={url}\n')
-        env_lines.append(f'SYNC_API_KEY={api_key}\n')
-        env_lines.append('SYNC_ENABLED=1\n')
-        env_lines.append('SYNC_INTERVAL_SECONDS=60\n')
-
-        with open(env_path, 'w') as f:
-            f.writelines(env_lines)
-
-        # Set env vars for current session
-        os.environ['SYNC_API_URL'] = url
-        os.environ['SYNC_API_KEY'] = api_key
-        os.environ['SYNC_ENABLED'] = '1'
+        # Set env var for CA cert in current session
+        if ca_cert:
+            os.environ['SYNC_CA_CERT'] = ca_cert
 
         # Restart sync engine
         if self.sync_engine:
             self.sync_engine.stop()
-        self._init_sync()
+            self.sync_engine = None
 
-        self.sync_msg_label.config(text="Saved! Sync enabled.")
+        if enabled == '1':
+            self._init_sync()
+            self.sync_msg_label.config(text="Saved! Sync enabled.")
+        else:
+            self.sync_msg_label.config(text="Saved. Sync disabled.")
 
     def _save_settings(self):
         # Save General settings

@@ -27,9 +27,8 @@ SYNCED_TABLES = {
     },
     'notes': {
         'data_fields': ['id', 'folder_id', 'title', 'content', 'created_at',
-                        'updated_at', 'is_pinned'],
+                        'is_pinned'],
         'pk': 'id',
-        'fk_uuid_map': {'folder_id': ('note_folders', 'folder_uuid')},
     },
     'obfuscation_mappings': {
         'data_fields': ['id', 'session_name', 'entity_type', 'original_value',
