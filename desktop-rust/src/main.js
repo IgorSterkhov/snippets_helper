@@ -55,4 +55,24 @@ document.addEventListener('keydown', async (e) => {
   }
 });
 
-document.addEventListener('DOMContentLoaded', main);
+async function checkForUpdates() {
+  try {
+    const { check } = window.__TAURI__.updater;
+    const update = await check();
+    if (update) {
+      const { showToast } = await import('./components/toast.js');
+      showToast(`Update ${update.version} available. Installing...`, 'info');
+      await update.downloadAndInstall();
+      const { relaunch } = window.__TAURI__.process;
+      await relaunch();
+    }
+  } catch (e) {
+    console.log('Update check:', e);
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  main();
+  // Check for updates 5 seconds after launch
+  setTimeout(checkForUpdates, 5000);
+});
