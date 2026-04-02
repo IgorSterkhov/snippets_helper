@@ -45,4 +45,10 @@ items.json
 .env
 
 # Environment variables
-.env .superpowers/
+.env
+.superpowers/
+
+# Rust
+desktop-rust/src-tauri/target/
+desktop-rust/node_modules/
+desktop-rust/src-tauri/gen/
