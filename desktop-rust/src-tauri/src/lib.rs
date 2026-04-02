@@ -9,8 +9,22 @@ mod hotkey;
 mod sync;
 mod autostart;
 
+fn write_log(msg: &str) {
+    let log_path = dirs::data_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("keyboard-helper")
+        .join("crash.log");
+    let _ = std::fs::write(&log_path, format!("{}\n", msg));
+}
+
 pub fn run() {
-    let db = db::init_db().expect("Failed to initialize database");
+    let db = match db::init_db() {
+        Ok(db) => db,
+        Err(e) => {
+            write_log(&format!("Failed to initialize database: {}", e));
+            return;
+        }
+    };
 
     tauri::Builder::default()
         .manage(db)
@@ -102,5 +116,5 @@ pub fn run() {
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .unwrap_or_else(|e| write_log(&format!("Tauri run error: {}", e)));
 }
