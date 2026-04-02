@@ -1,7 +1,11 @@
 """HTTP client for communicating with the Snippets Helper Sync API."""
 import os
+import logging
 import requests
+import urllib3
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 class SyncClient:
@@ -13,10 +17,14 @@ class SyncClient:
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         })
-        # Support self-signed certificates via SYNC_CA_CERT env var
+        # SSL verification: CA cert file > skip verify for self-signed
         ca_cert = os.getenv("SYNC_CA_CERT")
         if ca_cert and os.path.isfile(ca_cert):
             self.session.verify = ca_cert
+        elif self.api_url.startswith("https://"):
+            # No CA cert provided — disable verify for self-signed certs
+            self.session.verify = False
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     def health(self) -> bool:
         """Check if server is reachable."""
