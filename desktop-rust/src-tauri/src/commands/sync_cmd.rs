@@ -134,35 +134,7 @@ pub async fn check_for_update(state: State<'_, DbState>) -> Result<Value, String
         .build()
         .map_err(|e| format!("build http client: {e}"))?;
 
-    // Try Tauri latest.json first
-    let tauri_url = "https://github.com/IgorSterkhov/snippets_helper/releases/latest/download/latest.json";
-    let mut tauri_req = client.get(tauri_url);
-    if let Some(ref token) = github_token {
-        tauri_req = tauri_req.bearer_auth(token);
-    }
-    if let Ok(resp) = tauri_req.send().await {
-        if resp.status().is_success() {
-            if let Ok(data) = resp.json::<Value>().await {
-                if let Some(version_str) = data.get("version").and_then(|v| v.as_str()) {
-                    let latest = version_str.trim_start_matches('v').to_string();
-                    let has_update = version_is_newer(&current_version, &latest);
-                    // Build download URL from notes or default
-                    let download_url = format!(
-                        "https://github.com/IgorSterkhov/snippets_helper/releases/tag/v{}",
-                        latest
-                    );
-                    return Ok(json!({
-                        "current_version": current_version,
-                        "latest_version": latest,
-                        "has_update": has_update,
-                        "download_url": download_url,
-                    }));
-                }
-            }
-        }
-    }
-
-    // Fallback: GitHub API
+    // Use GitHub API to check latest release (works for both public and private repos with token)
     let api_url = "https://api.github.com/repos/IgorSterkhov/snippets_helper/releases/latest";
     let mut req = client.get(api_url);
     if let Some(ref token) = github_token {
