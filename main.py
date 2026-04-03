@@ -3065,9 +3065,13 @@ class KeyboardHelper:
         last_sync = self.db.get_app_setting(self.app_computer_id, 'last_sync_at')
         ttk.Label(ctrl_inner, text=f"  Last: {last_sync or 'never'}").pack(side=tk.LEFT, padx=(20, 0))
 
-        # --- Save button ---
-        ttk.Button(parent, text="Save Settings",
-                   command=self._sync_save_config).pack(anchor=tk.W, padx=10, pady=(5, 5))
+        # --- Buttons ---
+        btn_frame = ttk.Frame(parent)
+        btn_frame.pack(fill=tk.X, padx=10, pady=(5, 5))
+        ttk.Button(btn_frame, text="Save Settings",
+                   command=self._sync_save_config).pack(side=tk.LEFT)
+        ttk.Button(btn_frame, text="Push All Data to Server",
+                   command=self._sync_push_all).pack(side=tk.LEFT, padx=(10, 0))
 
     def _sync_browse_cert(self):
         """Browse for CA certificate file."""
@@ -3124,6 +3128,19 @@ class KeyboardHelper:
                 self.sync_msg_label.config(text="Auth failed - invalid API key")
         except Exception as e:
             self.sync_msg_label.config(text=f"Error: {str(e)[:100]}")
+
+    def _sync_push_all(self):
+        """Push ALL local data to server (one-time migration)."""
+        if not self.sync_engine:
+            self.sync_msg_label.config(text="Sync not enabled. Enable sync first.")
+            return
+        self.sync_msg_label.config(text="Pushing all data...")
+        self.settings_window.update()
+        try:
+            total = self.sync_engine.push_all()
+            self.sync_msg_label.config(text=f"Done! Pushed {total} rows to server.")
+        except Exception as e:
+            self.sync_msg_label.config(text=f"Push error: {str(e)[:100]}")
 
     def _sync_save_config(self):
         """Save sync config to app_settings and restart sync engine."""
