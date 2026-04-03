@@ -71,8 +71,17 @@ async function checkForUpdates() {
   }
 }
 
+// Sync when window becomes visible (focus)
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    call('trigger_sync').catch(() => {});
+  }
+});
+
 document.addEventListener('DOMContentLoaded', () => {
   main();
+  // Initial sync on launch
+  setTimeout(() => call('trigger_sync').catch(() => {}), 1000);
   // Check for updates 5 seconds after launch
   setTimeout(checkForUpdates, 5000);
 });
