@@ -65,19 +65,59 @@ fn autostart_entry_exists() -> bool {
     false
 }
 
-// ── Windows stub ──────────────────────────────────────────────
+// ── Windows ──────────────────────────────────────────────────
 
 #[cfg(target_os = "windows")]
 fn create_autostart_entry() -> Result<(), String> {
-    Ok(()) // TODO: implement Windows autostart
+    use std::process::Command;
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let output = Command::new("reg")
+        .args([
+            "add",
+            r"HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Run",
+            "/v",
+            "KeyboardHelper",
+            "/t",
+            "REG_SZ",
+            "/d",
+            &exe.display().to_string(),
+            "/f",
+        ])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).to_string())
+    }
 }
 
 #[cfg(target_os = "windows")]
 fn remove_autostart_entry() -> Result<(), String> {
+    use std::process::Command;
+    let _ = Command::new("reg")
+        .args([
+            "delete",
+            r"HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Run",
+            "/v",
+            "KeyboardHelper",
+            "/f",
+        ])
+        .output();
     Ok(())
 }
 
 #[cfg(target_os = "windows")]
 fn autostart_entry_exists() -> bool {
-    false
+    use std::process::Command;
+    Command::new("reg")
+        .args([
+            "query",
+            r"HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Run",
+            "/v",
+            "KeyboardHelper",
+        ])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
 }
