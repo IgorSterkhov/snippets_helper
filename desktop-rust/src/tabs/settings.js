@@ -485,6 +485,40 @@ async function renderUpdates(container) {
   actions.appendChild(downloadBtn);
   container.appendChild(actions);
 
+  // GitHub Token for private repo
+  container.appendChild(el('label', { text: 'GitHub Token (for private repos):', class: 'settings-label', style: 'margin-top:16px' }));
+  const tokenRow = el('div', { class: 'settings-row' });
+  const tokenInput = document.createElement('input');
+  tokenInput.className = 'settings-input';
+  tokenInput.type = 'password';
+  tokenInput.placeholder = 'ghp_... or github_pat_...';
+  tokenInput.style.flex = '1';
+  const savedToken = await getSetting('github_token') || '';
+  tokenInput.value = savedToken;
+  tokenInput.addEventListener('change', () => saveSetting('github_token', tokenInput.value));
+  tokenRow.appendChild(tokenInput);
+  container.appendChild(tokenRow);
+
+  // Debug Sync button
+  container.appendChild(el('label', { text: 'Sync diagnostics:', class: 'settings-label', style: 'margin-top:16px' }));
+  const debugBtn = el('button', { text: 'Debug Sync', class: 'btn-secondary' });
+  const debugOutput = el('pre', { style: 'font-size:11px;color:var(--text-muted);background:var(--bg-secondary);padding:10px;border-radius:6px;overflow:auto;max-height:200px;white-space:pre-wrap;margin-top:8px' });
+  debugBtn.addEventListener('click', async () => {
+    debugBtn.disabled = true;
+    debugBtn.textContent = 'Running...';
+    try {
+      const result = await call('debug_sync');
+      debugOutput.textContent = JSON.stringify(result, null, 2);
+    } catch (err) {
+      debugOutput.textContent = 'Error: ' + err;
+    } finally {
+      debugBtn.disabled = false;
+      debugBtn.textContent = 'Debug Sync';
+    }
+  });
+  container.appendChild(debugBtn);
+  container.appendChild(debugOutput);
+
   // Auto-check on tab open
   checkBtn.click();
 }

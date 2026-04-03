@@ -45,6 +45,7 @@ pub fn run() {
             commands::sync_cmd::register_sync,
             commands::sync_cmd::check_sync_health,
             commands::sync_cmd::check_for_update,
+            commands::sync_cmd::debug_sync,
             commands::notes::list_note_folders,
             commands::notes::create_note_folder,
             commands::notes::update_note_folder,
