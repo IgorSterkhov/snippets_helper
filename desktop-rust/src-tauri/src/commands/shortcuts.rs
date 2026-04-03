@@ -1,5 +1,5 @@
 use tauri::State;
-use crate::db::{DbState, queries, models::Shortcut};
+use crate::db::{DbState, queries, models::{Shortcut, SnippetTag}};
 
 #[tauri::command]
 pub fn list_shortcuts(state: State<DbState>) -> Result<Vec<Shortcut>, String> {
@@ -29,4 +29,56 @@ pub fn update_shortcut(state: State<DbState>, id: i64, name: String, value: Stri
 pub fn delete_shortcut(state: State<DbState>, id: i64) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     queries::delete_shortcut(&conn, id).map_err(|e| e.to_string())
+}
+
+// ── Snippet Tags ────────────────────────────────────────────
+
+#[tauri::command]
+pub fn list_snippet_tags(state: State<DbState>) -> Result<Vec<SnippetTag>, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    queries::list_snippet_tags(&conn).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn create_snippet_tag(
+    state: State<DbState>,
+    name: String,
+    patterns: String,
+    color: String,
+    sort_order: i32,
+) -> Result<SnippetTag, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    queries::create_snippet_tag(&conn, &name, &patterns, &color, sort_order)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn update_snippet_tag(
+    state: State<DbState>,
+    id: i64,
+    name: String,
+    patterns: String,
+    color: String,
+    sort_order: i32,
+) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    queries::update_snippet_tag(&conn, id, &name, &patterns, &color, sort_order)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn delete_snippet_tag(state: State<DbState>, id: i64) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    queries::delete_snippet_tag(&conn, id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn filter_shortcuts(
+    state: State<DbState>,
+    patterns: Vec<String>,
+    query: String,
+) -> Result<Vec<Shortcut>, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    queries::filter_shortcuts_by_patterns(&conn, &patterns, &query)
+        .map_err(|e| e.to_string())
 }

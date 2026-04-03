@@ -11,6 +11,9 @@ let currentQuery = '';
 let fontSize = 14;
 let listWidth = 260;
 let descOpen = false;
+let tags = [];
+let selectedTagId = null;
+let tagPanelEl = null;
 
 export async function init(container) {
   container.innerHTML = '';
@@ -42,6 +45,11 @@ export async function init(container) {
 
   container.appendChild(header);
 
+  // Tag panel
+  tagPanelEl = document.createElement('div');
+  tagPanelEl.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;padding:6px 12px;border-bottom:1px solid var(--border);flex-shrink:0;align-items:center';
+  container.appendChild(tagPanelEl);
+
   // Two-panel layout (fills remaining space)
   const panels = document.createElement('div');
   panels.style.cssText = 'display:flex;flex:1;overflow:hidden';
@@ -72,7 +80,25 @@ async function onSearch(query) {
 
 async function loadShortcuts() {
   try {
-    if (currentQuery.trim()) {
+    // Load tags
+    try {
+      tags = await call('list_snippet_tags');
+    } catch { tags = []; }
+    renderTagPanel();
+
+    // Load shortcuts based on tag + search
+    if (selectedTagId !== null) {
+      const tag = tags.find(t => t.id === selectedTagId);
+      if (tag) {
+        const patterns = JSON.parse(tag.patterns || '[]');
+        shortcuts = await call('filter_shortcuts', { patterns, query: currentQuery });
+      } else {
+        selectedTagId = null;
+        shortcuts = currentQuery.trim()
+          ? await call('search_shortcuts', { query: currentQuery })
+          : await call('list_shortcuts');
+      }
+    } else if (currentQuery.trim()) {
       shortcuts = await call('search_shortcuts', { query: currentQuery });
     } else {
       shortcuts = await call('list_shortcuts');
@@ -228,6 +254,213 @@ function renderDetail() {
   descSection.appendChild(toggle);
   descSection.appendChild(descContent);
   detailEl.appendChild(descSection);
+}
+
+function renderTagPanel() {
+  if (!tagPanelEl) return;
+  tagPanelEl.innerHTML = '';
+
+  if (tags.length === 0 && selectedTagId === null) {
+    // Show only the "+" button when no tags exist
+  }
+
+  tags.forEach(tag => {
+    const btn = document.createElement('button');
+    const isSelected = selectedTagId === tag.id;
+    btn.textContent = tag.name;
+    btn.style.cssText = `
+      background: ${isSelected ? tag.color + '22' : 'transparent'};
+      border: 1px solid ${tag.color};
+      color: ${tag.color};
+      padding: 2px 10px;
+      border-radius: 12px;
+      font-size: 12px;
+      cursor: pointer;
+      font-weight: ${isSelected ? '600' : '400'};
+      line-height: 1.4;
+    `;
+    btn.addEventListener('click', () => {
+      selectedTagId = isSelected ? null : tag.id;
+      selectedIndex = -1;
+      loadShortcuts();
+    });
+    tagPanelEl.appendChild(btn);
+  });
+
+  // "+" manage tags button
+  const addBtn = document.createElement('button');
+  addBtn.textContent = '+';
+  addBtn.title = 'Manage tags';
+  addBtn.style.cssText = 'background:transparent;border:1px solid var(--text-muted);color:var(--text-muted);width:24px;height:24px;border-radius:12px;font-size:14px;cursor:pointer;padding:0;display:flex;align-items:center;justify-content:center;line-height:1';
+  addBtn.addEventListener('click', openTagManager);
+  tagPanelEl.appendChild(addBtn);
+}
+
+function openTagManager() {
+  const body = document.createElement('div');
+  body.style.cssText = 'display:flex;flex-direction:column;gap:12px;min-width:380px';
+
+  // Existing tags list
+  const listDiv = document.createElement('div');
+  listDiv.style.cssText = 'display:flex;flex-direction:column;gap:6px;max-height:200px;overflow-y:auto';
+
+  function renderTagList() {
+    listDiv.innerHTML = '';
+    tags.forEach(tag => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:4px 0';
+
+      const dot = document.createElement('span');
+      dot.style.cssText = `width:12px;height:12px;border-radius:50%;background:${tag.color};flex-shrink:0`;
+      row.appendChild(dot);
+
+      const nameSpan = document.createElement('span');
+      nameSpan.style.cssText = 'flex:1;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+      nameSpan.textContent = tag.name;
+      row.appendChild(nameSpan);
+
+      const patternsSpan = document.createElement('span');
+      patternsSpan.style.cssText = 'font-size:11px;color:var(--text-muted);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+      try {
+        patternsSpan.textContent = JSON.parse(tag.patterns).join(', ');
+      } catch { patternsSpan.textContent = tag.patterns; }
+      row.appendChild(patternsSpan);
+
+      const editBtn = document.createElement('button');
+      editBtn.textContent = 'Edit';
+      editBtn.style.cssText = 'padding:2px 8px;font-size:11px';
+      editBtn.className = 'btn-secondary';
+      editBtn.addEventListener('click', () => fillForm(tag));
+      row.appendChild(editBtn);
+
+      const delBtn = document.createElement('button');
+      delBtn.textContent = 'Del';
+      delBtn.style.cssText = 'padding:2px 8px;font-size:11px';
+      delBtn.className = 'btn-danger';
+      delBtn.addEventListener('click', async () => {
+        try {
+          await call('delete_snippet_tag', { id: tag.id });
+          if (selectedTagId === tag.id) selectedTagId = null;
+          tags = await call('list_snippet_tags');
+          renderTagList();
+          renderTagPanel();
+          showToast('Tag deleted', 'success');
+        } catch (err) { showToast('Error: ' + err, 'error'); }
+      });
+      row.appendChild(delBtn);
+
+      listDiv.appendChild(row);
+    });
+
+    if (tags.length === 0) {
+      const empty = document.createElement('p');
+      empty.textContent = 'No tags yet';
+      empty.style.cssText = 'text-align:center;color:var(--text-muted);font-size:12px;margin:8px 0';
+      listDiv.appendChild(empty);
+    }
+  }
+
+  body.appendChild(listDiv);
+
+  // Separator
+  const sep = document.createElement('div');
+  sep.style.cssText = 'border-top:1px solid var(--border);margin:4px 0';
+  body.appendChild(sep);
+
+  // Add/edit form
+  const formTitle = document.createElement('div');
+  formTitle.textContent = 'Add tag';
+  formTitle.style.cssText = 'font-size:13px;font-weight:600;color:var(--text)';
+  body.appendChild(formTitle);
+
+  const form = document.createElement('div');
+  form.style.cssText = 'display:flex;flex-direction:column;gap:8px';
+
+  const nameInput = document.createElement('input');
+  nameInput.type = 'text';
+  nameInput.placeholder = 'Tag name';
+  form.appendChild(nameInput);
+
+  const patternsInput = document.createElement('input');
+  patternsInput.type = 'text';
+  patternsInput.placeholder = 'Patterns (comma-separated, e.g. af_*, airflow_*)';
+  form.appendChild(patternsInput);
+
+  const colorRow = document.createElement('div');
+  colorRow.style.cssText = 'display:flex;align-items:center;gap:8px';
+  const colorLabel = document.createElement('span');
+  colorLabel.textContent = 'Color:';
+  colorLabel.style.cssText = 'font-size:12px;color:var(--text-muted)';
+  colorRow.appendChild(colorLabel);
+  const colorInput = document.createElement('input');
+  colorInput.type = 'color';
+  colorInput.value = '#388bfd';
+  colorInput.style.cssText = 'width:40px;height:28px;padding:0;border:none;cursor:pointer';
+  colorRow.appendChild(colorInput);
+  form.appendChild(colorRow);
+
+  let editingId = null;
+
+  const saveBtn = document.createElement('button');
+  saveBtn.textContent = 'Save tag';
+  saveBtn.style.cssText = 'padding:4px 16px;font-size:12px;align-self:flex-start';
+  saveBtn.addEventListener('click', async () => {
+    const name = nameInput.value.trim();
+    const rawPatterns = patternsInput.value.trim();
+    const color = colorInput.value;
+
+    if (!name) { showToast('Name is required', 'error'); return; }
+    if (!rawPatterns) { showToast('At least one pattern is required', 'error'); return; }
+
+    const patternsArr = rawPatterns.split(',').map(p => p.trim()).filter(Boolean);
+    const patterns = JSON.stringify(patternsArr);
+
+    try {
+      if (editingId !== null) {
+        await call('update_snippet_tag', { id: editingId, name, patterns, color, sort_order: 0 });
+        showToast('Tag updated', 'success');
+      } else {
+        await call('create_snippet_tag', { name, patterns, color, sort_order: tags.length });
+        showToast('Tag created', 'success');
+      }
+      tags = await call('list_snippet_tags');
+      renderTagList();
+      renderTagPanel();
+      clearForm();
+    } catch (err) { showToast('Error: ' + err, 'error'); }
+  });
+  form.appendChild(saveBtn);
+  body.appendChild(form);
+
+  function fillForm(tag) {
+    editingId = tag.id;
+    nameInput.value = tag.name;
+    try {
+      patternsInput.value = JSON.parse(tag.patterns).join(', ');
+    } catch { patternsInput.value = tag.patterns; }
+    colorInput.value = tag.color;
+    formTitle.textContent = 'Edit tag';
+    saveBtn.textContent = 'Update tag';
+  }
+
+  function clearForm() {
+    editingId = null;
+    nameInput.value = '';
+    patternsInput.value = '';
+    colorInput.value = '#388bfd';
+    formTitle.textContent = 'Add tag';
+    saveBtn.textContent = 'Save tag';
+  }
+
+  renderTagList();
+
+  showModal({
+    title: 'Manage Snippet Tags',
+    body,
+    onConfirm: async () => {
+      await loadShortcuts();
+    },
+  }).catch(() => {});
 }
 
 function onKeydown(e) {

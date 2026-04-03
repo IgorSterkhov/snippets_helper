@@ -148,6 +148,18 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
             sort_order      INTEGER NOT NULL DEFAULT 0,
             hide_after_run  INTEGER NOT NULL DEFAULT 0
         );
+
+        CREATE TABLE IF NOT EXISTS snippet_tags (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            name            TEXT NOT NULL DEFAULT '',
+            patterns        TEXT NOT NULL DEFAULT '[]',
+            color           TEXT NOT NULL DEFAULT '#388bfd',
+            sort_order      INTEGER NOT NULL DEFAULT 0,
+            uuid            TEXT UNIQUE NOT NULL,
+            updated_at      TIMESTAMP NOT NULL,
+            sync_status     TEXT NOT NULL DEFAULT 'pending',
+            user_id         TEXT NOT NULL DEFAULT ''
+        );
         ",
     )?;
 
@@ -173,7 +185,7 @@ mod tests {
     }
 
     #[test]
-    fn test_all_12_tables_exist() {
+    fn test_all_13_tables_exist() {
         let conn = init_test_db();
 
         let tables: Vec<String> = conn
@@ -196,6 +208,7 @@ mod tests {
             "notes",
             "obfuscation_mappings",
             "shortcuts",
+            "snippet_tags",
             "sql_macrosing_templates",
             "sql_table_analyzer_templates",
             "superset_settings",
