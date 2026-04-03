@@ -509,9 +509,12 @@ async function renderUpdates(container) {
   tokenRow.appendChild(tokenInput);
   container.appendChild(tokenRow);
 
-  // Force Full Sync button
-  container.appendChild(el('label', { text: 'Sync actions:', class: 'settings-label', style: 'margin-top:16px' }));
+  // --- Sync actions section ---
+  const syncSection = el('div', { style: 'margin-top:20px;padding-top:16px;border-top:1px solid var(--border)' });
+  syncSection.appendChild(el('label', { text: 'Sync actions', class: 'settings-label', style: 'display:block;margin-bottom:8px' }));
+
   const forceBtn = el('button', { text: 'Force Full Sync (reset & re-download all data)' });
+  forceBtn.style.cssText = 'display:block;margin-bottom:16px';
   forceBtn.addEventListener('click', async () => {
     forceBtn.disabled = true;
     forceBtn.textContent = 'Syncing...';
@@ -525,12 +528,16 @@ async function renderUpdates(container) {
       forceBtn.textContent = 'Force Full Sync (reset & re-download all data)';
     }
   });
-  container.appendChild(forceBtn);
+  syncSection.appendChild(forceBtn);
+  container.appendChild(syncSection);
 
-  // Debug Sync button
-  container.appendChild(el('label', { text: 'Sync diagnostics:', class: 'settings-label', style: 'margin-top:16px' }));
+  // --- Diagnostics section ---
+  const diagSection = el('div', { style: 'margin-top:8px;padding-top:16px;border-top:1px solid var(--border)' });
+  diagSection.appendChild(el('label', { text: 'Diagnostics', class: 'settings-label', style: 'display:block;margin-bottom:8px' }));
+
   const debugBtn = el('button', { text: 'Debug Sync', class: 'btn-secondary' });
-  const debugOutput = el('pre', { style: 'font-size:11px;color:var(--text-muted);background:var(--bg-secondary);padding:10px;border-radius:6px;overflow:auto;max-height:200px;white-space:pre-wrap;margin-top:8px' });
+  debugBtn.style.cssText = 'display:block;margin-bottom:8px';
+  const debugOutput = el('pre', { style: 'font-size:11px;color:var(--text-muted);background:var(--bg-secondary);padding:10px;border-radius:6px;overflow:auto;max-height:200px;white-space:pre-wrap' });
   debugBtn.addEventListener('click', async () => {
     debugBtn.disabled = true;
     debugBtn.textContent = 'Running...';
@@ -544,8 +551,9 @@ async function renderUpdates(container) {
       debugBtn.textContent = 'Debug Sync';
     }
   });
-  container.appendChild(debugBtn);
-  container.appendChild(debugOutput);
+  diagSection.appendChild(debugBtn);
+  diagSection.appendChild(debugOutput);
+  container.appendChild(diagSection);
 
   // Auto-check on tab open
   checkBtn.click();
