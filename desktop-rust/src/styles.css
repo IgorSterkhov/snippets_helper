@@ -325,17 +325,10 @@ button:hover, .btn:hover {
 .update-banner {
   background: var(--accent);
   color: white;
-  padding: 8px 16px;
+  padding: 6px 16px;
   text-align: center;
   font-size: 13px;
-  cursor: pointer;
-  width: 100%;
   flex-shrink: 0;
-}
-
-.update-banner a {
-  color: white;
-  text-decoration: underline;
 }
 
 /* ── Utility ──────────────────────────────────────────────── */

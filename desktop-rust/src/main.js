@@ -61,11 +61,26 @@ async function showUpdateBanner() {
     if (autoUpdate !== '1') return;
     const info = await call('check_for_update');
     if (info.has_update) {
-      const app = document.getElementById('app');
+      // Insert banner before #app, not inside it
       const banner = document.createElement('div');
       banner.className = 'update-banner';
-      banner.innerHTML = `New version ${info.latest_version} available! <a href="${info.download_url}" target="_blank">Download</a>`;
-      app.insertBefore(banner, app.firstChild);
+      const text = document.createTextNode(`New version ${info.latest_version} available! `);
+      const link = document.createElement('a');
+      link.textContent = 'Download';
+      link.href = '#';
+      link.style.cssText = 'color:white;text-decoration:underline;cursor:pointer';
+      link.addEventListener('click', async (e) => {
+        e.preventDefault();
+        try { await call('open_url', { url: info.download_url }); } catch {}
+      });
+      const closeBtn = document.createElement('span');
+      closeBtn.textContent = ' ✕';
+      closeBtn.style.cssText = 'cursor:pointer;margin-left:12px;opacity:0.7';
+      closeBtn.addEventListener('click', () => banner.remove());
+      banner.appendChild(text);
+      banner.appendChild(link);
+      banner.appendChild(closeBtn);
+      document.body.insertBefore(banner, document.body.firstChild);
     }
   } catch (e) {
     console.log('Update check:', e);
