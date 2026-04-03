@@ -387,14 +387,8 @@ async function renderSync(container) {
     registerBtn.disabled = true;
     registerBtn.textContent = 'Registering...';
     try {
-      // Simple registration: POST to /register endpoint
-      const resp = await fetch(url.replace(/\/+$/, '') + '/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hostname: navigator.userAgent }),
-      });
-      if (!resp.ok) throw new Error('HTTP ' + resp.status);
-      const data = await resp.json();
+      const computerName = await call('get_setting', { key: 'computer_name' }) || 'unknown';
+      const data = await call('register_sync', { apiUrl: url, name: computerName });
       if (data.api_key) {
         keyInput.value = data.api_key;
         await saveSetting('sync_api_key', data.api_key);
