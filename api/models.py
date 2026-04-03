@@ -26,6 +26,7 @@ class Shortcut(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     value: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
+    links: Mapped[str | None] = mapped_column(Text, default="[]")
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
 
