@@ -48,6 +48,11 @@ items.json
 .env
 .superpowers/
 
+# Sensitive workflow docs (contain server IPs, SSH commands, deploy instructions)
+.workflow/plans/2026-04-01-api-deploy.md
+.workflow/plans/2026-04-02-sync-client-fix.md
+.workflow/specs/api_sync.md
+
 # Rust
 desktop-rust/src-tauri/target/
 desktop-rust/node_modules/
