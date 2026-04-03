@@ -42,6 +42,8 @@ pub fn run() {
             clipboard::copy_to_clipboard,
             clipboard::read_clipboard,
             commands::sync_cmd::trigger_sync,
+            commands::sync_cmd::register_sync,
+            commands::sync_cmd::check_sync_health,
             commands::notes::list_note_folders,
             commands::notes::create_note_folder,
             commands::notes::update_note_folder,
