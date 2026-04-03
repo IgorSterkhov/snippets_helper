@@ -10,7 +10,9 @@ let detailEl = null;
 let currentQuery = '';
 let fontSize = 14;
 let listWidth = 260;
-let activeTab = null; // 'desc' | 'links' | null
+let descOpen = false;
+let viewMode = 'main'; // 'main' | 'web'
+let activeWebLink = null; // index of active link in web view
 let tags = [];
 let selectedTagId = null;
 let tagPanelEl = null;
@@ -142,7 +144,9 @@ function renderList() {
 
     item.addEventListener('click', () => {
       selectedIndex = index;
-      activeTab = null;
+      viewMode = 'main';
+      descOpen = false;
+      activeWebLink = null;
       renderList();
       renderDetail();
     });
@@ -174,23 +178,41 @@ function renderDetail() {
   const links = parseLinks(shortcut);
   const hasLinks = links.length > 0;
 
-  // Auto-select tab on first selection
-  if (activeTab === null) {
-    if (hasDesc) activeTab = 'desc';
-    else if (hasLinks) activeTab = 'links';
-  }
+  // Auto-open description if filled
+  if (hasDesc && !descOpen) descOpen = true;
 
-  // Header with name + actions (fixed)
+  // Header: name + [Main|Web] + actions
   const header = document.createElement('div');
-  header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:10px 16px;border-bottom:1px solid var(--border);flex-shrink:0';
+  header.style.cssText = 'display:flex;align-items:center;padding:10px 16px;border-bottom:1px solid var(--border);flex-shrink:0;gap:8px';
 
   const nameEl = document.createElement('h3');
-  nameEl.style.cssText = `margin:0;font-size:${fontSize + 1}px;color:var(--text)`;
+  nameEl.style.cssText = `margin:0;font-size:${fontSize + 1}px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0`;
   nameEl.textContent = shortcut.name;
   header.appendChild(nameEl);
 
+  // Main/Web toggle (only show if has links)
+  if (hasLinks) {
+    const toggle = document.createElement('div');
+    toggle.style.cssText = 'display:flex;gap:0;flex-shrink:0';
+
+    const mainBtn = document.createElement('button');
+    mainBtn.textContent = 'Main';
+    mainBtn.style.cssText = `padding:3px 14px;font-size:12px;border:1px solid var(--border);cursor:pointer;border-radius:6px 0 0 6px;transition:all 0.15s;background:${viewMode === 'main' ? 'var(--bg-tertiary)' : 'transparent'};color:${viewMode === 'main' ? 'var(--text)' : 'var(--text-muted)'};border-color:${viewMode === 'main' ? 'var(--border-hover,#30363d)' : 'var(--border)'}`;
+    mainBtn.addEventListener('click', () => { viewMode = 'main'; renderDetail(); });
+
+    const webBtn = document.createElement('button');
+    webBtn.textContent = 'Web';
+    webBtn.style.cssText = `padding:3px 14px;font-size:12px;border:1px solid var(--border);border-left:none;cursor:pointer;border-radius:0 6px 6px 0;transition:all 0.15s;background:${viewMode === 'web' ? 'var(--bg-tertiary)' : 'transparent'};color:${viewMode === 'web' ? 'var(--text)' : 'var(--text-muted)'};border-color:${viewMode === 'web' ? 'var(--border-hover,#30363d)' : 'var(--border)'}`;
+    webBtn.addEventListener('click', () => { viewMode = 'web'; if (activeWebLink === null && links.length > 0) activeWebLink = 0; renderDetail(); });
+
+    toggle.appendChild(mainBtn);
+    toggle.appendChild(webBtn);
+    header.appendChild(toggle);
+  }
+
+  // Action buttons
   const actions = document.createElement('div');
-  actions.style.cssText = 'display:flex;gap:6px';
+  actions.style.cssText = 'display:flex;gap:6px;flex-shrink:0;margin-left:auto';
 
   const copyBtn = document.createElement('button');
   copyBtn.textContent = 'Copy';
@@ -215,99 +237,223 @@ function renderDetail() {
   header.appendChild(actions);
   detailEl.appendChild(header);
 
-  // Value -- independent scroll, takes available space
+  if (viewMode === 'main') {
+    renderMainView(shortcut, hasDesc, links, hasLinks);
+  } else {
+    renderWebView(links);
+  }
+}
+
+function renderMainView(shortcut, hasDesc, links, hasLinks) {
+  const mainView = document.createElement('div');
+  mainView.style.cssText = 'flex:1;display:flex;flex-direction:column;overflow-y:auto';
+
+  // Snippet value
   const valueEl = document.createElement('pre');
-  valueEl.style.cssText = `flex:1;overflow-y:auto;min-height:0;font-family:'SF Mono','Fira Code','Cascadia Code',monospace;font-size:${fontSize}px;color:var(--text);padding:12px 16px;white-space:pre-wrap;word-break:break-word;margin:0`;
+  valueEl.style.cssText = `font-family:'SF Mono','Fira Code','Cascadia Code',monospace;font-size:${fontSize}px;color:var(--text);padding:12px 16px;white-space:pre-wrap;word-break:break-word;margin:0`;
   valueEl.textContent = shortcut.value;
-  detailEl.appendChild(valueEl);
+  mainView.appendChild(valueEl);
 
-  // Tabbed bottom section
-  const bottomSection = document.createElement('div');
-  bottomSection.style.cssText = 'border-top:1px solid var(--border);flex-shrink:0';
+  // Link chips (inline, below snippet text)
+  if (hasLinks) {
+    const linksInline = document.createElement('div');
+    linksInline.style.cssText = 'padding:8px 16px;display:flex;flex-wrap:wrap;gap:6px;align-items:center';
 
-  // Tab bar
-  const tabBar = document.createElement('div');
-  tabBar.style.cssText = 'display:flex;gap:0;border-bottom:1px solid var(--border)';
+    links.forEach((link, i) => {
+      const chip = document.createElement('div');
+      chip.style.cssText = 'display:inline-flex;align-items:center;gap:6px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;transition:border-color 0.15s';
+      chip.addEventListener('mouseenter', () => { chip.style.borderColor = 'var(--accent)'; });
+      chip.addEventListener('mouseleave', () => { chip.style.borderColor = 'var(--border)'; });
 
-  function makeTab(id, label, badgeText) {
-    const tab = document.createElement('button');
-    const isActive = activeTab === id;
-    tab.textContent = label + (badgeText ? ` (${badgeText})` : '');
-    tab.style.cssText = `
-      background:none;border:none;border-bottom:2px solid ${isActive ? 'var(--accent)' : 'transparent'};
-      padding:6px 14px;font-size:12px;cursor:pointer;color:${isActive ? 'var(--text)' : 'var(--text-muted)'};
-      font-weight:${isActive ? '600' : '400'}
-    `;
-    tab.addEventListener('mouseenter', () => { if (!isActive) tab.style.color = 'var(--text)'; });
-    tab.addEventListener('mouseleave', () => { if (!isActive) tab.style.color = 'var(--text-muted)'; });
-    tab.addEventListener('click', () => {
-      activeTab = activeTab === id ? null : id;
-      renderDetail();
-    });
-    return tab;
-  }
+      const icon = document.createElement('span');
+      icon.textContent = '🔗';
+      icon.style.cssText = 'font-size:11px';
+      chip.appendChild(icon);
 
-  tabBar.appendChild(makeTab('desc', 'Description', hasDesc ? 'filled' : ''));
-  tabBar.appendChild(makeTab('links', 'Links', hasLinks ? String(links.length) : ''));
-  bottomSection.appendChild(tabBar);
+      const title = document.createElement('span');
+      title.textContent = link.title || link.url;
+      title.style.cssText = 'color:var(--text)';
+      chip.appendChild(title);
 
-  // Tab content
-  if (activeTab === 'desc') {
-    const descContent = document.createElement('div');
-    descContent.style.cssText = `max-height:160px;overflow-y:auto;padding:8px 16px 10px 16px;font-size:${fontSize - 1}px;color:var(--text);white-space:pre-wrap;word-break:break-word`;
-    if (hasDesc) {
-      descContent.textContent = shortcut.description;
-    } else {
-      descContent.innerHTML = '<span style="color:var(--text-muted);font-style:italic">No description. Click Edit to add one.</span>';
-    }
-    bottomSection.appendChild(descContent);
-  } else if (activeTab === 'links') {
-    const linksContent = document.createElement('div');
-    linksContent.style.cssText = 'max-height:160px;overflow-y:auto;padding:8px 16px 10px 16px';
-    if (hasLinks) {
-      links.forEach(link => {
-        const row = document.createElement('div');
-        row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:3px 0;font-size:13px';
-
-        const dot = document.createElement('span');
-        dot.style.cssText = 'width:6px;height:6px;border-radius:50%;background:var(--accent);flex-shrink:0';
-        row.appendChild(dot);
-
-        const titleSpan = document.createElement('span');
-        titleSpan.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)';
-        titleSpan.textContent = link.title || link.url;
-        row.appendChild(titleSpan);
-
-        const openAppBtn = document.createElement('button');
-        openAppBtn.textContent = 'Open in app';
-        openAppBtn.style.cssText = 'padding:2px 8px;font-size:11px;flex-shrink:0';
-        openAppBtn.addEventListener('click', async () => {
-          try {
-            await call('open_link_window', { url: link.url, title: link.title || link.url });
-          } catch (err) { showToast('Error: ' + err, 'error'); }
-        });
-        row.appendChild(openAppBtn);
-
-        const openBrowserBtn = document.createElement('button');
-        openBrowserBtn.textContent = 'Open in browser';
-        openBrowserBtn.className = 'btn-secondary';
-        openBrowserBtn.style.cssText = 'padding:2px 8px;font-size:11px;flex-shrink:0';
-        openBrowserBtn.addEventListener('click', async () => {
-          try {
-            await call('open_url', { url: link.url });
-          } catch (err) { showToast('Error: ' + err, 'error'); }
-        });
-        row.appendChild(openBrowserBtn);
-
-        linksContent.appendChild(row);
+      // Click chip → switch to Web view on this link
+      chip.addEventListener('click', (e) => {
+        if (e.target.classList.contains('link-ext')) return;
+        viewMode = 'web';
+        activeWebLink = i;
+        renderDetail();
       });
-    } else {
-      linksContent.innerHTML = '<span style="color:var(--text-muted);font-style:italic;font-size:13px">No links. Click Edit to add.</span>';
-    }
-    bottomSection.appendChild(linksContent);
+
+      // ↗ open in browser
+      const ext = document.createElement('span');
+      ext.textContent = '↗';
+      ext.className = 'link-ext';
+      ext.title = 'Open in browser';
+      ext.style.cssText = 'color:var(--text-muted);font-size:11px;cursor:pointer;padding:2px;border-radius:3px;margin-left:2px';
+      ext.addEventListener('mouseenter', () => { ext.style.color = 'var(--text)'; ext.style.background = 'var(--bg-tertiary)'; });
+      ext.addEventListener('mouseleave', () => { ext.style.color = 'var(--text-muted)'; ext.style.background = ''; });
+      ext.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        try { await call('open_url', { url: link.url }); } catch (err) { showToast('Error: ' + err, 'error'); }
+      });
+      chip.appendChild(ext);
+
+      linksInline.appendChild(chip);
+    });
+
+    mainView.appendChild(linksInline);
   }
 
-  detailEl.appendChild(bottomSection);
+  // Description (collapsible)
+  const descSection = document.createElement('div');
+  descSection.style.cssText = 'border-top:1px solid var(--border);flex-shrink:0';
+
+  const toggle = document.createElement('div');
+  toggle.style.cssText = 'display:flex;align-items:center;gap:6px;padding:7px 16px;cursor:pointer;font-size:12px;color:var(--text-muted);user-select:none';
+  toggle.addEventListener('mouseenter', () => { toggle.style.background = 'var(--bg-secondary)'; });
+  toggle.addEventListener('mouseleave', () => { toggle.style.background = ''; });
+
+  const arrow = document.createElement('span');
+  arrow.textContent = '\u25B6';
+  arrow.style.cssText = `font-size:10px;display:inline-block;transition:transform 0.2s;${descOpen ? 'transform:rotate(90deg)' : ''}`;
+  toggle.appendChild(arrow);
+
+  const label = document.createElement('span');
+  label.textContent = 'Description';
+  toggle.appendChild(label);
+
+  const badge = document.createElement('span');
+  badge.style.cssText = 'background:var(--bg-tertiary);padding:1px 6px;border-radius:8px;font-size:10px;color:var(--text-muted)';
+  badge.textContent = hasDesc ? 'filled' : 'empty';
+  if (!hasDesc) badge.style.opacity = '0.5';
+  toggle.appendChild(badge);
+
+  const descContent = document.createElement('div');
+  descContent.style.cssText = `max-height:140px;overflow-y:auto;padding:0 16px 10px 16px;font-size:${fontSize - 1}px;color:var(--text);white-space:pre-wrap;word-break:break-word;display:${descOpen ? 'block' : 'none'}`;
+  if (hasDesc) {
+    descContent.textContent = shortcut.description;
+  } else {
+    descContent.innerHTML = '<span style="color:var(--text-muted);font-style:italic">No description. Click Edit to add one.</span>';
+  }
+
+  toggle.addEventListener('click', () => {
+    descOpen = !descOpen;
+    arrow.style.transform = descOpen ? 'rotate(90deg)' : '';
+    descContent.style.display = descOpen ? 'block' : 'none';
+  });
+
+  descSection.appendChild(toggle);
+  descSection.appendChild(descContent);
+  mainView.appendChild(descSection);
+
+  detailEl.appendChild(mainView);
+}
+
+function renderWebView(links) {
+  const webView = document.createElement('div');
+  webView.style.cssText = 'flex:1;display:flex;flex-direction:column;overflow:hidden';
+
+  // Compact link tabs + ↗ browser buttons
+  const tabBar = document.createElement('div');
+  tabBar.style.cssText = 'display:flex;padding:8px 16px;flex-shrink:0;border-bottom:1px solid var(--border);gap:4px;flex-wrap:wrap;align-items:center';
+
+  links.forEach((link, i) => {
+    const tabWrapper = document.createElement('div');
+    tabWrapper.style.cssText = 'display:inline-flex;align-items:center;gap:2px';
+
+    const tab = document.createElement('button');
+    const isActive = activeWebLink === i;
+    tab.textContent = link.title || link.url;
+    tab.style.cssText = `padding:4px 10px;font-size:12px;border:1px solid var(--border);border-radius:4px 0 0 4px;cursor:pointer;transition:all 0.15s;background:${isActive ? 'var(--bg-tertiary)' : 'transparent'};color:${isActive ? 'var(--text)' : 'var(--text-muted)'};border-color:${isActive ? '#30363d' : 'var(--border)'}`;
+    tab.addEventListener('click', () => { activeWebLink = i; renderDetail(); });
+    tabWrapper.appendChild(tab);
+
+    const extBtn = document.createElement('button');
+    extBtn.textContent = '↗';
+    extBtn.title = 'Open in browser';
+    extBtn.style.cssText = `padding:4px 6px;font-size:11px;border:1px solid var(--border);border-left:none;border-radius:0 4px 4px 0;cursor:pointer;background:transparent;color:var(--text-muted);transition:all 0.15s`;
+    extBtn.addEventListener('mouseenter', () => { extBtn.style.color = 'var(--text)'; extBtn.style.background = 'var(--bg-tertiary)'; });
+    extBtn.addEventListener('mouseleave', () => { extBtn.style.color = 'var(--text-muted)'; extBtn.style.background = ''; });
+    extBtn.addEventListener('click', async () => {
+      try { await call('open_url', { url: link.url }); } catch (err) { showToast('Error: ' + err, 'error'); }
+    });
+    tabWrapper.appendChild(extBtn);
+
+    tabBar.appendChild(tabWrapper);
+  });
+
+  webView.appendChild(tabBar);
+
+  // iframe area
+  const frameArea = document.createElement('div');
+  frameArea.style.cssText = 'flex:1;background:var(--bg-secondary);display:flex;flex-direction:column;overflow:hidden';
+
+  if (activeWebLink !== null && activeWebLink < links.length) {
+    const url = links[activeWebLink].url;
+    const iframe = document.createElement('iframe');
+    iframe.src = url;
+    iframe.style.cssText = 'width:100%;flex:1;border:none;background:white';
+
+    // Detect iframe load failure
+    const fallback = document.createElement('div');
+    fallback.style.cssText = 'display:none;flex:1;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:var(--text-muted)';
+    fallback.innerHTML = `
+      <div style="font-size:14px">This site blocked embedded viewing</div>
+      <div style="display:flex;gap:8px">
+        <button id="fb-app" style="padding:6px 16px;font-size:13px;background:var(--accent,#388bfd);color:white;border:none;border-radius:6px;cursor:pointer">Open in app window</button>
+        <button id="fb-browser" class="btn-secondary" style="padding:6px 16px;font-size:13px;background:var(--bg-tertiary);color:var(--text);border:1px solid var(--border);border-radius:6px;cursor:pointer">Open in browser</button>
+      </div>
+    `;
+
+    // Try to detect blocked iframe (heuristic: if contentWindow is inaccessible after load)
+    iframe.addEventListener('load', () => {
+      try {
+        // If we can access contentDocument, it loaded (or it's about:blank for blocked)
+        const doc = iframe.contentDocument;
+        if (!doc || !doc.body || doc.body.innerHTML === '') {
+          iframe.style.display = 'none';
+          fallback.style.display = 'flex';
+        }
+      } catch {
+        // Cross-origin — iframe loaded but we can't access it (this is normal/OK)
+      }
+    });
+
+    iframe.addEventListener('error', () => {
+      iframe.style.display = 'none';
+      fallback.style.display = 'flex';
+    });
+
+    // Timeout fallback — if iframe shows nothing after 5s
+    setTimeout(() => {
+      try {
+        const doc = iframe.contentDocument;
+        if (doc && doc.body && doc.body.innerHTML === '') {
+          iframe.style.display = 'none';
+          fallback.style.display = 'flex';
+        }
+      } catch { /* cross-origin, iframe is working */ }
+    }, 5000);
+
+    frameArea.appendChild(iframe);
+    frameArea.appendChild(fallback);
+
+    // Wire fallback buttons after DOM insertion
+    setTimeout(() => {
+      const appBtn = fallback.querySelector('#fb-app');
+      const browserBtn = fallback.querySelector('#fb-browser');
+      if (appBtn) appBtn.addEventListener('click', async () => {
+        try { await call('open_link_window', { url, title: links[activeWebLink].title || url }); } catch (err) { showToast('Error: ' + err, 'error'); }
+      });
+      if (browserBtn) browserBtn.addEventListener('click', async () => {
+        try { await call('open_url', { url }); } catch (err) { showToast('Error: ' + err, 'error'); }
+      });
+    }, 0);
+  } else {
+    frameArea.innerHTML = '<div style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:14px">Select a link to view</div>';
+  }
+
+  webView.appendChild(frameArea);
+  detailEl.appendChild(webView);
 }
 
 function renderTagPanel() {
@@ -527,7 +673,7 @@ function onKeydown(e) {
     e.preventDefault();
     if (shortcuts.length === 0) return;
     selectedIndex = Math.min(selectedIndex + 1, shortcuts.length - 1);
-    activeTab = null;
+    viewMode = 'main'; descOpen = false; activeWebLink = null;
     renderList();
     renderDetail();
     scrollToSelected();
@@ -535,7 +681,7 @@ function onKeydown(e) {
     e.preventDefault();
     if (shortcuts.length === 0) return;
     selectedIndex = Math.max(selectedIndex - 1, 0);
-    activeTab = null;
+    viewMode = 'main'; descOpen = false; activeWebLink = null;
     renderList();
     renderDetail();
     scrollToSelected();
