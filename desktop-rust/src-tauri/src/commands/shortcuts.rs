@@ -14,15 +14,39 @@ pub fn search_shortcuts(state: State<DbState>, query: String) -> Result<Vec<Shor
 }
 
 #[tauri::command]
-pub fn create_shortcut(state: State<DbState>, name: String, value: String, description: String) -> Result<Shortcut, String> {
+pub fn create_shortcut(state: State<DbState>, name: String, value: String, description: String, links: String) -> Result<Shortcut, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    queries::create_shortcut(&conn, &name, &value, &description).map_err(|e| e.to_string())
+    queries::create_shortcut(&conn, &name, &value, &description, &links).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn update_shortcut(state: State<DbState>, id: i64, name: String, value: String, description: String) -> Result<(), String> {
+pub fn update_shortcut(state: State<DbState>, id: i64, name: String, value: String, description: String, links: String) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    queries::update_shortcut(&conn, id, &name, &value, &description).map_err(|e| e.to_string())
+    queries::update_shortcut(&conn, id, &name, &value, &description, &links).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn open_link_window(app: tauri::AppHandle, url: String, title: String) -> Result<(), String> {
+    use tauri::{Manager, WebviewWindowBuilder, WebviewUrl};
+
+    // Generate unique window label
+    let label = format!("link_{}", url.len() % 1000);
+
+    // If window with this label exists, focus it
+    if let Some(window) = app.get_webview_window(&label) {
+        window.set_focus().map_err(|e| format!("{e}"))?;
+        return Ok(());
+    }
+
+    let parsed_url: tauri::Url = url.parse().map_err(|e| format!("{e}"))?;
+
+    WebviewWindowBuilder::new(&app, &label, WebviewUrl::External(parsed_url))
+        .title(&title)
+        .inner_size(1024.0, 768.0)
+        .build()
+        .map_err(|e| format!("{e}"))?;
+
+    Ok(())
 }
 
 #[tauri::command]

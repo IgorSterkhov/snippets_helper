@@ -16,7 +16,7 @@ pub const SYNC_FIELDS: &[&str] = &["uuid", "updated_at", "sync_status", "user_id
 /// These match the Python `sync_schema.SYNCED_TABLES[table]['data_fields']` minus `id`.
 pub fn data_columns(table: &str) -> &'static [&'static str] {
     match table {
-        "shortcuts" => &["name", "value", "description"],
+        "shortcuts" => &["name", "value", "description", "links"],
         "sql_table_analyzer_templates" => &["template_text"],
         "sql_macrosing_templates" => &[
             "template_name",

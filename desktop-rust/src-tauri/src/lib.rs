@@ -44,6 +44,7 @@ pub fn run() {
             commands::shortcuts::update_snippet_tag,
             commands::shortcuts::delete_snippet_tag,
             commands::shortcuts::filter_shortcuts,
+            commands::shortcuts::open_link_window,
             clipboard::copy_to_clipboard,
             clipboard::open_url,
             clipboard::read_clipboard,
@@ -129,9 +130,11 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
-                // Hide to tray instead of quitting
-                api.prevent_close();
-                let _ = window.hide();
+                // Only hide to tray for the main window; let link windows close normally
+                if window.label() == "main" {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
             }
         })
         .run(tauri::generate_context!())
