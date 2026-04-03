@@ -6,6 +6,7 @@ pub const SYNCED_TABLES: &[&str] = &[
     "note_folders",
     "notes",
     "obfuscation_mappings",
+    "snippet_tags",
 ];
 
 /// Columns present on every synced table (uuid, updated_at, sync_status, user_id).
@@ -33,6 +34,7 @@ pub fn data_columns(table: &str) -> &'static [&'static str] {
             "obfuscated_value",
             "created_at",
         ],
+        "snippet_tags" => &["name", "patterns", "color", "sort_order"],
         _ => &[],
     }
 }

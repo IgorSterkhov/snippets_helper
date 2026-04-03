@@ -65,6 +65,19 @@ pub struct SqlMacrosingTemplate {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnippetTag {
+    pub id: Option<i64>,
+    pub name: String,
+    pub patterns: String, // JSON array: ["af_*", "airflow_*"]
+    pub color: String,    // hex: "#f0883e"
+    pub sort_order: i32,
+    pub uuid: String,
+    pub updated_at: NaiveDateTime,
+    pub sync_status: String,
+    pub user_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ObfuscationMapping {
     pub id: Option<i64>,
     pub session_name: String,

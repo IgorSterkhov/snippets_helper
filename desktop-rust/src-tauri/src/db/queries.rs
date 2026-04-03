@@ -1,4 +1,5 @@
 use chrono::{NaiveDateTime, Utc};
+use regex::Regex;
 use rusqlite::{params, Connection, Result};
 use serde_json::{Map, Value};
 use uuid::Uuid;
@@ -107,6 +108,125 @@ pub fn delete_shortcut(conn: &Connection, id: i64) -> Result<()> {
         params![now, id],
     )?;
     Ok(())
+}
+
+// ── Snippet Tags ────────────────────────────────────────────
+
+pub fn list_snippet_tags(conn: &Connection) -> Result<Vec<SnippetTag>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, name, patterns, color, sort_order, uuid, updated_at, sync_status, user_id
+         FROM snippet_tags WHERE sync_status != 'deleted' ORDER BY sort_order, name",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        let updated_at_str: String = row.get(6)?;
+        Ok(SnippetTag {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            patterns: row.get(2)?,
+            color: row.get(3)?,
+            sort_order: row.get(4)?,
+            uuid: row.get(5)?,
+            updated_at: parse_dt(&updated_at_str),
+            sync_status: row.get(7)?,
+            user_id: row.get(8)?,
+        })
+    })?;
+    rows.collect()
+}
+
+pub fn create_snippet_tag(
+    conn: &Connection,
+    name: &str,
+    patterns: &str,
+    color: &str,
+    sort_order: i32,
+) -> Result<SnippetTag> {
+    let uuid = Uuid::new_v4().to_string();
+    let now = now_str();
+    conn.execute(
+        "INSERT INTO snippet_tags (name, patterns, color, sort_order, uuid, updated_at, sync_status, user_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending', '')",
+        params![name, patterns, color, sort_order, uuid, now],
+    )?;
+    let id = conn.last_insert_rowid();
+    Ok(SnippetTag {
+        id: Some(id),
+        name: name.to_string(),
+        patterns: patterns.to_string(),
+        color: color.to_string(),
+        sort_order,
+        uuid,
+        updated_at: parse_dt(&now),
+        sync_status: "pending".to_string(),
+        user_id: String::new(),
+    })
+}
+
+pub fn update_snippet_tag(
+    conn: &Connection,
+    id: i64,
+    name: &str,
+    patterns: &str,
+    color: &str,
+    sort_order: i32,
+) -> Result<()> {
+    let now = now_str();
+    conn.execute(
+        "UPDATE snippet_tags SET name = ?1, patterns = ?2, color = ?3, sort_order = ?4,
+                updated_at = ?5, sync_status = 'pending'
+         WHERE id = ?6",
+        params![name, patterns, color, sort_order, now, id],
+    )?;
+    Ok(())
+}
+
+pub fn delete_snippet_tag(conn: &Connection, id: i64) -> Result<()> {
+    let now = now_str();
+    conn.execute(
+        "UPDATE snippet_tags SET sync_status = 'deleted', updated_at = ?1 WHERE id = ?2",
+        params![now, id],
+    )?;
+    Ok(())
+}
+
+/// Convert a glob pattern (with `*` as wildcard) to a case-insensitive regex.
+fn glob_to_regex(pattern: &str) -> Option<Regex> {
+    let escaped = regex::escape(pattern).replace(r"\*", ".*");
+    let anchored = format!("(?i)^{}$", escaped);
+    Regex::new(&anchored).ok()
+}
+
+/// Filter shortcuts by glob patterns on the name field, then by search query.
+pub fn filter_shortcuts_by_patterns(
+    conn: &Connection,
+    patterns: &[String],
+    query: &str,
+) -> Result<Vec<Shortcut>> {
+    let all = list_shortcuts(conn)?;
+
+    // Compile glob patterns to regexes
+    let regexes: Vec<Regex> = patterns.iter().filter_map(|p| glob_to_regex(p)).collect();
+
+    let filtered: Vec<Shortcut> = all
+        .into_iter()
+        .filter(|s| {
+            if regexes.is_empty() {
+                return true;
+            }
+            regexes.iter().any(|re| re.is_match(&s.name))
+        })
+        .filter(|s| {
+            if query.is_empty() {
+                return true;
+            }
+            let q = query.to_lowercase();
+            s.name.to_lowercase().contains(&q)
+                || s.value.to_lowercase().contains(&q)
+                || s.description.to_lowercase().contains(&q)
+        })
+        .collect();
+
+    Ok(filtered)
 }
 
 // ── Note Folders ─────────────────────────────────────────────
@@ -1160,6 +1280,59 @@ mod tests {
         delete_commit_history(&conn, h.id.unwrap()).unwrap();
         let list = list_commit_history(&conn, "pc1").unwrap();
         assert_eq!(list.len(), 0);
+    }
+
+    // ── Snippet Tags ─────────────────────────────────────────
+
+    #[test]
+    fn test_snippet_tags_crud() {
+        let conn = init_test_db();
+        let t = create_snippet_tag(&conn, "Airflow", r#"["af_*","airflow_*"]"#, "#f0883e", 0).unwrap();
+        assert!(t.id.is_some());
+        assert_eq!(t.name, "Airflow");
+
+        let list = list_snippet_tags(&conn).unwrap();
+        assert_eq!(list.len(), 1);
+
+        update_snippet_tag(&conn, t.id.unwrap(), "Airflow v2", r#"["af_*"]"#, "#00ff00", 1).unwrap();
+        let list = list_snippet_tags(&conn).unwrap();
+        assert_eq!(list[0].name, "Airflow v2");
+        assert_eq!(list[0].color, "#00ff00");
+
+        delete_snippet_tag(&conn, t.id.unwrap()).unwrap();
+        let list = list_snippet_tags(&conn).unwrap();
+        assert_eq!(list.len(), 0);
+    }
+
+    #[test]
+    fn test_filter_shortcuts_by_patterns() {
+        let conn = init_test_db();
+        create_shortcut(&conn, "af_pipeline", "val1", "desc").unwrap();
+        create_shortcut(&conn, "af_dag_test", "val2", "desc").unwrap();
+        create_shortcut(&conn, "sql_query", "val3", "desc").unwrap();
+        create_shortcut(&conn, "airflow_config", "val4", "desc").unwrap();
+
+        // Filter by af_* pattern
+        let results = filter_shortcuts_by_patterns(&conn, &["af_*".to_string()], "").unwrap();
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().all(|s| s.name.starts_with("af_")));
+
+        // Filter by multiple patterns
+        let results = filter_shortcuts_by_patterns(
+            &conn,
+            &["af_*".to_string(), "airflow_*".to_string()],
+            "",
+        ).unwrap();
+        assert_eq!(results.len(), 3);
+
+        // Filter by pattern + search query
+        let results = filter_shortcuts_by_patterns(&conn, &["af_*".to_string()], "pipeline").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "af_pipeline");
+
+        // Empty patterns returns all
+        let results = filter_shortcuts_by_patterns(&conn, &[], "").unwrap();
+        assert_eq!(results.len(), 4);
     }
 
     // ── Exec Categories + Commands ───────────────────────────
