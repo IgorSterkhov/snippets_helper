@@ -471,10 +471,10 @@ function openTagManager() {
 
     try {
       if (editingId !== null) {
-        await call('update_snippet_tag', { id: editingId, name, patterns, color, sort_order: 0 });
+        await call('update_snippet_tag', { id: editingId, name, patterns, color, sortOrder: 0 });
         showToast('Tag updated', 'success');
       } else {
-        await call('create_snippet_tag', { name, patterns, color, sort_order: tags.length });
+        await call('create_snippet_tag', { name, patterns, color, sortOrder: tags.length });
         showToast('Tag created', 'success');
       }
       tags = await call('list_snippet_tags');
