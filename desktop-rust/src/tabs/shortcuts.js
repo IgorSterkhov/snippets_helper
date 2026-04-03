@@ -6,20 +6,29 @@ import { showToast } from '../components/toast.js';
 let shortcuts = [];
 let selectedIndex = -1;
 let listEl = null;
+let detailEl = null;
 let currentQuery = '';
+let fontSize = 14;
+let listWidth = 260;
+let descOpen = false;
 
-export function init(container) {
+export async function init(container) {
   container.innerHTML = '';
   container.style.display = 'flex';
   container.style.flexDirection = 'column';
   container.style.height = '100%';
 
+  // Load font size settings
+  try {
+    const fs = await call('get_setting', { key: 'snippets_font_size' });
+    if (fs) fontSize = parseInt(fs) || 14;
+    const lw = await call('get_setting', { key: 'snippets_left_width' });
+    if (lw) listWidth = parseInt(lw) || 260;
+  } catch {}
+
   // Header row: search + add button
   const header = document.createElement('div');
-  header.style.display = 'flex';
-  header.style.gap = '8px';
-  header.style.alignItems = 'flex-start';
-  header.style.marginBottom = '4px';
+  header.style.cssText = 'display:flex;gap:8px;align-items:flex-start;margin-bottom:4px;flex-shrink:0';
 
   const searchBar = createSearchBar(onSearch);
   searchBar.style.flex = '1';
@@ -29,21 +38,27 @@ export function init(container) {
   const addBtn = document.createElement('button');
   addBtn.textContent = '+';
   addBtn.title = 'Add shortcut';
-  addBtn.style.minWidth = '36px';
-  addBtn.style.height = '36px';
-  addBtn.style.padding = '0';
-  addBtn.style.fontSize = '18px';
+  addBtn.style.cssText = 'min-width:36px;height:36px;padding:0;font-size:18px';
   addBtn.addEventListener('click', () => openEditor(null));
   header.appendChild(addBtn);
 
   container.appendChild(header);
 
-  // List
+  // Two-panel layout
+  const panels = document.createElement('div');
+  panels.style.cssText = 'display:flex;flex:1;gap:0;overflow:hidden;border:1px solid var(--border);border-radius:6px';
+
+  // Left panel: name list
   listEl = document.createElement('div');
-  listEl.className = 'shortcuts-list';
-  listEl.style.flex = '1';
-  listEl.style.overflowY = 'auto';
-  container.appendChild(listEl);
+  listEl.style.cssText = `width:${listWidth}px;min-width:180px;overflow-y:auto;border-right:1px solid var(--border);flex-shrink:0`;
+
+  // Right panel: detail view
+  detailEl = document.createElement('div');
+  detailEl.style.cssText = 'flex:1;display:flex;flex-direction:column;overflow:hidden';
+
+  panels.appendChild(listEl);
+  panels.appendChild(detailEl);
+  container.appendChild(panels);
 
   // Keyboard navigation
   document.addEventListener('keydown', onKeydown);
@@ -64,7 +79,10 @@ async function loadShortcuts() {
     } else {
       shortcuts = await call('list_shortcuts');
     }
+    if (selectedIndex < 0 && shortcuts.length > 0) selectedIndex = 0;
+    if (selectedIndex >= shortcuts.length) selectedIndex = shortcuts.length - 1;
     renderList();
+    renderDetail();
   } catch (err) {
     showToast('Failed to load shortcuts: ' + err, 'error');
   }
@@ -75,106 +93,156 @@ function renderList() {
 
   if (shortcuts.length === 0) {
     const empty = document.createElement('p');
-    empty.textContent = currentQuery ? 'No shortcuts found' : 'No shortcuts yet. Click + to add one.';
-    empty.style.textAlign = 'center';
-    empty.style.marginTop = '32px';
+    empty.textContent = currentQuery ? 'No matches' : 'No shortcuts yet';
+    empty.style.cssText = 'text-align:center;margin-top:32px;color:var(--text-muted);font-size:13px';
     listEl.appendChild(empty);
     return;
   }
 
   shortcuts.forEach((shortcut, index) => {
-    const card = document.createElement('div');
-    card.className = 'list-item';
-    if (index === selectedIndex) {
-      card.style.borderLeftColor = 'var(--accent)';
-      card.style.background = 'var(--bg-tertiary)';
-    }
+    const item = document.createElement('div');
+    item.style.cssText = `padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--border);font-size:${fontSize}px;transition:background 0.1s;border-left:3px solid transparent`;
 
-    // Content area
-    const content = document.createElement('div');
-    content.style.flex = '1';
-    content.style.minWidth = '0';
+    if (index === selectedIndex) {
+      item.style.background = 'var(--bg-tertiary)';
+      item.style.borderLeftColor = 'var(--accent)';
+    } else {
+      item.addEventListener('mouseenter', () => { item.style.background = 'var(--bg-secondary)'; });
+      item.addEventListener('mouseleave', () => { item.style.background = ''; });
+    }
 
     const nameEl = document.createElement('div');
-    nameEl.style.fontWeight = '600';
-    nameEl.style.marginBottom = '2px';
+    nameEl.style.cssText = 'font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
     nameEl.textContent = shortcut.name;
-    content.appendChild(nameEl);
+    item.appendChild(nameEl);
 
-    const valueEl = document.createElement('div');
-    valueEl.style.fontFamily = 'monospace';
-    valueEl.style.fontSize = '12px';
-    valueEl.style.color = 'var(--text-muted)';
-    valueEl.style.whiteSpace = 'nowrap';
-    valueEl.style.overflow = 'hidden';
-    valueEl.style.textOverflow = 'ellipsis';
-    valueEl.textContent = shortcut.value;
-    content.appendChild(valueEl);
-
-    if (shortcut.description) {
-      const descEl = document.createElement('div');
-      descEl.style.fontSize = '12px';
-      descEl.style.color = 'var(--text-muted)';
-      descEl.style.marginTop = '2px';
-      descEl.textContent = shortcut.description;
-      content.appendChild(descEl);
-    }
-
-    // Actions
-    const actions = document.createElement('div');
-    actions.style.display = 'flex';
-    actions.style.gap = '4px';
-    actions.style.alignItems = 'center';
-    actions.style.marginLeft = '8px';
-    actions.style.flexShrink = '0';
-
-    const editBtn = document.createElement('button');
-    editBtn.className = 'btn-secondary';
-    editBtn.textContent = '\u270E';
-    editBtn.title = 'Edit';
-    editBtn.style.padding = '4px 8px';
-    editBtn.style.fontSize = '12px';
-    editBtn.style.minWidth = 'auto';
-    editBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      openEditor(shortcut);
-    });
-
-    const delBtn = document.createElement('button');
-    delBtn.className = 'btn-danger';
-    delBtn.textContent = '\u2716';
-    delBtn.title = 'Delete';
-    delBtn.style.padding = '4px 8px';
-    delBtn.style.fontSize = '12px';
-    delBtn.style.minWidth = 'auto';
-    delBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      confirmDelete(shortcut);
-    });
-
-    actions.appendChild(editBtn);
-    actions.appendChild(delBtn);
-
-    // Layout
-    card.style.display = 'flex';
-    card.style.alignItems = 'center';
-    card.appendChild(content);
-    card.appendChild(actions);
-
-    card.addEventListener('click', () => {
+    item.addEventListener('click', () => {
       selectedIndex = index;
+      descOpen = false; // collapse description when switching
       renderList();
-      copyToClipboard(shortcut.value);
+      renderDetail();
     });
 
-    listEl.appendChild(card);
+    listEl.appendChild(item);
   });
 }
 
+function renderDetail() {
+  detailEl.innerHTML = '';
+
+  if (selectedIndex < 0 || selectedIndex >= shortcuts.length) {
+    const hint = document.createElement('p');
+    hint.textContent = 'Select a snippet from the list';
+    hint.style.cssText = 'color:var(--text-muted);text-align:center;margin-top:32px';
+    detailEl.appendChild(hint);
+    return;
+  }
+
+  const shortcut = shortcuts[selectedIndex];
+
+  // Header with name + actions
+  const header = document.createElement('div');
+  header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border);flex-shrink:0';
+
+  const nameEl = document.createElement('h3');
+  nameEl.style.cssText = `margin:0;font-size:${fontSize + 2}px;color:var(--text)`;
+  nameEl.textContent = shortcut.name;
+  header.appendChild(nameEl);
+
+  const actions = document.createElement('div');
+  actions.style.cssText = 'display:flex;gap:6px';
+
+  const copyBtn = document.createElement('button');
+  copyBtn.textContent = 'Copy';
+  copyBtn.style.cssText = 'padding:4px 12px;font-size:12px';
+  copyBtn.addEventListener('click', () => copyToClipboard(shortcut.value));
+
+  const editBtn = document.createElement('button');
+  editBtn.className = 'btn-secondary';
+  editBtn.textContent = 'Edit';
+  editBtn.style.cssText = 'padding:4px 12px;font-size:12px';
+  editBtn.addEventListener('click', () => openEditor(shortcut));
+
+  const delBtn = document.createElement('button');
+  delBtn.className = 'btn-danger';
+  delBtn.textContent = 'Delete';
+  delBtn.style.cssText = 'padding:4px 12px;font-size:12px';
+  delBtn.addEventListener('click', () => confirmDelete(shortcut));
+
+  actions.appendChild(copyBtn);
+  actions.appendChild(editBtn);
+  actions.appendChild(delBtn);
+  header.appendChild(actions);
+  detailEl.appendChild(header);
+
+  // Body: value + collapsible description
+  const body = document.createElement('div');
+  body.style.cssText = 'flex:1;display:flex;flex-direction:column;overflow:hidden';
+
+  // Value (main content)
+  const valueEl = document.createElement('pre');
+  valueEl.style.cssText = `flex:1;overflow:auto;font-family:'SF Mono','Fira Code','Cascadia Code',monospace;font-size:${fontSize}px;color:var(--text);padding:12px 16px;white-space:pre-wrap;word-break:break-word;margin:0`;
+  valueEl.textContent = shortcut.value;
+  body.appendChild(valueEl);
+
+  // Description section: collapsible at bottom
+  const descSection = document.createElement('div');
+  descSection.style.cssText = 'border-top:1px solid var(--border);flex-shrink:0';
+
+  const hasDesc = shortcut.description && shortcut.description.trim();
+
+  // Toggle bar
+  const toggle = document.createElement('div');
+  toggle.style.cssText = 'display:flex;align-items:center;gap:6px;padding:8px 16px;cursor:pointer;font-size:12px;color:var(--text-muted);user-select:none';
+  toggle.addEventListener('mouseenter', () => { toggle.style.background = 'var(--bg-secondary)'; });
+  toggle.addEventListener('mouseleave', () => { toggle.style.background = ''; });
+
+  const arrow = document.createElement('span');
+  arrow.textContent = '▶';
+  arrow.style.cssText = `font-size:10px;transition:transform 0.2s;display:inline-block;${descOpen ? 'transform:rotate(90deg)' : ''}`;
+
+  const label = document.createElement('span');
+  label.textContent = 'Description';
+
+  const badge = document.createElement('span');
+  badge.style.cssText = 'background:var(--bg-tertiary);padding:1px 6px;border-radius:8px;font-size:10px;color:var(--text-muted)';
+  badge.textContent = hasDesc ? 'filled' : 'empty';
+  if (!hasDesc) badge.style.opacity = '0.5';
+
+  toggle.appendChild(arrow);
+  toggle.appendChild(label);
+  toggle.appendChild(badge);
+
+  // Content
+  const descContent = document.createElement('div');
+  descContent.style.cssText = `padding:0 16px 12px 16px;font-size:${fontSize - 1}px;color:var(--text);white-space:pre-wrap;word-break:break-word;max-height:150px;overflow-y:auto;display:${descOpen ? 'block' : 'none'}`;
+
+  if (hasDesc) {
+    descContent.textContent = shortcut.description;
+  } else {
+    descContent.innerHTML = '<span style="color:var(--text-muted);font-style:italic">No description. Click Edit to add one.</span>';
+  }
+
+  // Auto-open if description has content
+  if (hasDesc && !descOpen) {
+    // Keep collapsed by default, user can open
+  }
+
+  toggle.addEventListener('click', () => {
+    descOpen = !descOpen;
+    arrow.style.transform = descOpen ? 'rotate(90deg)' : '';
+    descContent.style.display = descOpen ? 'block' : 'none';
+  });
+
+  descSection.appendChild(toggle);
+  descSection.appendChild(descContent);
+  body.appendChild(descSection);
+
+  detailEl.appendChild(body);
+}
+
 function onKeydown(e) {
-  // Only handle when shortcuts tab is visible
   if (!listEl || !listEl.offsetParent) return;
-  // Don't intercept when modal is open or focus is in an input/textarea
   const activeTag = document.activeElement?.tagName?.toLowerCase();
   if (document.querySelector('.modal-overlay')) return;
   if (activeTag === 'textarea') return;
@@ -183,13 +251,17 @@ function onKeydown(e) {
     e.preventDefault();
     if (shortcuts.length === 0) return;
     selectedIndex = Math.min(selectedIndex + 1, shortcuts.length - 1);
+    descOpen = false;
     renderList();
+    renderDetail();
     scrollToSelected();
   } else if (e.key === 'ArrowUp') {
     e.preventDefault();
     if (shortcuts.length === 0) return;
     selectedIndex = Math.max(selectedIndex - 1, 0);
+    descOpen = false;
     renderList();
+    renderDetail();
     scrollToSelected();
   } else if (e.key === 'Enter' && activeTag !== 'input') {
     e.preventDefault();
@@ -201,7 +273,7 @@ function onKeydown(e) {
 
 function scrollToSelected() {
   if (selectedIndex < 0 || !listEl) return;
-  const items = listEl.querySelectorAll('.list-item');
+  const items = listEl.children;
   if (items[selectedIndex]) {
     items[selectedIndex].scrollIntoView({ block: 'nearest' });
   }
@@ -229,9 +301,7 @@ function openEditor(shortcut) {
   const isEdit = shortcut !== null;
 
   const form = document.createElement('div');
-  form.style.display = 'flex';
-  form.style.flexDirection = 'column';
-  form.style.gap = '12px';
+  form.style.cssText = 'display:flex;flex-direction:column;gap:12px';
 
   const nameInput = document.createElement('input');
   nameInput.type = 'text';
@@ -241,13 +311,13 @@ function openEditor(shortcut) {
 
   const valueInput = document.createElement('textarea');
   valueInput.placeholder = 'Value (text to copy)';
-  valueInput.rows = 4;
+  valueInput.rows = 6;
   valueInput.value = isEdit ? shortcut.value : '';
   form.appendChild(valueInput);
 
-  const descInput = document.createElement('input');
-  descInput.type = 'text';
-  descInput.placeholder = 'Description (optional)';
+  const descInput = document.createElement('textarea');
+  descInput.placeholder = 'Description (optional — documentation, notes, context)';
+  descInput.rows = 3;
   descInput.value = isEdit ? shortcut.description : '';
   form.appendChild(descInput);
 
@@ -259,14 +329,8 @@ function openEditor(shortcut) {
       const value = valueInput.value;
       const description = descInput.value.trim();
 
-      if (!name) {
-        showToast('Name is required', 'error');
-        return;
-      }
-      if (!value) {
-        showToast('Value is required', 'error');
-        return;
-      }
+      if (!name) { showToast('Name is required', 'error'); return; }
+      if (!value) { showToast('Value is required', 'error'); return; }
 
       try {
         if (isEdit) {
@@ -295,6 +359,7 @@ function confirmDelete(shortcut) {
       try {
         await call('delete_shortcut', { id: shortcut.id });
         showToast('Shortcut deleted', 'success');
+        selectedIndex = Math.min(selectedIndex, shortcuts.length - 2);
         await loadShortcuts();
       } catch (err) {
         showToast('Error: ' + err, 'error');
