@@ -234,7 +234,13 @@ impl SyncClient {
         };
 
         // Phase 2: HTTP pull (no lock held)
-        let body = json!({ "last_sync_at": last_sync });
+        // Treat empty string as null (server expects null or valid timestamp)
+        let last_sync_value = match &last_sync {
+            Some(s) if s.is_empty() => Value::Null,
+            Some(s) => Value::String(s.clone()),
+            None => Value::Null,
+        };
+        let body = json!({ "last_sync_at": last_sync_value });
 
         let resp = self
             .client

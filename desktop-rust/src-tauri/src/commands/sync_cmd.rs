@@ -186,11 +186,13 @@ pub async fn force_full_sync(state: State<'_, DbState>) -> Result<String, String
         .to_string_lossy()
         .to_string();
 
-    // Reset last_sync_at to force full pull
+    // Delete last_sync_at to force full pull (null, not empty string)
     {
         let conn = state.0.lock().map_err(|e| e.to_string())?;
-        queries::set_setting(&conn, &computer_id, "last_sync_at", "")
-            .map_err(|e| e.to_string())?;
+        conn.execute(
+            "DELETE FROM app_settings WHERE computer_id = ?1 AND setting_key = 'last_sync_at'",
+            rusqlite::params![computer_id],
+        ).map_err(|e| e.to_string())?;
     }
 
     // Now do normal sync

@@ -40,6 +40,7 @@ pub fn run() {
             commands::shortcuts::update_shortcut,
             commands::shortcuts::delete_shortcut,
             clipboard::copy_to_clipboard,
+            clipboard::open_url,
             clipboard::read_clipboard,
             commands::sync_cmd::trigger_sync,
             commands::sync_cmd::register_sync,
