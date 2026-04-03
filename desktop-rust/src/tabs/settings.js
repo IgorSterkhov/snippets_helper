@@ -475,9 +475,16 @@ async function renderUpdates(container) {
     }
   });
 
-  downloadBtn.addEventListener('click', () => {
+  downloadBtn.addEventListener('click', async () => {
     if (updateInfo && updateInfo.download_url) {
-      window.open(updateInfo.download_url, '_blank');
+      try {
+        const { invoke } = window.__TAURI__.core;
+        await invoke('open_url', { url: updateInfo.download_url });
+      } catch {
+        // Fallback: copy URL to clipboard
+        await navigator.clipboard.writeText(updateInfo.download_url);
+        showToast('URL copied to clipboard. Open in browser.', 'info');
+      }
     }
   });
 
