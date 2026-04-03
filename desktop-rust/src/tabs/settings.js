@@ -138,6 +138,16 @@ async function renderGeneral(container) {
   fontRow.appendChild(fontInput);
   container.appendChild(fontRow);
 
+  // Language
+  const langRow = makeFormRow('Language:');
+  const langSelect = document.createElement('select');
+  langSelect.className = 'settings-input';
+  langSelect.innerHTML = '<option value="en">English</option><option value="ru">Русский</option>';
+  langSelect.value = await getSetting('ui_language') || 'en';
+  langSelect.addEventListener('change', () => saveSetting('ui_language', langSelect.value));
+  langRow.appendChild(langSelect);
+  container.appendChild(langRow);
+
   // Autostart
   const autoRow = makeFormRow('Autostart:');
   const autoCb = document.createElement('input');

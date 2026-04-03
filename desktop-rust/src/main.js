@@ -31,6 +31,16 @@ async function main() {
   settingsBtn.addEventListener('click', () => openSettingsModal());
   tabContainer.tabBar.appendChild(settingsBtn);
 
+  const helpBtn = document.createElement('button');
+  helpBtn.className = 'tab-btn';
+  helpBtn.title = 'Help';
+  helpBtn.innerHTML = '<span class="tab-icon">?</span><span class="tab-label">Help</span>';
+  helpBtn.addEventListener('click', async () => {
+    const { openHelpModal } = await import('./tabs/help.js');
+    openHelpModal();
+  });
+  tabContainer.tabBar.appendChild(helpBtn);
+
   let lastTab = 'shortcuts';
   try {
     const saved = await call('get_setting', { key: 'last_active_tab' });

@@ -96,6 +96,8 @@ pub fn run() {
             commands::exec::delete_exec_command,
             commands::exec::run_command,
             commands::exec::stop_command,
+            // Help
+            commands::help::get_changelog,
             // Autostart
             autostart::set_autostart,
             autostart::get_autostart,
