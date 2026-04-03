@@ -830,6 +830,27 @@ class Database:
 
     # ==================== Sync Helpers ====================
 
+    def get_all_rows_for_push(self, table_name: str) -> List[Dict]:
+        """Get ALL rows (not just pending) for a one-time full push."""
+        from shared.sync_schema import SYNCED_TABLES
+        if table_name not in SYNCED_TABLES:
+            return []
+        fields = SYNCED_TABLES[table_name]['data_fields'] + ['uuid', 'updated_at', 'sync_status']
+        cols = ', '.join(fields)
+        with self._connect() as conn:
+            result = conn.execute(
+                f"SELECT {cols} FROM {table_name} WHERE sync_status != 'deleted'"
+            ).fetchall()
+            rows = []
+            for row in result:
+                d = dict(zip(fields, row))
+                if d.get('updated_at') and hasattr(d['updated_at'], 'isoformat'):
+                    d['updated_at'] = d['updated_at'].isoformat()
+                if d.get('created_at') and hasattr(d['created_at'], 'isoformat'):
+                    d['created_at'] = d['created_at'].isoformat()
+                rows.append(d)
+            return rows
+
     def get_pending_changes(self, table_name: str) -> List[Dict]:
         """Get all rows with sync_status 'pending' or 'deleted' for a synced table."""
         from shared.sync_schema import SYNCED_TABLES

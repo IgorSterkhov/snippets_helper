@@ -70,6 +70,47 @@ class SyncEngine:
             logger.exception("Sync error")
             self._notify("error", str(e)[:100])
 
+    def push_all(self):
+        """Push ALL local data to server (not just pending). One-time migration."""
+        from shared.sync_schema import SYNCED_TABLES
+        self._notify("syncing", "Pushing all data...")
+        try:
+            changes = {}
+            for table_name in SYNCED_TABLES:
+                all_rows = self.db.get_all_rows_for_push(table_name)
+                if not all_rows:
+                    continue
+                rows_to_push = []
+                for row in all_rows:
+                    row_data = {k: v for k, v in row.items() if k != 'sync_status'}
+                    row_data['is_deleted'] = row.get('sync_status') == 'deleted'
+                    if table_name == 'notes' and row_data.get('folder_id') is not None:
+                        folder_uuid = self.db.get_folder_uuid_by_id(row_data['folder_id'])
+                        row_data['folder_uuid'] = folder_uuid
+                    rows_to_push.append(row_data)
+                if rows_to_push:
+                    changes[table_name] = rows_to_push
+
+            if not changes:
+                self._notify("ok", "No data to push")
+                return 0
+
+            result = self.client.push(changes)
+            total = sum(len(rows) for rows in changes.values())
+
+            # Mark all as synced
+            if isinstance(result, dict):
+                for table_name, rows in changes.items():
+                    synced = [(r['uuid'], r.get('updated_at')) for r in rows if not r.get('is_deleted')]
+                    self.db.mark_as_synced(table_name, synced)
+
+            self._notify("ok", f"Pushed {total} rows")
+            return total
+        except Exception as e:
+            logger.exception("Push all error")
+            self._notify("error", str(e)[:100])
+            raise
+
     def _push(self):
         """Push all pending local changes to server."""
         changes = {}
