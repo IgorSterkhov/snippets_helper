@@ -65,6 +65,16 @@ async def push(
             client_updated = row_data.updated_at.replace(tzinfo=None) if row_data.updated_at else None
             is_deleted = row_data.is_deleted
 
+            # Parse string dates in extra fields to datetime
+            extra = row_data.model_extra or {}
+            for key in list(extra.keys()):
+                val = extra[key]
+                if isinstance(val, str) and key in ("created_at", "updated_at"):
+                    try:
+                        extra[key] = datetime.fromisoformat(val)
+                    except (ValueError, TypeError):
+                        pass
+
             if existing:
                 # Conflict check: last-write-wins
                 if client_updated and existing.updated_at and client_updated < existing.updated_at:
@@ -81,7 +91,6 @@ async def push(
                     existing.is_deleted = True
                     existing.updated_at = client_updated or datetime.now(timezone.utc)
                 else:
-                    extra = row_data.model_extra or {}
                     for key, val in extra.items():
                         if hasattr(existing, key) and key not in ("uuid", "user_id"):
                             setattr(existing, key, val)
@@ -91,7 +100,6 @@ async def push(
             else:
                 # Insert new row
                 new_row = model(uuid=row_uuid, user_id=user.id)
-                extra = row_data.model_extra or {}
                 for key, val in extra.items():
                     if hasattr(new_row, key) and key not in ("uuid", "user_id"):
                         setattr(new_row, key, val)
