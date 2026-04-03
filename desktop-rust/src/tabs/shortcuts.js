@@ -14,9 +14,7 @@ let descOpen = false;
 
 export async function init(container) {
   container.innerHTML = '';
-  container.style.display = 'flex';
-  container.style.flexDirection = 'column';
-  container.style.height = '100%';
+  container.style.cssText = 'display:flex;flex-direction:column;height:100%;overflow:hidden';
 
   // Load font size settings
   try {
@@ -26,9 +24,9 @@ export async function init(container) {
     if (lw) listWidth = parseInt(lw) || 260;
   } catch {}
 
-  // Header row: search + add button
+  // Header row: search + add button (fixed)
   const header = document.createElement('div');
-  header.style.cssText = 'display:flex;gap:8px;align-items:flex-start;margin-bottom:4px;flex-shrink:0';
+  header.style.cssText = 'display:flex;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--border);background:var(--bg-secondary);flex-shrink:0';
 
   const searchBar = createSearchBar(onSearch);
   searchBar.style.flex = '1';
@@ -38,21 +36,21 @@ export async function init(container) {
   const addBtn = document.createElement('button');
   addBtn.textContent = '+';
   addBtn.title = 'Add shortcut';
-  addBtn.style.cssText = 'min-width:36px;height:36px;padding:0;font-size:18px';
+  addBtn.style.cssText = 'min-width:32px;height:32px;padding:0;font-size:18px';
   addBtn.addEventListener('click', () => openEditor(null));
   header.appendChild(addBtn);
 
   container.appendChild(header);
 
-  // Two-panel layout
+  // Two-panel layout (fills remaining space)
   const panels = document.createElement('div');
-  panels.style.cssText = 'display:flex;flex:1;gap:0;overflow:hidden;border:1px solid var(--border);border-radius:6px';
+  panels.style.cssText = 'display:flex;flex:1;overflow:hidden';
 
-  // Left panel: name list
+  // Left panel: name list (independent scroll)
   listEl = document.createElement('div');
   listEl.style.cssText = `width:${listWidth}px;min-width:180px;overflow-y:auto;border-right:1px solid var(--border);flex-shrink:0`;
 
-  // Right panel: detail view
+  // Right panel: detail view (fixed layout, internal scrolls)
   detailEl = document.createElement('div');
   detailEl.style.cssText = 'flex:1;display:flex;flex-direction:column;overflow:hidden';
 
@@ -118,7 +116,7 @@ function renderList() {
 
     item.addEventListener('click', () => {
       selectedIndex = index;
-      descOpen = false; // collapse description when switching
+      descOpen = false;
       renderList();
       renderDetail();
     });
@@ -139,13 +137,14 @@ function renderDetail() {
   }
 
   const shortcut = shortcuts[selectedIndex];
+  const hasDesc = shortcut.description && shortcut.description.trim();
 
-  // Header with name + actions
+  // Header with name + actions (fixed)
   const header = document.createElement('div');
-  header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border);flex-shrink:0';
+  header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:10px 16px;border-bottom:1px solid var(--border);flex-shrink:0';
 
   const nameEl = document.createElement('h3');
-  nameEl.style.cssText = `margin:0;font-size:${fontSize + 2}px;color:var(--text)`;
+  nameEl.style.cssText = `margin:0;font-size:${fontSize + 1}px;color:var(--text)`;
   nameEl.textContent = shortcut.name;
   header.appendChild(nameEl);
 
@@ -175,31 +174,28 @@ function renderDetail() {
   header.appendChild(actions);
   detailEl.appendChild(header);
 
-  // Body: value + collapsible description
-  const body = document.createElement('div');
-  body.style.cssText = 'flex:1;display:flex;flex-direction:column;overflow:hidden';
-
-  // Value (main content)
+  // Value — independent scroll, takes available space
   const valueEl = document.createElement('pre');
-  valueEl.style.cssText = `flex:1;overflow:auto;font-family:'SF Mono','Fira Code','Cascadia Code',monospace;font-size:${fontSize}px;color:var(--text);padding:12px 16px;white-space:pre-wrap;word-break:break-word;margin:0`;
+  valueEl.style.cssText = `flex:1;overflow-y:auto;min-height:0;font-family:'SF Mono','Fira Code','Cascadia Code',monospace;font-size:${fontSize}px;color:var(--text);padding:12px 16px;white-space:pre-wrap;word-break:break-word;margin:0`;
   valueEl.textContent = shortcut.value;
-  body.appendChild(valueEl);
+  detailEl.appendChild(valueEl);
 
-  // Description section: collapsible at bottom
+  // Description section — collapsible, independent scroll
   const descSection = document.createElement('div');
   descSection.style.cssText = 'border-top:1px solid var(--border);flex-shrink:0';
 
-  const hasDesc = shortcut.description && shortcut.description.trim();
+  // Auto-open if has content when first selecting
+  const showDesc = hasDesc ? descOpen || hasDesc : descOpen;
 
   // Toggle bar
   const toggle = document.createElement('div');
-  toggle.style.cssText = 'display:flex;align-items:center;gap:6px;padding:8px 16px;cursor:pointer;font-size:12px;color:var(--text-muted);user-select:none';
+  toggle.style.cssText = 'display:flex;align-items:center;gap:6px;padding:7px 16px;cursor:pointer;font-size:12px;color:var(--text-muted);user-select:none';
   toggle.addEventListener('mouseenter', () => { toggle.style.background = 'var(--bg-secondary)'; });
   toggle.addEventListener('mouseleave', () => { toggle.style.background = ''; });
 
   const arrow = document.createElement('span');
-  arrow.textContent = '▶';
-  arrow.style.cssText = `font-size:10px;transition:transform 0.2s;display:inline-block;${descOpen ? 'transform:rotate(90deg)' : ''}`;
+  arrow.textContent = '\u25B6';
+  arrow.style.cssText = `font-size:10px;display:inline-block;transition:transform 0.2s;${showDesc ? 'transform:rotate(90deg)' : ''}`;
 
   const label = document.createElement('span');
   label.textContent = 'Description';
@@ -213,19 +209,14 @@ function renderDetail() {
   toggle.appendChild(label);
   toggle.appendChild(badge);
 
-  // Content
+  // Content — scrolls independently
   const descContent = document.createElement('div');
-  descContent.style.cssText = `padding:0 16px 12px 16px;font-size:${fontSize - 1}px;color:var(--text);white-space:pre-wrap;word-break:break-word;max-height:150px;overflow-y:auto;display:${descOpen ? 'block' : 'none'}`;
+  descContent.style.cssText = `max-height:160px;overflow-y:auto;padding:0 16px 10px 16px;font-size:${fontSize - 1}px;color:var(--text);white-space:pre-wrap;word-break:break-word;display:${showDesc ? 'block' : 'none'}`;
 
   if (hasDesc) {
     descContent.textContent = shortcut.description;
   } else {
     descContent.innerHTML = '<span style="color:var(--text-muted);font-style:italic">No description. Click Edit to add one.</span>';
-  }
-
-  // Auto-open if description has content
-  if (hasDesc && !descOpen) {
-    // Keep collapsed by default, user can open
   }
 
   toggle.addEventListener('click', () => {
@@ -236,9 +227,7 @@ function renderDetail() {
 
   descSection.appendChild(toggle);
   descSection.appendChild(descContent);
-  body.appendChild(descSection);
-
-  detailEl.appendChild(body);
+  detailEl.appendChild(descSection);
 }
 
 function onKeydown(e) {
