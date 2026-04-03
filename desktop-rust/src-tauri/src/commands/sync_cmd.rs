@@ -180,6 +180,24 @@ pub async fn check_for_update(state: State<'_, DbState>) -> Result<Value, String
 }
 
 #[tauri::command]
+pub async fn force_full_sync(state: State<'_, DbState>) -> Result<String, String> {
+    let computer_id = hostname::get()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+
+    // Reset last_sync_at to force full pull
+    {
+        let conn = state.0.lock().map_err(|e| e.to_string())?;
+        queries::set_setting(&conn, &computer_id, "last_sync_at", "")
+            .map_err(|e| e.to_string())?;
+    }
+
+    // Now do normal sync
+    trigger_sync(state).await
+}
+
+#[tauri::command]
 pub async fn debug_sync(state: State<'_, DbState>) -> Result<Value, String> {
     let computer_id = hostname::get()
         .unwrap_or_default()
@@ -220,7 +238,7 @@ pub async fn debug_sync(state: State<'_, DbState>) -> Result<Value, String> {
     let auth_status = auth_resp.status().as_u16();
     let auth_body: Value = auth_resp.json().await.unwrap_or(json!(null));
 
-    // Try pull
+    // Try pull with CURRENT last_sync_at
     let last_sync = {
         let conn = state.0.lock().map_err(|e| e.to_string())?;
         queries::get_setting(&conn, &computer_id, "last_sync_at")
@@ -234,6 +252,15 @@ pub async fn debug_sync(state: State<'_, DbState>) -> Result<Value, String> {
         .send().await.map_err(|e| format!("pull request: {e}"))?;
     let pull_status = pull_resp.status().as_u16();
     let pull_body: Value = pull_resp.json().await.unwrap_or(json!(null));
+
+    // Also try FULL pull (last_sync_at = null) to see what server would return
+    let full_pull_resp = http
+        .post(format!("{}/v1/sync/pull", url.trim_end_matches('/')))
+        .bearer_auth(&key)
+        .json(&json!({"last_sync_at": null}))
+        .send().await.map_err(|e| format!("full pull request: {e}"))?;
+    let full_pull_status = full_pull_resp.status().as_u16();
+    let full_pull_body: Value = full_pull_resp.json().await.unwrap_or(json!(null));
 
     // Count local rows
     let local_counts = {
@@ -257,13 +284,23 @@ pub async fn debug_sync(state: State<'_, DbState>) -> Result<Value, String> {
         }
     }
 
+    // Summarize full pull
+    let mut full_pull_summary = serde_json::Map::new();
+    if let Some(changes) = full_pull_body.get("changes").and_then(|v| v.as_object()) {
+        for (table, rows) in changes {
+            let count = rows.as_array().map(|a| a.len()).unwrap_or(0);
+            full_pull_summary.insert(table.clone(), json!(count));
+        }
+    }
+
     Ok(json!({
         "computer_id": computer_id,
         "api_url": url,
         "api_key_prefix": &key[..8.min(key.len())],
         "last_sync_at": last_sync,
         "auth": {"status": auth_status, "body": auth_body},
-        "pull": {"status": pull_status, "rows_received": pull_summary, "server_time": pull_body.get("server_time")},
+        "pull_incremental": {"status": pull_status, "rows_received": pull_summary, "server_time": pull_body.get("server_time")},
+        "pull_full": {"status": full_pull_status, "rows_available": full_pull_summary},
         "local_row_counts": local_counts,
     }))
 }

@@ -499,6 +499,24 @@ async function renderUpdates(container) {
   tokenRow.appendChild(tokenInput);
   container.appendChild(tokenRow);
 
+  // Force Full Sync button
+  container.appendChild(el('label', { text: 'Sync actions:', class: 'settings-label', style: 'margin-top:16px' }));
+  const forceBtn = el('button', { text: 'Force Full Sync (reset & re-download all data)' });
+  forceBtn.addEventListener('click', async () => {
+    forceBtn.disabled = true;
+    forceBtn.textContent = 'Syncing...';
+    try {
+      await call('force_full_sync');
+      showToast('Full sync complete! Restart app to see data.', 'success');
+    } catch (err) {
+      showToast('Sync error: ' + err, 'error');
+    } finally {
+      forceBtn.disabled = false;
+      forceBtn.textContent = 'Force Full Sync (reset & re-download all data)';
+    }
+  });
+  container.appendChild(forceBtn);
+
   // Debug Sync button
   container.appendChild(el('label', { text: 'Sync diagnostics:', class: 'settings-label', style: 'margin-top:16px' }));
   const debugBtn = el('button', { text: 'Debug Sync', class: 'btn-secondary' });
