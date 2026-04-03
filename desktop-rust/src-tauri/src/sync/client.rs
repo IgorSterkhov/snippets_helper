@@ -284,6 +284,18 @@ impl SyncClient {
 
                 let mut rows_owned: Vec<Value> = rows.clone();
 
+                // Ensure user_id is set on every row (server may not include it)
+                // Read user_id from auth settings
+                let user_id = queries::get_setting(conn, computer_id, "sync_user_id")
+                    .ok().flatten().unwrap_or_default();
+                for row in &mut rows_owned {
+                    if let Some(obj) = row.as_object_mut() {
+                        if !obj.contains_key("user_id") || obj.get("user_id").map(|v| v.is_null()).unwrap_or(false) {
+                            obj.insert("user_id".to_string(), Value::String(user_id.clone()));
+                        }
+                    }
+                }
+
                 // Resolve folder_uuid -> folder_id for notes
                 if table == "notes" {
                     for row in &mut rows_owned {

@@ -27,6 +27,27 @@ pub async fn trigger_sync(state: State<'_, DbState>) -> Result<String, String> {
 
     let client = SyncClient::new(&url, &key, ca_cert.as_deref())?;
 
+    // Ensure user_id is saved (needed for pull to fill user_id on rows)
+    let needs_user_id = {
+        let conn = state.0.lock().map_err(|e| e.to_string())?;
+        queries::get_setting(&conn, &computer_id, "sync_user_id").ok().flatten().is_none()
+    };
+    if needs_user_id {
+        let http = reqwest::Client::builder()
+            .danger_accept_invalid_certs(true)
+            .timeout(std::time::Duration::from_secs(10))
+            .build().map_err(|e| e.to_string())?;
+        if let Ok(resp) = http.get(format!("{}/v1/auth/me", url.trim_end_matches('/')))
+            .bearer_auth(&key).send().await {
+            if let Ok(data) = resp.json::<serde_json::Value>().await {
+                if let Some(uid) = data.get("user_id").and_then(|v| v.as_str()) {
+                    let conn = state.0.lock().map_err(|e| e.to_string())?;
+                    let _ = queries::set_setting(&conn, &computer_id, "sync_user_id", uid);
+                }
+            }
+        }
+    }
+
     // Push then Pull -- the client manages its own locking internally
     client.push(&state.0, &computer_id).await?;
     client.pull(&state.0, &computer_id).await?;
