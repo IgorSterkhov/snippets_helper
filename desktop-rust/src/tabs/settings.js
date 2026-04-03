@@ -463,6 +463,9 @@ async function renderUpdates(container) {
       if (info.has_update) {
         statusRow.textContent = 'A new version is available!';
         downloadBtn.style.display = '';
+      } else if (info.build_in_progress) {
+        statusRow.textContent = `Version ${info.latest_version} is building... Windows installer not ready yet. Try again in a few minutes.`;
+        downloadBtn.style.display = 'none';
       } else {
         statusRow.textContent = 'You are up to date.';
         downloadBtn.style.display = 'none';

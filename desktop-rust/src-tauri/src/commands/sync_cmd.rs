@@ -192,11 +192,29 @@ pub async fn check_for_update(state: State<'_, DbState>) -> Result<Value, String
 
     let has_update = version_is_newer(&current_version, &tag);
 
+    // Check if Windows asset exists (build might still be in progress)
+    let mut win_asset_ready = false;
+    let mut win_download_url = html_url.clone();
+    if let Some(assets) = data.get("assets").and_then(|v| v.as_array()) {
+        for asset in assets {
+            if let Some(name) = asset.get("name").and_then(|v| v.as_str()) {
+                if name.ends_with("x64-setup.exe") {
+                    win_asset_ready = true;
+                    if let Some(url) = asset.get("browser_download_url").and_then(|v| v.as_str()) {
+                        win_download_url = url.to_string();
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
     Ok(json!({
         "current_version": current_version,
         "latest_version": tag,
-        "has_update": has_update,
-        "download_url": html_url,
+        "has_update": has_update && win_asset_ready,
+        "download_url": win_download_url,
+        "build_in_progress": has_update && !win_asset_ready,
     }))
 }
 
