@@ -1,4 +1,4 @@
-use tauri::tray::TrayIconBuilder;
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::menu::{Menu, MenuItem};
 use tauri::Manager;
 
@@ -23,6 +23,20 @@ pub fn create_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                     app.exit(0);
                 }
                 _ => {}
+            }
+        })
+        .on_tray_icon_event(|tray, event| {
+            // Left click on tray icon → show/focus window
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                if let Some(window) = tray.app_handle().get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
             }
         })
         .build(app)?;
