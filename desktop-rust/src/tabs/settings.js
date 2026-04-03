@@ -11,6 +11,7 @@ const SUB_TABS = [
   { id: 'commits',    label: 'Commits' },
   { id: 'formatter',  label: 'SQL Formatter' },
   { id: 'sync',       label: 'Sync' },
+  { id: 'updates',    label: 'Updates' },
 ];
 
 // ── Public API ────────────────────────────────────────────────
@@ -91,6 +92,7 @@ async function renderSubTab(container) {
       case 'commits':   await renderCommits(container);    break;
       case 'formatter': await renderFormatter(container);  break;
       case 'sync':      await renderSync(container);       break;
+      case 'updates':   await renderUpdates(container);    break;
     }
   } catch (err) {
     container.innerHTML = '';
@@ -406,6 +408,85 @@ async function renderSync(container) {
   actions.appendChild(registerBtn);
 
   container.appendChild(actions);
+}
+
+// ── Updates ──────────────────────────────────────────────────
+
+async function renderUpdates(container) {
+  container.innerHTML = '';
+
+  const autoUpdateEnabled = await getSetting('auto_update_enabled') || '0';
+
+  // Current version
+  const curRow = makeFormRow('Current version:');
+  const curLabel = el('span', { text: 'loading...' });
+  curRow.appendChild(curLabel);
+  container.appendChild(curRow);
+
+  // Latest version
+  const latestRow = makeFormRow('Latest version:');
+  const latestLabel = el('span', { text: '-' });
+  latestRow.appendChild(latestLabel);
+  container.appendChild(latestRow);
+
+  // Status text
+  const statusRow = el('div', { style: 'margin-bottom:12px;font-size:13px;color:var(--text-muted)' });
+  statusRow.textContent = '';
+  container.appendChild(statusRow);
+
+  // Auto-update checkbox
+  const autoRow = makeFormRow('Auto-update:');
+  const autoCb = document.createElement('input');
+  autoCb.type = 'checkbox';
+  autoCb.checked = autoUpdateEnabled === '1';
+  autoCb.addEventListener('change', () => saveSetting('auto_update_enabled', autoCb.checked ? '1' : '0'));
+  autoRow.appendChild(autoCb);
+  container.appendChild(autoRow);
+
+  // Action buttons
+  const actions = el('div', { class: 'settings-actions' });
+
+  const checkBtn = el('button', { text: 'Check for updates', class: 'btn-secondary' });
+  const downloadBtn = el('button', { text: 'Download & Install' });
+  downloadBtn.style.display = 'none';
+  let updateInfo = null;
+
+  checkBtn.addEventListener('click', async () => {
+    checkBtn.disabled = true;
+    checkBtn.textContent = 'Checking...';
+    statusRow.textContent = '';
+    try {
+      const info = await call('check_for_update');
+      updateInfo = info;
+      curLabel.textContent = info.current_version;
+      latestLabel.textContent = info.latest_version || '-';
+      if (info.has_update) {
+        statusRow.textContent = 'A new version is available!';
+        downloadBtn.style.display = '';
+      } else {
+        statusRow.textContent = 'You are up to date.';
+        downloadBtn.style.display = 'none';
+      }
+    } catch (err) {
+      statusRow.textContent = 'Check failed: ' + err;
+    } finally {
+      checkBtn.disabled = false;
+      checkBtn.textContent = 'Check for updates';
+    }
+  });
+
+  downloadBtn.addEventListener('click', () => {
+    if (updateInfo && updateInfo.download_url) {
+      window.open(updateInfo.download_url, '_blank');
+    }
+  });
+
+  actions.appendChild(checkBtn);
+  actions.appendChild(downloadBtn);
+  container.appendChild(actions);
+
+  // Auto-check on tab open
+  checkBtn.click();
 }
 
 // ── First-Run Dialog ──────────────────────────────────────────

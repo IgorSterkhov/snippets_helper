@@ -55,16 +55,17 @@ document.addEventListener('keydown', async (e) => {
   }
 });
 
-async function checkForUpdates() {
+async function showUpdateBanner() {
   try {
-    const { check } = window.__TAURI__.updater;
-    const update = await check();
-    if (update) {
-      const { showToast } = await import('./components/toast.js');
-      showToast(`Update ${update.version} available. Installing...`, 'info');
-      await update.downloadAndInstall();
-      const { relaunch } = window.__TAURI__.process;
-      await relaunch();
+    const autoUpdate = await call('get_setting', { key: 'auto_update_enabled' });
+    if (autoUpdate !== '1') return;
+    const info = await call('check_for_update');
+    if (info.has_update) {
+      const app = document.getElementById('app');
+      const banner = document.createElement('div');
+      banner.className = 'update-banner';
+      banner.innerHTML = `New version ${info.latest_version} available! <a href="${info.download_url}" target="_blank">Download</a>`;
+      app.insertBefore(banner, app.firstChild);
     }
   } catch (e) {
     console.log('Update check:', e);
@@ -82,6 +83,6 @@ document.addEventListener('DOMContentLoaded', () => {
   main();
   // Initial sync on launch
   setTimeout(() => call('trigger_sync').catch(() => {}), 1000);
-  // Check for updates 5 seconds after launch
-  setTimeout(checkForUpdates, 5000);
+  // Check for updates 3 seconds after launch
+  setTimeout(showUpdateBanner, 3000);
 });
