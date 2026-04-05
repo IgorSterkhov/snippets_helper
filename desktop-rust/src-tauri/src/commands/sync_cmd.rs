@@ -164,16 +164,24 @@ pub async fn check_for_update(state: State<'_, DbState>) -> Result<Value, String
 
     let has_update = version_is_newer(&current_version, &tag);
 
-    // Check if Windows asset exists (build might still be in progress)
-    let mut win_asset_ready = false;
-    let mut win_download_url = html_url.clone();
+    // Find the right asset for current platform
+    let platform_suffix = if cfg!(target_os = "windows") {
+        "x64-setup.exe"
+    } else if cfg!(target_os = "macos") {
+        "aarch64.dmg"
+    } else {
+        "amd64.AppImage"
+    };
+
+    let mut asset_ready = false;
+    let mut download_url = html_url.clone();
     if let Some(assets) = data.get("assets").and_then(|v| v.as_array()) {
         for asset in assets {
             if let Some(name) = asset.get("name").and_then(|v| v.as_str()) {
-                if name.ends_with("x64-setup.exe") {
-                    win_asset_ready = true;
+                if name.ends_with(platform_suffix) {
+                    asset_ready = true;
                     if let Some(url) = asset.get("browser_download_url").and_then(|v| v.as_str()) {
-                        win_download_url = url.to_string();
+                        download_url = url.to_string();
                     }
                     break;
                 }
@@ -184,9 +192,9 @@ pub async fn check_for_update(state: State<'_, DbState>) -> Result<Value, String
     Ok(json!({
         "current_version": current_version,
         "latest_version": tag,
-        "has_update": has_update && win_asset_ready,
-        "download_url": win_download_url,
-        "build_in_progress": has_update && !win_asset_ready,
+        "has_update": has_update && asset_ready,
+        "download_url": download_url,
+        "build_in_progress": has_update && !asset_ready,
     }))
 }
 
