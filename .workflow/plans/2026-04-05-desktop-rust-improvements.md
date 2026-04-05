@@ -22,7 +22,15 @@
 - Доработка: читать из app_settings, применять через Tauri Window API
 - По умолчанию: true (как сейчас)
 
-## 5. Интеграция с Obsidian
+## 5. Синхронизация snippet tags через API
+- Таблица `snippet_tags` уже добавлена в `SYNCED_TABLES` и `sync/schema.rs` на клиенте
+- Нужно: добавить модель `SnippetTag` в API сервер (`api/models.py`)
+- Alembic миграция: создать таблицу `snippet_tags` в PostgreSQL
+- Добавить в `TABLE_MODELS` для sync routes
+- Обновить Python `shared/sync_schema.py` — добавить `snippet_tags`
+- После этого теги будут автоматически синхронизироваться между устройствами
+
+## 6. Интеграция с Obsidian
 - Требует детальной проработки (brainstorming)
 - Цель: сниппеты могут создавать, открывать и редактировать заметки в Obsidian
 - Нужно определить: механизм взаимодействия, формат данных, UI
