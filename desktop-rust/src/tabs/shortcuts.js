@@ -11,8 +11,9 @@ let currentQuery = '';
 let fontSize = 14;
 let listWidth = 260;
 let descOpen = false;
-let viewMode = 'main'; // 'main' | 'web'
+let viewMode = 'main'; // 'main' | 'web' | 'note'
 let activeWebLink = null; // index of active link in web view
+let obsidianConfigured = false;
 let tags = [];
 let selectedTagId = null;
 let tagPanelEl = null;
@@ -83,6 +84,12 @@ async function onSearch(query) {
 
 async function loadShortcuts() {
   try {
+    // Check obsidian configuration
+    try {
+      const obsPath = await call('get_setting', { key: 'obsidian_vaults_path' });
+      obsidianConfigured = !!(obsPath && obsPath.trim());
+    } catch { obsidianConfigured = false; }
+
     // Load tags
     try {
       tags = await call('list_snippet_tags');
@@ -191,23 +198,34 @@ function renderDetail() {
   nameEl.textContent = shortcut.name;
   header.appendChild(nameEl);
 
-  // Main/Web toggle (only show if has links)
-  if (hasLinks) {
+  // Main/Web/Note toggle
+  const hasNote = shortcut.obsidian_note && shortcut.obsidian_note.trim();
+  const showToggle = hasLinks || hasNote || obsidianConfigured;
+  if (showToggle) {
     const toggle = document.createElement('div');
     toggle.style.cssText = 'display:flex;gap:0;flex-shrink:0';
 
-    const mainBtn = document.createElement('button');
-    mainBtn.textContent = 'Main';
-    mainBtn.style.cssText = `padding:3px 14px;font-size:12px;border:1px solid var(--border);cursor:pointer;border-radius:6px 0 0 6px;transition:all 0.15s;background:${viewMode === 'main' ? 'var(--bg-tertiary)' : 'transparent'};color:${viewMode === 'main' ? 'var(--text)' : 'var(--text-muted)'};border-color:${viewMode === 'main' ? 'var(--border-hover,#30363d)' : 'var(--border)'}`;
-    mainBtn.addEventListener('click', () => { viewMode = 'main'; renderDetail(); });
+    const tabs = [{ id: 'main', label: 'Main', show: true }];
+    if (hasLinks) tabs.push({ id: 'web', label: 'Web', show: true });
+    if (hasNote || obsidianConfigured) tabs.push({ id: 'note', label: 'Note', show: true });
 
-    const webBtn = document.createElement('button');
-    webBtn.textContent = 'Web';
-    webBtn.style.cssText = `padding:3px 14px;font-size:12px;border:1px solid var(--border);border-left:none;cursor:pointer;border-radius:0 6px 6px 0;transition:all 0.15s;background:${viewMode === 'web' ? 'var(--bg-tertiary)' : 'transparent'};color:${viewMode === 'web' ? 'var(--text)' : 'var(--text-muted)'};border-color:${viewMode === 'web' ? 'var(--border-hover,#30363d)' : 'var(--border)'}`;
-    webBtn.addEventListener('click', () => { viewMode = 'web'; if (activeWebLink === null && links.length > 0) activeWebLink = 0; renderDetail(); });
+    tabs.forEach((tab, i) => {
+      if (!tab.show) return;
+      const btn = document.createElement('button');
+      btn.textContent = tab.label;
+      const isActive = viewMode === tab.id;
+      const isFirst = i === 0;
+      const isLast = i === tabs.length - 1;
+      const radius = isFirst ? '6px 0 0 6px' : isLast ? '0 6px 6px 0' : '0';
+      btn.style.cssText = `padding:3px 14px;font-size:12px;border:1px solid var(--border);${!isFirst ? 'border-left:none;' : ''}cursor:pointer;border-radius:${radius};transition:all 0.15s;background:${isActive ? 'var(--bg-tertiary)' : 'transparent'};color:${isActive ? 'var(--text)' : 'var(--text-muted)'};border-color:${isActive ? 'var(--border-hover,#30363d)' : 'var(--border)'}`;
+      btn.addEventListener('click', () => {
+        viewMode = tab.id;
+        if (tab.id === 'web' && activeWebLink === null && links.length > 0) activeWebLink = 0;
+        renderDetail();
+      });
+      toggle.appendChild(btn);
+    });
 
-    toggle.appendChild(mainBtn);
-    toggle.appendChild(webBtn);
     header.appendChild(toggle);
   }
 
@@ -240,6 +258,8 @@ function renderDetail() {
 
   if (viewMode === 'main') {
     renderMainView(shortcut, hasDesc, links, hasLinks);
+  } else if (viewMode === 'note') {
+    renderNoteView(shortcut);
   } else {
     renderWebView(links);
   }
@@ -455,6 +475,300 @@ function renderWebView(links) {
 
   webView.appendChild(frameArea);
   detailEl.appendChild(webView);
+}
+
+// ── Obsidian Note View ──────────────────────────────────────
+
+function renderMarkdown(md) {
+  let html = md;
+  // Escape HTML
+  html = html.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  // Code blocks (``` ... ```)
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
+    return `<pre style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;padding:12px;overflow-x:auto;font-size:13px"><code>${code.trim()}</code></pre>`;
+  });
+
+  // Inline code
+  html = html.replace(/`([^`]+)`/g, '<code style="background:var(--bg-secondary);padding:2px 6px;border-radius:4px;font-size:0.9em">$1</code>');
+
+  // Headers
+  html = html.replace(/^#### (.+)$/gm, '<h4 style="margin:16px 0 8px;font-size:14px">$1</h4>');
+  html = html.replace(/^### (.+)$/gm, '<h3 style="margin:16px 0 8px;font-size:16px">$1</h3>');
+  html = html.replace(/^## (.+)$/gm, '<h2 style="margin:20px 0 10px;font-size:18px">$1</h2>');
+  html = html.replace(/^# (.+)$/gm, '<h1 style="margin:20px 0 12px;font-size:22px">$1</h1>');
+
+  // Horizontal rules
+  html = html.replace(/^---+$/gm, '<hr style="border:none;border-top:1px solid var(--border);margin:16px 0">');
+
+  // Bold and italic
+  html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+
+  // Links
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" style="color:var(--accent);text-decoration:none" target="_blank">$1</a>');
+
+  // Unordered list items
+  html = html.replace(/^- (.+)$/gm, '<li style="margin-left:20px;list-style:disc">$1</li>');
+
+  // Wrap consecutive <li> in <ul>
+  html = html.replace(/((?:<li[^>]*>.*<\/li>\n?)+)/g, '<ul style="padding-left:0;margin:8px 0">$1</ul>');
+
+  // Paragraphs (lines not already tagged)
+  html = html.replace(/^(?!<[hupola]|<hr|<code|<li|<ul|<\/)(.*\S.*)$/gm, '<p style="margin:6px 0;line-height:1.6">$1</p>');
+
+  return html;
+}
+
+async function renderNoteView(shortcut) {
+  const noteView = document.createElement('div');
+  noteView.style.cssText = 'flex:1;display:flex;flex-direction:column;overflow:hidden';
+
+  const hasNote = shortcut.obsidian_note && shortcut.obsidian_note.trim();
+
+  if (hasNote) {
+    // Show note path
+    const pathBar = document.createElement('div');
+    pathBar.style.cssText = 'padding:8px 16px;border-bottom:1px solid var(--border);font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:8px;flex-shrink:0';
+    const pathLabel = document.createElement('span');
+    pathLabel.textContent = shortcut.obsidian_note;
+    pathLabel.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+    pathBar.appendChild(pathLabel);
+
+    const unlinkBtn = document.createElement('button');
+    unlinkBtn.textContent = 'Unlink';
+    unlinkBtn.className = 'btn-secondary';
+    unlinkBtn.style.cssText = 'padding:2px 10px;font-size:11px;flex-shrink:0';
+    unlinkBtn.addEventListener('click', async () => {
+      try {
+        await call('link_obsidian_note', { snippetId: shortcut.id, notePath: '' });
+        showToast('Note unlinked', 'success');
+        await loadShortcuts();
+      } catch (err) { showToast('Error: ' + err, 'error'); }
+    });
+    pathBar.appendChild(unlinkBtn);
+    noteView.appendChild(pathBar);
+
+    // Read and render note content
+    const contentArea = document.createElement('div');
+    contentArea.style.cssText = 'flex:1;overflow-y:auto;padding:16px 20px;font-size:14px;color:var(--text);line-height:1.6';
+
+    try {
+      const md = await call('read_obsidian_note', { notePath: shortcut.obsidian_note });
+      contentArea.innerHTML = renderMarkdown(md);
+    } catch (err) {
+      contentArea.innerHTML = `<div style="color:var(--text-muted);text-align:center;margin-top:32px">
+        <p>Cannot read note: ${err}</p>
+        <p style="font-size:12px">The file may have been moved or deleted.</p>
+      </div>`;
+    }
+    noteView.appendChild(contentArea);
+  } else {
+    // No linked note - show actions
+    const emptyView = document.createElement('div');
+    emptyView.style.cssText = 'flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;color:var(--text-muted)';
+
+    const msg = document.createElement('p');
+    msg.textContent = 'No linked Obsidian note';
+    msg.style.cssText = 'font-size:14px;margin:0';
+    emptyView.appendChild(msg);
+
+    if (obsidianConfigured) {
+      const actions = document.createElement('div');
+      actions.style.cssText = 'display:flex;gap:10px';
+
+      const createBtn = document.createElement('button');
+      createBtn.textContent = 'Create note';
+      createBtn.style.cssText = 'padding:6px 16px;font-size:13px';
+      createBtn.addEventListener('click', () => openCreateNoteModal(shortcut));
+      actions.appendChild(createBtn);
+
+      const linkBtn = document.createElement('button');
+      linkBtn.textContent = 'Link existing note';
+      linkBtn.className = 'btn-secondary';
+      linkBtn.style.cssText = 'padding:6px 16px;font-size:13px';
+      linkBtn.addEventListener('click', () => openLinkNoteModal(shortcut));
+      actions.appendChild(linkBtn);
+
+      emptyView.appendChild(actions);
+    } else {
+      const hint = document.createElement('p');
+      hint.textContent = 'Configure Obsidian vaults path in Settings > General';
+      hint.style.cssText = 'font-size:12px;margin:0';
+      emptyView.appendChild(hint);
+    }
+
+    noteView.appendChild(emptyView);
+  }
+
+  detailEl.appendChild(noteView);
+}
+
+async function openCreateNoteModal(shortcut) {
+  const form = document.createElement('div');
+  form.style.cssText = 'display:flex;flex-direction:column;gap:12px;min-width:350px';
+
+  // Vault selector
+  const vaultLabel = document.createElement('label');
+  vaultLabel.textContent = 'Vault:';
+  vaultLabel.style.cssText = 'font-size:13px;font-weight:600;color:var(--text)';
+  form.appendChild(vaultLabel);
+
+  const vaultSelect = document.createElement('select');
+  vaultSelect.style.cssText = 'padding:6px 10px;font-size:13px';
+  form.appendChild(vaultSelect);
+
+  // Folder selector
+  const folderLabel = document.createElement('label');
+  folderLabel.textContent = 'Folder:';
+  folderLabel.style.cssText = 'font-size:13px;font-weight:600;color:var(--text)';
+  form.appendChild(folderLabel);
+
+  const folderSelect = document.createElement('select');
+  folderSelect.style.cssText = 'padding:6px 10px;font-size:13px';
+  form.appendChild(folderSelect);
+
+  // Filename
+  const fnLabel = document.createElement('label');
+  fnLabel.textContent = 'Filename:';
+  fnLabel.style.cssText = 'font-size:13px;font-weight:600;color:var(--text)';
+  form.appendChild(fnLabel);
+
+  const fnInput = document.createElement('input');
+  fnInput.type = 'text';
+  fnInput.value = shortcut.name;
+  fnInput.placeholder = 'Note filename (without .md)';
+  form.appendChild(fnInput);
+
+  // Load vaults
+  try {
+    const vaults = await call('list_obsidian_vaults');
+    if (vaults.length === 0) {
+      showToast('No Obsidian vaults found at the configured path', 'error');
+      return;
+    }
+    for (const v of vaults) {
+      const opt = document.createElement('option');
+      opt.value = v;
+      opt.textContent = v;
+      vaultSelect.appendChild(opt);
+    }
+    // Load folders for first vault
+    await loadFolders(vaultSelect.value);
+  } catch (err) {
+    showToast('Error loading vaults: ' + err, 'error');
+    return;
+  }
+
+  vaultSelect.addEventListener('change', () => loadFolders(vaultSelect.value));
+
+  async function loadFolders(vault) {
+    folderSelect.innerHTML = '';
+    try {
+      const folders = await call('list_obsidian_folders', { vault });
+      for (const f of folders) {
+        const opt = document.createElement('option');
+        opt.value = f;
+        opt.textContent = f;
+        folderSelect.appendChild(opt);
+      }
+    } catch (err) { showToast('Error loading folders: ' + err, 'error'); }
+  }
+
+  showModal({
+    title: 'Create Obsidian Note',
+    body: form,
+    onConfirm: async () => {
+      const vault = vaultSelect.value;
+      const folder = folderSelect.value;
+      const filename = fnInput.value.trim();
+      if (!filename) { showToast('Filename is required', 'error'); return; }
+      try {
+        await call('create_obsidian_note', { snippetId: shortcut.id, vault, folder, filename });
+        showToast('Note created', 'success');
+        viewMode = 'note';
+        await loadShortcuts();
+      } catch (err) { showToast('Error: ' + err, 'error'); }
+    },
+  }).catch(() => {});
+}
+
+async function openLinkNoteModal(shortcut) {
+  const form = document.createElement('div');
+  form.style.cssText = 'display:flex;flex-direction:column;gap:12px;min-width:350px';
+
+  // Vault selector
+  const vaultLabel = document.createElement('label');
+  vaultLabel.textContent = 'Vault:';
+  vaultLabel.style.cssText = 'font-size:13px;font-weight:600;color:var(--text)';
+  form.appendChild(vaultLabel);
+
+  const vaultSelect = document.createElement('select');
+  vaultSelect.style.cssText = 'padding:6px 10px;font-size:13px';
+  form.appendChild(vaultSelect);
+
+  // File list
+  const fileLabel = document.createElement('label');
+  fileLabel.textContent = 'Note file:';
+  fileLabel.style.cssText = 'font-size:13px;font-weight:600;color:var(--text)';
+  form.appendChild(fileLabel);
+
+  const fileSelect = document.createElement('select');
+  fileSelect.style.cssText = 'padding:6px 10px;font-size:13px';
+  fileSelect.size = 10;
+  form.appendChild(fileSelect);
+
+  // Load vaults
+  try {
+    const vaults = await call('list_obsidian_vaults');
+    if (vaults.length === 0) {
+      showToast('No Obsidian vaults found at the configured path', 'error');
+      return;
+    }
+    for (const v of vaults) {
+      const opt = document.createElement('option');
+      opt.value = v;
+      opt.textContent = v;
+      vaultSelect.appendChild(opt);
+    }
+    await loadFiles(vaultSelect.value);
+  } catch (err) {
+    showToast('Error loading vaults: ' + err, 'error');
+    return;
+  }
+
+  vaultSelect.addEventListener('change', () => loadFiles(vaultSelect.value));
+
+  async function loadFiles(vault) {
+    fileSelect.innerHTML = '';
+    try {
+      const files = await call('list_obsidian_files', { vault });
+      for (const f of files) {
+        const opt = document.createElement('option');
+        opt.value = f;
+        opt.textContent = f;
+        fileSelect.appendChild(opt);
+      }
+    } catch (err) { showToast('Error loading files: ' + err, 'error'); }
+  }
+
+  showModal({
+    title: 'Link Existing Note',
+    body: form,
+    onConfirm: async () => {
+      const vault = vaultSelect.value;
+      const file = fileSelect.value;
+      if (!file) { showToast('Select a note file', 'error'); return; }
+      const notePath = vault + '/' + file;
+      try {
+        await call('link_obsidian_note', { snippetId: shortcut.id, notePath });
+        showToast('Note linked', 'success');
+        viewMode = 'note';
+        await loadShortcuts();
+      } catch (err) { showToast('Error: ' + err, 'error'); }
+    },
+  }).catch(() => {});
 }
 
 function renderTagPanel() {
@@ -803,6 +1117,38 @@ function openEditor(shortcut) {
     renderLinkRows();
   });
   form.appendChild(addLinkBtn);
+
+  // Obsidian note (read-only display)
+  if (isEdit && shortcut.obsidian_note && shortcut.obsidian_note.trim()) {
+    const noteLabel = document.createElement('div');
+    noteLabel.textContent = 'Obsidian note:';
+    noteLabel.style.cssText = 'font-size:13px;font-weight:600;color:var(--text);margin-top:4px';
+    form.appendChild(noteLabel);
+
+    const noteRow = document.createElement('div');
+    noteRow.style.cssText = 'display:flex;align-items:center;gap:8px';
+
+    const noteSpan = document.createElement('span');
+    noteSpan.textContent = shortcut.obsidian_note;
+    noteSpan.style.cssText = 'font-size:12px;color:var(--text-muted);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+    noteRow.appendChild(noteSpan);
+
+    const unlinkBtn = document.createElement('button');
+    unlinkBtn.className = 'btn-danger';
+    unlinkBtn.textContent = 'Unlink';
+    unlinkBtn.style.cssText = 'padding:2px 10px;font-size:11px;flex-shrink:0';
+    unlinkBtn.addEventListener('click', async () => {
+      try {
+        await call('link_obsidian_note', { snippetId: shortcut.id, notePath: '' });
+        noteSpan.textContent = '(unlinked)';
+        unlinkBtn.disabled = true;
+        showToast('Note unlinked', 'success');
+      } catch (err) { showToast('Error: ' + err, 'error'); }
+    });
+    noteRow.appendChild(unlinkBtn);
+
+    form.appendChild(noteRow);
+  }
 
   showModal({
     title: isEdit ? 'Edit Shortcut' : 'New Shortcut',

@@ -166,6 +166,9 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     // Migration: add links column to shortcuts (may already exist)
     conn.execute_batch("ALTER TABLE shortcuts ADD COLUMN links TEXT NOT NULL DEFAULT '[]'").ok();
 
+    // Migration: add obsidian_note column to shortcuts (may already exist)
+    conn.execute_batch("ALTER TABLE shortcuts ADD COLUMN obsidian_note TEXT NOT NULL DEFAULT ''").ok();
+
     Ok(())
 }
 

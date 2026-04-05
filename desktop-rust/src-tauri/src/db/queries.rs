@@ -26,21 +26,22 @@ fn parse_dt(s: &str) -> NaiveDateTime {
 
 pub fn list_shortcuts(conn: &Connection) -> Result<Vec<Shortcut>> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, value, description, links, uuid, updated_at, sync_status, user_id
+        "SELECT id, name, value, description, links, obsidian_note, uuid, updated_at, sync_status, user_id
          FROM shortcuts WHERE sync_status != 'deleted' ORDER BY name",
     )?;
     let rows = stmt.query_map([], |row| {
-        let updated_at_str: String = row.get(6)?;
+        let updated_at_str: String = row.get(7)?;
         Ok(Shortcut {
             id: row.get(0)?,
             name: row.get(1)?,
             value: row.get(2)?,
             description: row.get(3)?,
             links: row.get(4)?,
-            uuid: row.get(5)?,
+            obsidian_note: row.get(5)?,
+            uuid: row.get(6)?,
             updated_at: parse_dt(&updated_at_str),
-            sync_status: row.get(7)?,
-            user_id: row.get(8)?,
+            sync_status: row.get(8)?,
+            user_id: row.get(9)?,
         })
     })?;
     rows.collect()
@@ -49,36 +50,37 @@ pub fn list_shortcuts(conn: &Connection) -> Result<Vec<Shortcut>> {
 pub fn search_shortcuts(conn: &Connection, query: &str) -> Result<Vec<Shortcut>> {
     let pattern = format!("%{}%", query);
     let mut stmt = conn.prepare(
-        "SELECT id, name, value, description, links, uuid, updated_at, sync_status, user_id
+        "SELECT id, name, value, description, links, obsidian_note, uuid, updated_at, sync_status, user_id
          FROM shortcuts
          WHERE sync_status != 'deleted'
            AND (name LIKE ?1 OR value LIKE ?1 OR description LIKE ?1)
          ORDER BY name",
     )?;
     let rows = stmt.query_map(params![pattern], |row| {
-        let updated_at_str: String = row.get(6)?;
+        let updated_at_str: String = row.get(7)?;
         Ok(Shortcut {
             id: row.get(0)?,
             name: row.get(1)?,
             value: row.get(2)?,
             description: row.get(3)?,
             links: row.get(4)?,
-            uuid: row.get(5)?,
+            obsidian_note: row.get(5)?,
+            uuid: row.get(6)?,
             updated_at: parse_dt(&updated_at_str),
-            sync_status: row.get(7)?,
-            user_id: row.get(8)?,
+            sync_status: row.get(8)?,
+            user_id: row.get(9)?,
         })
     })?;
     rows.collect()
 }
 
-pub fn create_shortcut(conn: &Connection, name: &str, value: &str, description: &str, links: &str) -> Result<Shortcut> {
+pub fn create_shortcut(conn: &Connection, name: &str, value: &str, description: &str, links: &str, obsidian_note: &str) -> Result<Shortcut> {
     let uuid = Uuid::new_v4().to_string();
     let now = now_str();
     conn.execute(
-        "INSERT INTO shortcuts (name, value, description, links, uuid, updated_at, sync_status, user_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending', '')",
-        params![name, value, description, links, uuid, now],
+        "INSERT INTO shortcuts (name, value, description, links, obsidian_note, uuid, updated_at, sync_status, user_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'pending', '')",
+        params![name, value, description, links, obsidian_note, uuid, now],
     )?;
     let id = conn.last_insert_rowid();
     Ok(Shortcut {
@@ -87,6 +89,7 @@ pub fn create_shortcut(conn: &Connection, name: &str, value: &str, description: 
         value: value.to_string(),
         description: description.to_string(),
         links: links.to_string(),
+        obsidian_note: obsidian_note.to_string(),
         uuid,
         updated_at: parse_dt(&now),
         sync_status: "pending".to_string(),
@@ -94,12 +97,21 @@ pub fn create_shortcut(conn: &Connection, name: &str, value: &str, description: 
     })
 }
 
-pub fn update_shortcut(conn: &Connection, id: i64, name: &str, value: &str, description: &str, links: &str) -> Result<()> {
+pub fn update_shortcut(conn: &Connection, id: i64, name: &str, value: &str, description: &str, links: &str, obsidian_note: &str) -> Result<()> {
     let now = now_str();
     conn.execute(
-        "UPDATE shortcuts SET name = ?1, value = ?2, description = ?3, links = ?4, updated_at = ?5, sync_status = 'pending'
-         WHERE id = ?6",
-        params![name, value, description, links, now, id],
+        "UPDATE shortcuts SET name = ?1, value = ?2, description = ?3, links = ?4, obsidian_note = ?5, updated_at = ?6, sync_status = 'pending'
+         WHERE id = ?7",
+        params![name, value, description, links, obsidian_note, now, id],
+    )?;
+    Ok(())
+}
+
+pub fn update_shortcut_obsidian_note(conn: &Connection, id: i64, note_path: &str) -> Result<()> {
+    let now = now_str();
+    conn.execute(
+        "UPDATE shortcuts SET obsidian_note = ?1, updated_at = ?2, sync_status = 'pending' WHERE id = ?3",
+        params![note_path, now, id],
     )?;
     Ok(())
 }
@@ -1050,7 +1062,7 @@ mod tests {
     #[test]
     fn test_shortcuts_create_and_list() {
         let conn = init_test_db();
-        let s = create_shortcut(&conn, "greet", "Hello!", "A greeting", "[]").unwrap();
+        let s = create_shortcut(&conn, "greet", "Hello!", "A greeting", "[]", "").unwrap();
         assert_eq!(s.name, "greet");
         assert_eq!(s.sync_status, "pending");
         assert!(s.id.is_some());
@@ -1063,8 +1075,8 @@ mod tests {
     #[test]
     fn test_shortcuts_update() {
         let conn = init_test_db();
-        let s = create_shortcut(&conn, "greet", "Hello!", "desc", "[]").unwrap();
-        update_shortcut(&conn, s.id.unwrap(), "greet2", "Hi!", "new desc", "[]").unwrap();
+        let s = create_shortcut(&conn, "greet", "Hello!", "desc", "[]", "").unwrap();
+        update_shortcut(&conn, s.id.unwrap(), "greet2", "Hi!", "new desc", "[]", "").unwrap();
 
         let list = list_shortcuts(&conn).unwrap();
         assert_eq!(list[0].name, "greet2");
@@ -1075,7 +1087,7 @@ mod tests {
     #[test]
     fn test_shortcuts_soft_delete() {
         let conn = init_test_db();
-        let s = create_shortcut(&conn, "greet", "Hello!", "desc", "[]").unwrap();
+        let s = create_shortcut(&conn, "greet", "Hello!", "desc", "[]", "").unwrap();
         delete_shortcut(&conn, s.id.unwrap()).unwrap();
 
         let list = list_shortcuts(&conn).unwrap();
@@ -1085,8 +1097,8 @@ mod tests {
     #[test]
     fn test_shortcuts_search() {
         let conn = init_test_db();
-        create_shortcut(&conn, "hello", "world", "desc", "[]").unwrap();
-        create_shortcut(&conn, "foo", "bar", "desc", "[]").unwrap();
+        create_shortcut(&conn, "hello", "world", "desc", "[]", "").unwrap();
+        create_shortcut(&conn, "foo", "bar", "desc", "[]", "").unwrap();
 
         let results = search_shortcuts(&conn, "hel").unwrap();
         assert_eq!(results.len(), 1);
@@ -1100,7 +1112,7 @@ mod tests {
     #[test]
     fn test_shortcuts_uuid_generated() {
         let conn = init_test_db();
-        let s = create_shortcut(&conn, "test", "val", "desc", "[]").unwrap();
+        let s = create_shortcut(&conn, "test", "val", "desc", "[]", "").unwrap();
         assert!(!s.uuid.is_empty());
         // UUID v4 format: 8-4-4-4-12 hex chars
         assert_eq!(s.uuid.len(), 36);
@@ -1310,10 +1322,10 @@ mod tests {
     #[test]
     fn test_filter_shortcuts_by_patterns() {
         let conn = init_test_db();
-        create_shortcut(&conn, "af_pipeline", "val1", "desc", "[]").unwrap();
-        create_shortcut(&conn, "af_dag_test", "val2", "desc", "[]").unwrap();
-        create_shortcut(&conn, "sql_query", "val3", "desc", "[]").unwrap();
-        create_shortcut(&conn, "airflow_config", "val4", "desc", "[]").unwrap();
+        create_shortcut(&conn, "af_pipeline", "val1", "desc", "[]", "").unwrap();
+        create_shortcut(&conn, "af_dag_test", "val2", "desc", "[]", "").unwrap();
+        create_shortcut(&conn, "sql_query", "val3", "desc", "[]", "").unwrap();
+        create_shortcut(&conn, "airflow_config", "val4", "desc", "[]", "").unwrap();
 
         // Filter by af_* pattern
         let results = filter_shortcuts_by_patterns(&conn, &["af_*".to_string()], "").unwrap();

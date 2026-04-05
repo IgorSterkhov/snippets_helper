@@ -148,6 +148,17 @@ async function renderGeneral(container) {
   langRow.appendChild(langSelect);
   container.appendChild(langRow);
 
+  // Obsidian vaults path
+  const obsRow = makeFormRow('Obsidian vaults:');
+  const obsInput = document.createElement('input');
+  obsInput.className = 'settings-input';
+  obsInput.placeholder = '/path/to/obsidian/vaults';
+  obsInput.style.flex = '1';
+  obsInput.value = await getSetting('obsidian_vaults_path') || '';
+  obsInput.addEventListener('change', () => saveSetting('obsidian_vaults_path', obsInput.value));
+  obsRow.appendChild(obsInput);
+  container.appendChild(obsRow);
+
   // Autostart
   const autoRow = makeFormRow('Autostart:');
   const autoCb = document.createElement('input');

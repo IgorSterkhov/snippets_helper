@@ -9,7 +9,7 @@ SYNC_FIELDS = ['uuid', 'updated_at', 'sync_status', 'user_id']
 # Syncable tables and their original data fields (excluding sync fields)
 SYNCED_TABLES = {
     'shortcuts': {
-        'data_fields': ['id', 'name', 'value', 'description', 'links'],
+        'data_fields': ['id', 'name', 'value', 'description', 'links', 'obsidian_note'],
         'pk': 'id',
     },
     'sql_table_analyzer_templates': {
