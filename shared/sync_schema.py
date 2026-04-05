@@ -35,4 +35,8 @@ SYNCED_TABLES = {
                         'obfuscated_value', 'created_at'],
         'pk': 'id',
     },
+    'snippet_tags': {
+        'data_fields': ['id', 'name', 'patterns', 'color', 'sort_order'],
+        'pk': 'id',
+    },
 }

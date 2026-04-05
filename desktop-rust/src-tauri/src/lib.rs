@@ -33,6 +33,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::settings::get_setting,
             commands::settings::set_setting,
+            commands::settings::set_always_on_top,
             commands::settings::hide_and_sync,
             commands::shortcuts::list_shortcuts,
             commands::shortcuts::search_shortcuts,
@@ -116,6 +117,14 @@ pub fn run() {
                 .ok()
                 .flatten()
                 .unwrap_or_else(|| "alt_space".to_string());
+
+            // Apply always_on_top setting
+            if let Some(window) = app.get_webview_window("main") {
+                let aot = db::queries::get_setting(&conn, &computer_id, "always_on_top")
+                    .ok().flatten().unwrap_or_else(|| "1".to_string());
+                let _ = window.set_always_on_top(aot == "1");
+            }
+
             drop(conn);
 
             match hotkey_mode.as_str() {

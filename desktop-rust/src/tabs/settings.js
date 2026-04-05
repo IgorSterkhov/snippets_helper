@@ -164,6 +164,23 @@ async function renderGeneral(container) {
   });
   autoRow.appendChild(autoCb);
   container.appendChild(autoRow);
+
+  // Always on top
+  const aotRow = makeFormRow('Always on top:');
+  const aotCb = document.createElement('input');
+  aotCb.type = 'checkbox';
+  const aotVal = await getSetting('always_on_top');
+  aotCb.checked = aotVal !== '0'; // default true
+  aotCb.addEventListener('change', async () => {
+    await saveSetting('always_on_top', aotCb.checked ? '1' : '0');
+    try {
+      await call('set_always_on_top', { enabled: aotCb.checked });
+    } catch (err) {
+      showToast('Failed to set always on top: ' + err, 'error');
+    }
+  });
+  aotRow.appendChild(aotCb);
+  container.appendChild(aotRow);
 }
 
 // ── Shortcuts settings ────────────────────────────────────────

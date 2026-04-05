@@ -23,6 +23,11 @@ pub fn set_setting(state: State<DbState>, key: String, value: String) -> Result<
 }
 
 #[tauri::command]
+pub fn set_always_on_top(window: tauri::WebviewWindow, enabled: bool) -> Result<(), String> {
+    window.set_always_on_top(enabled).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn hide_and_sync(window: tauri::WebviewWindow, state: State<'_, DbState>) -> Result<(), String> {
     let _ = window.hide();
 

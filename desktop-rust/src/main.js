@@ -41,6 +41,12 @@ async function main() {
   });
   tabContainer.tabBar.appendChild(helpBtn);
 
+  // Apply global font size
+  try {
+    const fs = await call('get_setting', { key: 'font_size' });
+    if (fs) document.getElementById('app').style.fontSize = fs + 'px';
+  } catch {}
+
   let lastTab = 'shortcuts';
   try {
     const saved = await call('get_setting', { key: 'last_active_tab' });

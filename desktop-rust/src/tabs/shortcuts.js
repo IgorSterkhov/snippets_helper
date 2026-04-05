@@ -21,10 +21,11 @@ export async function init(container) {
   container.innerHTML = '';
   container.style.cssText = 'display:flex;flex-direction:column;height:100%;overflow:hidden';
 
-  // Load font size settings
+  // Load font size settings (snippets-specific overrides global)
   try {
-    const fs = await call('get_setting', { key: 'snippets_font_size' });
-    if (fs) fontSize = parseInt(fs) || 14;
+    const globalFs = await call('get_setting', { key: 'font_size' });
+    const snippetsFs = await call('get_setting', { key: 'snippets_font_size' });
+    fontSize = parseInt(snippetsFs || globalFs) || 14;
     const lw = await call('get_setting', { key: 'snippets_left_width' });
     if (lw) listWidth = parseInt(lw) || 260;
   } catch {}

@@ -112,6 +112,22 @@ class ObfuscationMapping(Base):
     __table_args__ = (Index("idx_obfuscation_user_updated", "user_id", "updated_at"),)
 
 
+class SnippetTag(Base):
+    __tablename__ = "snippet_tags"
+
+    uuid: Mapped[uuid_mod.UUID] = mapped_column(Uuid, primary_key=True, default=uuid_mod.uuid4)
+    user_id: Mapped[uuid_mod.UUID] = mapped_column(Uuid, ForeignKey("users.id"), nullable=False)
+    id: Mapped[int | None] = mapped_column(Integer)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    patterns: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    color: Mapped[str] = mapped_column(String, nullable=False, default="#388bfd")
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    __table_args__ = (Index("idx_snippet_tags_user_updated", "user_id", "updated_at"),)
+
+
 # Map table names to ORM models (used by sync routes)
 TABLE_MODELS = {
     "shortcuts": Shortcut,
@@ -120,4 +136,5 @@ TABLE_MODELS = {
     "note_folders": NoteFolder,
     "notes": Note,
     "obfuscation_mappings": ObfuscationMapping,
+    "snippet_tags": SnippetTag,
 }
