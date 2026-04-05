@@ -20,7 +20,7 @@ let tagPanelEl = null;
 
 export async function init(container) {
   container.innerHTML = '';
-  container.style.cssText = 'display:flex;flex-direction:column;height:100%;overflow:hidden';
+  container.style.cssText = 'display:flex;flex-direction:column;height:100%;overflow:hidden;padding:0';
 
   // Load font size settings (snippets-specific overrides global)
   try {
