@@ -105,6 +105,13 @@ pub fn run() {
             commands::exec::stop_command,
             // Help
             commands::help::get_changelog,
+            // Repo Search
+            commands::repo_search::list_repo_paths,
+            commands::repo_search::add_repo_path,
+            commands::repo_search::remove_repo_path,
+            commands::repo_search::search_filenames,
+            commands::repo_search::search_content,
+            commands::repo_search::search_git_history,
             // Autostart
             autostart::set_autostart,
             autostart::get_autostart,

@@ -10,6 +10,7 @@ const TABS = [
   { id: 'superset',  label: 'Superset',  icon: '\u{1F4CA}', loader: (el) => import('./tabs/superset/superset-main.js').then(m => m.init(el)) },
   { id: 'commits',   label: 'Commits',   icon: '\u{1F4BE}', loader: (el) => import('./tabs/commits.js').then(m => m.init(el)) },
   { id: 'exec',      label: 'Exec',      icon: '\u26A1',    loader: (el) => import('./tabs/exec.js').then(m => m.init(el)) },
+  { id: 'repo-search', label: 'Search', icon: '\uD83D\uDD0D', loader: (el) => import('./tabs/repo-search.js').then(m => m.init(el)) },
 ];
 
 async function main() {
@@ -59,8 +60,27 @@ async function main() {
 
   await tabContainer.activate(lastTab);
 
+  let repoSearchTimer = null;
   const origActivate = tabContainer.activate.bind(tabContainer);
   tabContainer.activate = async (tabId) => {
+    // If switching away from repo-search, start unload timer
+    if (tabContainer.activeTabId === 'repo-search' && tabId !== 'repo-search') {
+      const timeout = parseInt(await call('get_setting', { key: 'repo_search_unload_minutes' }).catch(() => '10')) || 10;
+      repoSearchTimer = setTimeout(async () => {
+        try {
+          const { destroy } = await import('./tabs/repo-search.js');
+          destroy();
+        } catch {}
+        tabContainer.loadedTabs.delete('repo-search');
+        const panel = tabContainer.panels['repo-search'];
+        if (panel) panel.innerHTML = '<div class="loading">Loading...</div>';
+      }, timeout * 60 * 1000);
+    }
+    // If switching to repo-search, cancel unload timer
+    if (tabId === 'repo-search' && repoSearchTimer) {
+      clearTimeout(repoSearchTimer);
+      repoSearchTimer = null;
+    }
     await origActivate(tabId);
     call('set_setting', { key: 'last_active_tab', value: tabId }).catch(() => {});
   };

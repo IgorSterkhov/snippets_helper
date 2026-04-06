@@ -7,3 +7,4 @@ pub mod superset;
 pub mod commits;
 pub mod exec;
 pub mod help;
+pub mod repo_search;

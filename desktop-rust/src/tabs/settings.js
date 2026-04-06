@@ -177,6 +177,19 @@ async function renderGeneral(container) {
   autoRow.appendChild(autoCb);
   container.appendChild(autoRow);
 
+  // Search tab unload timeout
+  const unloadRow = makeFormRow('Search tab unload (min):');
+  const unloadInput = document.createElement('input');
+  unloadInput.type = 'number';
+  unloadInput.className = 'settings-input';
+  unloadInput.min = '1';
+  unloadInput.max = '60';
+  unloadInput.value = await getSetting('repo_search_unload_minutes') || '10';
+  unloadInput.style.width = '80px';
+  unloadInput.addEventListener('change', () => saveSetting('repo_search_unload_minutes', unloadInput.value));
+  unloadRow.appendChild(unloadInput);
+  container.appendChild(unloadRow);
+
   // Always on top
   const aotRow = makeFormRow('Always on top:');
   const aotCb = document.createElement('input');
