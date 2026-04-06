@@ -1,14 +1,25 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::State;
 use crate::db::{DbState, queries};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
+use std::collections::HashMap;
 
 const MAX_RESULTS: usize = 200;
+const MAX_FILE_GROUPS: usize = 50;
 
 const SKIP_DIRS: &[&str] = &[
     ".git", "node_modules", "target", "__pycache__", ".venv", ".idea", ".vs",
 ];
+
+// ── Data types ───────────────────────────────────────────
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct RepoEntry {
+    pub name: String,
+    pub path: String,
+    pub color: String,
+}
 
 #[derive(Serialize, Clone)]
 pub struct SearchResult {
@@ -22,6 +33,29 @@ pub struct SearchResult {
 }
 
 #[derive(Serialize, Clone)]
+pub struct FileSearchResult {
+    pub file_path: String,
+    pub repo_name: String,
+    pub relative_path: String,
+    pub modified_at: String,
+    pub matches: Vec<MatchInfo>,
+    pub total_matches: usize,
+}
+
+#[derive(Serialize, Clone)]
+pub struct MatchInfo {
+    pub line_num: u32,
+    pub line_text: String,
+}
+
+#[derive(Serialize, Clone)]
+pub struct ContextLine {
+    pub line_num: u32,
+    pub text: String,
+    pub is_match: bool,
+}
+
+#[derive(Serialize, Clone)]
 pub struct GitSearchResult {
     pub repo_name: String,
     pub commit_hash: String,
@@ -31,7 +65,7 @@ pub struct GitSearchResult {
     pub files_changed: Vec<String>,
 }
 
-// ── Repo path management ──────────────────────────────────
+// ── Repo management ──────────────────────────────────────
 
 fn get_computer_id() -> String {
     hostname::get()
@@ -40,44 +74,55 @@ fn get_computer_id() -> String {
         .to_string()
 }
 
-fn load_repo_paths(conn: &rusqlite::Connection, computer_id: &str) -> Vec<String> {
-    let raw = queries::get_setting(conn, computer_id, "repo_search_paths")
+fn load_repos(conn: &rusqlite::Connection, computer_id: &str) -> Vec<RepoEntry> {
+    let raw = queries::get_setting(conn, computer_id, "repo_search_repos")
         .ok()
         .flatten()
         .unwrap_or_else(|| "[]".to_string());
-    serde_json::from_str::<Vec<String>>(&raw).unwrap_or_default()
+    serde_json::from_str::<Vec<RepoEntry>>(&raw).unwrap_or_default()
 }
 
-fn save_repo_paths(conn: &rusqlite::Connection, computer_id: &str, paths: &[String]) -> Result<(), String> {
-    let json = serde_json::to_string(paths).map_err(|e| e.to_string())?;
-    queries::set_setting(conn, computer_id, "repo_search_paths", &json).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub fn list_repo_paths(state: State<DbState>) -> Result<Vec<String>, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
-    let cid = get_computer_id();
-    Ok(load_repo_paths(&conn, &cid))
+fn save_repos(conn: &rusqlite::Connection, computer_id: &str, repos: &[RepoEntry]) -> Result<(), String> {
+    let json = serde_json::to_string(repos).map_err(|e| e.to_string())?;
+    queries::set_setting(conn, computer_id, "repo_search_repos", &json).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn add_repo_path(state: State<DbState>, path: String) -> Result<(), String> {
+pub fn list_repos(state: State<DbState>) -> Result<Vec<RepoEntry>, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     let cid = get_computer_id();
-    let mut paths = load_repo_paths(&conn, &cid);
-    if !paths.contains(&path) {
-        paths.push(path);
+    Ok(load_repos(&conn, &cid))
+}
+
+#[tauri::command]
+pub fn add_repo(state: State<DbState>, name: String, path: String, color: String) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let cid = get_computer_id();
+    let mut repos = load_repos(&conn, &cid);
+    if repos.iter().any(|r| r.name == name) {
+        return Err(format!("Repo with name '{}' already exists", name));
     }
-    save_repo_paths(&conn, &cid, &paths)
+    repos.push(RepoEntry { name, path, color });
+    save_repos(&conn, &cid, &repos)
 }
 
 #[tauri::command]
-pub fn remove_repo_path(state: State<DbState>, path: String) -> Result<(), String> {
+pub fn remove_repo(state: State<DbState>, name: String) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     let cid = get_computer_id();
-    let mut paths = load_repo_paths(&conn, &cid);
-    paths.retain(|p| p != &path);
-    save_repo_paths(&conn, &cid, &paths)
+    let mut repos = load_repos(&conn, &cid);
+    repos.retain(|r| r.name != name);
+    save_repos(&conn, &cid, &repos)
+}
+
+/// Resolve active repo names to paths. If `repos` is empty, use all repos.
+fn resolve_repo_paths(conn: &rusqlite::Connection, computer_id: &str, repos: &[String]) -> Vec<RepoEntry> {
+    let all = load_repos(conn, computer_id);
+    if repos.is_empty() {
+        all
+    } else {
+        all.into_iter().filter(|r| repos.contains(&r.name)).collect()
+    }
 }
 
 // ── Filename search ───────────────────────────────────────
@@ -120,14 +165,6 @@ fn walk_dir_recursive(dir: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
-fn repo_name_from_path(repo_path: &Path) -> String {
-    repo_path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("unknown")
-        .to_string()
-}
-
 fn glob_to_regex(pattern: &str) -> String {
     let mut regex = String::new();
     for ch in pattern.chars() {
@@ -145,15 +182,15 @@ fn glob_to_regex(pattern: &str) -> String {
 }
 
 #[tauri::command]
-pub async fn search_filenames(state: State<'_, DbState>, pattern: String) -> Result<Vec<SearchResult>, String> {
-    let paths = {
+pub async fn search_filenames(state: State<'_, DbState>, pattern: String, repos: Vec<String>) -> Result<Vec<SearchResult>, String> {
+    let entries = {
         let conn = state.0.lock().map_err(|e| e.to_string())?;
         let cid = get_computer_id();
-        load_repo_paths(&conn, &cid)
+        resolve_repo_paths(&conn, &cid, &repos)
     };
 
-    if paths.is_empty() {
-        return Err("No repository paths configured. Add paths in Settings.".to_string());
+    if entries.is_empty() {
+        return Err("No repository paths configured. Add repos in Settings.".to_string());
     }
 
     let regex_pattern = glob_to_regex(&pattern);
@@ -164,12 +201,11 @@ pub async fn search_filenames(state: State<'_, DbState>, pattern: String) -> Res
 
     let mut results = Vec::new();
 
-    for repo_path_str in &paths {
-        let repo_path = Path::new(repo_path_str);
+    for repo in &entries {
+        let repo_path = Path::new(&repo.path);
         if !repo_path.exists() {
             continue;
         }
-        let repo_name = repo_name_from_path(repo_path);
         let files = walk_repo(repo_path);
 
         for file_path in files {
@@ -196,7 +232,7 @@ pub async fn search_filenames(state: State<'_, DbState>, pattern: String) -> Res
 
                 results.push(SearchResult {
                     file_path: file_path.to_string_lossy().to_string(),
-                    repo_name: repo_name.clone(),
+                    repo_name: repo.name.clone(),
                     relative_path,
                     modified_at,
                     size,
@@ -213,18 +249,26 @@ pub async fn search_filenames(state: State<'_, DbState>, pattern: String) -> Res
     Ok(results)
 }
 
-// ── Content search ────────────────────────────────────────
+// ── Content search (grouped by file) ─────────────────────
 
 fn is_binary(data: &[u8]) -> bool {
     let check_len = data.len().min(512);
     data[..check_len].contains(&0)
 }
 
-fn try_ripgrep(query: &str, repo_path: &str, max_results: usize) -> Option<Vec<SearchResult>> {
+/// Raw match from any search backend
+struct RawMatch {
+    file_path: String,
+    repo_name: String,
+    relative_path: String,
+    line_num: u32,
+    line_text: String,
+}
+
+fn try_ripgrep(query: &str, repo_path: &str, repo_name: &str, max_results: usize) -> Option<Vec<RawMatch>> {
     let output = std::process::Command::new("rg")
         .args([
             "--json",
-            "--max-count", "3",
             "--glob", "!.git",
             "--glob", "!node_modules",
             "--glob", "!target",
@@ -240,7 +284,6 @@ fn try_ripgrep(query: &str, repo_path: &str, max_results: usize) -> Option<Vec<S
         .ok()?;
 
     if !output.status.success() && output.stdout.is_empty() {
-        // rg returns exit code 1 when no matches found
         if output.status.code() == Some(1) {
             return Some(Vec::new());
         }
@@ -248,7 +291,6 @@ fn try_ripgrep(query: &str, repo_path: &str, max_results: usize) -> Option<Vec<S
     }
 
     let repo_path_obj = Path::new(repo_path);
-    let repo_name = repo_name_from_path(repo_path_obj);
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut results = Vec::new();
 
@@ -269,34 +311,25 @@ fn try_ripgrep(query: &str, repo_path: &str, max_results: usize) -> Option<Vec<S
         let match_text = data["lines"]["text"].as_str().unwrap_or_default().trim().to_string();
 
         let file_path = Path::new(file_path_str);
-        let metadata = std::fs::metadata(file_path).ok();
-        let modified_at = metadata
-            .as_ref()
-            .and_then(|m| m.modified().ok())
-            .map(format_system_time)
-            .unwrap_or_default();
-        let size = metadata.map(|m| m.len()).unwrap_or(0);
         let relative_path = file_path
             .strip_prefix(repo_path_obj)
             .unwrap_or(file_path)
             .to_string_lossy()
             .to_string();
 
-        results.push(SearchResult {
+        results.push(RawMatch {
             file_path: file_path_str.to_string(),
-            repo_name: repo_name.clone(),
+            repo_name: repo_name.to_string(),
             relative_path,
-            modified_at,
-            size,
-            match_line: Some(match_text),
-            match_line_num: Some(line_number),
+            line_num: line_number,
+            line_text: match_text,
         });
     }
 
     Some(results)
 }
 
-fn try_grep(query: &str, repo_path: &str, max_results: usize) -> Option<Vec<SearchResult>> {
+fn try_grep(query: &str, repo_path: &str, repo_name: &str, max_results: usize) -> Option<Vec<RawMatch>> {
     let output = std::process::Command::new("grep")
         .args([
             "-rn",
@@ -323,7 +356,6 @@ fn try_grep(query: &str, repo_path: &str, max_results: usize) -> Option<Vec<Sear
     }
 
     let repo_path_obj = Path::new(repo_path);
-    let repo_name = repo_name_from_path(repo_path_obj);
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut results = Vec::new();
 
@@ -331,7 +363,6 @@ fn try_grep(query: &str, repo_path: &str, max_results: usize) -> Option<Vec<Sear
         if results.len() >= max_results {
             break;
         }
-        // Format: filepath:linenum:matched_text
         let parts: Vec<&str> = line.splitn(3, ':').collect();
         if parts.len() < 3 {
             continue;
@@ -341,36 +372,26 @@ fn try_grep(query: &str, repo_path: &str, max_results: usize) -> Option<Vec<Sear
         let match_text = parts[2].trim().to_string();
 
         let file_path = Path::new(file_path_str);
-        let metadata = std::fs::metadata(file_path).ok();
-        let modified_at = metadata
-            .as_ref()
-            .and_then(|m| m.modified().ok())
-            .map(format_system_time)
-            .unwrap_or_default();
-        let size = metadata.map(|m| m.len()).unwrap_or(0);
         let relative_path = file_path
             .strip_prefix(repo_path_obj)
             .unwrap_or(file_path)
             .to_string_lossy()
             .to_string();
 
-        results.push(SearchResult {
+        results.push(RawMatch {
             file_path: file_path_str.to_string(),
-            repo_name: repo_name.clone(),
+            repo_name: repo_name.to_string(),
             relative_path,
-            modified_at,
-            size,
-            match_line: Some(match_text),
-            match_line_num: Some(line_num),
+            line_num,
+            line_text: match_text,
         });
     }
 
     Some(results)
 }
 
-fn fallback_content_search(query: &str, repo_path: &str, max_results: usize) -> Vec<SearchResult> {
+fn fallback_content_search(query: &str, repo_path: &str, repo_name: &str, max_results: usize) -> Vec<RawMatch> {
     let repo_path_obj = Path::new(repo_path);
-    let repo_name = repo_name_from_path(repo_path_obj);
     let query_lower = query.to_lowercase();
     let files = walk_repo(repo_path_obj);
     let mut results = Vec::new();
@@ -395,27 +416,18 @@ fn fallback_content_search(query: &str, repo_path: &str, max_results: usize) -> 
                 break;
             }
             if line.to_lowercase().contains(&query_lower) {
-                let metadata = std::fs::metadata(&file_path).ok();
-                let modified_at = metadata
-                    .as_ref()
-                    .and_then(|m| m.modified().ok())
-                    .map(format_system_time)
-                    .unwrap_or_default();
-                let size = metadata.map(|m| m.len()).unwrap_or(0);
                 let relative_path = file_path
                     .strip_prefix(repo_path_obj)
                     .unwrap_or(&file_path)
                     .to_string_lossy()
                     .to_string();
 
-                results.push(SearchResult {
+                results.push(RawMatch {
                     file_path: file_path.to_string_lossy().to_string(),
-                    repo_name: repo_name.clone(),
+                    repo_name: repo_name.to_string(),
                     relative_path,
-                    modified_at,
-                    size,
-                    match_line: Some(line.trim().to_string()),
-                    match_line_num: Some((i + 1) as u32),
+                    line_num: (i + 1) as u32,
+                    line_text: line.trim().to_string(),
                 });
             }
         }
@@ -424,49 +436,112 @@ fn fallback_content_search(query: &str, repo_path: &str, max_results: usize) -> 
     results
 }
 
+/// Group raw matches by file path into FileSearchResult
+fn group_matches(raw: Vec<RawMatch>) -> Vec<FileSearchResult> {
+    let mut map: HashMap<String, FileSearchResult> = HashMap::new();
+    let mut order: Vec<String> = Vec::new();
+
+    for m in raw {
+        let entry = map.entry(m.file_path.clone()).or_insert_with(|| {
+            order.push(m.file_path.clone());
+            let metadata = std::fs::metadata(&m.file_path).ok();
+            let modified_at = metadata
+                .as_ref()
+                .and_then(|md| md.modified().ok())
+                .map(format_system_time)
+                .unwrap_or_default();
+            FileSearchResult {
+                file_path: m.file_path.clone(),
+                repo_name: m.repo_name.clone(),
+                relative_path: m.relative_path.clone(),
+                modified_at,
+                matches: Vec::new(),
+                total_matches: 0,
+            }
+        });
+        entry.total_matches += 1;
+        entry.matches.push(MatchInfo {
+            line_num: m.line_num,
+            line_text: m.line_text,
+        });
+    }
+
+    // Return in insertion order, limited to MAX_FILE_GROUPS
+    order.into_iter()
+        .filter_map(|k| map.remove(&k))
+        .take(MAX_FILE_GROUPS)
+        .collect()
+}
+
 #[tauri::command]
-pub async fn search_content(state: State<'_, DbState>, query: String, file_pattern: Option<String>) -> Result<Vec<SearchResult>, String> {
-    let paths = {
+pub async fn search_content(state: State<'_, DbState>, query: String, repos: Vec<String>, file_pattern: Option<String>) -> Result<Vec<FileSearchResult>, String> {
+    let entries = {
         let conn = state.0.lock().map_err(|e| e.to_string())?;
         let cid = get_computer_id();
-        load_repo_paths(&conn, &cid)
+        resolve_repo_paths(&conn, &cid, &repos)
     };
 
-    if paths.is_empty() {
-        return Err("No repository paths configured. Add paths in Settings.".to_string());
+    if entries.is_empty() {
+        return Err("No repository paths configured. Add repos in Settings.".to_string());
     }
 
     let _ = file_pattern; // reserved for future use
 
-    let mut all_results = Vec::new();
+    let mut all_raw = Vec::new();
 
-    for repo_path_str in &paths {
-        let repo_path = Path::new(repo_path_str);
+    for repo in &entries {
+        let repo_path = Path::new(&repo.path);
         if !repo_path.exists() {
             continue;
         }
-        let remaining = MAX_RESULTS.saturating_sub(all_results.len());
+        let remaining = MAX_RESULTS.saturating_sub(all_raw.len());
         if remaining == 0 {
             break;
         }
 
-        // Try ripgrep first, then grep, then fallback
-        let results = try_ripgrep(&query, repo_path_str, remaining)
-            .or_else(|| try_grep(&query, repo_path_str, remaining))
-            .unwrap_or_else(|| fallback_content_search(&query, repo_path_str, remaining));
+        let results = try_ripgrep(&query, &repo.path, &repo.name, remaining)
+            .or_else(|| try_grep(&query, &repo.path, &repo.name, remaining))
+            .unwrap_or_else(|| fallback_content_search(&query, &repo.path, &repo.name, remaining));
 
-        all_results.extend(results);
+        all_raw.extend(results);
     }
 
-    all_results.truncate(MAX_RESULTS);
-    Ok(all_results)
+    all_raw.truncate(MAX_RESULTS);
+    Ok(group_matches(all_raw))
+}
+
+// ── File context ─────────────────────────────────────────
+
+#[tauri::command]
+pub fn get_file_context(file_path: String, line_num: u32, context_lines: u32) -> Result<Vec<ContextLine>, String> {
+    let content = std::fs::read_to_string(&file_path)
+        .map_err(|e| format!("Cannot read file: {e}"))?;
+
+    let lines: Vec<&str> = content.lines().collect();
+    let total = lines.len() as u32;
+    if line_num == 0 || line_num > total {
+        return Err(format!("Line {line_num} out of range (1..{total})"));
+    }
+
+    let start = (line_num as i64 - context_lines as i64).max(1) as u32;
+    let end = (line_num + context_lines).min(total);
+
+    let mut result = Vec::new();
+    for ln in start..=end {
+        let idx = (ln - 1) as usize;
+        result.push(ContextLine {
+            line_num: ln,
+            text: lines.get(idx).unwrap_or(&"").to_string(),
+            is_match: ln == line_num,
+        });
+    }
+
+    Ok(result)
 }
 
 // ── Git history search ────────────────────────────────────
 
-fn search_git_in_repo(query: &str, repo_path: &str, max_results: usize) -> Vec<GitSearchResult> {
-    let repo_path_obj = Path::new(repo_path);
-    let repo_name = repo_name_from_path(repo_path_obj);
+fn search_git_in_repo(query: &str, repo_path: &str, repo_name: &str, max_results: usize) -> Vec<GitSearchResult> {
     let mut results = Vec::new();
     let mut seen_hashes = std::collections::HashSet::new();
 
@@ -500,7 +575,7 @@ fn search_git_in_repo(query: &str, repo_path: &str, max_results: usize) -> Vec<G
             let files_changed = get_commit_files(repo_path, &hash);
 
             results.push(GitSearchResult {
-                repo_name: repo_name.clone(),
+                repo_name: repo_name.to_string(),
                 commit_hash: hash,
                 commit_date: parts[1].to_string(),
                 author: parts[2].to_string(),
@@ -541,7 +616,7 @@ fn search_git_in_repo(query: &str, repo_path: &str, max_results: usize) -> Vec<G
                 let files_changed = get_commit_files(repo_path, &hash);
 
                 results.push(GitSearchResult {
-                    repo_name: repo_name.clone(),
+                    repo_name: repo_name.to_string(),
                     commit_hash: hash,
                     commit_date: parts[1].to_string(),
                     author: parts[2].to_string(),
@@ -568,31 +643,29 @@ fn get_commit_files(repo_path: &str, hash: &str) -> Vec<String> {
 }
 
 #[tauri::command]
-pub async fn search_git_history(state: State<'_, DbState>, query: String, repo_path: Option<String>) -> Result<Vec<GitSearchResult>, String> {
-    let paths = if let Some(ref single) = repo_path {
-        vec![single.clone()]
-    } else {
+pub async fn search_git_history(state: State<'_, DbState>, query: String, repos: Vec<String>) -> Result<Vec<GitSearchResult>, String> {
+    let entries = {
         let conn = state.0.lock().map_err(|e| e.to_string())?;
         let cid = get_computer_id();
-        load_repo_paths(&conn, &cid)
+        resolve_repo_paths(&conn, &cid, &repos)
     };
 
-    if paths.is_empty() {
-        return Err("No repository paths configured. Add paths in Settings.".to_string());
+    if entries.is_empty() {
+        return Err("No repository paths configured. Add repos in Settings.".to_string());
     }
 
     let mut all_results = Vec::new();
 
-    for repo_path_str in &paths {
-        let repo_path_obj = Path::new(repo_path_str);
-        if !repo_path_obj.exists() {
+    for repo in &entries {
+        let repo_path = Path::new(&repo.path);
+        if !repo_path.exists() {
             continue;
         }
         let remaining = MAX_RESULTS.saturating_sub(all_results.len());
         if remaining == 0 {
             break;
         }
-        let results = search_git_in_repo(&query, repo_path_str, remaining);
+        let results = search_git_in_repo(&query, &repo.path, &repo.name, remaining);
         all_results.extend(results);
     }
 
@@ -628,8 +701,49 @@ mod tests {
     }
 
     #[test]
-    fn test_repo_name_from_path() {
-        assert_eq!(repo_name_from_path(Path::new("/home/user/projects/my-repo")), "my-repo");
-        assert_eq!(repo_name_from_path(Path::new("/tmp")), "tmp");
+    fn test_group_matches() {
+        let raw = vec![
+            RawMatch {
+                file_path: "/tmp/test.rs".to_string(),
+                repo_name: "test".to_string(),
+                relative_path: "test.rs".to_string(),
+                line_num: 10,
+                line_text: "line 10".to_string(),
+            },
+            RawMatch {
+                file_path: "/tmp/test.rs".to_string(),
+                repo_name: "test".to_string(),
+                relative_path: "test.rs".to_string(),
+                line_num: 20,
+                line_text: "line 20".to_string(),
+            },
+            RawMatch {
+                file_path: "/tmp/other.rs".to_string(),
+                repo_name: "test".to_string(),
+                relative_path: "other.rs".to_string(),
+                line_num: 5,
+                line_text: "line 5".to_string(),
+            },
+        ];
+        let grouped = group_matches(raw);
+        assert_eq!(grouped.len(), 2);
+        assert_eq!(grouped[0].file_path, "/tmp/test.rs");
+        assert_eq!(grouped[0].matches.len(), 2);
+        assert_eq!(grouped[0].total_matches, 2);
+        assert_eq!(grouped[1].file_path, "/tmp/other.rs");
+        assert_eq!(grouped[1].matches.len(), 1);
+    }
+
+    #[test]
+    fn test_repo_entry_serialization() {
+        let entry = RepoEntry {
+            name: "test".to_string(),
+            path: "/home/user/test".to_string(),
+            color: "#f0883e".to_string(),
+        };
+        let json = serde_json::to_string(&entry).unwrap();
+        let parsed: RepoEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.name, "test");
+        assert_eq!(parsed.color, "#f0883e");
     }
 }

@@ -190,6 +190,19 @@ async function renderGeneral(container) {
   unloadRow.appendChild(unloadInput);
   container.appendChild(unloadRow);
 
+  // Search context lines
+  const ctxRow = makeFormRow('Search context lines:');
+  const ctxInput = document.createElement('input');
+  ctxInput.type = 'number';
+  ctxInput.className = 'settings-input';
+  ctxInput.min = '0';
+  ctxInput.max = '10';
+  ctxInput.value = await getSetting('search_context_lines') || '3';
+  ctxInput.style.width = '80px';
+  ctxInput.addEventListener('change', () => saveSetting('search_context_lines', ctxInput.value));
+  ctxRow.appendChild(ctxInput);
+  container.appendChild(ctxRow);
+
   // Always on top
   const aotRow = makeFormRow('Always on top:');
   const aotCb = document.createElement('input');

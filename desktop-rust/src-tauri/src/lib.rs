@@ -30,6 +30,7 @@ pub fn run() {
         .manage(db)
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             commands::settings::get_setting,
             commands::settings::set_setting,
@@ -106,12 +107,13 @@ pub fn run() {
             // Help
             commands::help::get_changelog,
             // Repo Search
-            commands::repo_search::list_repo_paths,
-            commands::repo_search::add_repo_path,
-            commands::repo_search::remove_repo_path,
+            commands::repo_search::list_repos,
+            commands::repo_search::add_repo,
+            commands::repo_search::remove_repo,
             commands::repo_search::search_filenames,
             commands::repo_search::search_content,
             commands::repo_search::search_git_history,
+            commands::repo_search::get_file_context,
             // Autostart
             autostart::set_autostart,
             autostart::get_autostart,
