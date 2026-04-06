@@ -3,6 +3,7 @@ import { createSearchBar } from '../components/search-bar.js';
 import { showModal } from '../components/modal.js';
 import { showToast } from '../components/toast.js';
 import { marked } from '../lib/marked.min.js';
+import { attachToolbar } from '../components/md-toolbar.js';
 
 let shortcuts = [];
 let selectedIndex = -1;
@@ -1012,12 +1013,14 @@ function openEditor(shortcut) {
   valueInput.rows = 6;
   valueInput.value = isEdit ? shortcut.value : '';
   form.appendChild(valueInput);
+  attachToolbar(valueInput);
 
   const descInput = document.createElement('textarea');
   descInput.placeholder = 'Description (optional — documentation, notes, context)';
   descInput.rows = 3;
   descInput.value = isEdit ? shortcut.description : '';
   form.appendChild(descInput);
+  attachToolbar(descInput);
 
   // Links section
   const linksLabel = document.createElement('div');

@@ -2,6 +2,7 @@ import { call } from '../tauri-api.js';
 import { showModal } from '../components/modal.js';
 import { showToast } from '../components/toast.js';
 import { marked } from '../lib/marked.min.js';
+import { attachToolbar } from '../components/md-toolbar.js';
 
 let root = null;
 let folders = [];
@@ -294,6 +295,7 @@ function renderEditor() {
     textarea.value = editingNote.content;
     textarea.addEventListener('input', () => { editingNote.content = textarea.value; });
     right.appendChild(textarea);
+    attachToolbar(textarea);
   }
 
   // Action buttons

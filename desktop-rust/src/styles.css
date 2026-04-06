@@ -359,6 +359,46 @@ button:hover, .btn:hover {
 .markdown-body del { color: var(--text-muted); }
 .markdown-body strong { color: var(--text); }
 
+/* ── Markdown Toolbar ────────────────────────────────────── */
+
+.md-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 4px 6px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+}
+
+.md-toolbar button {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 12px;
+  cursor: pointer;
+  min-width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.md-toolbar button:hover {
+  background: var(--bg-secondary);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.md-toolbar .sep {
+  width: 1px;
+  background: var(--border);
+  margin: 2px 4px;
+}
+
 /* ── Utility ──────────────────────────────────────────────── */
 
 h2 {
