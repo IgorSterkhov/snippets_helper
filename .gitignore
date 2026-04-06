@@ -62,3 +62,6 @@ docs/commits_doc.md
 desktop-rust/src-tauri/target/
 desktop-rust/node_modules/
 desktop-rust/src-tauri/gen/
+
+# Un-ignore JS lib for desktop app
+!desktop-rust/src/lib/

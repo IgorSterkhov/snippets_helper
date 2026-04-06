@@ -1,6 +1,7 @@
 import { call } from '../tauri-api.js';
 import { showModal } from '../components/modal.js';
 import { showToast } from '../components/toast.js';
+import { marked } from '../lib/marked.min.js';
 
 let root = null;
 let folders = [];
@@ -283,8 +284,8 @@ function renderEditor() {
 
   // Content area
   if (previewMode) {
-    const previewDiv = el('div', { class: 'note-preview' });
-    previewDiv.innerHTML = renderMarkdown(editingNote.content);
+    const previewDiv = el('div', { class: 'note-preview markdown-body' });
+    previewDiv.innerHTML = editingNote.content ? marked(editingNote.content) : '<p style="color:var(--text-muted)">(empty)</p>';
     right.appendChild(previewDiv);
   } else {
     const textarea = document.createElement('textarea');
@@ -353,50 +354,6 @@ async function onDeleteNote() {
     previewMode = false;
     await loadNotes();
   } catch (_) { /* cancelled */ }
-}
-
-// ── Basic Markdown renderer ─────────────────────────────────
-
-function renderMarkdown(text) {
-  if (!text) return '<p style="color:var(--text-muted)">(empty)</p>';
-
-  let html = escapeHtml(text);
-
-  // Headers (must be at line start)
-  html = html.replace(/^### (.+)$/gm, '<h4>$1</h4>');
-  html = html.replace(/^## (.+)$/gm, '<h3>$1</h3>');
-  html = html.replace(/^# (.+)$/gm, '<h2>$1</h2>');
-
-  // Bold and italic
-  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
-
-  // Inline code
-  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-
-  // Horizontal rule
-  html = html.replace(/^---$/gm, '<hr>');
-
-  // Unordered list items
-  html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
-
-  // Newlines to <br> (but not after block elements)
-  html = html.replace(/\n/g, '<br>');
-
-  // Clean up <br> after block elements
-  html = html.replace(/(<\/h[2-4]>)<br>/g, '$1');
-  html = html.replace(/(<hr>)<br>/g, '$1');
-  html = html.replace(/(<\/li>)<br>/g, '$1');
-
-  return html;
-}
-
-function escapeHtml(str) {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
 }
 
 // ── DOM helper ──────────────────────────────────────────────

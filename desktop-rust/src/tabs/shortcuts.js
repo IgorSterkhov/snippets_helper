@@ -2,6 +2,7 @@ import { call } from '../tauri-api.js';
 import { createSearchBar } from '../components/search-bar.js';
 import { showModal } from '../components/modal.js';
 import { showToast } from '../components/toast.js';
+import { marked } from '../lib/marked.min.js';
 
 let shortcuts = [];
 let selectedIndex = -1;
@@ -479,47 +480,6 @@ function renderWebView(links) {
 
 // ── Obsidian Note View ──────────────────────────────────────
 
-function renderMarkdown(md) {
-  let html = md;
-  // Escape HTML
-  html = html.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
-  // Code blocks (``` ... ```)
-  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
-    return `<pre style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;padding:12px;overflow-x:auto;font-size:13px"><code>${code.trim()}</code></pre>`;
-  });
-
-  // Inline code
-  html = html.replace(/`([^`]+)`/g, '<code style="background:var(--bg-secondary);padding:2px 6px;border-radius:4px;font-size:0.9em">$1</code>');
-
-  // Headers
-  html = html.replace(/^#### (.+)$/gm, '<h4 style="margin:16px 0 8px;font-size:14px">$1</h4>');
-  html = html.replace(/^### (.+)$/gm, '<h3 style="margin:16px 0 8px;font-size:16px">$1</h3>');
-  html = html.replace(/^## (.+)$/gm, '<h2 style="margin:20px 0 10px;font-size:18px">$1</h2>');
-  html = html.replace(/^# (.+)$/gm, '<h1 style="margin:20px 0 12px;font-size:22px">$1</h1>');
-
-  // Horizontal rules
-  html = html.replace(/^---+$/gm, '<hr style="border:none;border-top:1px solid var(--border);margin:16px 0">');
-
-  // Bold and italic
-  html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
-  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
-
-  // Links
-  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" style="color:var(--accent);text-decoration:none" target="_blank">$1</a>');
-
-  // Unordered list items
-  html = html.replace(/^- (.+)$/gm, '<li style="margin-left:20px;list-style:disc">$1</li>');
-
-  // Wrap consecutive <li> in <ul>
-  html = html.replace(/((?:<li[^>]*>.*<\/li>\n?)+)/g, '<ul style="padding-left:0;margin:8px 0">$1</ul>');
-
-  // Paragraphs (lines not already tagged)
-  html = html.replace(/^(?!<[hupola]|<hr|<code|<li|<ul|<\/)(.*\S.*)$/gm, '<p style="margin:6px 0;line-height:1.6">$1</p>');
-
-  return html;
-}
 
 async function renderNoteView(shortcut) {
   const noteView = document.createElement('div');
@@ -556,7 +516,8 @@ async function renderNoteView(shortcut) {
 
     try {
       const md = await call('read_obsidian_note', { notePath: shortcut.obsidian_note });
-      contentArea.innerHTML = renderMarkdown(md);
+      contentArea.classList.add('markdown-body');
+      contentArea.innerHTML = marked(md);
     } catch (err) {
       contentArea.innerHTML = `<div style="color:var(--text-muted);text-align:center;margin-top:32px">
         <p>Cannot read note: ${err}</p>
