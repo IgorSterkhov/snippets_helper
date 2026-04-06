@@ -1,5 +1,6 @@
 import { call } from '../tauri-api.js';
 import { showToast } from '../components/toast.js';
+import { doSync } from '../sync-ui.js';
 
 let root = null;
 let activeSubTab = 'general';
@@ -406,8 +407,10 @@ async function renderSync(container) {
     testBtn.disabled = true;
     testBtn.textContent = 'Testing...';
     try {
-      await call('trigger_sync');
-      showToast('Connection successful', 'success');
+      const result = await doSync();
+      const pushN = result.push?.total || 0;
+      const pullN = result.pull?.total || 0;
+      showToast(`Connection OK. Pushed: ${pushN}, Pulled: ${pullN}`, 'success');
     } catch (err) {
       showToast('Connection failed: ' + err, 'error');
     } finally {
@@ -557,8 +560,10 @@ async function renderUpdates(container) {
     forceBtn.disabled = true;
     forceBtn.textContent = 'Syncing...';
     try {
-      await call('force_full_sync');
-      showToast('Full sync complete! Restart app to see data.', 'success');
+      const result = await call('force_full_sync');
+      const pushN = result.push?.total || 0;
+      const pullN = result.pull?.total || 0;
+      showToast(`Full sync complete! Pushed: ${pushN}, Pulled: ${pullN}. Restart app to see data.`, 'success');
     } catch (err) {
       showToast('Sync error: ' + err, 'error');
     } finally {
@@ -667,7 +672,7 @@ export async function checkFirstRun() {
         await call('set_setting', { key: 'setup_complete', value: '1' });
         if (url && key) {
           try {
-            await call('trigger_sync');
+            await doSync();
             showToast('Sync completed', 'success');
           } catch (err) {
             showToast('Sync failed: ' + err, 'error');

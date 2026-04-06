@@ -1,6 +1,6 @@
 use reqwest::Client;
 use serde_json::{json, Map, Value};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -53,15 +53,15 @@ impl SyncClient {
         &self,
         db: &Mutex<rusqlite::Connection>,
         _computer_id: &str,
-    ) -> Result<(), String> {
+    ) -> Result<Value, String> {
         // Phase 1: collect pending rows (lock held briefly)
-        let (changes, deleted_uuids) = {
+        let (changes, deleted_uuids, pending_names) = {
             let conn = db.lock().map_err(|e| e.to_string())?;
             self.collect_pending(&conn)?
         };
 
         if changes.is_empty() {
-            return Ok(());
+            return Ok(json!({ "pushed": {}, "total": 0 }));
         }
 
         // Phase 2: HTTP push (no lock held)
@@ -88,16 +88,25 @@ impl SyncClient {
             self.process_push_response(&conn, &changes, &deleted_uuids, &result)?;
         }
 
-        Ok(())
+        // Build detailed result
+        let total: usize = pending_names.values().map(|v| v.len()).sum();
+        let pushed: Map<String, Value> = pending_names
+            .into_iter()
+            .map(|(table, names)| {
+                (table, Value::Array(names.into_iter().map(Value::String).collect()))
+            })
+            .collect();
+
+        Ok(json!({ "pushed": pushed, "total": total }))
     }
 
     fn collect_pending(
         &self,
         conn: &rusqlite::Connection,
-    ) -> Result<(Map<String, Value>, std::collections::HashMap<String, Vec<String>>), String> {
+    ) -> Result<(Map<String, Value>, HashMap<String, Vec<String>>, HashMap<String, Vec<String>>), String> {
         let mut changes: Map<String, Value> = Map::new();
-        let mut deleted_uuids: std::collections::HashMap<String, Vec<String>> =
-            std::collections::HashMap::new();
+        let mut deleted_uuids: HashMap<String, Vec<String>> = HashMap::new();
+        let mut pending_names: HashMap<String, Vec<String>> = HashMap::new();
 
         for &table in SYNCED_TABLES {
             let pending = queries::get_pending_rows(conn, table)
@@ -108,12 +117,17 @@ impl SyncClient {
 
             let mut rows_to_push: Vec<Value> = Vec::new();
             let mut table_deleted: Vec<String> = Vec::new();
+            let mut table_names: Vec<String> = Vec::new();
 
             for row in pending {
                 let mut row_data = row.clone();
                 let obj = row_data
                     .as_object_mut()
                     .ok_or("row is not an object")?;
+
+                // Extract display name for the log
+                let display_name = Self::extract_display_name(table, obj);
+                table_names.push(display_name);
 
                 let is_deleted = obj
                     .get("sync_status")
@@ -154,10 +168,13 @@ impl SyncClient {
                 if !table_deleted.is_empty() {
                     deleted_uuids.insert(table.to_string(), table_deleted);
                 }
+                if !table_names.is_empty() {
+                    pending_names.insert(table.to_string(), table_names);
+                }
             }
         }
 
-        Ok((changes, deleted_uuids))
+        Ok((changes, deleted_uuids, pending_names))
     }
 
     fn process_push_response(
@@ -225,7 +242,7 @@ impl SyncClient {
         &self,
         db: &Mutex<rusqlite::Connection>,
         computer_id: &str,
-    ) -> Result<(), String> {
+    ) -> Result<Value, String> {
         // Phase 1: read last_sync_at (lock held briefly)
         let last_sync = {
             let conn = db.lock().map_err(|e| e.to_string())?;
@@ -257,13 +274,22 @@ impl SyncClient {
 
         let result: Value = resp.json().await.map_err(|e| format!("pull json: {e}"))?;
 
-        // Phase 3: apply changes (lock held briefly)
-        {
+        // Phase 3: apply changes and collect pulled names (lock held briefly)
+        let pulled_names = {
             let conn = db.lock().map_err(|e| e.to_string())?;
-            self.apply_pull(&conn, computer_id, &result)?;
-        }
+            self.apply_pull(&conn, computer_id, &result)?
+        };
 
-        Ok(())
+        // Build detailed result
+        let total: usize = pulled_names.values().map(|v| v.len()).sum();
+        let pulled: Map<String, Value> = pulled_names
+            .into_iter()
+            .map(|(table, names)| {
+                (table, Value::Array(names.into_iter().map(Value::String).collect()))
+            })
+            .collect();
+
+        Ok(json!({ "pulled": pulled, "total": total }))
     }
 
     fn apply_pull(
@@ -271,7 +297,9 @@ impl SyncClient {
         conn: &rusqlite::Connection,
         computer_id: &str,
         result: &Value,
-    ) -> Result<(), String> {
+    ) -> Result<HashMap<String, Vec<String>>, String> {
+        let mut pulled_names: HashMap<String, Vec<String>> = HashMap::new();
+
         if let Some(changes) = result.get("changes").and_then(|v| v.as_object()) {
             for (table, rows_val) in changes {
                 if !SYNCED_TABLES.contains(&table.as_str()) {
@@ -283,6 +311,17 @@ impl SyncClient {
                 };
 
                 let mut rows_owned: Vec<Value> = rows.clone();
+
+                // Collect display names from pulled rows
+                let mut table_names: Vec<String> = Vec::new();
+                for row in &rows_owned {
+                    if let Some(obj) = row.as_object() {
+                        table_names.push(Self::extract_display_name(table, obj));
+                    }
+                }
+                if !table_names.is_empty() {
+                    pulled_names.insert(table.clone(), table_names);
+                }
 
                 // Ensure user_id is set on every row (server may not include it)
                 // Read user_id from auth settings
@@ -330,6 +369,51 @@ impl SyncClient {
                 .map_err(|e| format!("save last_sync_at: {e}"))?;
         }
 
-        Ok(())
+        Ok(pulled_names)
+    }
+
+    /// Extract a human-readable display name from a row for sync logging.
+    fn extract_display_name(table: &str, obj: &Map<String, Value>) -> String {
+        let name_field = match table {
+            "shortcuts" | "note_folders" | "snippet_tags" => "name",
+            "notes" => "title",
+            "sql_macrosing_templates" => "template_name",
+            "obfuscation_mappings" => "session_name",
+            _ => "",
+        };
+
+        if !name_field.is_empty() {
+            if let Some(val) = obj.get(name_field).and_then(|v| v.as_str()) {
+                if !val.is_empty() {
+                    let truncated = if val.len() > 40 {
+                        format!("{}...", &val[..37])
+                    } else {
+                        val.to_string()
+                    };
+                    return truncated;
+                }
+            }
+        }
+
+        // sql_table_analyzer_templates: use truncated template_text
+        if table == "sql_table_analyzer_templates" {
+            if let Some(val) = obj.get("template_text").and_then(|v| v.as_str()) {
+                if !val.is_empty() {
+                    let truncated = if val.len() > 40 {
+                        format!("{}...", &val[..37])
+                    } else {
+                        val.to_string()
+                    };
+                    return truncated;
+                }
+            }
+        }
+
+        // Fallback: truncated uuid
+        if let Some(uuid) = obj.get("uuid").and_then(|v| v.as_str()) {
+            return uuid[..8.min(uuid.len())].to_string();
+        }
+
+        "unknown".to_string()
     }
 }

@@ -1,6 +1,7 @@
 import { TabContainer } from './components/tab-container.js';
 import { call } from './tauri-api.js';
 import { openSettingsModal, checkFirstRun } from './tabs/settings.js';
+import { initSyncIndicator, doSync } from './sync-ui.js';
 
 const TABS = [
   { id: 'shortcuts', label: 'Shortcuts', icon: '\u{1F4CB}', loader: (el) => import('./tabs/shortcuts.js').then(m => m.init(el)) },
@@ -40,6 +41,9 @@ async function main() {
     openHelpModal();
   });
   tabContainer.tabBar.appendChild(helpBtn);
+
+  // Sync status indicator
+  initSyncIndicator(tabContainer.tabBar);
 
   // Apply global font size
   try {
@@ -106,14 +110,14 @@ async function showUpdateBanner() {
 // Sync when window becomes visible (focus)
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
-    call('trigger_sync').catch(() => {});
+    doSync().catch(() => {});
   }
 });
 
 document.addEventListener('DOMContentLoaded', () => {
   main();
   // Initial sync on launch
-  setTimeout(() => call('trigger_sync').catch(() => {}), 1000);
+  setTimeout(() => doSync().catch(() => {}), 1000);
   // Check for updates 3 seconds after launch
   setTimeout(showUpdateBanner, 3000);
 });

@@ -4,7 +4,7 @@ use crate::sync::client::SyncClient;
 use serde_json::{Value, json};
 
 #[tauri::command]
-pub async fn trigger_sync(state: State<'_, DbState>) -> Result<String, String> {
+pub async fn trigger_sync(state: State<'_, DbState>) -> Result<Value, String> {
     let computer_id = hostname::get()
         .unwrap_or_default()
         .to_string_lossy()
@@ -49,10 +49,14 @@ pub async fn trigger_sync(state: State<'_, DbState>) -> Result<String, String> {
     }
 
     // Push then Pull -- the client manages its own locking internally
-    client.push(&state.0, &computer_id).await?;
-    client.pull(&state.0, &computer_id).await?;
+    let push_result = client.push(&state.0, &computer_id).await?;
+    let pull_result = client.pull(&state.0, &computer_id).await?;
 
-    Ok("ok".to_string())
+    Ok(json!({
+        "push": push_result,
+        "pull": pull_result,
+        "timestamp": chrono::Utc::now().format("%H:%M:%S").to_string(),
+    }))
 }
 
 #[tauri::command]
@@ -199,7 +203,7 @@ pub async fn check_for_update(state: State<'_, DbState>) -> Result<Value, String
 }
 
 #[tauri::command]
-pub async fn force_full_sync(state: State<'_, DbState>) -> Result<String, String> {
+pub async fn force_full_sync(state: State<'_, DbState>) -> Result<Value, String> {
     let computer_id = hostname::get()
         .unwrap_or_default()
         .to_string_lossy()
