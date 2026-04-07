@@ -28,6 +28,9 @@ const i18n = {
     exec_name: 'Exec',
     exec_desc: 'Run shell commands organized by categories. Create command groups, add frequently used commands, and execute them as subprocesses directly from the app. View real-time output and stop running processes.',
 
+    search_name: 'Repo Search',
+    search_desc: 'Search across local git repositories by filename (glob patterns), file content (uses ripgrep if available), or git history (commits and code changes). Add named colored repos, toggle which ones to search. Results grouped by file with context preview on click. Tab auto-unloads after configurable timeout.',
+
     // Hotkeys tab
     hotkey_show_hide: 'Show / hide main window',
     hotkey_escape: 'Hide window to system tray',
@@ -63,6 +66,9 @@ const i18n = {
 
     exec_name: 'Выполнение',
     exec_desc: 'Запускайте shell-команды, организованные по категориям. Создавайте группы команд, добавляйте часто используемые команды и выполняйте их как подпроцессы прямо из приложения. Просмотр вывода в реальном времени и остановка запущенных процессов.',
+
+    search_name: 'Поиск в репозиториях',
+    search_desc: 'Поиск по локальным git-репозиториям: по имени файла (glob), по содержимому (ripgrep если установлен), по истории git (коммиты и изменения кода). Добавляйте именованные цветные репозитории, выбирайте в каких искать. Результаты группируются по файлу с превью контекста по клику. Вкладка выгружается из памяти при неиспользовании.',
 
     // Hotkeys tab
     hotkey_show_hide: 'Показать / скрыть главное окно',
@@ -238,6 +244,7 @@ function renderFeatures(container, lang) {
     { name: t(lang, 'superset_name'),  desc: t(lang, 'superset_desc') },
     { name: t(lang, 'commits_name'),   desc: t(lang, 'commits_desc') },
     { name: t(lang, 'exec_name'),      desc: t(lang, 'exec_desc') },
+    { name: t(lang, 'search_name'),    desc: t(lang, 'search_desc') },
   ];
 
   for (const f of features) {

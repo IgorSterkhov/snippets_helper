@@ -1,5 +1,49 @@
 # Changelog
 
+## v0.7.5 (2026-04-07)
+- Fixed repo search: sort now preserves card format (content/git cards no longer collapse to single lines)
+- Added edit/add repos in settings panel (gear icon)
+- Fixed repo chips bar not rendering on first load
+
+## v0.7.3 (2026-04-06)
+- Added markdown toolbar for content textareas (Bold, Italic, Code, Link, List, Table, etc.)
+- Toolbar appears in Notes editor and Snippet edit modal
+
+## v0.7.2 (2026-04-06)
+- Upgraded markdown preview: full parser with tables, code blocks, GFM, task lists
+- Custom marked.js bundled locally (headers, bold, italic, strikethrough, nested lists, blockquotes, images)
+- Added .markdown-body CSS styles for dark theme
+
+## v0.7.0 (2026-04-06)
+- New tab: Repo Search — search across local git repositories
+- Search by filename (glob), file content (ripgrep/grep/Rust fallback), git history
+- Named colored repos with toggle chips (Design B: bold + color bar)
+- Results grouped by file with context on click
+- Tab auto-unloads after configurable timeout (default 10 min)
+
+## v0.6.3 (2026-04-05)
+- Added sync status indicator in sidebar (syncing/ok/error)
+- Sync log popup with detailed push/pull results (click indicator to view)
+- Each sync shows what was pushed/pulled with record names
+
+## v0.6.1 (2026-04-05)
+- Obsidian integration: create, link, and view notes from snippets
+- Main/Web/Note toggle in snippet detail panel
+- Markdown rendering for Obsidian notes
+- Settings: Obsidian vaults path (per machine)
+
+## v0.5.3 (2026-04-05)
+- New app icon: H4 Cyan {K} on purple-blue gradient
+- Fixed global font size setting
+- Added Always on Top toggle in Settings → General
+- Snippet tags sync via API (server migration applied)
+- Language setting (English/Russian) for Help
+
+## v0.5.1 (2026-04-05)
+- Added Help modal (?) with Features, Hotkeys, and Changelog tabs
+- Multi-language support (English/Russian)
+- Changelog embedded from CHANGELOG.md at build time
+
 ## v0.5.0 (2026-04-03)
 - Redesigned links: Main/Web toggle, inline link chips, embedded iframe viewer with fallback
 - Links open in Web tab inside the app, with "Open in browser" option
