@@ -3,8 +3,11 @@ import { showToast } from '../components/toast.js';
 
 let root = null;
 let searchType = 'files';   // files | content | git
+let lastSearchType = 'files'; // what type was last search
 let sortMode = 'name';      // name | date
 let results = [];
+let contentResults = [];
+let gitResults = [];
 let settingsOpen = false;
 let activeRepos = new Set();  // names of selected repos
 let allRepos = [];            // RepoEntry[]
@@ -133,7 +136,7 @@ function buildLayout() {
       sortMode = s.id;
       sortBar.querySelectorAll('.rs-sort-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
-      renderResults();
+      reRenderCurrentResults();
     });
     sortBar.appendChild(btn);
   }
@@ -238,7 +241,8 @@ async function removeRepo(name) {
 
 // ── Add Repo Modal ────────────────────────────────────────
 
-function showAddRepoModal() {
+function showAddRepoModal(existing = null) {
+  const isEdit = existing !== null;
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay rs-modal-overlay';
 
@@ -247,7 +251,7 @@ function showAddRepoModal() {
 
   // Header
   const header = el('div', { class: 'rs-modal-header' });
-  header.appendChild(el('h3', { text: 'Add Repository' }));
+  header.appendChild(el('h3', { text: isEdit ? 'Edit Repository' : 'Add Repository' }));
   const closeBtn = el('button', { text: '\u2715', class: 'btn-secondary rs-modal-close' });
   closeBtn.addEventListener('click', () => overlay.remove());
   header.appendChild(closeBtn);
@@ -301,16 +305,22 @@ function showAddRepoModal() {
   colorRow.appendChild(el('label', { text: 'Color:', class: 'rs-form-label' }));
   const colorInput = document.createElement('input');
   colorInput.type = 'color';
-  colorInput.value = randomColor();
+  colorInput.value = isEdit ? existing.color : randomColor();
   colorInput.className = 'rs-color-input';
   colorRow.appendChild(colorInput);
   body.appendChild(colorRow);
+
+  // Pre-fill for edit
+  if (isEdit) {
+    nameInput.value = existing.name;
+    pathInput.value = existing.path;
+  }
 
   modal.appendChild(body);
 
   // Actions
   const actions = el('div', { class: 'rs-modal-actions' });
-  const saveBtn = el('button', { text: 'Save' });
+  const saveBtn = el('button', { text: isEdit ? 'Update' : 'Save' });
   saveBtn.addEventListener('click', async () => {
     const name = nameInput.value.trim();
     const path = pathInput.value.trim();
@@ -320,11 +330,23 @@ function showAddRepoModal() {
       return;
     }
     try {
-      await call('add_repo', { name, path, color });
-      allRepos.push({ name, path, color });
-      activeRepos.add(name);
+      if (isEdit) {
+        // Remove old, add new
+        await call('remove_repo', { name: existing.name });
+        await call('add_repo', { name, path, color });
+        const idx = allRepos.findIndex(r => r.name === existing.name);
+        if (idx >= 0) allRepos[idx] = { name, path, color };
+        activeRepos.delete(existing.name);
+        activeRepos.add(name);
+        showToast('Repo updated', 'success');
+      } else {
+        await call('add_repo', { name, path, color });
+        allRepos.push({ name, path, color });
+        activeRepos.add(name);
+        showToast('Repo added', 'success');
+      }
       renderRepoChips();
-      showToast('Repo added', 'success');
+      loadSettingsPanel();
       overlay.remove();
     } catch (e) {
       showToast('Error: ' + e, 'error');
@@ -384,6 +406,11 @@ async function loadSettingsPanel() {
     item.appendChild(colorDot);
     item.appendChild(el('span', { text: r.name, class: 'rs-repo-name-label', style: 'font-weight:600;margin-right:8px' }));
     item.appendChild(el('span', { text: r.path, class: 'rs-path-text' }));
+    const editBtn = el('button', { text: '\u270E', class: 'rs-path-edit', title: 'Edit' });
+    editBtn.addEventListener('click', () => {
+      showAddRepoModal(r);
+    });
+    item.appendChild(editBtn);
     const removeBtn = el('button', { text: '\u2715', class: 'rs-path-remove', title: 'Remove' });
     removeBtn.addEventListener('click', async () => {
       await removeRepo(r.name);
@@ -396,6 +423,12 @@ async function loadSettingsPanel() {
     list.appendChild(el('p', { text: 'No repos configured', style: 'color:var(--text-muted);padding:4px 0' }));
   }
   repoSection.appendChild(list);
+
+  const addRepoBtn = el('button', { text: '+ Add repository', class: 'rs-settings-add-btn' });
+  addRepoBtn.style.cssText = 'margin-top:8px;padding:4px 12px;font-size:12px';
+  addRepoBtn.addEventListener('click', () => showAddRepoModal());
+  repoSection.appendChild(addRepoBtn);
+
   panel.appendChild(repoSection);
 
   // Context lines setting
@@ -439,20 +472,30 @@ async function doSearch() {
   const repos = [...activeRepos];
 
   try {
+    lastSearchType = searchType;
     if (searchType === 'files') {
       results = await call('search_filenames', { pattern: query, repos });
+      contentResults = []; gitResults = [];
       renderResults();
     } else if (searchType === 'content') {
-      results = await call('search_content', { query, repos });
-      renderContentResults(results);
+      contentResults = await call('search_content', { query, repos });
+      results = []; gitResults = [];
+      renderContentResults(contentResults);
     } else if (searchType === 'git') {
-      const gitResults = await call('search_git_history', { query, repos });
+      gitResults = await call('search_git_history', { query, repos });
+      results = []; contentResults = [];
       renderGitResults(gitResults);
     }
   } catch (e) {
     resultsList.innerHTML = '';
     resultsList.appendChild(el('p', { text: 'Error: ' + e, class: 'rs-placeholder', style: 'color:var(--danger)' }));
   }
+}
+
+function reRenderCurrentResults() {
+  if (lastSearchType === 'files') renderResults();
+  else if (lastSearchType === 'content') renderContentResults(contentResults);
+  else if (lastSearchType === 'git') renderGitResults(gitResults);
 }
 
 // ── Render file search results ────────────────────────────
