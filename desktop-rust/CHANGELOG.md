@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.8.0 (2026-04-07)
+- Status bar at bottom of window: sync status (left) + update status (right)
+- Sync: pulsing dot indicator, click for sync log popup
+- Updates: shows current version, available update, click to download or re-check
+- Replaced sidebar sync indicator and top update banner
+- Smart markdown rendering in snippets (auto-detect markdown content)
+- Modal no longer closes on overlay click (only Cancel/X/Escape)
+
 ## v0.7.5 (2026-04-07)
 - Fixed repo search: sort now preserves card format (content/git cards no longer collapse to single lines)
 - Added edit/add repos in settings panel (gear icon)

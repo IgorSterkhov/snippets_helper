@@ -1,7 +1,7 @@
 import { TabContainer } from './components/tab-container.js';
 import { call } from './tauri-api.js';
 import { openSettingsModal, checkFirstRun } from './tabs/settings.js';
-import { initSyncIndicator, doSync } from './sync-ui.js';
+import { createStatusBar, doSync, checkUpdateStatus } from './components/status-bar.js';
 
 const TABS = [
   { id: 'shortcuts', label: 'Shortcuts', icon: '\u{1F4CB}', loader: (el) => import('./tabs/shortcuts.js').then(m => m.init(el)) },
@@ -43,8 +43,8 @@ async function main() {
   });
   tabContainer.tabBar.appendChild(helpBtn);
 
-  // Sync status indicator
-  initSyncIndicator(tabContainer.tabBar);
+  // Status bar (bottom of window)
+  createStatusBar();
 
   // Apply global font size
   try {
@@ -95,39 +95,7 @@ document.addEventListener('keydown', async (e) => {
   }
 });
 
-async function showUpdateBanner() {
-  try {
-    const autoUpdate = await call('get_setting', { key: 'auto_update_enabled' });
-    if (autoUpdate !== '1') return;
-    const info = await call('check_for_update');
-    if (info.has_update) {
-      // Insert banner before #app, not inside it
-      const banner = document.createElement('div');
-      banner.className = 'update-banner';
-      const text = document.createTextNode(`New version ${info.latest_version} available! `);
-      const link = document.createElement('a');
-      link.textContent = 'Download';
-      link.href = '#';
-      link.style.cssText = 'color:white;text-decoration:underline;cursor:pointer';
-      link.addEventListener('click', async (e) => {
-        e.preventDefault();
-        try { await call('open_url', { url: info.download_url }); } catch {}
-      });
-      const closeBtn = document.createElement('span');
-      closeBtn.textContent = ' ✕';
-      closeBtn.style.cssText = 'cursor:pointer;margin-left:12px;opacity:0.7';
-      closeBtn.addEventListener('click', () => banner.remove());
-      banner.appendChild(text);
-      banner.appendChild(link);
-      banner.appendChild(closeBtn);
-      document.body.insertBefore(banner, document.body.firstChild);
-    }
-  } catch (e) {
-    console.log('Update check:', e);
-  }
-}
-
-// Sync when window becomes visible (focus)
+// Sync when window becomes visible
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
     doSync().catch(() => {});
@@ -138,6 +106,6 @@ document.addEventListener('DOMContentLoaded', () => {
   main();
   // Initial sync on launch
   setTimeout(() => doSync().catch(() => {}), 1000);
-  // Check for updates 3 seconds after launch
-  setTimeout(showUpdateBanner, 3000);
+  // Check for updates via status bar
+  setTimeout(() => checkUpdateStatus().catch(() => {}), 3000);
 });

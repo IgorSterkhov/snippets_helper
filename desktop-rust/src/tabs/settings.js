@@ -1,6 +1,6 @@
 import { call } from '../tauri-api.js';
 import { showToast } from '../components/toast.js';
-import { doSync } from '../sync-ui.js';
+import { doSync } from '../components/status-bar.js';
 
 let root = null;
 let activeSubTab = 'general';

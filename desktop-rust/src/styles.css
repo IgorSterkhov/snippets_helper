@@ -26,6 +26,9 @@ body {
   font-size: 14px;
   color: var(--text);
   background: var(--bg-primary);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
 }
 
 /* ── Layout ───────────────────────────────────────────────── */
@@ -33,9 +36,10 @@ body {
 #app {
   display: flex;
   flex-direction: row;
-  height: 100vh;
+  flex: 1;
   width: 100vw;
   font-size: inherit;
+  overflow: hidden;
 }
 
 /* ── Sidebar / Tab Bar ────────────────────────────────────── */
@@ -245,7 +249,7 @@ button:hover, .btn:hover {
 
 .toast-container {
   position: fixed;
-  bottom: 16px;
+  bottom: 40px;
   right: 16px;
   z-index: 2000;
   display: flex;
@@ -322,16 +326,27 @@ button:hover, .btn:hover {
   background: var(--text-muted);
 }
 
-/* ── Update Banner ───────────────────────────────────────── */
+/* ── Status Bar ──────────────────────────────────────────── */
 
-.update-banner {
-  background: var(--accent);
-  color: white;
-  padding: 6px 16px;
-  text-align: center;
-  font-size: 13px;
+#status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  background: var(--bg-tertiary);
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-muted);
   flex-shrink: 0;
+  height: 24px;
+  min-height: 24px;
 }
+
+#status-bar .sync-ok { color: var(--success); }
+#status-bar .sync-error { color: var(--danger); }
+#status-bar .sync-busy { color: var(--accent); }
+#status-bar .update-available { color: var(--accent); cursor: pointer; }
+#status-bar .update-building { color: #f0883e; }
 
 /* ── Markdown Body ───────────────────────────────────────── */
 
