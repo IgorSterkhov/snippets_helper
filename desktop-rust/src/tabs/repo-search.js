@@ -108,7 +108,7 @@ function buildLayout() {
   // Repo chips bar
   const repoBar = el('div', { class: 'rs-repo-bar', id: 'rs-repo-bar' });
   wrap.appendChild(repoBar);
-  renderRepoChips();
+  renderRepoChips(repoBar);
 
   // Settings panel (collapsible)
   const settingsPanel = el('div', { class: 'rs-settings-panel', id: 'rs-settings-panel' });
@@ -168,8 +168,8 @@ function updatePlaceholder() {
 
 // ── Repo Chips ────────────────────────────────────────────
 
-function renderRepoChips() {
-  const bar = root.querySelector('#rs-repo-bar');
+function renderRepoChips(barEl) {
+  const bar = barEl || root.querySelector('#rs-repo-bar');
   if (!bar) return;
   bar.innerHTML = '';
 
