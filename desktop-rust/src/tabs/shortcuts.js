@@ -271,10 +271,20 @@ function renderMainView(shortcut, hasDesc, links, hasLinks) {
   const mainView = document.createElement('div');
   mainView.style.cssText = 'flex:1;display:flex;flex-direction:column;overflow-y:auto';
 
-  // Snippet value
-  const valueEl = document.createElement('pre');
-  valueEl.style.cssText = `font-family:'SF Mono','Fira Code','Cascadia Code',monospace;font-size:${fontSize}px;color:var(--text);padding:12px 16px;white-space:pre-wrap;word-break:break-word;margin:0`;
-  valueEl.textContent = shortcut.value;
+  // Snippet value — render as markdown if content has markdown markers, otherwise raw
+  const hasMarkdown = /(?:^#{1,6}\s|\*\*|__|\[.+\]\(.+\)|```|^\s*[-*]\s|\|.+\|)/m.test(shortcut.value);
+
+  let valueEl;
+  if (hasMarkdown) {
+    valueEl = document.createElement('div');
+    valueEl.className = 'markdown-body';
+    valueEl.style.cssText = `font-size:${fontSize}px;padding:12px 16px`;
+    valueEl.innerHTML = marked(shortcut.value);
+  } else {
+    valueEl = document.createElement('pre');
+    valueEl.style.cssText = `font-family:'SF Mono','Fira Code','Cascadia Code',monospace;font-size:${fontSize}px;color:var(--text);padding:12px 16px;white-space:pre-wrap;word-break:break-word;margin:0`;
+    valueEl.textContent = shortcut.value;
+  }
   mainView.appendChild(valueEl);
 
   // Link chips (inline, below snippet text)

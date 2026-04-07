@@ -51,9 +51,6 @@ export function showModal({ title, body, onConfirm, onCancel }) {
 
     confirmBtn.addEventListener('click', () => close(true));
     cancelBtn.addEventListener('click', () => close(false));
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) close(false);
-    });
 
     function onKeydown(e) {
       if (e.key === 'Escape') {
