@@ -11,10 +11,10 @@ const i18n = {
 
     // Features tab
     shortcuts_name: 'Shortcuts',
-    shortcuts_desc: 'Store and quickly access text snippets. Two-panel layout with a searchable list on the left and detail view on the right. Filter by colored tags, attach links to snippets, and copy values instantly by pressing Enter.',
+    shortcuts_desc: 'Store and quickly access text snippets. Two-panel layout with searchable list and detail view. Filter by colored tags (glob patterns). Attach links with embedded Web viewer. Expandable card preview in the list. Markdown auto-rendering. Obsidian note integration. Copy values instantly with Enter.',
 
     notes_name: 'Notes',
-    notes_desc: 'Organize notes in folders. Built-in Markdown editor with live preview. Create, edit, and delete notes with full-text content.',
+    notes_desc: 'Organize notes in nested folders (tree view with arbitrary depth). Built-in Markdown editor with toolbar and live preview. Expandable card previews in the note list. Auto markdown rendering on open. Pin important notes to the top.',
 
     sql_name: 'SQL Tools',
     sql_desc: 'A suite of SQL utilities with five sub-tools: Parser extracts table names from queries, Analyzer generates DDL analysis using templates, Macrosing wraps queries in Jinja macros, Formatter beautifies SQL code, and Obfuscator replaces sensitive values with placeholders.',
@@ -50,10 +50,10 @@ const i18n = {
 
     // Features tab
     shortcuts_name: 'Сниппеты',
-    shortcuts_desc: 'Храните и быстро используйте текстовые сниппеты. Двухпанельный интерфейс с поиском слева и детальным просмотром справа. Фильтрация по цветным тегам, прикрепление ссылок к сниппетам и мгновенное копирование по нажатию Enter.',
+    shortcuts_desc: 'Храните и быстро используйте текстовые сниппеты. Двухпанельный интерфейс с поиском и детальным просмотром. Фильтрация по цветным тегам (glob-паттерны). Ссылки со встроенным Web-просмотром. Раскрываемые карточки для быстрого предпросмотра. Авто-рендеринг Markdown. Интеграция с Obsidian. Копирование по Enter.',
 
     notes_name: 'Заметки',
-    notes_desc: 'Организуйте заметки по папкам. Встроенный Markdown-редактор с предпросмотром. Создание, редактирование и удаление заметок с полнотекстовым содержимым.',
+    notes_desc: 'Организуйте заметки во вложенных папках (древовидная структура). Встроенный Markdown-редактор с панелью инструментов и предпросмотром. Раскрываемые карточки в списке заметок. Авто-рендеринг Markdown при открытии. Закрепление важных заметок.',
 
     sql_name: 'SQL Инструменты',
     sql_desc: 'Набор SQL-утилит из пяти инструментов: Парсер извлекает имена таблиц из запросов, Анализатор генерирует анализ DDL по шаблонам, Макросинг оборачивает запросы в Jinja-макросы, Форматтер форматирует SQL-код, Обфускатор заменяет чувствительные данные заглушками.',
