@@ -63,5 +63,9 @@ desktop-rust/src-tauri/target/
 desktop-rust/node_modules/
 desktop-rust/src-tauri/gen/
 
+# Mobile build artifacts
+mobile/android/app/.cxx/
+mobile/android/app/build/
+
 # Un-ignore JS lib for desktop app
 !desktop-rust/src/lib/
