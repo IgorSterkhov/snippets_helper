@@ -11,11 +11,19 @@ let selectedFolderId = null;
 let editingNote = null; // null = list view, object = editing
 let previewMode = false;
 let expandedFolderIds = new Set();
+let expandedNoteIdx = null;
+let expandMultiplier = 4;
 
-export function init(container) {
+export async function init(container) {
   root = container;
   root.innerHTML = '';
   root.appendChild(buildLayout());
+
+  try {
+    const em = await call('get_setting', { key: 'snippet_expand_multiplier' });
+    if (em) expandMultiplier = parseInt(em) || 4;
+  } catch {}
+
   loadFolders();
 }
 
@@ -215,6 +223,7 @@ function selectFolder(id) {
   selectedFolderId = id;
   editingNote = null;
   previewMode = false;
+  expandedNoteIdx = null;
   renderFolders();
   loadNotes();
 }
@@ -381,22 +390,77 @@ function renderNotesList() {
     return;
   }
 
+  const baseItemHeight = 36;
   const list = el('div', { class: 'notes-list' });
-  for (const n of notes) {
+
+  notes.forEach((n, index) => {
+    const isExpanded = expandedNoteIdx === index;
+    const hasMarkdown = hasMarkdownMarkers(n.content);
+
     const card = el('div', { class: 'note-card' });
+
+    // Title row (click -> open editor)
     const titleRow = el('div', { class: 'note-card-title' });
     if (n.is_pinned) {
-      titleRow.appendChild(el('span', { text: '\uD83D\uDCCC ', class: 'pin-icon' }));
+      titleRow.appendChild(el('span', { class: 'pin-dot' }));
     }
-    titleRow.appendChild(el('strong', { text: n.title || '(untitled)' }));
+    const titleText = el('span', { class: 'note-card-title-text' });
+    titleText.textContent = n.title || '(untitled)';
+    titleRow.appendChild(titleText);
     card.appendChild(titleRow);
 
-    const preview = (n.content || '').replace(/\n/g, ' ').substring(0, 120);
-    card.appendChild(el('div', { text: preview || '(empty)', class: 'note-card-preview' }));
+    // Preview subtitle (first line, truncated)
+    const firstLine = (n.content || '').split('\n').find(l => l.trim()) || '';
+    const previewText = firstLine.replace(/^#+\s*/, '').substring(0, 120);
+    card.appendChild(el('div', { text: previewText || '(empty)', class: 'note-card-preview' }));
 
-    card.addEventListener('click', () => openEditor(n));
+    // Expandable content area
+    if (isExpanded) {
+      const expandContent = el('div', { class: 'expand-content' });
+      expandContent.style.height = (baseItemHeight * expandMultiplier) + 'px';
+
+      if (hasMarkdown) {
+        const mdDiv = el('div', { class: 'markdown-body' });
+        mdDiv.style.fontSize = '13px';
+        mdDiv.innerHTML = marked(n.content);
+        expandContent.appendChild(mdDiv);
+      } else {
+        const pre = document.createElement('pre');
+        pre.style.cssText = "font-family:'SF Mono','Fira Code',monospace;font-size:13px;color:var(--text);white-space:pre-wrap;word-break:break-word;margin:0;padding:6px 0";
+        pre.textContent = n.content;
+        expandContent.appendChild(pre);
+      }
+      card.appendChild(expandContent);
+      card.style.background = 'var(--bg-secondary)';
+      card.style.borderLeftColor = 'var(--accent)';
+    }
+
+    // Expand handle (thin bar at bottom, matches snippets exactly)
+    const handle = el('div', { class: 'expand-handle' + (isExpanded ? ' open' : '') });
+    handle.textContent = isExpanded ? '\u25B2' : '\u25BC';
+    handle.addEventListener('click', (e) => {
+      e.stopPropagation();
+      expandedNoteIdx = isExpanded ? null : index;
+      renderNotesList();
+    });
+    card.appendChild(handle);
+
+    // Click title area -> open editor
+    titleRow.style.cursor = 'pointer';
+    titleRow.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openEditor(n);
+    });
+
+    // Click preview -> also open editor
+    card.querySelector('.note-card-preview').addEventListener('click', (e) => {
+      e.stopPropagation();
+      openEditor(n);
+    });
+
     list.appendChild(card);
-  }
+  });
+
   right.appendChild(list);
 }
 
@@ -604,8 +668,8 @@ function notesCSS() {
 .notes-folder-item {
   display: flex;
   align-items: center;
-  padding: 7px 10px;
-  border-radius: 6px;
+  padding: 6px 8px;
+  border-radius: 4px;
   cursor: pointer;
   transition: background 0.15s;
   margin-bottom: 1px;
@@ -618,8 +682,8 @@ function notesCSS() {
 }
 
 .notes-folder-item.active {
-  background: var(--bg-secondary);
-  border-left: 3px solid var(--accent);
+  background: var(--bg-tertiary);
+  border-left: 2px solid var(--accent);
 }
 
 .folder-arrow {
@@ -628,10 +692,10 @@ function notesCSS() {
   justify-content: center;
   width: 16px;
   height: 16px;
-  font-size: 9px;
+  font-size: 10px;
   color: var(--text-muted);
   cursor: pointer;
-  transition: transform 0.2s ease;
+  transition: transform 0.15s;
   flex-shrink: 0;
   user-select: none;
 }
@@ -679,8 +743,9 @@ function notesCSS() {
   top: 0;
   bottom: 0;
   width: 1px;
-  background: var(--border);
-  opacity: 0.5;
+  border-left: 1px dashed var(--border);
+  background: transparent;
+  opacity: 0.7;
 }
 
 .folder-actions {
@@ -724,77 +789,123 @@ function notesCSS() {
 }
 
 .notes-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  flex: 1;
+  overflow-y: auto;
+  padding: 0;
 }
 
 .note-card {
-  background: var(--bg-secondary);
-  border-radius: 6px;
-  padding: 10px 14px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  border-left: 2px solid transparent;
   cursor: pointer;
-  border-left: 3px solid transparent;
-  transition: border-color 0.15s;
+  transition: all 0.15s;
+  position: relative;
+  overflow: hidden;
 }
 
 .note-card:hover {
+  background: var(--bg-secondary);
   border-left-color: var(--accent);
 }
 
 .note-card-title {
-  margin-bottom: 4px;
+  font-weight: 600;
   font-size: 14px;
+  margin-bottom: 2px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
-.pin-icon {
-  font-size: 12px;
-}
-
-.note-card-preview {
-  font-size: 12px;
-  color: var(--text-muted);
+.note-card-title-text {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.note-title-input {
-  width: 100%;
-  font-size: 16px;
-  font-weight: 600;
-  margin-bottom: 8px;
-  padding: 10px 12px;
+.note-card-preview {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.note-toolbar {
+.pin-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #f0883e;
+  flex-shrink: 0;
+}
+
+.note-card .expand-handle {
+  height: 14px;
   display: flex;
-  gap: 8px;
-  margin-bottom: 8px;
+  align-items: center;
+  justify-content: center;
+  font-size: 8px;
+  color: var(--text-muted);
+  opacity: 0;
+  transition: opacity 0.15s;
+  cursor: pointer;
+}
+
+.note-card:hover .expand-handle {
+  opacity: 0.6;
+}
+
+.note-card .expand-handle.open {
+  opacity: 0.8;
+}
+
+.note-card .expand-content {
+  border-top: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 8px 0;
+  animation: note-expand 0.2s ease-out;
+}
+
+@keyframes note-expand {
+  from { height: 0; opacity: 0; }
+  to { opacity: 1; }
+}
+
+.note-title-input {
+  font-size: 18px;
+  font-weight: 600;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px 0;
+  margin-bottom: 12px;
+  width: 100%;
+  outline: none;
+}
+
+.note-title-input:focus {
+  border-bottom-color: var(--accent);
 }
 
 .note-content-input {
-  width: 100%;
   flex: 1;
+  resize: none;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 14px;
+  line-height: 1.6;
+  width: 100%;
   min-height: 300px;
-  resize: vertical;
-  font-family: 'Consolas', 'Monaco', monospace;
-  font-size: 13px;
-  line-height: 1.5;
   padding: 12px;
   margin-bottom: 12px;
 }
 
 .note-preview {
   flex: 1;
-  min-height: 300px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 16px;
-  margin-bottom: 12px;
   overflow-y: auto;
-  line-height: 1.6;
+  padding: 12px 0;
+  min-height: 300px;
 }
 
 .note-preview h2 { font-size: 18px; margin: 12px 0 8px 0; }
@@ -804,7 +915,7 @@ function notesCSS() {
   background: var(--bg-tertiary);
   padding: 2px 6px;
   border-radius: 3px;
-  font-family: 'Consolas', 'Monaco', monospace;
+  font-family: 'SF Mono', 'Fira Code', monospace;
   font-size: 13px;
 }
 .note-preview hr {
@@ -818,9 +929,18 @@ function notesCSS() {
 }
 .note-preview strong { color: var(--text); }
 
+.note-toolbar {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
 .note-actions {
   display: flex;
   gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
 }
 `;
 }
