@@ -1,0 +1,8 @@
+node_modules/
+android/app/build/
+android/app/.cxx/
+android/app/release.keystore
+android/app/google-services.json
+android/.gradle/
+android/build/
+.metro-health-check*

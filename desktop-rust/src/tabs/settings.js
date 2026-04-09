@@ -1,6 +1,7 @@
 import { call } from '../tauri-api.js';
 import { showToast } from '../components/toast.js';
 import { doSync } from '../components/status-bar.js';
+import { qrcode } from '../lib/qrcode.js';
 
 let root = null;
 let activeSubTab = 'general';
@@ -437,6 +438,15 @@ async function renderSync(container) {
   keyInput.style.flex = '1';
   keyInput.addEventListener('change', () => saveSetting('sync_api_key', keyInput.value));
   keyRow.appendChild(keyInput);
+
+  const qrBtn = el('button', { text: 'QR', class: 'btn-secondary', title: 'Show QR code for mobile app' });
+  qrBtn.style.cssText = 'min-width:auto;padding:6px 12px;font-size:13px';
+  qrBtn.addEventListener('click', () => {
+    const key = keyInput.value.trim();
+    if (!key) { showToast('API key is empty', 'error'); return; }
+    showQRModal(key);
+  });
+  keyRow.appendChild(qrBtn);
   container.appendChild(keyRow);
 
   // Action buttons
@@ -735,6 +745,59 @@ export async function checkFirstRun() {
     injectStyles();
     document.body.appendChild(overlay);
   });
+}
+
+// ── QR Code Modal ────────────────────────────────────────────
+
+function showQRModal(apiKey) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.style.zIndex = '10001';
+
+  const modal = document.createElement('div');
+  modal.className = 'modal';
+  modal.style.cssText = 'max-width:340px;padding:24px;text-align:center';
+
+  modal.appendChild(el('h3', { text: 'QR-код для мобильного', style: 'margin:0 0 16px' }));
+
+  // Generate QR
+  const qr = qrcode(0, 'M');
+  qr.addData(apiKey);
+  qr.make();
+
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  canvas.style.cssText = 'border-radius:8px;background:#fff;padding:12px';
+  const ctx = canvas.getContext('2d');
+  const moduleCount = qr.getModuleCount();
+  const cellSize = size / moduleCount;
+
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, size, size);
+  ctx.fillStyle = '#000000';
+  for (let row = 0; row < moduleCount; row++) {
+    for (let col = 0; col < moduleCount; col++) {
+      if (qr.isDark(row, col)) {
+        ctx.fillRect(col * cellSize, row * cellSize, cellSize, cellSize);
+      }
+    }
+  }
+  modal.appendChild(canvas);
+
+  modal.appendChild(el('p', {
+    text: 'Отсканируйте в мобильном приложении Snippets Helper',
+    style: 'margin:16px 0 0;font-size:13px;color:var(--text-muted)',
+  }));
+
+  const closeBtn = el('button', { text: 'Закрыть', style: 'margin-top:16px' });
+  closeBtn.addEventListener('click', () => overlay.remove());
+  modal.appendChild(closeBtn);
+
+  overlay.appendChild(modal);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
 }
 
 // ── Helpers ───────────────────────────────────────────────────
