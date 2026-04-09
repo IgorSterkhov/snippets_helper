@@ -1,8 +1,11 @@
 {
-  "name": "snippets-helper-mobile",
+  "name": "SnippetsHelper",
   "version": "1.0.0",
   "private": true,
   "scripts": {
+    "android": "react-native run-android",
+    "start": "react-native start",
+    "postinstall": "sed -i 's/jcenter()/mavenCentral()/g' node_modules/react-native-sqlite-storage/platforms/android/build.gradle 2>/dev/null || true",
     "test": "jest",
     "lint": "eslint src/"
   },
@@ -15,8 +18,8 @@
     "@react-navigation/bottom-tabs": "^7.15.9",
     "@react-navigation/native": "^7.2.2",
     "@react-navigation/native-stack": "^7.14.10",
-    "react": "^18.3.1",
-    "react-native": "^0.76.0",
+    "react": "19.2.3",
+    "react-native": "0.85.0",
     "react-native-biometrics": "^3.0.1",
     "react-native-encrypted-storage": "^4.0.3",
     "react-native-markdown-display": "^7.0.2",
@@ -27,12 +30,17 @@
     "react-native-vision-camera": "^4.7.3"
   },
   "devDependencies": {
-    "@babel/core": "^7.29.0",
-    "@babel/preset-env": "^7.29.2",
-    "@babel/runtime": "^7.29.2",
+    "@babel/core": "^7.25.2",
+    "@babel/preset-env": "^7.25.3",
+    "@babel/runtime": "^7.25.0",
+    "@react-native-community/cli": "20.1.0",
+    "@react-native-community/cli-platform-android": "20.1.0",
+    "@react-native/babel-preset": "0.85.0",
+    "@react-native/metro-config": "0.85.0",
+    "@react-native/jest-preset": "0.85.0",
     "@testing-library/react-native": "^12.9.0",
     "babel-jest": "^29.7.0",
     "jest": "^29.7.0",
-    "react-test-renderer": "^18.3.1"
+    "react-test-renderer": "19.2.3"
   }
 }

@@ -1,0 +1,1 @@
+/home/aster/dev/snippets_helper/mobile/android/app/build/intermediates/cxx/RelWithDebInfo/3r4v3f1h/obj/armeabi-v7a

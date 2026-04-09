@@ -1,0 +1,4 @@
+/home/aster/dev/snippets_helper/mobile/android/app/.cxx/RelWithDebInfo/3r4v3f1h/x86_64/CMakeFiles/_CMakeLTOTest-CXX/bin/CMakeFiles/foo.dir
+/home/aster/dev/snippets_helper/mobile/android/app/.cxx/RelWithDebInfo/3r4v3f1h/x86_64/CMakeFiles/_CMakeLTOTest-CXX/bin/CMakeFiles/boo.dir
+/home/aster/dev/snippets_helper/mobile/android/app/.cxx/RelWithDebInfo/3r4v3f1h/x86_64/CMakeFiles/_CMakeLTOTest-CXX/bin/CMakeFiles/edit_cache.dir
+/home/aster/dev/snippets_helper/mobile/android/app/.cxx/RelWithDebInfo/3r4v3f1h/x86_64/CMakeFiles/_CMakeLTOTest-CXX/bin/CMakeFiles/rebuild_cache.dir
