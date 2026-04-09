@@ -15,6 +15,8 @@ let listWidth = 260;
 let descOpen = false;
 let viewMode = 'main'; // 'main' | 'web' | 'note'
 let activeWebLink = null; // index of active link in web view
+let expandedCard = null; // index of expanded card in list
+let expandHeight = 4; // multiplier for expanded height
 let obsidianConfigured = false;
 let tags = [];
 let selectedTagId = null;
@@ -31,6 +33,8 @@ export async function init(container) {
     fontSize = parseInt(snippetsFs || globalFs) || 14;
     const lw = await call('get_setting', { key: 'snippets_left_width' });
     if (lw) listWidth = parseInt(lw) || 260;
+    const eh = await call('get_setting', { key: 'snippet_expand_multiplier' });
+    if (eh) expandHeight = parseInt(eh) || 4;
   } catch {}
 
   // Header row: search + add button (fixed)
@@ -135,24 +139,42 @@ function renderList() {
     return;
   }
 
-  shortcuts.forEach((shortcut, index) => {
-    const item = document.createElement('div');
-    item.style.cssText = `padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--border);font-size:${fontSize}px;transition:background 0.1s;border-left:3px solid transparent`;
+  const baseItemHeight = Math.max(fontSize * 2.4, 36);
 
-    if (index === selectedIndex) {
-      item.style.background = 'var(--bg-tertiary)';
-      item.style.borderLeftColor = 'var(--accent)';
-    } else {
+  shortcuts.forEach((shortcut, index) => {
+    const isSelected = index === selectedIndex;
+    const isExpanded = expandedCard === index;
+    const hasMarkdown = /(?:^#{1,6}\s|\*\*|__|\[.+\]\(.+\)|```|^\s*[-*]\s|\|.+\|)/m.test(shortcut.value);
+
+    const item = document.createElement('div');
+    item.className = 'snip-card';
+    item.style.cssText = `
+      border-bottom:1px solid var(--border);
+      font-size:${fontSize}px;
+      transition:all 0.2s ease;
+      border-left:3px solid ${isSelected ? 'var(--accent)' : 'transparent'};
+      background:${isSelected ? 'var(--bg-tertiary)' : 'transparent'};
+      position:relative;
+      overflow:hidden;
+    `;
+
+    if (!isSelected) {
       item.addEventListener('mouseenter', () => { item.style.background = 'var(--bg-secondary)'; });
-      item.addEventListener('mouseleave', () => { item.style.background = ''; });
+      item.addEventListener('mouseleave', () => { if (expandedCard !== index) item.style.background = ''; });
     }
 
-    const nameEl = document.createElement('div');
-    nameEl.style.cssText = 'font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
-    nameEl.textContent = shortcut.name;
-    item.appendChild(nameEl);
+    // Name row
+    const nameRow = document.createElement('div');
+    nameRow.style.cssText = 'display:flex;align-items:center;padding:8px 12px;cursor:pointer;gap:6px';
 
-    item.addEventListener('click', () => {
+    const nameEl = document.createElement('div');
+    nameEl.style.cssText = 'font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1';
+    nameEl.textContent = shortcut.name;
+    nameRow.appendChild(nameEl);
+
+    // Click name → select
+    nameRow.addEventListener('click', (e) => {
+      e.stopPropagation();
       selectedIndex = index;
       viewMode = 'main';
       descOpen = false;
@@ -160,7 +182,58 @@ function renderList() {
       renderList();
       renderDetail();
     });
+    item.appendChild(nameRow);
 
+    // Expandable preview area
+    if (isExpanded) {
+      const preview = document.createElement('div');
+      preview.style.cssText = `
+        height:${baseItemHeight * expandHeight}px;
+        overflow-y:auto;
+        padding:0 12px 8px 12px;
+        border-top:1px solid var(--border);
+        animation:snip-expand 0.2s ease-out;
+      `;
+
+      if (hasMarkdown) {
+        const mdDiv = document.createElement('div');
+        mdDiv.className = 'markdown-body';
+        mdDiv.style.cssText = `font-size:${Math.max(fontSize - 1, 11)}px`;
+        mdDiv.innerHTML = marked(shortcut.value);
+        preview.appendChild(mdDiv);
+      } else {
+        const pre = document.createElement('pre');
+        pre.style.cssText = `font-family:'SF Mono','Fira Code',monospace;font-size:${Math.max(fontSize - 1, 11)}px;color:var(--text);white-space:pre-wrap;word-break:break-word;margin:0;padding:6px 0`;
+        pre.textContent = shortcut.value;
+        preview.appendChild(pre);
+      }
+      item.appendChild(preview);
+      item.style.background = 'var(--bg-secondary)';
+    }
+
+    // Expand handle — thin bar at bottom
+    const handle = document.createElement('div');
+    handle.style.cssText = `
+      height:14px;
+      display:flex;align-items:center;justify-content:center;
+      cursor:pointer;
+      color:var(--text-muted);
+      font-size:8px;
+      opacity:${isExpanded ? '0.8' : '0'};
+      transition:opacity 0.15s;
+    `;
+    handle.textContent = isExpanded ? '▲' : '▼';
+    handle.addEventListener('click', (e) => {
+      e.stopPropagation();
+      expandedCard = isExpanded ? null : index;
+      renderList();
+    });
+
+    // Show handle on hover
+    item.addEventListener('mouseenter', () => { handle.style.opacity = '0.6'; });
+    item.addEventListener('mouseleave', () => { if (!isExpanded) handle.style.opacity = '0'; });
+
+    item.appendChild(handle);
     listEl.appendChild(item);
   });
 }

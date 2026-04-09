@@ -252,6 +252,20 @@ async function renderShortcuts(container) {
   widthInput.addEventListener('change', () => saveSetting('shortcuts_left_width', widthInput.value));
   widthRow.appendChild(widthInput);
   container.appendChild(widthRow);
+
+  // Expand preview multiplier
+  const expandVal = await getSetting('snippet_expand_multiplier') || '4';
+  const expandRow = makeFormRow('Card expand height (x):');
+  const expandInput = document.createElement('input');
+  expandInput.type = 'number';
+  expandInput.className = 'settings-input';
+  expandInput.min = '2';
+  expandInput.max = '10';
+  expandInput.value = expandVal;
+  expandInput.style.width = '80px';
+  expandInput.addEventListener('change', () => saveSetting('snippet_expand_multiplier', expandInput.value));
+  expandRow.appendChild(expandInput);
+  container.appendChild(expandRow);
 }
 
 // ── SQL Table Analyzer ────────────────────────────────────────
