@@ -1,4 +1,6 @@
 node_modules/
 android/app/build/
+android/app/.cxx/
 android/.gradle/
+android/build/
 .metro-health-check*
