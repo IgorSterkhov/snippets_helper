@@ -3,8 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'reac
 import { useTheme } from '../../theme/ThemeContext';
 import { useAuth } from '../../auth/AuthContext';
 import { initApi, getMe } from '../../api/endpoints';
-
-const API_BASE_URL = 'http://109.172.85.124:8000';
+import { API_BASE_URL } from '../../config';
 
 export default function LoginScreen({ navigation }) {
   const { colors } = useTheme();

@@ -4,8 +4,7 @@ import { Camera, useCameraDevice, useCodeScanner } from 'react-native-vision-cam
 import { useTheme } from '../../theme/ThemeContext';
 import { useAuth } from '../../auth/AuthContext';
 import { initApi, getMe } from '../../api/endpoints';
-
-const API_BASE_URL = 'http://109.172.85.124:8000';
+import { API_BASE_URL } from '../../config';
 
 export default function QRScannerScreen({ navigation }) {
   const { colors } = useTheme();

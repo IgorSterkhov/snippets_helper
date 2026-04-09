@@ -21,7 +21,8 @@ function AppContent() {
     if (!apiKey) return;
     (async () => {
       await initDB();
-      initApi('http://109.172.85.124:8000', apiKey);
+      const { API_BASE_URL } = require('./src/config');
+      initApi(API_BASE_URL, apiKey);
       performSync().catch(console.warn);
       startNetworkListener();
     })();
