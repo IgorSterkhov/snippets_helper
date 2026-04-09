@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.8.3 (2026-04-07)
+- Nested folders in Notes: tree view with expand/collapse, sub-folder creation, arbitrary depth
+- Expandable note cards: hover handle to preview content without opening editor
+- Expandable snippet cards: same pattern in Shortcuts tab
+- Redesigned Notes styling: refined tree connectors, pin dots, editor typography
+- Auto markdown preview when opening notes with markdown content
+- Fixed ordered list rendering in markdown (explicit list-style-type)
+- Card expand height configurable in Settings → Shortcuts
+
 ## v0.8.0 (2026-04-07)
 - Status bar at bottom of window: sync status (left) + update status (right)
 - Sync: pulsing dot indicator, click for sync log popup
