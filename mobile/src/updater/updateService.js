@@ -1,6 +1,5 @@
 import { Alert } from 'react-native';
-
-const UPDATE_URL = 'http://REDACTED:8000/updates/latest.json';
+import { UPDATE_URL } from '../config';
 
 let updateInfo = null;
 let onProgressCallback = null;
