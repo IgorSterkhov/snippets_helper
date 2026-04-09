@@ -93,10 +93,10 @@ android {
             keyPassword 'android'
         }
         release {
-            storeFile file(RELEASE_STORE_FILE)
-            storePassword RELEASE_STORE_PASSWORD
-            keyAlias RELEASE_KEY_ALIAS
-            keyPassword RELEASE_KEY_PASSWORD
+            storeFile file(SNIPPETS_RELEASE_STORE_FILE)
+            storePassword SNIPPETS_RELEASE_STORE_PASSWORD
+            keyAlias SNIPPETS_RELEASE_KEY_ALIAS
+            keyPassword SNIPPETS_RELEASE_KEY_PASSWORD
         }
     }
     buildTypes {
