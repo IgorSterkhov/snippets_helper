@@ -248,37 +248,39 @@ pub fn filter_shortcuts_by_patterns(
 
 pub fn list_note_folders(conn: &Connection) -> Result<Vec<NoteFolder>> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, sort_order, uuid, updated_at, sync_status, user_id
+        "SELECT id, name, sort_order, parent_id, uuid, updated_at, sync_status, user_id
          FROM note_folders WHERE sync_status != 'deleted' ORDER BY sort_order, name",
     )?;
     let rows = stmt.query_map([], |row| {
-        let updated_at_str: String = row.get(4)?;
+        let updated_at_str: String = row.get(5)?;
         Ok(NoteFolder {
             id: row.get(0)?,
             name: row.get(1)?,
             sort_order: row.get(2)?,
-            uuid: row.get(3)?,
+            parent_id: row.get(3)?,
+            uuid: row.get(4)?,
             updated_at: parse_dt(&updated_at_str),
-            sync_status: row.get(5)?,
-            user_id: row.get(6)?,
+            sync_status: row.get(6)?,
+            user_id: row.get(7)?,
         })
     })?;
     rows.collect()
 }
 
-pub fn create_note_folder(conn: &Connection, name: &str, sort_order: i32) -> Result<NoteFolder> {
+pub fn create_note_folder(conn: &Connection, name: &str, sort_order: i32, parent_id: Option<i64>) -> Result<NoteFolder> {
     let uuid = Uuid::new_v4().to_string();
     let now = now_str();
     conn.execute(
-        "INSERT INTO note_folders (name, sort_order, uuid, updated_at, sync_status, user_id)
-         VALUES (?1, ?2, ?3, ?4, 'pending', '')",
-        params![name, sort_order, uuid, now],
+        "INSERT INTO note_folders (name, sort_order, parent_id, uuid, updated_at, sync_status, user_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, 'pending', '')",
+        params![name, sort_order, parent_id, uuid, now],
     )?;
     let id = conn.last_insert_rowid();
     Ok(NoteFolder {
         id: Some(id),
         name: name.to_string(),
         sort_order,
+        parent_id,
         uuid,
         updated_at: parse_dt(&now),
         sync_status: "pending".to_string(),
@@ -286,12 +288,12 @@ pub fn create_note_folder(conn: &Connection, name: &str, sort_order: i32) -> Res
     })
 }
 
-pub fn update_note_folder(conn: &Connection, id: i64, name: &str, sort_order: i32) -> Result<()> {
+pub fn update_note_folder(conn: &Connection, id: i64, name: &str, sort_order: i32, parent_id: Option<i64>) -> Result<()> {
     let now = now_str();
     conn.execute(
-        "UPDATE note_folders SET name = ?1, sort_order = ?2, updated_at = ?3, sync_status = 'pending'
-         WHERE id = ?4",
-        params![name, sort_order, now, id],
+        "UPDATE note_folders SET name = ?1, sort_order = ?2, parent_id = ?3, updated_at = ?4, sync_status = 'pending'
+         WHERE id = ?5",
+        params![name, sort_order, parent_id, now, id],
     )?;
     Ok(())
 }
@@ -1160,13 +1162,13 @@ mod tests {
     #[test]
     fn test_note_folders_crud() {
         let conn = init_test_db();
-        let f = create_note_folder(&conn, "Work", 0).unwrap();
+        let f = create_note_folder(&conn, "Work", 0, None).unwrap();
         assert!(f.id.is_some());
 
         let list = list_note_folders(&conn).unwrap();
         assert_eq!(list.len(), 1);
 
-        update_note_folder(&conn, f.id.unwrap(), "Work Updated", 1).unwrap();
+        update_note_folder(&conn, f.id.unwrap(), "Work Updated", 1, None).unwrap();
         let list = list_note_folders(&conn).unwrap();
         assert_eq!(list[0].name, "Work Updated");
 
@@ -1178,7 +1180,7 @@ mod tests {
     #[test]
     fn test_notes_crud() {
         let conn = init_test_db();
-        let folder = create_note_folder(&conn, "Folder", 0).unwrap();
+        let folder = create_note_folder(&conn, "Folder", 0, None).unwrap();
         let fid = folder.id.unwrap();
 
         let n = create_note(&conn, fid, "Title", "Content").unwrap();

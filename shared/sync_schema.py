@@ -22,7 +22,7 @@ SYNCED_TABLES = {
         'pk': 'id',
     },
     'note_folders': {
-        'data_fields': ['id', 'name', 'sort_order'],
+        'data_fields': ['id', 'name', 'sort_order', 'parent_id'],
         'pk': 'id',
     },
     'notes': {

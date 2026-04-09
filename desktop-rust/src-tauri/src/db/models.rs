@@ -22,6 +22,7 @@ pub struct NoteFolder {
     pub id: Option<i64>,
     pub name: String,
     pub sort_order: i32,
+    pub parent_id: Option<i64>,
     pub uuid: String,
     pub updated_at: NaiveDateTime,
     pub sync_status: String,

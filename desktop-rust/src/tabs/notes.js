@@ -10,6 +10,7 @@ let notes = [];
 let selectedFolderId = null;
 let editingNote = null; // null = list view, object = editing
 let previewMode = false;
+let expandedFolderIds = new Set();
 
 export function init(container) {
   root = container;
@@ -28,7 +29,7 @@ function buildLayout() {
   const leftHeader = el('div', { class: 'notes-panel-header' });
   leftHeader.appendChild(el('span', { text: 'Folders', class: 'notes-panel-title' }));
   const addFolderBtn = el('button', { text: '+', class: 'btn-small' });
-  addFolderBtn.addEventListener('click', onAddFolder);
+  addFolderBtn.addEventListener('click', () => onAddFolder(null));
   leftHeader.appendChild(addFolderBtn);
   left.appendChild(leftHeader);
 
@@ -50,6 +51,52 @@ function buildLayout() {
   return wrap;
 }
 
+// ── Folder tree helpers ─────────────────────────────────────────
+
+function buildFolderTree(flatFolders) {
+  const map = new Map();
+  const roots = [];
+  for (const f of flatFolders) {
+    map.set(f.id, { ...f, children: [] });
+  }
+  for (const f of flatFolders) {
+    const node = map.get(f.id);
+    if (f.parent_id && map.has(f.parent_id)) {
+      map.get(f.parent_id).children.push(node);
+    } else {
+      roots.push(node);
+    }
+  }
+  return { roots, map };
+}
+
+function countDescendantFolders(node) {
+  let count = node.children.length;
+  for (const child of node.children) {
+    count += countDescendantFolders(child);
+  }
+  return count;
+}
+
+function getAllDescendantIds(node) {
+  const ids = [];
+  for (const child of node.children) {
+    ids.push(child.id);
+    ids.push(...getAllDescendantIds(child));
+  }
+  return ids;
+}
+
+function getFolderPath(folderId, folderMap) {
+  const parts = [];
+  let current = folderMap.get(folderId);
+  while (current) {
+    parts.unshift(current.name);
+    current = current.parent_id ? folderMap.get(current.parent_id) : null;
+  }
+  return parts.join(' / ');
+}
+
 // ── Folders ───────────────────────────────────────────────────
 
 async function loadFolders() {
@@ -59,7 +106,6 @@ async function loadFolders() {
     if (folders.length && !selectedFolderId) {
       selectFolder(folders[0].id);
     } else if (selectedFolderId) {
-      // re-select to refresh note counts display
       const still = folders.find(f => f.id === selectedFolderId);
       if (still) selectFolder(selectedFolderId);
       else if (folders.length) selectFolder(folders[0].id);
@@ -76,24 +122,92 @@ function renderFolders() {
   const list = root.querySelector('#folder-list');
   if (!list) return;
   list.innerHTML = '';
-  for (const f of folders) {
+
+  const { roots, map } = buildFolderTree(folders);
+
+  function renderNode(node, depth) {
+    const hasChildren = node.children.length > 0;
+    const isExpanded = expandedFolderIds.has(node.id);
+    const isActive = node.id === selectedFolderId;
+
     const item = el('div', {
-      class: 'notes-folder-item' + (f.id === selectedFolderId ? ' active' : ''),
+      class: 'notes-folder-item' + (isActive ? ' active' : ''),
     });
-    const nameSpan = el('span', { text: f.name, class: 'folder-name' });
+    item.style.paddingLeft = (10 + depth * 20) + 'px';
+
+    // Tree connector line
+    if (depth > 0) {
+      const connector = el('span', { class: 'tree-connector' });
+      connector.style.left = (depth * 20 - 6) + 'px';
+      item.appendChild(connector);
+      item.style.position = 'relative';
+    }
+
+    // Expand/collapse arrow
+    const arrow = el('span', { class: 'folder-arrow' + (hasChildren ? '' : ' invisible') });
+    arrow.textContent = isExpanded ? '\u25BC' : '\u25B6';
+    if (hasChildren) {
+      arrow.classList.add(isExpanded ? 'arrow-expanded' : 'arrow-collapsed');
+      arrow.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (expandedFolderIds.has(node.id)) {
+          expandedFolderIds.delete(node.id);
+        } else {
+          expandedFolderIds.add(node.id);
+        }
+        renderFolders();
+      });
+    }
+    item.appendChild(arrow);
+
+    // Folder icon
+    const icon = el('span', { class: 'folder-icon' });
+    if (hasChildren && isExpanded) {
+      icon.textContent = '\uD83D\uDCC2 ';
+    } else if (hasChildren) {
+      icon.textContent = '\uD83D\uDCC1 ';
+    } else {
+      icon.textContent = '\uD83D\uDCC4 ';
+    }
+    item.appendChild(icon);
+
+    // Folder name
+    const nameSpan = el('span', { text: node.name, class: 'folder-name' });
     item.appendChild(nameSpan);
 
+    // Sub-folder count badge
+    const totalChildren = countDescendantFolders(node);
+    if (totalChildren > 0) {
+      const badge = el('span', { text: String(totalChildren), class: 'folder-badge' });
+      item.appendChild(badge);
+    }
+
+    // Actions
     const actions = el('span', { class: 'folder-actions' });
+    const addSubBtn = el('button', { text: '+', class: 'btn-icon', title: 'Add sub-folder' });
+    addSubBtn.addEventListener('click', (e) => { e.stopPropagation(); onAddFolder(node.id); });
     const renameBtn = el('button', { text: '\u270E', class: 'btn-icon', title: 'Rename' });
-    renameBtn.addEventListener('click', (e) => { e.stopPropagation(); onRenameFolder(f); });
+    renameBtn.addEventListener('click', (e) => { e.stopPropagation(); onRenameFolder(node); });
     const deleteBtn = el('button', { text: '\u2715', class: 'btn-icon btn-icon-danger', title: 'Delete' });
-    deleteBtn.addEventListener('click', (e) => { e.stopPropagation(); onDeleteFolder(f); });
+    deleteBtn.addEventListener('click', (e) => { e.stopPropagation(); onDeleteFolder(node); });
+    actions.appendChild(addSubBtn);
     actions.appendChild(renameBtn);
     actions.appendChild(deleteBtn);
     item.appendChild(actions);
 
-    item.addEventListener('click', () => selectFolder(f.id));
+    item.addEventListener('click', () => selectFolder(node.id));
     list.appendChild(item);
+
+    // Render children if expanded
+    if (hasChildren && isExpanded) {
+      for (const child of node.children) {
+        renderNode(child, depth + 1);
+      }
+    }
+  }
+
+  for (const r of roots) {
+    renderNode(r, 0);
   }
 }
 
@@ -105,13 +219,41 @@ function selectFolder(id) {
   loadNotes();
 }
 
-async function onAddFolder() {
+async function onAddFolder(parentId) {
+  const { map } = buildFolderTree(folders);
+
   const body = document.createElement('div');
-  body.innerHTML = '<label style="display:block;margin-bottom:6px;color:var(--text)">Folder name</label>';
+
+  // Folder name
+  const nameLabel = document.createElement('label');
+  nameLabel.style.cssText = 'display:block;margin-bottom:6px;color:var(--text)';
+  nameLabel.textContent = 'Folder name';
+  body.appendChild(nameLabel);
   const input = document.createElement('input');
   input.style.width = '100%';
   input.placeholder = 'New folder';
   body.appendChild(input);
+
+  // Parent folder dropdown
+  const parentLabel = document.createElement('label');
+  parentLabel.style.cssText = 'display:block;margin:12px 0 6px 0;color:var(--text)';
+  parentLabel.textContent = 'Parent folder';
+  body.appendChild(parentLabel);
+  const select = document.createElement('select');
+  select.style.width = '100%';
+  const rootOpt = document.createElement('option');
+  rootOpt.value = '';
+  rootOpt.textContent = '(Root)';
+  select.appendChild(rootOpt);
+
+  for (const f of folders) {
+    const opt = document.createElement('option');
+    opt.value = String(f.id);
+    opt.textContent = getFolderPath(f.id, map);
+    if (parentId !== null && f.id === parentId) opt.selected = true;
+    select.appendChild(opt);
+  }
+  body.appendChild(select);
 
   try {
     await showModal({
@@ -120,7 +262,10 @@ async function onAddFolder() {
       onConfirm: async () => {
         const name = input.value.trim();
         if (!name) throw new Error('Name is required');
-        await call('create_note_folder', { name, sortOrder: folders.length });
+        const selParent = select.value ? Number(select.value) : null;
+        await call('create_note_folder', { name, sortOrder: folders.length, parentId: selParent });
+        // Auto-expand parent so the new folder is visible
+        if (selParent) expandedFolderIds.add(selParent);
         showToast('Folder created', 'success');
       },
     });
@@ -129,22 +274,56 @@ async function onAddFolder() {
 }
 
 async function onRenameFolder(folder) {
+  const { map } = buildFolderTree(folders);
+
   const body = document.createElement('div');
-  body.innerHTML = '<label style="display:block;margin-bottom:6px;color:var(--text)">Folder name</label>';
+
+  // Name
+  const nameLabel = document.createElement('label');
+  nameLabel.style.cssText = 'display:block;margin-bottom:6px;color:var(--text)';
+  nameLabel.textContent = 'Folder name';
+  body.appendChild(nameLabel);
   const input = document.createElement('input');
   input.style.width = '100%';
   input.value = folder.name;
   body.appendChild(input);
 
+  // Parent folder dropdown
+  const parentLabel = document.createElement('label');
+  parentLabel.style.cssText = 'display:block;margin:12px 0 6px 0;color:var(--text)';
+  parentLabel.textContent = 'Parent folder';
+  body.appendChild(parentLabel);
+  const select = document.createElement('select');
+  select.style.width = '100%';
+  const rootOpt = document.createElement('option');
+  rootOpt.value = '';
+  rootOpt.textContent = '(Root)';
+  if (!folder.parent_id) rootOpt.selected = true;
+  select.appendChild(rootOpt);
+
+  // Exclude this folder and its descendants from parent options
+  const excludeIds = new Set([folder.id, ...getAllDescendantIds(map.get(folder.id) || { children: [] })]);
+
+  for (const f of folders) {
+    if (excludeIds.has(f.id)) continue;
+    const opt = document.createElement('option');
+    opt.value = String(f.id);
+    opt.textContent = getFolderPath(f.id, map);
+    if (folder.parent_id && f.id === folder.parent_id) opt.selected = true;
+    select.appendChild(opt);
+  }
+  body.appendChild(select);
+
   try {
     await showModal({
-      title: 'Rename Folder',
+      title: 'Edit Folder',
       body,
       onConfirm: async () => {
         const name = input.value.trim();
         if (!name) throw new Error('Name is required');
-        await call('update_note_folder', { id: folder.id, name, sortOrder: folder.sort_order });
-        showToast('Folder renamed', 'success');
+        const selParent = select.value ? Number(select.value) : null;
+        await call('update_note_folder', { id: folder.id, name, sortOrder: folder.sort_order, parentId: selParent });
+        showToast('Folder updated', 'success');
       },
     });
     await loadFolders();
@@ -229,9 +408,14 @@ function onNewNote() {
   renderEditor();
 }
 
+function hasMarkdownMarkers(text) {
+  if (!text) return false;
+  return /^#{1,6}\s|^\*\*|^- |\*\*|```|^\|.*\|/m.test(text);
+}
+
 function openEditor(note) {
   editingNote = { ...note };
-  previewMode = false;
+  previewMode = hasMarkdownMarkers(note.content);
   renderEditor();
 }
 
@@ -381,8 +565,8 @@ function notesCSS() {
 }
 
 .notes-left {
-  width: 250px;
-  min-width: 250px;
+  width: 260px;
+  min-width: 260px;
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
@@ -414,18 +598,19 @@ function notesCSS() {
 .notes-folder-list {
   flex: 1;
   overflow-y: auto;
-  padding: 4px 8px;
+  padding: 4px 4px;
 }
 
 .notes-folder-item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 8px 10px;
+  padding: 7px 10px;
   border-radius: 6px;
   cursor: pointer;
   transition: background 0.15s;
-  margin-bottom: 2px;
+  margin-bottom: 1px;
+  position: relative;
+  gap: 2px;
 }
 
 .notes-folder-item:hover {
@@ -435,7 +620,34 @@ function notesCSS() {
 .notes-folder-item.active {
   background: var(--bg-secondary);
   border-left: 3px solid var(--accent);
-  padding-left: 7px;
+}
+
+.folder-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  font-size: 9px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.folder-arrow.invisible {
+  visibility: hidden;
+}
+
+.folder-arrow:hover {
+  color: var(--text);
+}
+
+.folder-icon {
+  font-size: 13px;
+  flex-shrink: 0;
+  margin-right: 2px;
 }
 
 .folder-name {
@@ -443,15 +655,46 @@ function notesCSS() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 13px;
+}
+
+.folder-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--bg-tertiary, rgba(128,128,128,0.15));
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  flex-shrink: 0;
+  margin-left: 4px;
+}
+
+.tree-connector {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border);
+  opacity: 0.5;
 }
 
 .folder-actions {
   display: none;
   gap: 2px;
+  flex-shrink: 0;
 }
 
 .notes-folder-item:hover .folder-actions {
   display: flex;
+}
+
+.notes-folder-item:hover .folder-badge {
+  display: none;
 }
 
 .btn-icon {

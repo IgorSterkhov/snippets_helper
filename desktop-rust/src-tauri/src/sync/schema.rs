@@ -25,7 +25,7 @@ pub fn data_columns(table: &str) -> &'static [&'static str] {
             "combination_mode",
             "separator",
         ],
-        "note_folders" => &["name", "sort_order"],
+        "note_folders" => &["name", "sort_order", "parent_id"],
         "notes" => &["folder_id", "title", "content", "created_at", "is_pinned"],
         "obfuscation_mappings" => &[
             "session_name",

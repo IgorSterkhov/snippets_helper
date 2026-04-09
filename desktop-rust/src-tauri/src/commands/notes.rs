@@ -10,15 +10,15 @@ pub fn list_note_folders(state: State<DbState>) -> Result<Vec<NoteFolder>, Strin
 }
 
 #[tauri::command]
-pub fn create_note_folder(state: State<DbState>, name: String, sort_order: i32) -> Result<NoteFolder, String> {
+pub fn create_note_folder(state: State<DbState>, name: String, sort_order: i32, parent_id: Option<i64>) -> Result<NoteFolder, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    queries::create_note_folder(&conn, &name, sort_order).map_err(|e| e.to_string())
+    queries::create_note_folder(&conn, &name, sort_order, parent_id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn update_note_folder(state: State<DbState>, id: i64, name: String, sort_order: i32) -> Result<(), String> {
+pub fn update_note_folder(state: State<DbState>, id: i64, name: String, sort_order: i32, parent_id: Option<i64>) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    queries::update_note_folder(&conn, id, &name, sort_order).map_err(|e| e.to_string())
+    queries::update_note_folder(&conn, id, &name, sort_order, parent_id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
