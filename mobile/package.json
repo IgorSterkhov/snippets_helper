@@ -1,0 +1,22 @@
+{
+  "name": "snippets-helper-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "test": "jest",
+    "lint": "eslint src/"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-native": "^0.76.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.25.0",
+    "@babel/preset-env": "^7.25.0",
+    "@babel/runtime": "^7.25.0",
+    "babel-jest": "^29.7.0",
+    "jest": "^29.7.0",
+    "@testing-library/react-native": "^12.4.0",
+    "react-test-renderer": "^18.3.1"
+  }
+}
