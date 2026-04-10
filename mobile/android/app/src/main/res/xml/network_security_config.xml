@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <domain-config>
+        <domain includeSubdomains="false">109.172.85.124</domain>
+        <trust-anchors>
+            <certificates src="@raw/snippets_cert" />
+            <certificates src="system" />
+        </trust-anchors>
+    </domain-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
