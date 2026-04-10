@@ -1,16 +1,16 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { View, Text, StyleSheet, Alert } from 'react-native';
 import { Camera, useCameraDevice, useCodeScanner } from 'react-native-vision-camera';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../../theme/ThemeContext';
 import { useAuth } from '../../auth/AuthContext';
 import { initApi, getMe } from '../../api/endpoints';
-import { API_BASE_URL } from '../../config';
 
 export default function QRScannerScreen({ navigation }) {
   const { colors } = useTheme();
   const { login } = useAuth();
   const [hasPermission, setHasPermission] = useState(false);
-  const [scanned, setScanned] = useState(false);
+  const processing = useRef(false);
   const device = useCameraDevice('back');
 
   useEffect(() => {
@@ -22,16 +22,53 @@ export default function QRScannerScreen({ navigation }) {
   const codeScanner = useCodeScanner({
     codeTypes: ['qr'],
     onCodeScanned: async (codes) => {
-      if (scanned || !codes.length) return;
-      setScanned(true);
-      const apiKey = codes[0].value;
+      if (processing.current || !codes.length) return;
+      processing.current = true;
+
+      const raw = codes[0].value;
+      let apiUrl = '';
+      let apiKey = '';
+
+      // Try JSON format: {"url":"...","key":"..."}
       try {
-        initApi(API_BASE_URL, apiKey);
+        const parsed = JSON.parse(raw);
+        if (parsed.url && parsed.key) {
+          apiUrl = parsed.url;
+          apiKey = parsed.key;
+        }
+      } catch {
+        // Not JSON — treat as plain API key (legacy)
+        apiKey = raw;
+      }
+
+      if (!apiKey) {
+        Alert.alert('Ошибка', 'QR-код не содержит API-ключ', [
+          { text: 'OK', onPress: () => { processing.current = false; } },
+        ]);
+        return;
+      }
+
+      if (!apiUrl) {
+        // No URL in QR — check saved URL
+        apiUrl = await AsyncStorage.getItem('api_base_url') || '';
+      }
+
+      if (!apiUrl) {
+        Alert.alert('Ошибка', 'API URL не настроен. Введите URL на экране логина.', [
+          { text: 'OK', onPress: () => { processing.current = false; navigation.goBack(); } },
+        ]);
+        return;
+      }
+
+      try {
+        initApi(apiUrl, apiKey);
         await getMe();
+        await AsyncStorage.setItem('api_base_url', apiUrl);
         await login(apiKey);
       } catch (e) {
-        Alert.alert('Ошибка', 'Неверный QR-код');
-        setScanned(false);
+        Alert.alert('Ошибка', 'Неверный QR-код или сервер недоступен', [
+          { text: 'OK', onPress: () => { processing.current = false; } },
+        ]);
       }
     },
   });
@@ -54,7 +91,7 @@ export default function QRScannerScreen({ navigation }) {
 
   return (
     <View style={s.container}>
-      <Camera style={StyleSheet.absoluteFill} device={device} isActive={!scanned} codeScanner={codeScanner} />
+      <Camera style={StyleSheet.absoluteFill} device={device} isActive={!processing.current} codeScanner={codeScanner} />
       <View style={s.overlay}>
         <View style={s.scanArea} />
       </View>

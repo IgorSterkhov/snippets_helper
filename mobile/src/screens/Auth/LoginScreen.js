@@ -1,22 +1,31 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../../theme/ThemeContext';
 import { useAuth } from '../../auth/AuthContext';
 import { initApi, getMe } from '../../api/endpoints';
-import { API_BASE_URL } from '../../config';
 
 export default function LoginScreen({ navigation }) {
   const { colors } = useTheme();
   const { login } = useAuth();
+  const [url, setUrl] = useState('');
   const [key, setKey] = useState('');
   const [loading, setLoading] = useState(false);
 
+  useEffect(() => {
+    AsyncStorage.getItem('api_base_url').then((saved) => {
+      if (saved) setUrl(saved);
+    });
+  }, []);
+
   const handleLogin = async () => {
-    if (!key.trim()) return;
+    if (!url.trim()) { Alert.alert('Ошибка', 'Введите API URL'); return; }
+    if (!key.trim()) { Alert.alert('Ошибка', 'Введите API-ключ'); return; }
     setLoading(true);
     try {
-      initApi(API_BASE_URL, key.trim());
+      initApi(url.trim(), key.trim());
       await getMe();
+      await AsyncStorage.setItem('api_base_url', url.trim());
       await login(key.trim());
     } catch (e) {
       Alert.alert('Ошибка', 'Неверный API-ключ или сервер недоступен');
@@ -29,7 +38,18 @@ export default function LoginScreen({ navigation }) {
   return (
     <View style={s.container}>
       <Text style={s.title}>Snippets Helper</Text>
-      <Text style={s.subtitle}>Введите API-ключ</Text>
+      <Text style={s.subtitle}>Подключение к серверу</Text>
+
+      <TextInput
+        style={s.input}
+        value={url}
+        onChangeText={setUrl}
+        placeholder="API URL (https://...)"
+        placeholderTextColor={colors.textMuted}
+        autoCapitalize="none"
+        autoCorrect={false}
+        keyboardType="url"
+      />
 
       <TextInput
         style={s.input}

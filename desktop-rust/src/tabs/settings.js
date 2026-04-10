@@ -749,7 +749,10 @@ export async function checkFirstRun() {
 
 // ── QR Code Modal ────────────────────────────────────────────
 
-function showQRModal(apiKey) {
+async function showQRModal(apiKey) {
+  const apiUrl = await getSetting('sync_api_url') || '';
+  const payload = JSON.stringify({ url: apiUrl, key: apiKey });
+
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.style.zIndex = '10001';
@@ -762,7 +765,7 @@ function showQRModal(apiKey) {
 
   // Generate QR
   const qr = qrcode(0, 'M');
-  qr.addData(apiKey);
+  qr.addData(payload);
   qr.make();
 
   const size = 256;

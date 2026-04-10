@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { StatusBar } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ThemeProvider, useTheme } from './src/theme/ThemeContext';
 import { AuthProvider, useAuth } from './src/auth/AuthContext';
 import AppNavigator from './src/navigation/AppNavigator';
@@ -21,10 +22,12 @@ function AppContent() {
     if (!apiKey) return;
     (async () => {
       await initDB();
-      const { API_BASE_URL } = require('./src/config');
-      initApi(API_BASE_URL, apiKey);
-      performSync().catch(console.warn);
-      startNetworkListener();
+      const apiUrl = await AsyncStorage.getItem('api_base_url');
+      if (apiUrl) {
+        initApi(apiUrl, apiKey);
+        performSync().catch(console.warn);
+        startNetworkListener();
+      }
     })();
   }, [apiKey]);
 
