@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.9.0 (2026-04-15)
+- New tab: VPS Management — monitor remote servers via SSH
+- Dashboard: CPU, RAM, Disk usage with color-coded progress bars
+- Named colored server chips with auto-refresh (configurable per server)
+- SSH key file support, custom ports, connection testing
+
+## v0.8.8 (2026-04-15)
+- Fixed Commits: history dropdown preserves selection, tag creation works
+- Reset button clears history selection
+
+## v0.8.7 (2026-04-15)
+- Rewritten Commits tab to match Python logic
+- Commit types/categories match Python version
+- Task ID auto-parsed from tracker URLs (tracker.wb.ru, etc.)
+- Real-time commit and chat message previews
+- Conditional fields: reports (test/prod/connect) for отчет, test dag for даг
+
+## v0.8.6 (2026-04-10)
+- Fixed sync: LWW (Last Write Wins) by updated_at — prevents pull from overwriting newer local changes
+- Added tag clear button (×) to reset snippet tag filter
+- Markdown rendering in Description section
+
+## v0.8.5 (2026-04-10)
+- Fixed Windows build: removed .cxx build artifacts with too-long paths
+
 ## v0.8.3 (2026-04-07)
 - Nested folders in Notes: tree view with expand/collapse, sub-folder creation, arbitrary depth
 - Expandable note cards: hover handle to preview content without opening editor

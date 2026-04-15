@@ -31,6 +31,9 @@ const i18n = {
     search_name: 'Repo Search',
     search_desc: 'Search across local git repositories by filename (glob patterns), file content (uses ripgrep if available), or git history (commits and code changes). Add named colored repos, toggle which ones to search. Results grouped by file with context preview on click. Tab auto-unloads after configurable timeout.',
 
+    vps_name: 'VPS Management',
+    vps_desc: 'Monitor remote servers via SSH. Add named servers with color coding. Dashboard shows CPU, RAM, and Disk usage with color-coded progress bars. Auto-refresh with configurable interval per server. Test connection before saving. Supports custom SSH key files and ports.',
+
     // Hotkeys tab
     hotkey_show_hide: 'Show / hide main window',
     hotkey_escape: 'Hide window to system tray',
@@ -69,6 +72,9 @@ const i18n = {
 
     search_name: 'Поиск в репозиториях',
     search_desc: 'Поиск по локальным git-репозиториям: по имени файла (glob), по содержимому (ripgrep если установлен), по истории git (коммиты и изменения кода). Добавляйте именованные цветные репозитории, выбирайте в каких искать. Результаты группируются по файлу с превью контекста по клику. Вкладка выгружается из памяти при неиспользовании.',
+
+    vps_name: 'Управление VPS',
+    vps_desc: 'Мониторинг удалённых серверов по SSH. Добавляйте именованные серверы с цветовым кодированием. Дашборд показывает CPU, RAM и Disk с цветными индикаторами. Автообновление с настраиваемым интервалом для каждого сервера. Поддержка SSH-ключей и нестандартных портов.',
 
     // Hotkeys tab
     hotkey_show_hide: 'Показать / скрыть главное окно',
@@ -245,6 +251,7 @@ function renderFeatures(container, lang) {
     { name: t(lang, 'commits_name'),   desc: t(lang, 'commits_desc') },
     { name: t(lang, 'exec_name'),      desc: t(lang, 'exec_desc') },
     { name: t(lang, 'search_name'),    desc: t(lang, 'search_desc') },
+    { name: t(lang, 'vps_name'),       desc: t(lang, 'vps_desc') },
   ];
 
   for (const f of features) {
