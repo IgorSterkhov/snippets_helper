@@ -6,6 +6,7 @@ let root = null;
 let history = [];
 let tags = [];
 let computerId = '';
+let selectedHistoryId = null;
 
 // Form state
 let form = resetForm();
@@ -214,15 +215,17 @@ function renderForm() {
     const date = h.created_at ? h.created_at.substring(0, 16) : '';
     const obj = h.object_value ? `(${h.object_value})` : '';
     opt.textContent = `[${date}] ${h.commit_type}${obj}: ${(h.message || '').substring(0, 40)}`;
+    if (selectedHistoryId !== null && h.id === selectedHistoryId) opt.selected = true;
     histSelect.appendChild(opt);
   }
   histSelect.addEventListener('change', () => {
     if (histSelect.value) {
-      const h = history.find(x => x.id === Number(histSelect.value));
+      selectedHistoryId = Number(histSelect.value);
+      const h = history.find(x => x.id === selectedHistoryId);
       if (h) fillFromHistory(h);
     } else {
+      selectedHistoryId = null;
       form = resetForm();
-      // Re-select default tags
       form.selected_tags = tags.filter(t => t.is_default).map(t => t.tag_name);
       renderForm();
       updatePreviews();
@@ -376,6 +379,7 @@ function renderForm() {
   const resetBtn = el('button', { text: 'Reset', class: 'btn-secondary btn-danger-subtle' });
   resetBtn.addEventListener('click', () => {
     form = resetForm();
+    selectedHistoryId = null;
     form.selected_tags = tags.filter(t => t.is_default).map(t => t.tag_name);
     renderForm();
     updatePreviews();
@@ -544,27 +548,40 @@ async function onDeleteHistory() {
 
 async function onAddTag() {
   const body = document.createElement('div');
-  body.innerHTML = `
-    <label style="display:block;margin-bottom:6px;color:var(--text)">Tag name</label>
-    <input id="new-tag-input" style="width:100%" placeholder="e.g. backend" />
-    <label style="display:flex;align-items:center;gap:6px;margin-top:8px;color:var(--text)">
-      <input type="checkbox" id="new-tag-default" /> Default
-    </label>
-  `;
+
+  const nameLabel = document.createElement('label');
+  nameLabel.textContent = 'Tag name';
+  nameLabel.style.cssText = 'display:block;margin-bottom:6px;color:var(--text)';
+  body.appendChild(nameLabel);
+
+  const nameInput = document.createElement('input');
+  nameInput.style.cssText = 'width:100%';
+  nameInput.placeholder = 'e.g. backend';
+  body.appendChild(nameInput);
+
+  const defaultLabel = document.createElement('label');
+  defaultLabel.style.cssText = 'display:flex;align-items:center;gap:6px;margin-top:8px;color:var(--text)';
+  const defaultCb = document.createElement('input');
+  defaultCb.type = 'checkbox';
+  defaultLabel.appendChild(defaultCb);
+  defaultLabel.appendChild(document.createTextNode(' Default'));
+  body.appendChild(defaultLabel);
+
   try {
     await showModal({
       title: 'New Tag',
       body,
       onConfirm: async () => {
-        const name = document.getElementById('new-tag-input').value.trim();
-        const isDefault = document.getElementById('new-tag-default').checked;
+        const name = nameInput.value.trim();
+        const isDefault = defaultCb.checked;
         if (!name) throw new Error('Name is required');
-        await call('create_commit_tag', { computerId, tagName: name, isDefault: isDefault });
+        await call('create_commit_tag', { computerId, tagName: name, isDefault });
         showToast('Tag created', 'success');
       },
     });
     await loadTags();
     renderForm();
+    updatePreviews();
   } catch (_) { /* cancelled */ }
 }
 
