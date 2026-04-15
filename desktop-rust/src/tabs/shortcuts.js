@@ -434,9 +434,17 @@ function renderMainView(shortcut, hasDesc, links, hasLinks) {
   toggle.appendChild(badge);
 
   const descContent = document.createElement('div');
-  descContent.style.cssText = `max-height:140px;overflow-y:auto;padding:0 16px 10px 16px;font-size:${fontSize - 1}px;color:var(--text);white-space:pre-wrap;word-break:break-word;display:${descOpen ? 'block' : 'none'}`;
+  descContent.style.cssText = `max-height:300px;overflow-y:auto;padding:4px 16px 10px 16px;font-size:${fontSize - 1}px;color:var(--text);display:${descOpen ? 'block' : 'none'}`;
   if (hasDesc) {
-    descContent.textContent = shortcut.description;
+    const hasMarkdownInDesc = /(?:^#{1,6}\s|\*\*|__|\[.+\]\(.+\)|```|^\s*[-*]\s|\|.+\|)/m.test(shortcut.description);
+    if (hasMarkdownInDesc) {
+      descContent.className = 'markdown-body';
+      descContent.innerHTML = marked(shortcut.description);
+    } else {
+      descContent.style.whiteSpace = 'pre-wrap';
+      descContent.style.wordBreak = 'break-word';
+      descContent.textContent = shortcut.description;
+    }
   } else {
     descContent.innerHTML = '<span style="color:var(--text-muted);font-style:italic">No description. Click Edit to add one.</span>';
   }
