@@ -989,9 +989,12 @@ pub fn upsert_from_server(conn: &Connection, table: &str, rows: &[Value]) -> Res
         .map(|(i, c)| format!("{c} = ?{}", i + 1))
         .collect();
 
+    // LWW: only update if incoming updated_at >= local updated_at
+    // This prevents pull from overwriting newer local changes (including deletes)
     let sql = format!(
         "INSERT INTO {table} ({col_list}, sync_status) VALUES ({}, 'synced') \
-         ON CONFLICT(uuid) DO UPDATE SET {}, sync_status = 'synced'",
+         ON CONFLICT(uuid) DO UPDATE SET {}, sync_status = 'synced' \
+         WHERE excluded.updated_at >= {table}.updated_at",
         placeholders.join(", "),
         update_clauses.join(", ")
     );

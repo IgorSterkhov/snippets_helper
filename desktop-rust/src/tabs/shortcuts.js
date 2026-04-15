@@ -855,6 +855,20 @@ function renderTagPanel() {
     tagPanelEl.appendChild(btn);
   });
 
+  // Clear selection button (only if a tag is selected)
+  if (selectedTagId !== null) {
+    const clearBtn = document.createElement('button');
+    clearBtn.textContent = '×';
+    clearBtn.title = 'Clear tag filter';
+    clearBtn.style.cssText = 'background:transparent;border:1px solid var(--text-muted);color:var(--text-muted);width:24px;height:24px;border-radius:12px;font-size:14px;cursor:pointer;padding:0;display:flex;align-items:center;justify-content:center;line-height:1';
+    clearBtn.addEventListener('click', () => {
+      selectedTagId = null;
+      selectedIndex = -1;
+      loadShortcuts();
+    });
+    tagPanelEl.appendChild(clearBtn);
+  }
+
   // "+" manage tags button
   const addBtn = document.createElement('button');
   addBtn.textContent = '+';
