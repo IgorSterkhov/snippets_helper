@@ -114,6 +114,13 @@ pub fn run() {
             commands::repo_search::search_content,
             commands::repo_search::search_git_history,
             commands::repo_search::get_file_context,
+            // VPS
+            commands::vps::list_vps_servers,
+            commands::vps::add_vps_server,
+            commands::vps::update_vps_server,
+            commands::vps::remove_vps_server,
+            commands::vps::vps_get_stats,
+            commands::vps::vps_test_connection,
             // Autostart
             autostart::set_autostart,
             autostart::get_autostart,

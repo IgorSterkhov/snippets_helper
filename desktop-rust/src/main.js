@@ -11,6 +11,7 @@ const TABS = [
   { id: 'commits',   label: 'Commits',   icon: '\u{1F4BE}', loader: (el) => import('./tabs/commits.js').then(m => m.init(el)) },
   { id: 'exec',      label: 'Exec',      icon: '\u26A1',    loader: (el) => import('./tabs/exec.js').then(m => m.init(el)) },
   { id: 'repo-search', label: 'Search', icon: '\uD83D\uDD0D', loader: (el) => import('./tabs/repo-search.js').then(m => m.init(el)) },
+  { id: 'vps', label: 'VPS', icon: '\uD83D\uDDA5', loader: (el) => import('./tabs/vps.js').then(m => m.init(el)) },
 ];
 
 async function main() {
