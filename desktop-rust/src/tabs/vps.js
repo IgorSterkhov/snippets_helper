@@ -261,6 +261,9 @@ function buildStatCard(label, pct, valueText, subText) {
     card.appendChild(el('div', { text: subText, class: 'vps-stat-sub' }));
   }
 
+  // Add colored top accent line
+  card.style.setProperty('--card-accent', getBarColor(clampedPct));
+
   return card;
 }
 
@@ -707,23 +710,25 @@ function css() {
 }
 .vps-placeholder {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  height: 200px;
+  gap: 12px;
+  height: 300px;
   color: var(--text-muted);
   font-size: 14px;
+  opacity: 0.7;
 }
 
 /* Spinner */
 .vps-spinner {
   display: inline-block;
-  width: 18px;
-  height: 18px;
-  border: 2px solid var(--border);
+  width: 22px;
+  height: 22px;
+  border: 2px solid rgba(255,255,255,0.08);
   border-top-color: var(--accent);
   border-radius: 50%;
-  animation: vps-spin 0.8s linear infinite;
+  animation: vps-spin 0.7s linear infinite;
 }
 @keyframes vps-spin {
   to { transform: rotate(360deg); }
@@ -766,13 +771,15 @@ function css() {
 .vps-info-badge {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 12px;
-  border-radius: 4px;
+  gap: 8px;
+  padding: 5px 14px;
+  border-radius: 6px;
   font-size: 12px;
   color: var(--text);
   background: var(--bg-secondary);
   border: 1px solid var(--border);
+  font-family: 'SF Mono', 'Cascadia Code', monospace;
+  letter-spacing: -0.2px;
 }
 .vps-info-label {
   font-weight: 600;
@@ -786,8 +793,8 @@ function css() {
 .vps-cards-row {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: 14px;
+  margin-bottom: 20px;
 }
 @media (max-width: 600px) {
   .vps-cards-row {
@@ -798,11 +805,29 @@ function css() {
 .vps-stat-card {
   background: var(--bg-secondary);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 16px;
+  border-radius: 10px;
+  padding: 18px 20px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
+  position: relative;
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+.vps-stat-card:hover {
+  border-color: var(--text-muted);
+}
+/* Subtle gradient overlay for depth */
+.vps-stat-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  border-radius: 10px 10px 0 0;
+  opacity: 0.6;
+  background: var(--card-accent, var(--accent));
 }
 .vps-stat-header {
   display: flex;
@@ -817,10 +842,12 @@ function css() {
   color: var(--text-muted);
 }
 .vps-stat-value {
-  font-size: 22px;
+  font-size: 26px;
   font-weight: 700;
   color: var(--text);
   font-variant-numeric: tabular-nums;
+  letter-spacing: -0.5px;
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
 }
 .vps-stat-sub {
   font-size: 12px;
@@ -830,16 +857,15 @@ function css() {
 /* Progress bar */
 .vps-bar-bg {
   width: 100%;
-  height: 6px;
-  background: var(--bg-tertiary);
-  border-radius: 3px;
+  height: 8px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 4px;
   overflow: hidden;
 }
 .vps-bar-fill {
   height: 100%;
-  border-radius: 3px;
-  transition: width 0.4s ease, background 0.3s;
-  min-width: 0;
+  border-radius: 4px;
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1), background 0.3s;
 }
 
 /* Actions bar */
@@ -853,8 +879,10 @@ function css() {
   font-size: 12px;
 }
 .vps-countdown {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-muted);
+  font-family: 'SF Mono', 'Cascadia Code', monospace;
+  letter-spacing: -0.3px;
 }
 
 /* Modal */
@@ -963,5 +991,14 @@ function css() {
   background: var(--danger) !important;
   color: #fff !important;
 }
+
+/* Fade-in animations */
+@keyframes vps-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.vps-info-line { animation: vps-fade-in 0.3s ease; }
+.vps-cards-row { animation: vps-fade-in 0.3s ease 0.05s both; }
+.vps-actions-bar { animation: vps-fade-in 0.3s ease 0.1s both; }
 `;
 }
