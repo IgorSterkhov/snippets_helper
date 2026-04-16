@@ -67,7 +67,7 @@ function buildLayout() {
   // Server chips bar
   const chipBar = el('div', { class: 'vps-chip-bar', id: 'vps-chip-bar' });
   wrap.appendChild(chipBar);
-  renderChips();
+  renderChips(chipBar);
 
   // Main content area
   const content = el('div', { class: 'vps-content', id: 'vps-content' });
@@ -78,8 +78,8 @@ function buildLayout() {
 
 // ── Server Chips ─────────────────────────────────────────────
 
-function renderChips() {
-  const bar = root ? root.querySelector('#vps-chip-bar') : null;
+function renderChips(barEl) {
+  const bar = barEl || (root ? root.querySelector('#vps-chip-bar') : null);
   if (!bar) return;
   bar.innerHTML = '';
 
