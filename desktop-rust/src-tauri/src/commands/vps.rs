@@ -14,6 +14,14 @@ pub struct VpsServer {
     pub color: String,
     pub auto_refresh: bool,
     pub refresh_interval: u32,
+    #[serde(default)]
+    pub environment: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct VpsEnvironment {
+    pub name: String,
+    pub sort_order: u32,
 }
 
 fn get_computer_id() -> String {
@@ -34,6 +42,44 @@ fn load_servers(conn: &rusqlite::Connection, computer_id: &str) -> Vec<VpsServer
 fn save_servers(conn: &rusqlite::Connection, computer_id: &str, servers: &[VpsServer]) -> Result<(), String> {
     let json = serde_json::to_string(servers).map_err(|e| e.to_string())?;
     queries::set_setting(conn, computer_id, "vps_servers", &json).map_err(|e| e.to_string())
+}
+
+fn load_environments(conn: &rusqlite::Connection, computer_id: &str) -> Vec<VpsEnvironment> {
+    let raw = queries::get_setting(conn, computer_id, "vps_environments")
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "[]".to_string());
+    serde_json::from_str::<Vec<VpsEnvironment>>(&raw).unwrap_or_default()
+}
+
+fn save_environments(conn: &rusqlite::Connection, computer_id: &str, envs: &[VpsEnvironment]) -> Result<(), String> {
+    let json = serde_json::to_string(envs).map_err(|e| e.to_string())?;
+    queries::set_setting(conn, computer_id, "vps_environments", &json).map_err(|e| e.to_string())
+}
+
+/// Ensure a "Default" environment exists and assign orphan servers to it.
+fn ensure_default_environment(conn: &rusqlite::Connection, computer_id: &str) -> Result<(), String> {
+    let mut envs = load_environments(conn, computer_id);
+    let has_default = envs.iter().any(|e| e.name == "Default");
+    if !has_default {
+        let max_order = envs.iter().map(|e| e.sort_order).max().unwrap_or(0);
+        envs.push(VpsEnvironment { name: "Default".to_string(), sort_order: max_order + 1 });
+        save_environments(conn, computer_id, &envs)?;
+    }
+
+    // Assign orphan servers (empty environment) to "Default"
+    let mut servers = load_servers(conn, computer_id);
+    let mut changed = false;
+    for srv in &mut servers {
+        if srv.environment.is_empty() {
+            srv.environment = "Default".to_string();
+            changed = true;
+        }
+    }
+    if changed {
+        save_servers(conn, computer_id, &servers)?;
+    }
+    Ok(())
 }
 
 fn expand_key_file(key_file: &str) -> String {
@@ -63,12 +109,126 @@ fn build_ssh_cmd(user: &str, host: &str, port: u16, key_file: &str, remote_cmd: 
     cmd
 }
 
-// ── Commands ─────────────────────────────────────────────
+// ── Environment Commands ────────────────────────────────────
+
+#[tauri::command]
+pub fn list_vps_environments(state: State<DbState>) -> Result<Vec<Value>, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let cid = get_computer_id();
+    ensure_default_environment(&conn, &cid)?;
+    let envs = load_environments(&conn, &cid);
+    let values: Vec<Value> = envs.into_iter()
+        .map(|e| serde_json::to_value(e).unwrap_or_default())
+        .collect();
+    Ok(values)
+}
+
+#[tauri::command]
+pub fn add_vps_environment(state: State<DbState>, name: String) -> Result<(), String> {
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err("Environment name cannot be empty".to_string());
+    }
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let cid = get_computer_id();
+    let mut envs = load_environments(&conn, &cid);
+    if envs.iter().any(|e| e.name == name) {
+        return Err(format!("Environment '{}' already exists", name));
+    }
+    let max_order = envs.iter().map(|e| e.sort_order).max().unwrap_or(0);
+    envs.push(VpsEnvironment { name, sort_order: max_order + 1 });
+    save_environments(&conn, &cid, &envs)
+}
+
+#[tauri::command]
+pub fn rename_vps_environment(state: State<DbState>, old_name: String, new_name: String) -> Result<(), String> {
+    let new_name = new_name.trim().to_string();
+    if new_name.is_empty() {
+        return Err("Environment name cannot be empty".to_string());
+    }
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let cid = get_computer_id();
+
+    let mut envs = load_environments(&conn, &cid);
+    if envs.iter().any(|e| e.name == new_name) {
+        return Err(format!("Environment '{}' already exists", new_name));
+    }
+    let found = envs.iter_mut().find(|e| e.name == old_name);
+    match found {
+        Some(env) => env.name = new_name.clone(),
+        None => return Err(format!("Environment '{}' not found", old_name)),
+    }
+    save_environments(&conn, &cid, &envs)?;
+
+    // Update all servers that belong to the renamed environment
+    let mut servers = load_servers(&conn, &cid);
+    for srv in &mut servers {
+        if srv.environment == old_name {
+            srv.environment = new_name.clone();
+        }
+    }
+    save_servers(&conn, &cid, &servers)
+}
+
+#[tauri::command]
+pub fn remove_vps_environment(state: State<DbState>, name: String) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let cid = get_computer_id();
+
+    let mut envs = load_environments(&conn, &cid);
+    let before_len = envs.len();
+    envs.retain(|e| e.name != name);
+    if envs.len() == before_len {
+        return Err(format!("Environment '{}' not found", name));
+    }
+
+    // Ensure we always have at least "Default"
+    if envs.is_empty() {
+        envs.push(VpsEnvironment { name: "Default".to_string(), sort_order: 0 });
+    }
+    save_environments(&conn, &cid, &envs)?;
+
+    // Move orphaned servers to "Default"
+    let mut servers = load_servers(&conn, &cid);
+    for srv in &mut servers {
+        if srv.environment == name {
+            srv.environment = "Default".to_string();
+        }
+    }
+    save_servers(&conn, &cid, &servers)
+}
+
+#[tauri::command]
+pub fn reorder_vps_environments(state: State<DbState>, names: Vec<String>) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let cid = get_computer_id();
+    let mut envs = load_environments(&conn, &cid);
+
+    // Re-sort envs according to the names order
+    let mut new_envs: Vec<VpsEnvironment> = Vec::new();
+    for (i, name) in names.iter().enumerate() {
+        if let Some(env) = envs.iter().find(|e| &e.name == name) {
+            new_envs.push(VpsEnvironment { name: env.name.clone(), sort_order: i as u32 });
+        }
+    }
+    // Keep any envs not in the list at the end
+    for env in &envs {
+        if !names.contains(&env.name) {
+            let order = new_envs.len() as u32;
+            new_envs.push(VpsEnvironment { name: env.name.clone(), sort_order: order });
+        }
+    }
+    envs = new_envs;
+    save_environments(&conn, &cid, &envs)
+}
+
+// ── Server Commands ─────────────────────────────────────────
 
 #[tauri::command]
 pub fn list_vps_servers(state: State<DbState>) -> Result<Vec<Value>, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     let cid = get_computer_id();
+    ensure_default_environment(&conn, &cid)?;
     let servers = load_servers(&conn, &cid);
     let values: Vec<Value> = servers.into_iter()
         .map(|s| serde_json::to_value(s).unwrap_or_default())
@@ -78,10 +238,16 @@ pub fn list_vps_servers(state: State<DbState>) -> Result<Vec<Value>, String> {
 
 #[tauri::command]
 pub fn add_vps_server(state: State<DbState>, server: Value) -> Result<(), String> {
-    let new_server: VpsServer = serde_json::from_value(server)
+    let mut new_server: VpsServer = serde_json::from_value(server)
         .map_err(|e| format!("Invalid server data: {}", e))?;
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     let cid = get_computer_id();
+
+    // Default environment if not specified
+    if new_server.environment.is_empty() {
+        new_server.environment = "Default".to_string();
+    }
+
     let mut servers = load_servers(&conn, &cid);
     if servers.iter().any(|s| s.name == new_server.name) {
         return Err(format!("Server with name '{}' already exists", new_server.name));
@@ -113,6 +279,25 @@ pub fn remove_vps_server(state: State<DbState>, index: usize) -> Result<(), Stri
         return Err(format!("Index {} out of range (have {} servers)", index, servers.len()));
     }
     servers.remove(index);
+    save_servers(&conn, &cid, &servers)
+}
+
+#[tauri::command]
+pub fn move_vps_server(state: State<DbState>, index: usize, target_env: String) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let cid = get_computer_id();
+    let mut servers = load_servers(&conn, &cid);
+    if index >= servers.len() {
+        return Err(format!("Index {} out of range (have {} servers)", index, servers.len()));
+    }
+
+    // Verify target environment exists
+    let envs = load_environments(&conn, &cid);
+    if !envs.iter().any(|e| e.name == target_env) {
+        return Err(format!("Environment '{}' not found", target_env));
+    }
+
+    servers[index].environment = target_env;
     save_servers(&conn, &cid, &servers)
 }
 
@@ -457,6 +642,7 @@ mod tests {
             color: "#f0883e".to_string(),
             auto_refresh: true,
             refresh_interval: 30,
+            environment: "Default".to_string(),
         };
         let json = serde_json::to_string(&server).unwrap();
         let parsed: VpsServer = serde_json::from_str(&json).unwrap();
@@ -464,5 +650,27 @@ mod tests {
         assert_eq!(parsed.host, "1.2.3.4");
         assert!(parsed.auto_refresh);
         assert_eq!(parsed.refresh_interval, 30);
+        assert_eq!(parsed.environment, "Default");
+    }
+
+    #[test]
+    fn test_vps_server_deserialization_without_environment() {
+        // Old format without environment field should still work
+        let json = r##"{"name":"Test","host":"1.2.3.4","user":"root","port":22,"key_file":"~/.ssh/id_rsa","color":"#f0883e","auto_refresh":true,"refresh_interval":30}"##;
+        let server: VpsServer = serde_json::from_str(json).unwrap();
+        assert_eq!(server.name, "Test");
+        assert_eq!(server.environment, ""); // default empty
+    }
+
+    #[test]
+    fn test_vps_environment_serialization() {
+        let env = VpsEnvironment {
+            name: "Production".to_string(),
+            sort_order: 0,
+        };
+        let json = serde_json::to_string(&env).unwrap();
+        let parsed: VpsEnvironment = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.name, "Production");
+        assert_eq!(parsed.sort_order, 0);
     }
 }
