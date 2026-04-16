@@ -202,12 +202,12 @@ function renderDetail() {
   // Auto-open description if filled
   if (hasDesc && !descOpen) descOpen = true;
 
-  // Header: name + [Main|Web] + actions
+  // Header: name + [Main|Web] + actions — dark bg zone
   const header = document.createElement('div');
-  header.style.cssText = 'display:flex;align-items:center;padding:10px 16px;border-bottom:1px solid var(--border);flex-shrink:0;gap:8px';
+  header.style.cssText = 'display:flex;align-items:center;padding:10px 18px;border-bottom:1px solid var(--border);flex-shrink:0;gap:10px;background:var(--bg-secondary)';
 
   const nameEl = document.createElement('h3');
-  nameEl.style.cssText = `margin:0;font-size:${fontSize + 1}px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0`;
+  nameEl.style.cssText = `margin:0;font-size:${fontSize + 1}px;font-weight:700;color:#f0f6fc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;font-family:'SF Mono','Cascadia Code','Fira Code',monospace;letter-spacing:-0.3px`;
   nameEl.textContent = shortcut.name;
   header.appendChild(nameEl);
 
@@ -230,7 +230,7 @@ function renderDetail() {
       const isFirst = i === 0;
       const isLast = i === tabs.length - 1;
       const radius = isFirst ? '6px 0 0 6px' : isLast ? '0 6px 6px 0' : '0';
-      btn.style.cssText = `padding:3px 14px;font-size:12px;border:1px solid var(--border);${!isFirst ? 'border-left:none;' : ''}cursor:pointer;border-radius:${radius};transition:all 0.15s;background:${isActive ? 'var(--bg-tertiary)' : 'transparent'};color:${isActive ? 'var(--text)' : 'var(--text-muted)'};border-color:${isActive ? 'var(--border-hover,#30363d)' : 'var(--border)'}`;
+      btn.style.cssText = `padding:3px 12px;font-size:11px;font-weight:500;border:1px solid var(--border);${!isFirst ? 'border-left:none;' : ''}cursor:pointer;border-radius:${radius};transition:all 0.12s;background:${isActive ? 'var(--bg-tertiary)' : 'transparent'};color:${isActive ? 'var(--text)' : 'var(--text-muted)'};border-color:${isActive ? '#30363d' : 'var(--border)'}`;
       btn.addEventListener('click', () => {
         viewMode = tab.id;
         if (tab.id === 'web' && activeWebLink === null && links.length > 0) activeWebLink = 0;
@@ -248,19 +248,17 @@ function renderDetail() {
 
   const copyBtn = document.createElement('button');
   copyBtn.textContent = 'Copy';
-  copyBtn.style.cssText = 'padding:4px 12px;font-size:12px';
+  copyBtn.style.cssText = 'padding:4px 10px;font-size:11px;font-weight:500;background:var(--accent);color:white;border:none;border-radius:4px;cursor:pointer';
   copyBtn.addEventListener('click', () => copyToClipboard(shortcut.value));
 
   const editBtn = document.createElement('button');
-  editBtn.className = 'btn-secondary';
   editBtn.textContent = 'Edit';
-  editBtn.style.cssText = 'padding:4px 12px;font-size:12px';
+  editBtn.style.cssText = 'padding:4px 10px;font-size:11px;font-weight:500;background:transparent;color:var(--text-muted);border:1px solid var(--border);border-radius:4px;cursor:pointer';
   editBtn.addEventListener('click', () => openEditor(shortcut));
 
   const delBtn = document.createElement('button');
-  delBtn.className = 'btn-danger';
-  delBtn.textContent = 'Delete';
-  delBtn.style.cssText = 'padding:4px 12px;font-size:12px';
+  delBtn.textContent = 'Del';
+  delBtn.style.cssText = 'padding:4px 10px;font-size:11px;font-weight:500;background:transparent;color:var(--danger);border:1px solid var(--border);border-radius:4px;cursor:pointer';
   delBtn.addEventListener('click', () => confirmDelete(shortcut));
 
   actions.appendChild(copyBtn);
@@ -268,6 +266,11 @@ function renderDetail() {
   actions.appendChild(delBtn);
   header.appendChild(actions);
   detailEl.appendChild(header);
+
+  // Accent gradient line
+  const accentLine = document.createElement('div');
+  accentLine.style.cssText = 'height:2px;flex-shrink:0;background:linear-gradient(90deg,var(--accent),transparent 70%);opacity:0.4';
+  detailEl.appendChild(accentLine);
 
   if (viewMode === 'main') {
     renderMainView(shortcut, hasDesc, links, hasLinks);
@@ -289,11 +292,11 @@ function renderMainView(shortcut, hasDesc, links, hasLinks) {
   if (hasMarkdown) {
     valueEl = document.createElement('div');
     valueEl.className = 'markdown-body';
-    valueEl.style.cssText = `font-size:${fontSize}px;padding:12px 16px`;
+    valueEl.style.cssText = `font-size:${fontSize}px;padding:16px 18px;line-height:1.6`;
     valueEl.innerHTML = marked(shortcut.value);
   } else {
     valueEl = document.createElement('pre');
-    valueEl.style.cssText = `font-family:'SF Mono','Fira Code','Cascadia Code',monospace;font-size:${fontSize}px;color:var(--text);padding:12px 16px;white-space:pre-wrap;word-break:break-word;margin:0`;
+    valueEl.style.cssText = `font-family:'SF Mono','Cascadia Code','Fira Code',monospace;font-size:${fontSize - 1}px;line-height:1.65;color:var(--text);padding:16px 18px;white-space:pre-wrap;word-break:break-word;margin:0`;
     valueEl.textContent = shortcut.value;
   }
   mainView.appendChild(valueEl);
@@ -301,7 +304,7 @@ function renderMainView(shortcut, hasDesc, links, hasLinks) {
   // Link chips (inline, below snippet text)
   if (hasLinks) {
     const linksInline = document.createElement('div');
-    linksInline.style.cssText = 'padding:8px 16px;display:flex;flex-wrap:wrap;gap:6px;align-items:center';
+    linksInline.style.cssText = 'padding:8px 18px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;border-top:1px solid rgba(255,255,255,0.04)';
 
     links.forEach((link, i) => {
       const chip = document.createElement('div');
@@ -352,7 +355,7 @@ function renderMainView(shortcut, hasDesc, links, hasLinks) {
   descSection.style.cssText = 'border-top:1px solid var(--border);flex-shrink:0';
 
   const toggle = document.createElement('div');
-  toggle.style.cssText = 'display:flex;align-items:center;gap:6px;padding:7px 16px;cursor:pointer;font-size:12px;color:var(--text-muted);user-select:none';
+  toggle.style.cssText = 'display:flex;align-items:center;gap:6px;padding:6px 18px;cursor:pointer;font-size:11px;color:var(--text-muted);user-select:none';
   toggle.addEventListener('mouseenter', () => { toggle.style.background = 'var(--bg-secondary)'; });
   toggle.addEventListener('mouseleave', () => { toggle.style.background = ''; });
 
@@ -366,13 +369,13 @@ function renderMainView(shortcut, hasDesc, links, hasLinks) {
   toggle.appendChild(label);
 
   const badge = document.createElement('span');
-  badge.style.cssText = 'background:var(--bg-tertiary);padding:1px 6px;border-radius:8px;font-size:10px;color:var(--text-muted)';
+  badge.style.cssText = 'background:var(--bg-tertiary);padding:1px 5px;border-radius:6px;font-size:9px;color:var(--text-muted)';
   badge.textContent = hasDesc ? 'filled' : 'empty';
   if (!hasDesc) badge.style.opacity = '0.5';
   toggle.appendChild(badge);
 
   const descContent = document.createElement('div');
-  descContent.style.cssText = `max-height:300px;overflow-y:auto;padding:4px 16px 10px 16px;font-size:${fontSize - 1}px;color:var(--text);display:${descOpen ? 'block' : 'none'}`;
+  descContent.style.cssText = `max-height:300px;overflow-y:auto;padding:4px 18px 10px 18px;font-size:${fontSize - 1}px;color:var(--text);line-height:1.5;display:${descOpen ? 'block' : 'none'}`;
   if (hasDesc) {
     const hasMarkdownInDesc = /(?:^#{1,6}\s|\*\*|__|\[.+\]\(.+\)|```|^\s*[-*]\s|\|.+\|)/m.test(shortcut.description);
     if (hasMarkdownInDesc) {
