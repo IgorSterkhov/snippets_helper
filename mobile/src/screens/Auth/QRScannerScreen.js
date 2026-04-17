@@ -66,7 +66,7 @@ export default function QRScannerScreen({ navigation }) {
         await AsyncStorage.setItem('api_base_url', apiUrl);
         await login(apiKey);
       } catch (e) {
-        Alert.alert('Ошибка', 'Неверный QR-код или сервер недоступен', [
+        Alert.alert('Ошибка', String(e), [
           { text: 'OK', onPress: () => { processing.current = false; } },
         ]);
       }

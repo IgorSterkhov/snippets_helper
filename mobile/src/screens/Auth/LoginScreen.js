@@ -28,7 +28,7 @@ export default function LoginScreen({ navigation }) {
       await AsyncStorage.setItem('api_base_url', url.trim());
       await login(key.trim());
     } catch (e) {
-      Alert.alert('Ошибка', 'Неверный API-ключ или сервер недоступен');
+      Alert.alert('Ошибка', String(e));
     } finally {
       setLoading(false);
     }
