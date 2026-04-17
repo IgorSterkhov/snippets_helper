@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, RefreshControl } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../../theme/ThemeContext';
 import { getAllSnippets, searchSnippets, getAllTags } from '../../db/snippetRepo';
 import { performSync } from '../../sync/syncService';
@@ -36,6 +37,8 @@ export default function SnippetListScreen({ navigation }) {
   }, [query, selectedTag]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  useFocusEffect(useCallback(() => { loadData(); }, [loadData]));
 
   const onRefresh = async () => {
     setRefreshing(true);

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, RefreshControl } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../../theme/ThemeContext';
 import { getAllFolders, getNotesByFolder, getAllNotes, searchNotes } from '../../db/noteRepo';
 import { performSync } from '../../sync/syncService';
@@ -34,6 +35,8 @@ export default function NoteListScreen({ navigation }) {
 
   useEffect(() => { loadFolders(); }, [loadFolders]);
   useEffect(() => { loadNotes(); }, [loadNotes]);
+
+  useFocusEffect(useCallback(() => { loadFolders(); loadNotes(); }, [loadFolders, loadNotes]));
 
   const onRefresh = async () => {
     setRefreshing(true);
