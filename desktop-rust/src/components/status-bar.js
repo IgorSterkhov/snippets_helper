@@ -126,7 +126,16 @@ export async function doSync() {
 // ── Sync popup ────────────────────────────────────────────
 
 function toggleSyncPopup() {
-  syncPopupEl ? closeSyncPopup() : openSyncPopup();
+  if (syncPopupEl) {
+    closeSyncPopup();
+    return;
+  }
+  openSyncPopup();
+  const isSyncing = syncDotEl?.classList.contains('sb-dot-syncing');
+  if (!isSyncing) {
+    showToast('Syncing...');
+    doSync().catch(() => {});
+  }
 }
 
 function openSyncPopup() {
