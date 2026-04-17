@@ -4,11 +4,13 @@ import { useTheme } from '../../theme/ThemeContext';
 import { useAuth } from '../../auth/AuthContext';
 import { isBiometricAvailable } from '../../auth/biometrics';
 import { performSync } from '../../sync/syncService';
+import { useSyncStatus } from '../../sync/useSyncStatus';
 
 export default function SettingsScreen() {
   const { colors, isDark, toggle: toggleTheme } = useTheme();
   const { logout, biometricEnabled, toggleBiometric } = useAuth();
   const [bioAvailable, setBioAvailable] = useState(false);
+  const { pending, syncing } = useSyncStatus();
 
   useEffect(() => {
     isBiometricAvailable().then(setBioAvailable);
@@ -62,11 +64,14 @@ export default function SettingsScreen() {
       )}
 
       <Text style={[s.section, { color: colors.textSecondary }]}>Данные</Text>
-      {row('Синхронизировать', (
-        <TouchableOpacity onPress={handleSync}>
-          <Text style={{ color: colors.primary }}>Синхронизировать</Text>
-        </TouchableOpacity>
-      ))}
+      {row(
+        pending > 0 ? `Ожидает отправки: ${pending}` : 'Синхронизация',
+        <TouchableOpacity onPress={handleSync} disabled={syncing}>
+          <Text style={{ color: colors.primary }}>
+            {syncing ? 'Синхронизация…' : 'Синхронизировать'}
+          </Text>
+        </TouchableOpacity>,
+      )}
 
       <Text style={[s.section, { color: colors.textSecondary }]}>Обновления</Text>
       {row('Проверить обновления', (

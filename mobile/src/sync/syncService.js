@@ -4,10 +4,50 @@ import { upsertSnippet, getModifiedSnippetsSince, upsertTag, getModifiedTagsSinc
 import { upsertNote, getModifiedNotesSince, upsertFolder, getModifiedFoldersSince } from '../db/noteRepo';
 
 let syncing = false;
+const listeners = new Set();
+
+export function subscribeSyncStatus(cb) {
+  listeners.add(cb);
+  return () => listeners.delete(cb);
+}
+
+function emit(payload) {
+  for (const cb of listeners) {
+    try { cb(payload); } catch (e) { /* ignore */ }
+  }
+}
+
+export async function countPendingChanges() {
+  const since = await getLastSyncAt();
+  const [s, t, n, f] = await Promise.all([
+    getModifiedSnippetsSince(since),
+    getModifiedTagsSince(since),
+    getModifiedNotesSince(since),
+    getModifiedFoldersSince(since),
+  ]);
+  return s.length + t.length + n.length + f.length;
+}
+
+async function emitPending() {
+  try {
+    const count = await countPendingChanges();
+    emit({ type: 'pending', count });
+  } catch (e) { /* ignore */ }
+}
+
+/**
+ * Notify the sync subsystem that a local change has been made.
+ * Updates pending counter immediately, then tries to sync in background.
+ */
+export function notifyLocalChange() {
+  emitPending();
+  performSync().catch(() => { /* will retry on next trigger */ });
+}
 
 export async function performSync() {
   if (syncing) return;
   syncing = true;
+  emit({ type: 'syncing', value: true });
 
   try {
     const lastSync = await getLastSyncAt();
@@ -15,7 +55,6 @@ export async function performSync() {
     // 1. Pull server changes
     const pullResult = await syncPull(lastSync);
 
-    // Apply server changes to local DB
     const applyMap = {
       shortcuts: upsertSnippet,
       snippet_tags: upsertTag,
@@ -52,7 +91,9 @@ export async function performSync() {
 
     // 3. Update last sync time
     await setLastSyncAt(pullResult.server_time);
+    await emitPending();
   } finally {
     syncing = false;
+    emit({ type: 'syncing', value: false });
   }
 }

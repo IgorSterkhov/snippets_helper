@@ -6,6 +6,7 @@ import { getAllFolders, getNotesByFolder, getAllNotes, searchNotes } from '../..
 import { performSync } from '../../sync/syncService';
 import FolderTree from '../../components/FolderTree';
 import SearchBar from '../../components/SearchBar';
+import SyncStatusBar from '../../components/SyncStatusBar';
 import { uuidv4 } from '../../lib/uuid';
 
 export default function NoteListScreen({ navigation }) {
@@ -86,6 +87,7 @@ export default function NoteListScreen({ navigation }) {
 
   return (
     <View style={[s.container, { backgroundColor: colors.bg }]}>
+      <SyncStatusBar />
       <SearchBar value={query} onChangeText={setQuery} placeholder="Поиск заметок..." />
 
       {!query && (

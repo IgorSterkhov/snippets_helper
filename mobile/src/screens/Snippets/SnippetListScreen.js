@@ -6,6 +6,7 @@ import { getAllSnippets, searchSnippets, getAllTags } from '../../db/snippetRepo
 import { performSync } from '../../sync/syncService';
 import SearchBar from '../../components/SearchBar';
 import TagFilter from '../../components/TagFilter';
+import SyncStatusBar from '../../components/SyncStatusBar';
 
 export default function SnippetListScreen({ navigation }) {
   const { colors } = useTheme();
@@ -75,6 +76,7 @@ export default function SnippetListScreen({ navigation }) {
 
   return (
     <View style={[s.container, { backgroundColor: colors.bg }]}>
+      <SyncStatusBar />
       <SearchBar value={query} onChangeText={setQuery} placeholder="Поиск сниппетов..." />
       <TagFilter tags={tags} selectedId={selectedTag} onSelect={setSelectedTag} />
       <FlatList

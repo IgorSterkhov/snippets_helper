@@ -3,6 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet } from 
 import Markdown from 'react-native-markdown-display';
 import { useTheme } from '../../theme/ThemeContext';
 import { upsertNote } from '../../db/noteRepo';
+import { notifyLocalChange } from '../../sync/syncService';
 
 export default function NoteEditorScreen({ route, navigation }) {
   const { note } = route.params;
@@ -20,6 +21,7 @@ export default function NoteEditorScreen({ route, navigation }) {
       content,
       updated_at: new Date().toISOString(),
     });
+    notifyLocalChange();
     setSaving(false);
     navigation.goBack();
   };
