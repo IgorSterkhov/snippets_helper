@@ -25,8 +25,18 @@ export default function SettingsScreen() {
 
   const handleCheckUpdate = async () => {
     try {
-      const { checkForUpdate } = require('../../updater/updateService');
-      await checkForUpdate(true);
+      const { checkForUpdate, applyUpdate, setOnProgress } = require('../../updater/updateService');
+      const update = await checkForUpdate(true);
+      if (update) {
+        Alert.alert(
+          'Обновление доступно',
+          `Версия ${update.version}\n${update.release_notes || ''}`,
+          [
+            { text: 'Позже', style: 'cancel' },
+            { text: 'Обновить', onPress: () => applyUpdate() },
+          ],
+        );
+      }
     } catch (e) {
       Alert.alert('Ошибка', 'Не удалось проверить обновления');
     }
