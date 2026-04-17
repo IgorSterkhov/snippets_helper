@@ -28,9 +28,17 @@ export default function SnippetListScreen({ navigation }) {
       const tag = t.find((tg) => tg.uuid === selectedTag);
       if (tag) {
         const patterns = JSON.parse(tag.patterns || '[]');
-        items = items.filter((s) =>
-          patterns.some((p) => s.name.toLowerCase().includes(p.toLowerCase())),
-        );
+        const regexes = patterns
+          .map((p) => {
+            try {
+              const escaped = p.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+              return new RegExp('^' + escaped + '$', 'i');
+            } catch { return null; }
+          })
+          .filter(Boolean);
+        if (regexes.length) {
+          items = items.filter((s) => regexes.some((re) => re.test(s.name)));
+        }
       }
     }
     setSnippets(items);

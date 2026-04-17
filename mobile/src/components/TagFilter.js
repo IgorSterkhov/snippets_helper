@@ -5,8 +5,10 @@ import { useTheme } from '../theme/ThemeContext';
 export default function TagFilter({ tags, selectedId, onSelect }) {
   const { colors } = useTheme();
 
+  if (!tags.length) return null;
+
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.container}>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.container} contentContainerStyle={s.content}>
       <TouchableOpacity
         style={[s.tag, { backgroundColor: !selectedId ? colors.primary : colors.bgSecondary, borderColor: colors.border }]}
         onPress={() => onSelect(null)}
@@ -35,7 +37,8 @@ export default function TagFilter({ tags, selectedId, onSelect }) {
 }
 
 const s = StyleSheet.create({
-  container: { paddingHorizontal: 12, paddingVertical: 6 },
-  tag: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, marginRight: 8, borderWidth: 1 },
-  tagText: { fontSize: 13 },
+  container: { paddingHorizontal: 12, paddingVertical: 6, flexGrow: 0 },
+  content: { alignItems: 'center' },
+  tag: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, marginRight: 8, borderWidth: 1, height: 32, justifyContent: 'center' },
+  tagText: { fontSize: 13, lineHeight: 18 },
 });
