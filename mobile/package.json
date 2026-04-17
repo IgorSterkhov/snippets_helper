@@ -1,6 +1,6 @@
 {
   "name": "SnippetsHelper",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "scripts": {
     "android": "react-native run-android",
@@ -21,6 +21,7 @@
     "react": "19.2.3",
     "react-native": "0.85.0",
     "react-native-biometrics": "^3.0.1",
+    "react-native-blob-util": "^0.24.7",
     "react-native-encrypted-storage": "^4.0.3",
     "react-native-markdown-display": "^7.0.2",
     "react-native-ota-hot-update": "^2.4.0",
@@ -36,8 +37,8 @@
     "@react-native-community/cli": "20.1.0",
     "@react-native-community/cli-platform-android": "20.1.0",
     "@react-native/babel-preset": "0.85.0",
-    "@react-native/metro-config": "0.85.0",
     "@react-native/jest-preset": "0.85.0",
+    "@react-native/metro-config": "0.85.0",
     "@testing-library/react-native": "^12.9.0",
     "babel-jest": "^29.7.0",
     "jest": "^29.7.0",

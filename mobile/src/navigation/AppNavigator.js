@@ -8,6 +8,7 @@ import { useAuth } from '../auth/AuthContext';
 
 import LoginScreen from '../screens/Auth/LoginScreen';
 import QRScannerScreen from '../screens/Auth/QRScannerScreen';
+import BiometricLockScreen from '../screens/Auth/BiometricLockScreen';
 import SnippetListScreen from '../screens/Snippets/SnippetListScreen';
 import SnippetDetailScreen from '../screens/Snippets/SnippetDetailScreen';
 import NoteListScreen from '../screens/Notes/NoteListScreen';
@@ -71,10 +72,16 @@ function MainTabs() {
 }
 
 export default function AppNavigator() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, lockedBehindBiometric } = useAuth();
   return (
     <NavigationContainer>
-      {isAuthenticated ? <MainTabs /> : <AuthNavigator />}
+      {lockedBehindBiometric ? (
+        <BiometricLockScreen />
+      ) : isAuthenticated ? (
+        <MainTabs />
+      ) : (
+        <AuthNavigator />
+      )}
     </NavigationContainer>
   );
 }

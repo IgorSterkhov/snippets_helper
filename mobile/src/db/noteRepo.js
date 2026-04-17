@@ -26,9 +26,9 @@ export async function getAllFolders() {
 
 export async function upsertFolder(f) {
   await query(
-    `INSERT OR REPLACE INTO note_folders (uuid, name, sort_order, parent_id, updated_at, is_deleted)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [f.uuid, f.name, f.sort_order || 0, f.parent_id || null, f.updated_at, f.is_deleted ? 1 : 0],
+    `INSERT OR REPLACE INTO note_folders (uuid, id, name, sort_order, parent_id, updated_at, is_deleted)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [f.uuid, f.id ?? null, f.name, f.sort_order || 0, f.parent_id || null, f.updated_at, f.is_deleted ? 1 : 0],
   );
 }
 
