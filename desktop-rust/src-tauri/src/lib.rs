@@ -207,6 +207,16 @@ pub fn run() {
 
             drop(conn);
 
+            // Debug escape hatch: force the window visible on startup.
+            // Useful for headless / CI screenshot tests and for users who
+            // can't trigger the global hotkey in their environment.
+            if std::env::var("KH_FORCE_SHOW").is_ok() {
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.show();
+                    let _ = w.set_focus();
+                }
+            }
+
             match hotkey_mode.as_str() {
                 "double_shift" | "double_ctrl" => {
                     hotkey::polling::start_polling(app.handle().clone(), &hotkey_mode)

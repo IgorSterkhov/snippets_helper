@@ -60,8 +60,11 @@ docs/commits_doc.md
 
 # Rust
 desktop-rust/src-tauri/target/
+desktop-rust/src-tauri/target-docker/
+desktop-rust/target-docker/
 desktop-rust/node_modules/
 desktop-rust/src-tauri/gen/
+desktop-rust/screen.png
 
 # Mobile build artifacts
 mobile/android/app/.cxx/

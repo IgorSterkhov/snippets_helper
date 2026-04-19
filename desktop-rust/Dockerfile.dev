@@ -33,6 +33,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN cargo install tauri-cli --version '^2' --locked
 
+# Screenshot / headless-display tools (separate layer to preserve tauri-cli cache)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    xvfb \
+    xauth \
+    x11-apps \
+    x11-utils \
+    imagemagick \
+    python3-pil \
+ && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /work
 ENV CARGO_TARGET_DIR=/work/target-docker
 ENV RUST_BACKTRACE=1
