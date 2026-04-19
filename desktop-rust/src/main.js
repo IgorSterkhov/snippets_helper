@@ -1,7 +1,7 @@
 import { TabContainer } from './components/tab-container.js';
 import { call } from './tauri-api.js';
 import { openSettingsModal, checkFirstRun } from './tabs/settings.js';
-import { createStatusBar, doSync, checkUpdateStatus } from './components/status-bar.js';
+import { createStatusBar, doSync, checkUpdateStatus, checkFrontendUpdateStatus, startFrontendUpdateWatcher } from './components/status-bar.js';
 
 const TABS = [
   { id: 'shortcuts', label: 'Shortcuts', icon: '\u{1F4CB}', loader: (el) => import('./tabs/shortcuts.js').then(m => m.init(el)) },
@@ -109,4 +109,6 @@ document.addEventListener('DOMContentLoaded', () => {
   setTimeout(() => doSync().catch(() => {}), 1000);
   // Check for updates via status bar
   setTimeout(() => checkUpdateStatus().catch(() => {}), 3000);
+  setTimeout(() => checkFrontendUpdateStatus().catch(() => {}), 4000);
+  startFrontendUpdateWatcher();
 });

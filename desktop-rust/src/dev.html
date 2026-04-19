@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Keyboard Helper — DEV</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    body::before {
+      content: 'DEV MOCK';
+      position: fixed;
+      top: 4px;
+      right: 6px;
+      z-index: 99999;
+      background: #f59e0b;
+      color: #000;
+      font: 700 10px/1 monospace;
+      padding: 2px 6px;
+      border-radius: 3px;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <script src="dev-mock.js"></script>
+  <script type="module" src="main.js"></script>
+</body>
+</html>

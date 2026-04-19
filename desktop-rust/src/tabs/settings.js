@@ -586,6 +586,73 @@ async function renderUpdates(container) {
   actions.appendChild(downloadBtn);
   container.appendChild(actions);
 
+  // Frontend OTA controls
+  const feSection = el('div', { style: 'margin-top:16px;padding-top:12px;border-top:1px solid var(--border)' });
+  feSection.appendChild(el('label', { text: 'Frontend (hot update)', class: 'settings-label', style: 'display:block;margin-bottom:6px' }));
+  const feStatus = el('div', { text: 'Current: -', style: 'font-size:12px;color:var(--text-muted);margin-bottom:8px' });
+  feSection.appendChild(feStatus);
+  const feRow = el('div', { class: 'settings-row' });
+  const feCheckBtn = el('button', { text: 'Check frontend update', class: 'btn-secondary' });
+  const feApplyBtn = el('button', { text: 'Apply' });
+  feApplyBtn.style.display = 'none';
+  const feRevertBtn = el('button', { text: 'Revert to previous', class: 'btn-secondary' });
+  feRow.appendChild(feCheckBtn);
+  feRow.appendChild(feApplyBtn);
+  feRow.appendChild(feRevertBtn);
+  feSection.appendChild(feRow);
+  container.appendChild(feSection);
+
+  let feInfo = null;
+
+  (async () => {
+    try { const v = await call('get_frontend_version'); feStatus.textContent = 'Current: ' + (v || '-'); } catch {}
+  })();
+
+  feCheckBtn.addEventListener('click', async () => {
+    feCheckBtn.disabled = true;
+    feCheckBtn.textContent = 'Checking...';
+    try {
+      feInfo = await call('check_frontend_update');
+      feStatus.textContent = `Current: ${feInfo.current_version} · Latest: ${feInfo.latest_version}`;
+      feApplyBtn.style.display = feInfo.has_update ? '' : 'none';
+    } catch (e) {
+      showToast('Frontend check failed: ' + e, 'error');
+    } finally {
+      feCheckBtn.disabled = false;
+      feCheckBtn.textContent = 'Check frontend update';
+    }
+  });
+
+  feApplyBtn.addEventListener('click', async () => {
+    if (!feInfo || !feInfo.has_update) return;
+    feApplyBtn.disabled = true;
+    feApplyBtn.textContent = 'Downloading...';
+    try {
+      await call('download_frontend_update', {
+        url: feInfo.url, version: feInfo.latest_version,
+        signature: feInfo.signature || '', sha256: feInfo.sha256 || null,
+      });
+      feApplyBtn.textContent = 'Applying...';
+      await call('apply_frontend_update', { version: feInfo.latest_version });
+    } catch (e) {
+      showToast('Apply failed: ' + e, 'error');
+      feApplyBtn.disabled = false;
+      feApplyBtn.textContent = 'Apply';
+    }
+  });
+
+  feRevertBtn.addEventListener('click', async () => {
+    feRevertBtn.disabled = true;
+    try {
+      const prev = await call('revert_frontend');
+      showToast('Reverted to ' + prev, 'success');
+    } catch (e) {
+      showToast(String(e), 'error');
+    } finally {
+      feRevertBtn.disabled = false;
+    }
+  });
+
   // GitHub Token for private repo
   container.appendChild(el('label', { text: 'GitHub Token (for private repos):', class: 'settings-label', style: 'margin-top:16px' }));
   const tokenRow = el('div', { class: 'settings-row' });

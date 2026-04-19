@@ -8,7 +8,33 @@ let updateTextEl = null;
 let updateDotEl = null;
 let syncPopupEl = null;
 let updateInfo = null;
+let frontendVersion = null;
+let frontendUpdateInfo = null;
 const syncLog = [];
+
+const FRONTEND_CHECK_INTERVAL_MS = 30 * 60 * 1000;
+
+async function loadFrontendVersion() {
+  try {
+    const ver = await call('get_frontend_version');
+    if (ver) { frontendVersion = ver; return ver; }
+  } catch { /* backend missing */ }
+  if (frontendVersion !== null) return frontendVersion;
+  try {
+    const res = await fetch('frontend-version.json');
+    if (!res.ok) throw new Error('no file');
+    const data = await res.json();
+    frontendVersion = (data && data.version) || '';
+  } catch {
+    frontendVersion = '';
+  }
+  return frontendVersion;
+}
+
+function formatVersion(nativeVersion) {
+  if (frontendVersion) return `v${frontendVersion}`;
+  return `v${nativeVersion}`;
+}
 
 // ── Public API ────────────────────────────────────────────
 
@@ -238,21 +264,23 @@ function makeBlock(label, dataMap) {
 
 export async function checkUpdateStatus() {
   if (!updateTextEl) return;
+  await loadFrontendVersion();
   updateTextEl.textContent = 'Checking...';
   updateDotEl.className = 'sb-dot sb-dot-idle';
   try {
     const info = await call('check_for_update');
     updateInfo = info;
+    const curLabel = formatVersion(info.current_version);
     if (info.has_update) {
-      updateTextEl.textContent = `v${info.current_version} → v${info.latest_version} available`;
+      updateTextEl.textContent = `${curLabel} → v${info.latest_version} available`;
       updateDotEl.className = 'sb-dot sb-dot-update';
       barEl.querySelector('.sb-update').title = 'Click to download v' + info.latest_version;
     } else if (info.build_in_progress) {
-      updateTextEl.textContent = `v${info.current_version} · v${info.latest_version} building...`;
+      updateTextEl.textContent = `${curLabel} · v${info.latest_version} building...`;
       updateDotEl.className = 'sb-dot sb-dot-building';
       barEl.querySelector('.sb-update').title = 'Build in progress, try again later';
     } else {
-      updateTextEl.textContent = `v${info.current_version} · up to date`;
+      updateTextEl.textContent = `${curLabel} · up to date`;
       updateDotEl.className = 'sb-dot sb-dot-ok';
       barEl.querySelector('.sb-update').title = 'Click to re-check';
     }
@@ -263,6 +291,10 @@ export async function checkUpdateStatus() {
 }
 
 async function onUpdateClick() {
+  if (frontendUpdateInfo && frontendUpdateInfo.has_update) {
+    await applyFrontendUpdate();
+    return;
+  }
   if (updateInfo && updateInfo.has_update && updateInfo.download_url) {
     try {
       await call('open_url', { url: updateInfo.download_url });
@@ -270,9 +302,56 @@ async function onUpdateClick() {
     } catch (e) {
       showToast('Error: ' + e, 'error');
     }
-  } else {
-    await checkUpdateStatus();
+    return;
   }
+  await checkUpdateStatus();
+  await checkFrontendUpdateStatus();
+}
+
+export async function checkFrontendUpdateStatus() {
+  try {
+    const info = await call('check_frontend_update');
+    frontendUpdateInfo = info;
+    if (info.has_update) {
+      updateDotEl.className = 'sb-dot sb-dot-update';
+      updateTextEl.textContent = `${formatVersion('')} → ${info.latest_version} (click to apply)`;
+      barEl.querySelector('.sb-update').title = 'Click to download & apply frontend update';
+      showToast(`Frontend update: ${info.latest_version}`, 'info');
+    }
+    return info;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function applyFrontendUpdate() {
+  if (!frontendUpdateInfo || !frontendUpdateInfo.has_update) return;
+  const info = frontendUpdateInfo;
+  try {
+    updateTextEl.textContent = 'Downloading...';
+    updateDotEl.className = 'sb-dot sb-dot-building';
+    await call('download_frontend_update', {
+      url: info.url,
+      version: info.latest_version,
+      signature: info.signature,
+      sha256: info.sha256 || null,
+    });
+    updateTextEl.textContent = 'Applying...';
+    await call('apply_frontend_update', { version: info.latest_version });
+    showToast('Frontend updated, reloading...', 'success');
+  } catch (e) {
+    showToast('Update failed: ' + e, 'error');
+    updateDotEl.className = 'sb-dot sb-dot-error';
+    updateTextEl.textContent = 'Update failed';
+  }
+}
+
+let frontendCheckTimer = null;
+export function startFrontendUpdateWatcher() {
+  if (frontendCheckTimer) return;
+  frontendCheckTimer = setInterval(() => {
+    checkFrontendUpdateStatus().catch(() => {});
+  }, FRONTEND_CHECK_INTERVAL_MS);
 }
 
 // ── Styles ────────────────────────────────────────────────

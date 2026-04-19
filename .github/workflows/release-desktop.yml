@@ -47,3 +47,95 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
+
+  release-frontend:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect if frontend changed since previous tag
+        id: diff
+        run: |
+          set -e
+          PREV_TAG=$(git tag --sort=-creatordate | grep -E '^v[0-9]' | grep -v "^${GITHUB_REF_NAME}$" | head -n1 || true)
+          SHA=$(git rev-parse --short HEAD)
+          NATIVE="${GITHUB_REF_NAME#v}"
+          VERSION="${NATIVE}-f${SHA}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          if [ -z "$PREV_TAG" ]; then
+            echo "No previous tag, publishing frontend."
+            echo "publish=true" >> $GITHUB_OUTPUT
+          elif git diff --quiet "$PREV_TAG" HEAD -- desktop-rust/src/; then
+            echo "No changes in desktop-rust/src/ since $PREV_TAG, skipping."
+            echo "publish=false" >> $GITHUB_OUTPUT
+          else
+            echo "desktop-rust/src/ changed since $PREV_TAG, publishing."
+            echo "publish=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Package frontend zip
+        if: steps.diff.outputs.publish == 'true'
+        run: |
+          VERSION="${{ steps.diff.outputs.version }}"
+          # Overwrite version file so runtime knows what it is
+          printf '{\n  "version": "%s"\n}\n' "$VERSION" > desktop-rust/src/frontend-version.json
+          cd desktop-rust/src
+          # Exclude dev-only files
+          zip -r "../../frontend-${VERSION}.zip" . \
+            -x "dev.html" "dev-mock.js" "dev-test.py" "__pycache__/*"
+          cd "$GITHUB_WORKSPACE"
+          SHA=$(sha256sum "frontend-${VERSION}.zip" | cut -d' ' -f1)
+          echo "sha256=$SHA" >> $GITHUB_OUTPUT
+        id: pack
+
+      - name: Sign frontend zip
+        if: steps.diff.outputs.publish == 'true'
+        id: sign
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          set -e
+          VERSION="${{ steps.diff.outputs.version }}"
+          ZIP="frontend-${VERSION}.zip"
+          # Install rsign2 (tauri's signing tool, compatible with tauri-plugin-updater key format)
+          cargo install --quiet --locked rsign2 --version '^0.6' || cargo install --quiet rsign2
+          mkdir -p /tmp/rsign
+          printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" | base64 -d > /tmp/rsign/key.txt 2>/dev/null || \
+            printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" > /tmp/rsign/key.txt
+          # Sign (empty password via stdin)
+          echo "" | rsign sign -W -s /tmp/rsign/key.txt -x "${ZIP}.sig" "$ZIP"
+          SIG=$(base64 -w0 < "${ZIP}.sig" || base64 < "${ZIP}.sig" | tr -d '\n')
+          echo "signature=$SIG" >> $GITHUB_OUTPUT
+          rm -rf /tmp/rsign
+
+      - name: Write manifest
+        if: steps.diff.outputs.publish == 'true'
+        run: |
+          VERSION="${{ steps.diff.outputs.version }}"
+          URL="https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/frontend-${VERSION}.zip"
+          SIG="${{ steps.sign.outputs.signature }}"
+          SHA="${{ steps.pack.outputs.sha256 }}"
+          cat > frontend-version.json <<EOF
+          {
+            "version": "$VERSION",
+            "url": "$URL",
+            "signature": "$SIG",
+            "sha256": "$SHA"
+          }
+          EOF
+          cat frontend-version.json
+
+      - name: Upload assets
+        if: steps.diff.outputs.publish == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: |
+            frontend-${{ steps.diff.outputs.version }}.zip
+            frontend-version.json
+          fail_on_unmatched_files: true

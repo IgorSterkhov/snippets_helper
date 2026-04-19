@@ -1,6 +1,6 @@
 [package]
 name = "keyboard-helper"
-version = "0.9.5"
+version = "0.9.6"
 edition = "2021"
 
 [dependencies]
@@ -24,6 +24,9 @@ rdev = "0.5"
 zip = "2"
 log = "0.4"
 env_logger = "0.11"
+minisign-verify = "0.2"
+sha2 = "0.10"
+hex = "0.4"
 
 [profile.release]
 lto = "thin"

@@ -1,6 +1,7 @@
 import { call } from '../tauri-api.js';
 import { showModal } from '../components/modal.js';
 import { showToast } from '../components/toast.js';
+import { openTemplatePicker } from './exec-templates.js';
 
 let root = null;
 let categories = [];
@@ -67,9 +68,9 @@ function buildLayout() {
   bottomHeader.appendChild(stopBtn);
   bottom.appendChild(bottomHeader);
 
-  const console = el('pre', { class: 'exec-console', id: 'exec-console' });
-  console.textContent = 'Ready.';
-  bottom.appendChild(console);
+  const consoleEl = el('pre', { class: 'exec-console', id: 'exec-console' });
+  consoleEl.textContent = 'Ready.';
+  bottom.appendChild(consoleEl);
 
   wrap.appendChild(bottom);
   return wrap;
@@ -155,10 +156,12 @@ async function onEditCategory(cat) {
   const body = document.createElement('div');
   body.innerHTML = `
     <label style="display:block;margin-bottom:6px;color:var(--text)">Name</label>
-    <input id="cat-name-input" style="width:100%" value="${cat.name}" />
+    <input id="cat-name-input" style="width:100%" />
     <label style="display:block;margin-top:8px;margin-bottom:6px;color:var(--text)">Sort order</label>
-    <input id="cat-sort-input" type="number" style="width:100%" value="${cat.sort_order}" />
+    <input id="cat-sort-input" type="number" style="width:100%" />
   `;
+  body.querySelector('#cat-name-input').value = cat.name || '';
+  body.querySelector('#cat-sort-input').value = cat.sort_order ?? 0;
   try {
     await showModal({
       title: 'Edit Category',
@@ -319,17 +322,35 @@ function buildCommandForm(cmd) {
   const body = document.createElement('div');
   body.innerHTML = `
     <label style="display:block;margin-bottom:4px;color:var(--text)">Name</label>
-    <input id="cmd-name" style="width:100%" value="${cmd.name || ''}" placeholder="Command name" />
-    <label style="display:block;margin-top:8px;margin-bottom:4px;color:var(--text)">Command</label>
-    <textarea id="cmd-command" style="width:100%;min-height:60px;font-family:monospace" placeholder="sh -c '...'">${cmd.command || ''}</textarea>
+    <input id="cmd-name" style="width:100%" placeholder="Command name" />
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;margin-bottom:4px">
+      <label style="color:var(--text)">Command</label>
+      <button type="button" id="cmd-tpl-btn" class="btn-secondary" style="padding:2px 8px;font-size:12px">Use template</button>
+    </div>
+    <textarea id="cmd-command" style="width:100%;min-height:60px;font-family:monospace" placeholder="sh -c '...'"></textarea>
     <label style="display:block;margin-top:8px;margin-bottom:4px;color:var(--text)">Description</label>
-    <input id="cmd-desc" style="width:100%" value="${cmd.description || ''}" placeholder="Optional description" />
+    <input id="cmd-desc" style="width:100%" placeholder="Optional description" />
     <label style="display:block;margin-top:8px;margin-bottom:4px;color:var(--text)">Sort order</label>
-    <input id="cmd-sort" type="number" style="width:100%" value="${cmd.sort_order ?? 0}" />
+    <input id="cmd-sort" type="number" style="width:100%" />
     <label style="display:flex;align-items:center;gap:6px;margin-top:8px;color:var(--text)">
-      <input type="checkbox" id="cmd-hide" ${cmd.hide_after_run ? 'checked' : ''} /> Hide window after run
+      <input type="checkbox" id="cmd-hide" /> Hide window after run
     </label>
   `;
+  body.querySelector('#cmd-name').value = cmd.name || '';
+  body.querySelector('#cmd-command').value = cmd.command || '';
+  body.querySelector('#cmd-desc').value = cmd.description || '';
+  body.querySelector('#cmd-sort').value = cmd.sort_order ?? 0;
+  body.querySelector('#cmd-hide').checked = !!cmd.hide_after_run;
+
+  body.querySelector('#cmd-tpl-btn').addEventListener('click', async () => {
+    const result = await openTemplatePicker();
+    if (!result) return;
+    const nameInput = document.getElementById('cmd-name');
+    const cmdInput = document.getElementById('cmd-command');
+    if (cmdInput) cmdInput.value = result.command;
+    if (nameInput && !nameInput.value.trim()) nameInput.value = result.name;
+  });
+
   return body;
 }
 

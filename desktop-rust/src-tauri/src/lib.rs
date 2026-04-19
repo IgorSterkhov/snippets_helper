@@ -1,4 +1,5 @@
 use tauri::{Manager, WindowEvent};
+use tauri::http::{Response, StatusCode};
 
 mod db;
 mod commands;
@@ -31,6 +32,50 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
+        .register_uri_scheme_protocol("khapp", |ctx, req| {
+            let app = ctx.app_handle();
+            let uri = req.uri().to_string();
+            let path = uri
+                .split_once("://")
+                .map(|(_, rest)| rest)
+                .unwrap_or(&uri);
+            let path = path.split_once('/').map(|(_, p)| p).unwrap_or("");
+            let path = path.split('?').next().unwrap_or(path);
+            let path = path.split('#').next().unwrap_or(path);
+            let path = if path.is_empty() { "index.html".to_string() } else { path.to_string() };
+
+            // Try override directory first
+            if let Some(dir) = commands::ota::override_frontend_dir(app) {
+                let candidate = dir.join(&path);
+                if candidate.exists() && candidate.is_file() {
+                    if let Ok(bytes) = std::fs::read(&candidate) {
+                        let mime = mime_for(&path);
+                        return Response::builder()
+                            .status(StatusCode::OK)
+                            .header("Content-Type", mime)
+                            .header("Access-Control-Allow-Origin", "*")
+                            .body(bytes)
+                            .unwrap();
+                    }
+                }
+            }
+
+            // Fallback to bundled
+            if let Some(asset) = app.asset_resolver().get(path.clone()) {
+                let mime = if asset.mime_type.is_empty() { mime_for(&path).to_string() } else { asset.mime_type };
+                return Response::builder()
+                    .status(StatusCode::OK)
+                    .header("Content-Type", mime)
+                    .header("Access-Control-Allow-Origin", "*")
+                    .body(asset.bytes)
+                    .unwrap();
+            }
+
+            Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body(format!("Not found: {}", path).into_bytes())
+                .unwrap()
+        })
         .invoke_handler(tauri::generate_handler![
             commands::settings::get_setting,
             commands::settings::set_setting,
@@ -130,6 +175,13 @@ pub fn run() {
             // Autostart
             autostart::set_autostart,
             autostart::get_autostart,
+            // OTA (frontend)
+            commands::ota::get_frontend_version,
+            commands::ota::check_frontend_update,
+            commands::ota::download_frontend_update,
+            commands::ota::apply_frontend_update,
+            commands::ota::revert_frontend,
+            commands::ota::drop_frontend_override,
         ])
         .setup(|app| {
             tray::create_tray(app)?;
@@ -178,4 +230,24 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| write_log(&format!("Tauri run error: {}", e)));
+}
+
+fn mime_for(path: &str) -> &'static str {
+    let lower = path.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    match lower.as_str() {
+        "html" | "htm" => "text/html; charset=utf-8",
+        "js" | "mjs" => "application/javascript; charset=utf-8",
+        "css" => "text/css; charset=utf-8",
+        "json" => "application/json; charset=utf-8",
+        "svg" => "image/svg+xml",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "ico" => "image/x-icon",
+        "woff" => "font/woff",
+        "woff2" => "font/woff2",
+        "txt" => "text/plain; charset=utf-8",
+        _ => "application/octet-stream",
+    }
 }
