@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, RefreshControl, ScrollView } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, StyleSheet, RefreshControl } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../../theme/ThemeContext';
 import { getAllFolders, getNotesByFolder, getAllNotes, searchNotes } from '../../db/noteRepo';
 import { performSync } from '../../sync/syncService';
-import FolderTree from '../../components/FolderTree';
+import FolderPicker from '../../components/FolderPicker';
 import SearchBar from '../../components/SearchBar';
 import SyncStatusBar from '../../components/SyncStatusBar';
 import { uuidv4 } from '../../lib/uuid';
@@ -16,7 +16,6 @@ export default function NoteListScreen({ navigation }) {
   const [selectedFolder, setSelectedFolder] = useState(null);
   const [query, setQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
-  const [showFolders, setShowFolders] = useState(true);
 
   const loadFolders = useCallback(async () => {
     const f = await getAllFolders();
@@ -88,26 +87,10 @@ export default function NoteListScreen({ navigation }) {
   return (
     <View style={[s.container, { backgroundColor: colors.bg }]}>
       <SyncStatusBar />
-      <SearchBar value={query} onChangeText={setQuery} placeholder="Поиск заметок..." />
-
       {!query && (
-        <TouchableOpacity style={s.toggleFolders} onPress={() => setShowFolders(!showFolders)}>
-          <Text style={{ color: colors.primary }}>{showFolders ? 'Скрыть папки' : 'Показать папки'}</Text>
-        </TouchableOpacity>
+        <FolderPicker folders={folders} selectedId={selectedFolder} onSelect={setSelectedFolder} />
       )}
-
-      {!query && showFolders && (
-        <View style={[s.folderPanel, { borderColor: colors.border }]}>
-          {selectedFolder ? (
-            <TouchableOpacity style={s.clearFolder} onPress={() => setSelectedFolder(null)}>
-              <Text style={{ color: colors.primary, fontSize: 13 }}>× Все папки</Text>
-            </TouchableOpacity>
-          ) : null}
-          <ScrollView style={s.folderScroll} nestedScrollEnabled>
-            <FolderTree folders={folders} selectedId={selectedFolder} onSelect={setSelectedFolder} />
-          </ScrollView>
-        </View>
-      )}
+      <SearchBar value={query} onChangeText={setQuery} placeholder="Поиск заметок..." />
 
       <FlatList
         data={notes}
@@ -131,10 +114,6 @@ export default function NoteListScreen({ navigation }) {
 
 const s = StyleSheet.create({
   container: { flex: 1 },
-  folderPanel: { maxHeight: 220, borderBottomWidth: 1, marginBottom: 4, overflow: 'hidden' },
-  folderScroll: { flexGrow: 0 },
-  clearFolder: { paddingHorizontal: 12, paddingVertical: 6 },
-  toggleFolders: { paddingHorizontal: 12, paddingVertical: 4 },
   card: { padding: 14, marginHorizontal: 12, marginVertical: 4, borderRadius: 8, borderWidth: 1 },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   noteTitle: { fontSize: 15, fontWeight: '600', flex: 1 },

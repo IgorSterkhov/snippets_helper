@@ -122,10 +122,16 @@ fn verify_signature(data: &[u8], signature: &str) -> Result<(), String> {
     if signature.is_empty() {
         return Ok(());
     }
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
     use minisign_verify::{PublicKey, Signature};
-    let pk = PublicKey::decode(PUBKEY).map_err(|e| format!("Bad pubkey: {}", e))?;
-    let sig = Signature::decode(signature).map_err(|e| format!("Bad signature: {}", e))?;
-    pk.verify(data, &sig, false).map_err(|e| format!("Signature verification failed: {}", e))
+    // Signature is transported as base64 of the raw .sig file contents.
+    let sig_text = match STANDARD.decode(signature.trim()) {
+        Ok(decoded) => String::from_utf8(decoded).map_err(|e| format!("Bad signature UTF-8: {}", e))?,
+        Err(_) => signature.to_string(),
+    };
+    let pk = PublicKey::from_base64(PUBKEY).map_err(|e| format!("Bad pubkey: {}", e))?;
+    let sig = Signature::decode(&sig_text).map_err(|e| format!("Bad signature: {}", e))?;
+    pk.verify(data, &sig, true).map_err(|e| format!("Signature verification failed: {}", e))
 }
 
 fn verify_sha256(data: &[u8], expected_hex: &str) -> Result<(), String> {
