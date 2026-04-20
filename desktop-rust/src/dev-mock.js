@@ -209,6 +209,7 @@
     async apply_frontend_update() { return; },
     async revert_frontend() { return '0.9.5-f0'; },
     async drop_frontend_override() { return; },
+    async confirm_frontend_boot() { return; },
     async debug_sync() { return { tables: {} }; },
     async force_full_sync() { return { reset: true, pull: { total: 0 } }; },
 

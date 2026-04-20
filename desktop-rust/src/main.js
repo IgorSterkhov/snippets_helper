@@ -107,6 +107,10 @@ document.addEventListener('DOMContentLoaded', () => {
   main();
   // Initial sync on launch
   setTimeout(() => doSync().catch(() => {}), 1000);
+  // Confirm the frontend booted successfully so the Rust watchdog
+  // doesn't auto-rollback a just-applied OTA update. 5s gives tabs
+  // and invoke round-trips time to settle.
+  setTimeout(() => call('confirm_frontend_boot').catch(() => {}), 5000);
   // Check for updates via status bar
   setTimeout(() => checkUpdateStatus().catch(() => {}), 3000);
   setTimeout(() => checkFrontendUpdateStatus().catch(() => {}), 4000);

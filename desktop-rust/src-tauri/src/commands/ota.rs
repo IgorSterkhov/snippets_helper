@@ -48,6 +48,10 @@ fn prev_pointer_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app_data_root(app)?.join("frontend-prev.txt"))
 }
 
+fn tentative_pointer_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app_data_root(app)?.join("frontend-tentative.txt"))
+}
+
 fn frontend_dir_for(root: &Path, version: &str) -> PathBuf {
     root.join(format!("frontend-{}", version))
 }
@@ -222,6 +226,7 @@ pub async fn apply_frontend_update(app: AppHandle, version: String) -> Result<()
 
     let pointer = pointer_path(&app)?;
     let prev_pointer = prev_pointer_path(&app)?;
+    let tentative = tentative_pointer_path(&app)?;
 
     if let Some(old) = read_trimmed_string(&pointer) {
         if old != version {
@@ -229,6 +234,9 @@ pub async fn apply_frontend_update(app: AppHandle, version: String) -> Result<()
         }
     }
     fs::write(&pointer, &version).map_err(|e| e.to_string())?;
+    // Mark this boot as tentative. Next startup's watchdog will auto-revert
+    // if confirm_frontend_boot is not called within the grace period.
+    fs::write(&tentative, &version).map_err(|e| e.to_string())?;
 
     cleanup_old_frontends(&root, &version)?;
 
@@ -236,6 +244,74 @@ pub async fn apply_frontend_update(app: AppHandle, version: String) -> Result<()
         let _ = window.eval("window.location.reload()");
     }
     Ok(())
+}
+
+/// Called by the frontend once it has successfully booted. Clears the
+/// "tentative" flag so the watchdog doesn't revert this version.
+#[tauri::command]
+pub fn confirm_frontend_boot(app: AppHandle) -> Result<(), String> {
+    let tentative = tentative_pointer_path(&app)?;
+    if tentative.exists() {
+        fs::remove_file(&tentative).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Runs once at startup when a tentative frontend pointer is present.
+/// Sleeps for the grace period; if the pointer is still there (frontend
+/// never confirmed a successful boot), reverts to the previous version
+/// and reloads the window. Safe-to-call at every startup — no-op when
+/// there is nothing tentative.
+pub fn spawn_boot_watchdog(app: AppHandle) {
+    let tentative = match tentative_pointer_path(&app) {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    if !tentative.exists() {
+        return;
+    }
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        if !tentative.exists() {
+            return; // Confirmed in time, no rollback needed.
+        }
+        eprintln!("[ota] tentative boot not confirmed within 30s — rolling back");
+        let _ = fs::remove_file(&tentative);
+        let root = match app_data_root(&app) {
+            Ok(r) => r,
+            Err(_) => return,
+        };
+        let prev = match read_trimmed_string(&root.join("frontend-prev.txt")) {
+            Some(v) => v,
+            None => {
+                // No previous version — drop the override entirely so the
+                // bundled frontend is used on next launch.
+                if let Ok(p) = pointer_path(&app) {
+                    let _ = fs::remove_file(&p);
+                }
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.eval("window.location.reload()");
+                }
+                return;
+            }
+        };
+        let prev_dir = frontend_dir_for(&root, &prev);
+        if prev_dir.join("index.html").exists() {
+            if let Ok(pp) = pointer_path(&app) {
+                let _ = fs::write(&pp, &prev);
+            }
+            let _ = fs::remove_file(&root.join("frontend-prev.txt"));
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.eval("window.location.reload()");
+            }
+        } else if let Ok(pp) = pointer_path(&app) {
+            // Previous folder gone too — drop override to fall back to bundled.
+            let _ = fs::remove_file(&pp);
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.eval("window.location.reload()");
+            }
+        }
+    });
 }
 
 fn cleanup_old_frontends(root: &Path, keep_version: &str) -> Result<(), String> {

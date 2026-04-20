@@ -182,6 +182,7 @@ pub fn run() {
             commands::ota::apply_frontend_update,
             commands::ota::revert_frontend,
             commands::ota::drop_frontend_override,
+            commands::ota::confirm_frontend_boot,
         ])
         .setup(|app| {
             tray::create_tray(app)?;
@@ -216,6 +217,11 @@ pub fn run() {
                     let _ = w.set_focus();
                 }
             }
+
+            // If the previous session applied a frontend update that never
+            // confirmed a successful boot, roll back before the new JS has
+            // a chance to break things again.
+            commands::ota::spawn_boot_watchdog(app.handle().clone());
 
             match hotkey_mode.as_str() {
                 "double_shift" | "double_ctrl" => {
