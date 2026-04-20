@@ -104,6 +104,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 document.addEventListener('DOMContentLoaded', () => {
+  console.log('[keyboard-helper] frontend loaded @', new Date().toISOString());
   main();
   // Initial sync on launch
   setTimeout(() => doSync().catch(() => {}), 1000);
