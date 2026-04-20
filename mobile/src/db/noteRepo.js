@@ -24,12 +24,17 @@ export async function getAllFolders() {
   return rowsToArray(result);
 }
 
+export function buildUpsertFolder(f) {
+  return {
+    sql: `INSERT OR REPLACE INTO note_folders (uuid, id, name, sort_order, parent_id, updated_at, is_deleted)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    params: [f.uuid, f.id ?? null, f.name, f.sort_order || 0, f.parent_id || null, f.updated_at, f.is_deleted ? 1 : 0],
+  };
+}
+
 export async function upsertFolder(f) {
-  await query(
-    `INSERT OR REPLACE INTO note_folders (uuid, id, name, sort_order, parent_id, updated_at, is_deleted)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [f.uuid, f.id ?? null, f.name, f.sort_order || 0, f.parent_id || null, f.updated_at, f.is_deleted ? 1 : 0],
-  );
+  const { sql, params } = buildUpsertFolder(f);
+  await query(sql, params);
 }
 
 export async function deleteFolder(uuid) {
@@ -68,12 +73,17 @@ export async function searchNotes(q) {
   return rowsToArray(result);
 }
 
+export function buildUpsertNote(n) {
+  return {
+    sql: `INSERT OR REPLACE INTO notes (uuid, folder_uuid, title, content, created_at, updated_at, is_pinned, is_deleted)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    params: [n.uuid, n.folder_uuid || null, n.title, n.content || '', n.created_at || new Date().toISOString(), n.updated_at, n.is_pinned || 0, n.is_deleted ? 1 : 0],
+  };
+}
+
 export async function upsertNote(n) {
-  await query(
-    `INSERT OR REPLACE INTO notes (uuid, folder_uuid, title, content, created_at, updated_at, is_pinned, is_deleted)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [n.uuid, n.folder_uuid || null, n.title, n.content || '', n.created_at || new Date().toISOString(), n.updated_at, n.is_pinned || 0, n.is_deleted ? 1 : 0],
-  );
+  const { sql, params } = buildUpsertNote(n);
+  await query(sql, params);
 }
 
 export async function deleteNote(uuid) {

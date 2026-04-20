@@ -1,5 +1,15 @@
-import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import React, { useState, useLayoutEffect, useCallback } from 'react';
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  ScrollView,
+  StyleSheet,
+  KeyboardAvoidingView,
+  Platform,
+  Alert,
+} from 'react-native';
 import Markdown from 'react-native-markdown-display';
 import { useTheme } from '../../theme/ThemeContext';
 import { upsertNote } from '../../db/noteRepo';
@@ -13,71 +23,157 @@ export default function NoteEditorScreen({ route, navigation }) {
   const [preview, setPreview] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const save = async () => {
+  const save = useCallback(async () => {
+    if (saving) return;
     setSaving(true);
-    await upsertNote({
-      ...note,
-      title,
-      content,
-      updated_at: new Date().toISOString(),
+    try {
+      await upsertNote({
+        ...note,
+        title,
+        content,
+        updated_at: new Date().toISOString(),
+      });
+      notifyLocalChange();
+      navigation.goBack();
+    } catch (e) {
+      Alert.alert('Ошибка', String(e));
+      setSaving(false);
+    }
+  }, [saving, title, content, note, navigation]);
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <TouchableOpacity
+          onPress={save}
+          disabled={saving}
+          style={s.headerBtn}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Text
+            style={[
+              s.headerBtnText,
+              { color: saving ? colors.textMuted : colors.primary },
+            ]}
+          >
+            {saving ? 'Сохр…' : 'Сохранить'}
+          </Text>
+        </TouchableOpacity>
+      ),
     });
-    notifyLocalChange();
-    setSaving(false);
-    navigation.goBack();
-  };
+  }, [navigation, save, saving, colors]);
 
   const mdStyles = {
-    body: { color: colors.text, fontSize: 14 },
-    heading1: { color: colors.text },
-    heading2: { color: colors.text },
-    heading3: { color: colors.text },
-    code_block: { backgroundColor: colors.bgSecondary, color: colors.text },
-    code_inline: { backgroundColor: colors.bgSecondary, color: colors.text },
+    body: { color: colors.text, fontSize: 15, lineHeight: 22 },
+    heading1: { color: colors.text, fontSize: 24, fontWeight: '700', marginTop: 16, marginBottom: 8 },
+    heading2: { color: colors.text, fontSize: 20, fontWeight: '700', marginTop: 14, marginBottom: 6 },
+    heading3: { color: colors.text, fontSize: 17, fontWeight: '600', marginTop: 12, marginBottom: 4 },
+    code_block: { backgroundColor: colors.bgSecondary, color: colors.text, padding: 10, borderRadius: 6 },
+    code_inline: { backgroundColor: colors.bgSecondary, color: colors.text, paddingHorizontal: 4, borderRadius: 3 },
     link: { color: colors.primary },
+    blockquote: { borderLeftWidth: 3, borderLeftColor: colors.primary, paddingLeft: 12, color: colors.textSecondary },
+    hr: { backgroundColor: colors.border, height: 1, marginVertical: 16 },
   };
 
   return (
-    <View style={[s.container, { backgroundColor: colors.bg }]}>
+    <KeyboardAvoidingView
+      style={[s.container, { backgroundColor: colors.bg }]}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
       <TextInput
-        style={[s.titleInput, { color: colors.text, borderColor: colors.border }]}
+        style={[s.titleInput, { color: colors.text }]}
         value={title}
         onChangeText={setTitle}
         placeholder="Заголовок"
         placeholderTextColor={colors.textMuted}
       />
 
-      <View style={s.toolbar}>
-        <TouchableOpacity onPress={() => setPreview(!preview)}>
-          <Text style={{ color: colors.primary }}>{preview ? 'Редактировать' : 'Превью'}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={save} disabled={saving}>
-          <Text style={{ color: colors.primary, fontWeight: '600' }}>{saving ? 'Сохранение...' : 'Сохранить'}</Text>
-        </TouchableOpacity>
+      <View style={[s.segmented, { backgroundColor: colors.bgSecondary }]}>
+        <Segment label="Написать" active={!preview} onPress={() => setPreview(false)} colors={colors} />
+        <Segment label="Превью" active={preview} onPress={() => setPreview(true)} colors={colors} />
       </View>
 
       {preview ? (
-        <ScrollView style={s.previewArea}>
-          <Markdown style={mdStyles}>{content}</Markdown>
+        <ScrollView style={s.body} contentContainerStyle={s.bodyContent}>
+          {content.trim() ? (
+            <Markdown style={mdStyles}>{content}</Markdown>
+          ) : (
+            <Text style={[s.placeholder, { color: colors.textMuted }]}>
+              Пусто — переключись во «Написать»
+            </Text>
+          )}
         </ScrollView>
       ) : (
         <TextInput
-          style={[s.editor, { color: colors.text, backgroundColor: colors.bgSecondary }]}
+          style={[s.editor, { color: colors.text }]}
           value={content}
           onChangeText={setContent}
           multiline
           textAlignVertical="top"
-          placeholder="Содержимое (markdown)"
+          placeholder="Начните писать…"
           placeholderTextColor={colors.textMuted}
         />
       )}
-    </View>
+    </KeyboardAvoidingView>
+  );
+}
+
+function Segment({ label, active, onPress, colors }) {
+  return (
+    <TouchableOpacity
+      style={[
+        s.segment,
+        active && {
+          backgroundColor: colors.bg,
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: 1 },
+          shadowOpacity: 0.12,
+          shadowRadius: 2,
+          elevation: 2,
+        },
+      ]}
+      onPress={onPress}
+      activeOpacity={0.85}
+    >
+      <Text style={[s.segmentText, { color: active ? colors.text : colors.textMuted }]}>
+        {label}
+      </Text>
+    </TouchableOpacity>
   );
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1, padding: 12 },
-  titleInput: { fontSize: 18, fontWeight: '600', borderBottomWidth: 1, paddingVertical: 8, marginBottom: 8 },
-  toolbar: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8 },
-  editor: { flex: 1, fontSize: 14, fontFamily: 'monospace', padding: 12, borderRadius: 8 },
-  previewArea: { flex: 1 },
+  container: { flex: 1, paddingHorizontal: 16, paddingTop: 8 },
+  headerBtn: { paddingHorizontal: 14, paddingVertical: 6 },
+  headerBtnText: { fontSize: 16, fontWeight: '600' },
+  titleInput: {
+    fontSize: 22,
+    fontWeight: '700',
+    paddingVertical: 12,
+    paddingHorizontal: 2,
+  },
+  segmented: {
+    flexDirection: 'row',
+    borderRadius: 10,
+    padding: 3,
+    marginBottom: 12,
+  },
+  segment: {
+    flex: 1,
+    paddingVertical: 8,
+    alignItems: 'center',
+    borderRadius: 7,
+  },
+  segmentText: { fontSize: 14, fontWeight: '600' },
+  body: { flex: 1 },
+  bodyContent: { paddingVertical: 8, paddingBottom: 40 },
+  editor: {
+    flex: 1,
+    fontSize: 15,
+    lineHeight: 22,
+    paddingHorizontal: 2,
+    paddingVertical: 8,
+    paddingBottom: 40,
+  },
+  placeholder: { fontSize: 14, fontStyle: 'italic', textAlign: 'center', paddingTop: 24 },
 });

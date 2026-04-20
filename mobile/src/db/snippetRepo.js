@@ -32,12 +32,17 @@ export async function searchSnippets(q) {
   return rowsToArray(result);
 }
 
+export function buildUpsertSnippet(s) {
+  return {
+    sql: `INSERT OR REPLACE INTO shortcuts (uuid, name, value, description, links, obsidian_note, updated_at, is_deleted)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    params: [s.uuid, s.name, s.value, s.description || '', s.links || '[]', s.obsidian_note || '', s.updated_at, s.is_deleted ? 1 : 0],
+  };
+}
+
 export async function upsertSnippet(s) {
-  await query(
-    `INSERT OR REPLACE INTO shortcuts (uuid, name, value, description, links, obsidian_note, updated_at, is_deleted)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [s.uuid, s.name, s.value, s.description || '', s.links || '[]', s.obsidian_note || '', s.updated_at, s.is_deleted ? 1 : 0],
-  );
+  const { sql, params } = buildUpsertSnippet(s);
+  await query(sql, params);
 }
 
 export async function deleteSnippet(uuid) {
@@ -60,12 +65,17 @@ export async function getAllTags() {
   return rowsToArray(result);
 }
 
+export function buildUpsertTag(t) {
+  return {
+    sql: `INSERT OR REPLACE INTO snippet_tags (uuid, name, patterns, color, sort_order, updated_at, is_deleted)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    params: [t.uuid, t.name, t.patterns || '[]', t.color || '#388bfd', t.sort_order || 0, t.updated_at, t.is_deleted ? 1 : 0],
+  };
+}
+
 export async function upsertTag(t) {
-  await query(
-    `INSERT OR REPLACE INTO snippet_tags (uuid, name, patterns, color, sort_order, updated_at, is_deleted)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [t.uuid, t.name, t.patterns || '[]', t.color || '#388bfd', t.sort_order || 0, t.updated_at, t.is_deleted ? 1 : 0],
-  );
+  const { sql, params } = buildUpsertTag(t);
+  await query(sql, params);
 }
 
 export async function getModifiedTagsSince(since) {

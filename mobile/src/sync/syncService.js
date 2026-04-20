@@ -1,7 +1,21 @@
 import { syncPull, syncPush } from '../api/endpoints';
 import { getLastSyncAt, setLastSyncAt } from '../db/syncMetaRepo';
-import { upsertSnippet, getModifiedSnippetsSince, upsertTag, getModifiedTagsSince } from '../db/snippetRepo';
-import { upsertNote, getModifiedNotesSince, upsertFolder, getModifiedFoldersSince } from '../db/noteRepo';
+import { getDB } from '../db/database';
+import {
+  buildUpsertSnippet, buildUpsertTag,
+  getModifiedSnippetsSince, getModifiedTagsSince,
+} from '../db/snippetRepo';
+import {
+  buildUpsertNote, buildUpsertFolder,
+  getModifiedNotesSince, getModifiedFoldersSince,
+} from '../db/noteRepo';
+
+const BUILDERS = {
+  shortcuts: buildUpsertSnippet,
+  snippet_tags: buildUpsertTag,
+  notes: buildUpsertNote,
+  note_folders: buildUpsertFolder,
+};
 
 let syncing = false;
 const listeners = new Set();
@@ -35,13 +49,34 @@ async function emitPending() {
   } catch (e) { /* ignore */ }
 }
 
-/**
- * Notify the sync subsystem that a local change has been made.
- * Updates pending counter immediately, then tries to sync in background.
- */
 export function notifyLocalChange() {
   emitPending();
   performSync().catch(() => { /* will retry on next trigger */ });
+}
+
+function applyPulledChanges(changes) {
+  const entries = Object.entries(changes || {});
+  let totalRows = 0;
+  for (const [, rows] of entries) totalRows += rows.length;
+  if (!totalRows) return Promise.resolve();
+
+  return new Promise((resolve, reject) => {
+    const db = getDB();
+    db.transaction(
+      (tx) => {
+        for (const [table, rows] of entries) {
+          const build = BUILDERS[table];
+          if (!build) continue;
+          for (const row of rows) {
+            const { sql, params } = build(row);
+            tx.executeSql(sql, params);
+          }
+        }
+      },
+      (err) => reject(err),
+      () => resolve(),
+    );
+  });
 }
 
 export async function performSync() {
@@ -52,36 +87,18 @@ export async function performSync() {
   try {
     const lastSync = await getLastSyncAt();
 
-    // 1. Pull server changes
+    // 1. Pull server changes and apply them in a single transaction.
     const pullResult = await syncPull(lastSync);
+    await applyPulledChanges(pullResult.changes);
 
-    const applyMap = {
-      shortcuts: upsertSnippet,
-      snippet_tags: upsertTag,
-      notes: upsertNote,
-      note_folders: upsertFolder,
-    };
-
-    for (const [table, rows] of Object.entries(pullResult.changes || {})) {
-      const upsert = applyMap[table];
-      if (!upsert) continue;
-      for (const row of rows) {
-        await upsert(row);
-      }
-    }
-
-    // 2. Push local changes
+    // 2. Push local changes.
     const changes = {};
-
     const localSnippets = await getModifiedSnippetsSince(lastSync);
     if (localSnippets.length) changes.shortcuts = localSnippets;
-
     const localTags = await getModifiedTagsSince(lastSync);
     if (localTags.length) changes.snippet_tags = localTags;
-
     const localNotes = await getModifiedNotesSince(lastSync);
     if (localNotes.length) changes.notes = localNotes;
-
     const localFolders = await getModifiedFoldersSince(lastSync);
     if (localFolders.length) changes.note_folders = localFolders;
 
@@ -89,7 +106,7 @@ export async function performSync() {
       await syncPush(changes);
     }
 
-    // 3. Update last sync time
+    // 3. Update last sync time and emit pending count.
     await setLastSyncAt(pullResult.server_time);
     await emitPending();
   } finally {
