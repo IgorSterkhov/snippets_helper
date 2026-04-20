@@ -270,19 +270,23 @@ export async function checkUpdateStatus() {
   try {
     const info = await call('check_for_update');
     updateInfo = info;
-    const curLabel = formatVersion(info.current_version);
+    // For native-update slots, use the native version directly so the label
+    // can never look like a downgrade when the frontend has been OTA'd ahead.
     if (info.has_update) {
-      updateTextEl.textContent = `${curLabel} → v${info.latest_version} available`;
+      updateTextEl.textContent = `v${info.current_version} → v${info.latest_version} available`;
       updateDotEl.className = 'sb-dot sb-dot-update';
-      barEl.querySelector('.sb-update').title = 'Click to download v' + info.latest_version;
+      barEl.querySelector('.sb-update').title = `Click to download v${info.latest_version}` +
+        (frontendVersion ? ` (frontend: ${frontendVersion})` : '');
     } else if (info.build_in_progress) {
-      updateTextEl.textContent = `${curLabel} · v${info.latest_version} building...`;
+      updateTextEl.textContent = `v${info.current_version} · v${info.latest_version} building...`;
       updateDotEl.className = 'sb-dot sb-dot-building';
       barEl.querySelector('.sb-update').title = 'Build in progress, try again later';
     } else {
-      updateTextEl.textContent = `${curLabel} · up to date`;
+      // No native update — show the combined label so users see their frontend version too.
+      updateTextEl.textContent = `${formatVersion(info.current_version)} · up to date`;
       updateDotEl.className = 'sb-dot sb-dot-ok';
-      barEl.querySelector('.sb-update').title = 'Click to re-check';
+      barEl.querySelector('.sb-update').title = `Click to re-check` +
+        (frontendVersion && frontendVersion !== info.current_version ? ` (native: v${info.current_version})` : '');
     }
   } catch (e) {
     updateTextEl.textContent = 'Update check failed';

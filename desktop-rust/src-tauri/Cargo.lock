@@ -2247,7 +2247,7 @@ dependencies = [
 
 [[package]]
 name = "keyboard-helper"
-version = "0.9.9"
+version = "0.9.10"
 dependencies = [
  "arboard",
  "base64 0.22.1",
