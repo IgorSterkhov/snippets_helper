@@ -3,10 +3,15 @@ name: Release Desktop (Rust)
 on:
   push:
     tags:
+      # Full releases rebuild the native bundle + publish frontend OTA.
       - 'v*'
+      # Frontend-only releases skip the native build; the client keeps
+      # using the most recent v-tag .dmg / .exe, just with a fresh JS/CSS/HTML.
+      - 'f-*'
 
 jobs:
   release:
+    if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
     strategy:
@@ -58,7 +63,11 @@ jobs:
           args: ${{ matrix.args }}
 
   release-frontend:
+    # Runs on both v-* and f-* tags. For v-* we depend on `release` so the
+    # native assets land first; for f-* the native job is skipped and the
+    # if: always() branch still lets us run.
     needs: release
+    if: always() && (needs.release.result == 'success' || needs.release.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -71,9 +80,15 @@ jobs:
         id: meta
         run: |
           SHA=$(git rev-parse --short HEAD)
-          NATIVE="${GITHUB_REF_NAME#v}"
+          if [[ "$GITHUB_REF_NAME" == v* ]]; then
+            NATIVE="${GITHUB_REF_NAME#v}"
+          else
+            NATIVE=$(git tag --sort=-creatordate | grep -E '^v[0-9]' | head -n1 | sed 's/^v//')
+            if [ -z "$NATIVE" ]; then NATIVE="0.0.0"; fi
+          fi
           VERSION="${NATIVE}-f${SHA}"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "is_frontend_only=$([[ "$GITHUB_REF_NAME" == f-* ]] && echo true || echo false)" >> $GITHUB_OUTPUT
 
       - name: Package frontend zip
         id: pack
@@ -120,11 +135,36 @@ jobs:
           EOF
           cat frontend-version.json
 
+      - name: Carry forward native latest.json (frontend-only releases)
+        if: steps.meta.outputs.is_frontend_only == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          # Find the most recent v-tag release that actually has latest.json.
+          LATEST_V=""
+          for TAG in $(gh release list --limit 30 --json tagName --jq '.[].tagName'); do
+            if [[ "$TAG" == v* ]]; then
+              if gh release view "$TAG" --json assets --jq '.assets[].name' | grep -q '^latest\.json$'; then
+                LATEST_V="$TAG"; break
+              fi
+            fi
+          done
+          if [ -z "$LATEST_V" ]; then
+            echo "No previous v-tag release with latest.json — native updater endpoint will 404 until next v-release."
+            exit 0
+          fi
+          echo "Copying latest.json from $LATEST_V"
+          gh release download "$LATEST_V" -p latest.json -D /tmp/latest-json
+          mv /tmp/latest-json/latest.json ./latest.json
+
       - name: Upload assets
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
           files: |
             frontend-${{ steps.meta.outputs.version }}.zip
             frontend-version.json
-          fail_on_unmatched_files: true
+            latest.json
+          fail_on_unmatched_files: false

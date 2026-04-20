@@ -1,5 +1,41 @@
 # Changelog
 
+## v1.0.0 (2026-04-20)
+
+**First stable release with frontend-over-the-air (OTA) updates.**
+
+### Highlights
+- **Frontend OTA:** small UI/JS/CSS changes now install in ~2 seconds without a
+  full reinstall. Click the sync indicator in the status bar → "Apply" → the
+  WebView reloads with the new bundle. The installer stays untouched.
+- **Signed updates:** every OTA bundle is minisign-signed in CI and verified
+  on the client before it touches disk (same key as the existing native
+  updater).
+- **Auto-rollback:** if an OTA bundle fails to boot within 30 seconds, the
+  previous version is restored automatically. No way to brick the app with
+  a bad frontend release.
+- **Two release flows:**
+  - `v*` tags — full release (native .dmg / .exe **and** frontend OTA).
+  - `f-*` tags — frontend-only release (fast, skips the native build).
+  - Either path is picked up by existing clients; native updater keeps
+    working because we carry `latest.json` forward on frontend-only releases.
+- **Script templates in Exec tab:** SCP / SSH / rsync forms with VPS
+  integration, generate a command in one click.
+- **Status bar:** combined `v{native}-f{sha}` label; clicking it now runs a
+  sync and the update check.
+- **Modal fix:** form modals keep themselves open on validation errors and
+  show inline error text instead of silently dismissing.
+- **Debug escape hatch:** `KH_FORCE_SHOW=1` forces the main window visible on
+  startup — useful for headless testing or recovering if the global hotkey
+  is unavailable.
+
+### Infrastructure
+- Dockerfile + `dev-docker.sh` for headless Linux builds.
+- Browser mock (`dev.html` + `dev-mock.js`) for offline UI development,
+  covering ~95 Tauri commands.
+- CDP-based smoke tests (`dev-test.py`) — 7 automated checks across the
+  Exec modal fix and SCP template flow.
+
 ## v0.9.0 (2026-04-15)
 - New tab: VPS Management — monitor remote servers via SSH
 - Dashboard: CPU, RAM, Disk usage with color-coded progress bars
