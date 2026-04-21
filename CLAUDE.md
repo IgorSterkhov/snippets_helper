@@ -16,3 +16,5 @@
 6. Когда начинаем новый диалог, первым делом надо составить спецификацию требований которые я накидал. Спецификацию клади в папку ".workflow/specs". Также я могу сам составить спецификацию.
 
 7. Процесс релизов, OTA-обновлений, CI, локального тестирования десктопного приложения описан в `desktop-rust/RELEASES.md`. Перед любым изменением в `desktop-rust/src-tauri/`, `desktop-rust/src/` или `.github/workflows/release-desktop.yml` — прочитай этот файл. Там же — известные грабли, ключи, структура state-файлов OTA, команды для Docker/browser mock/CDP тестов.
+
+8. Процесс релизов, OTA-обновлений, сборки APK, инфраструктуры сервера и отладки мобильного приложения описан в `mobile/RELEASES.md`. Перед любым изменением в `mobile/src/`, `mobile/android/`, `mobile/package.json` или серверных путях `/opt/isterapp/releases/snippets-updates/` — прочитай этот файл. Там же — известные грабли (jcenter-фикс для sqlite-storage, Let's Encrypt вместо self-signed, обязательный `MainApplication.kt`-setup для OTA, формат zip-бандла), команды для сборки APK и OTA, ключи подписи, чек-листы перед релизом.
