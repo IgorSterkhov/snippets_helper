@@ -1,6 +1,7 @@
 import { call } from '../tauri-api.js';
 import { showToast } from '../components/toast.js';
 import { showModal } from '../components/modal.js';
+import { ALL_ICONS, iconKey, renderIcon } from '../icons/index.js';
 
 let root = null;
 let searchType = 'files';   // files | content | git
@@ -230,6 +231,15 @@ function renderRepoChips(barEl) {
       showRepoContextMenu(e.clientX, e.clientY, repo);
     });
 
+    // Drag-and-drop: chip is the source — tabs are the drop targets.
+    chip.draggable = true;
+    chip.addEventListener('dragstart', (e) => {
+      e.dataTransfer?.setData('application/x-repo-name', repo.name);
+      if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+      chip.classList.add('rs-chip-dragging');
+    });
+    chip.addEventListener('dragend', () => chip.classList.remove('rs-chip-dragging'));
+
     chip.title = repo.path;
     bar.appendChild(chip);
   }
@@ -255,7 +265,7 @@ function renderRepoChips(barEl) {
         while (existingNames.has(name)) name = `${base} (${n++})`;
         existingNames.add(name);
         try {
-          await call('add_repo', { name, path: p, color: randomPaletteColor(), group_id: groupId });
+          await call('add_repo', { name, path: p, color: randomPaletteColor(), groupId });
           addedNames.push(name);
         } catch (e) {
           showToast(`Skipped ${base}: ${e}`, 'error');
@@ -293,8 +303,7 @@ function renderTabStrip(containerEl) {
     if (t.icon) {
       const ic = document.createElement('span');
       ic.className = 'rs-tab-icon';
-      ic.textContent = t.icon;
-      if (t.color) ic.style.color = t.color;
+      renderIcon(t.icon, ic, { size: 14, color: t.color || 'currentColor' });
       btn.appendChild(ic);
     }
     btn.appendChild(document.createTextNode(t.name));
@@ -307,6 +316,40 @@ function renderTabStrip(containerEl) {
       btn.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         showGroupContextMenu(e.clientX, e.clientY, allGroups.find(g => g.id === t.id));
+      });
+    }
+    // Drag-and-drop: accept repo drops onto a tab → move repo to that group.
+    if (t.id !== 'all') {
+      btn.addEventListener('dragover', (e) => {
+        if (e.dataTransfer?.types.includes('application/x-repo-name')) {
+          e.preventDefault();
+          btn.classList.add('rs-tab-drop');
+        }
+      });
+      btn.addEventListener('dragleave', () => btn.classList.remove('rs-tab-drop'));
+      btn.addEventListener('drop', async (e) => {
+        btn.classList.remove('rs-tab-drop');
+        const name = e.dataTransfer?.getData('application/x-repo-name');
+        if (!name) return;
+        e.preventDefault();
+        const repo = allRepos.find(r => r.name === name);
+        if (!repo) return;
+        const target = t.id === 'ungrouped' ? null : t.id;
+        if (repo.group_id === target) return;
+        try {
+          await call('update_repo', {
+            oldName: repo.name,
+            name: repo.name,
+            path: repo.path,
+            color: repo.color,
+            groupId: target,
+          });
+          allRepos = await call('list_repos');
+          renderTabStrip();
+          renderRepoChips();
+        } catch (err) {
+          showToast('Move failed: ' + err, 'error');
+        }
       });
     }
     // Inline select controls on the active tab
@@ -503,7 +546,6 @@ function randomColor() {
 
 // ── Group CRUD UI ──────────────────────────────────────────
 
-const CURATED_ICONS = ['🗄','🔄','🌐','💻','📱','🔧','📄','⚡','🤖','📊','🔒','🧪','🚀','🎨','📁'];
 const PALETTE_COLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4','#84cc16','#f97316','#a855f7','#14b8a6','#f43f5e','#6366f1','#eab308','#8b949e'];
 function randomPaletteColor() { return PALETTE_COLORS[Math.floor(Math.random() * PALETTE_COLORS.length)]; }
 
@@ -513,25 +555,65 @@ async function showNewGroupModal(existing) {
     <label style="display:block;margin-bottom:4px">Name</label>
     <input id="g-name" style="width:100%" placeholder="e.g. Databases" />
     <label style="display:block;margin-top:10px;margin-bottom:4px">Icon</label>
-    <div id="g-icon-grid" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px"></div>
-    <input id="g-icon" style="width:100%" maxlength="2" placeholder="or type 1-2 chars / emoji" />
+    <input id="g-icon-search" style="width:100%;margin-bottom:6px" placeholder="Search: clickhouse, python, docker…" />
+    <div id="g-icon-grid" style="display:flex;flex-wrap:wrap;gap:3px;max-height:180px;overflow-y:auto;padding:4px;border:1px solid var(--border);border-radius:4px"></div>
+    <input id="g-icon-custom" style="width:100%;margin-top:6px" maxlength="2" placeholder="or type 1-2 chars / emoji" />
     <label style="display:block;margin-top:10px;margin-bottom:4px">Color</label>
     <div id="g-color-grid" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px"></div>
     <input id="g-color" type="color" style="width:100%;height:30px" />
   `;
   body.querySelector('#g-name').value = existing?.name || '';
-  body.querySelector('#g-icon').value = existing?.icon || '';
   body.querySelector('#g-color').value = existing?.color || randomPaletteColor();
 
-  const iconGrid = body.querySelector('#g-icon-grid');
-  for (const ic of CURATED_ICONS) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.textContent = ic;
-    btn.style.cssText = 'font-size:16px;padding:4px 8px;background:transparent;border:1px solid var(--border);border-radius:4px;cursor:pointer';
-    btn.addEventListener('click', () => { body.querySelector('#g-icon').value = ic; });
-    iconGrid.appendChild(btn);
+  // Selected icon state — stored prefixed ("emoji:🗄" / "logo:python" / "text:DB").
+  let selectedKey = existing?.icon || '';
+  // Legacy bare-emoji support: normalise on open.
+  if (selectedKey && !selectedKey.includes(':')) {
+    selectedKey = `emoji:${selectedKey}`;
   }
+
+  const iconGrid = body.querySelector('#g-icon-grid');
+  const searchInput = body.querySelector('#g-icon-search');
+  const customInput = body.querySelector('#g-icon-custom');
+
+  function renderIconGrid(filter) {
+    iconGrid.innerHTML = '';
+    const q = (filter || '').trim().toLowerCase();
+    const entries = q
+      ? ALL_ICONS.filter(ic => ic.label.toLowerCase().includes(q) || (ic.slug || '').includes(q))
+      : ALL_ICONS;
+    for (const ic of entries) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.title = ic.label;
+      const key = iconKey(ic);
+      btn.style.cssText = 'padding:4px;background:transparent;border:1px solid var(--border);border-radius:4px;cursor:pointer;width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;font-size:16px';
+      if (key === selectedKey) { btn.style.borderColor = 'var(--accent, #3b82f6)'; btn.style.background = 'rgba(59,130,246,0.08)'; }
+      renderIcon(key, btn, { size: 16, color: 'currentColor' });
+      btn.addEventListener('click', () => {
+        selectedKey = key;
+        customInput.value = '';
+        renderIconGrid(searchInput.value);
+      });
+      iconGrid.appendChild(btn);
+    }
+    if (!entries.length) {
+      const empty = document.createElement('div');
+      empty.style.cssText = 'padding:8px;color:var(--text-muted);font-size:12px';
+      empty.textContent = 'No matches — try the free-text field below.';
+      iconGrid.appendChild(empty);
+    }
+  }
+  renderIconGrid('');
+  searchInput.addEventListener('input', () => renderIconGrid(searchInput.value));
+  customInput.addEventListener('input', () => {
+    const v = customInput.value.trim();
+    selectedKey = v ? `text:${v}` : '';
+    renderIconGrid(searchInput.value);
+  });
+  // Preseed custom input if we opened with a text: value
+  if (selectedKey.startsWith('text:')) customInput.value = selectedKey.slice(5);
+
   const colorGrid = body.querySelector('#g-color-grid');
   for (const c of PALETTE_COLORS) {
     const btn = document.createElement('button');
@@ -545,12 +627,10 @@ async function showNewGroupModal(existing) {
     await showModal({
       title: existing ? 'Edit Group' : 'New Group',
       body,
-      // Refresh inside onConfirm so real errors don't get swallowed by the
-      // outer try/catch that also catches the modal's 'cancelled' rejection.
       onConfirm: async () => {
         const name = body.querySelector('#g-name').value.trim();
-        const icon = body.querySelector('#g-icon').value.trim();
         const color = body.querySelector('#g-color').value;
+        const icon = selectedKey;
         if (!name) throw new Error('Name is required');
         if (existing) {
           await call('update_repo_group', { id: existing.id, name, icon, color });
@@ -642,7 +722,14 @@ async function showEditRepoModal(repo) {
   body.querySelector('#r-color').value = repo.color;
   const sel = body.querySelector('#r-group');
   sel.innerHTML = '<option value="">Ungrouped</option>' +
-    allGroups.map(g => `<option value="${g.id}" ${g.id === repo.group_id ? 'selected' : ''}>${g.icon ? g.icon + ' ' : ''}${g.name}</option>`).join('');
+    allGroups.map(g => {
+      // <option> can't render SVG, so only inline emoji/text prefixes.
+      let prefix = '';
+      if (g.icon && g.icon.startsWith('emoji:')) prefix = g.icon.slice(6) + ' ';
+      else if (g.icon && g.icon.startsWith('text:')) prefix = g.icon.slice(5) + ' ';
+      else if (g.icon && !g.icon.includes(':')) prefix = g.icon + ' ';  // legacy bare emoji
+      return `<option value="${g.id}" ${g.id === repo.group_id ? 'selected' : ''}>${prefix}${g.name}</option>`;
+    }).join('');
 
   try {
     await showModal({
@@ -651,9 +738,9 @@ async function showEditRepoModal(repo) {
       onConfirm: async () => {
         const name = body.querySelector('#r-name').value.trim();
         const color = body.querySelector('#r-color').value;
-        const group_id = body.querySelector('#r-group').value ? parseInt(body.querySelector('#r-group').value) : null;
+        const groupId = body.querySelector('#r-group').value ? parseInt(body.querySelector('#r-group').value) : null;
         if (!name) throw new Error('Name is required');
-        await call('update_repo', { old_name: repo.name, name, path: repo.path, color, group_id });
+        await call('update_repo', { oldName: repo.name, name, path: repo.path, color, groupId });
       },
     });
     allRepos = await call('list_repos');
@@ -1142,6 +1229,14 @@ function css() {
 .rs-tab-sel:hover { opacity: 1; background: rgba(255,255,255,0.05); }
 .rs-tab-add { color: var(--text-muted); font-weight: bold; padding: 5px 8px; }
 .rs-tab-add:hover { color: var(--text); }
+.rs-tab.rs-tab-drop {
+  background: rgba(59,130,246,0.18);
+  border-color: var(--accent, #3b82f6);
+  outline: 1px dashed var(--accent, #3b82f6);
+  outline-offset: -2px;
+}
+.rs-chip-dragging { opacity: 0.45; }
+.rs-logo-icon { transition: background-color 0.15s; }
 .rs-wrap {
   display: flex;
   flex-direction: column;

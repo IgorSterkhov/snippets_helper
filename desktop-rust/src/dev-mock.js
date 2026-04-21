@@ -307,10 +307,10 @@
 
     // ── Repo Search ─────────────────────────────────────
     async list_repos() { return storeGet('repos', []); },
-    async add_repo({ name, path, color, group_id }) {
+    async add_repo({ name, path, color, groupId }) {
       const repos = storeGet('repos', []);
       if (repos.some(r => r.name === name)) throw new Error(`Repo '${name}' already exists`);
-      repos.push({ name, path, color, group_id: group_id ?? null });
+      repos.push({ name, path, color, group_id: groupId ?? null });
       storeSet('repos', repos);
     },
     async remove_repo({ name }) {
@@ -345,12 +345,12 @@
       const groups = storeGet('repo_groups', []).filter(g => g.id !== id);
       storeSet('repo_groups', groups);
     },
-    async update_repo({ old_name, name, path, color, group_id }) {
+    async update_repo({ oldName, name, path, color, groupId }) {
       const repos = storeGet('repos', []);
-      if (repos.some(r => r.name === name && r.name !== old_name)) throw new Error(`Repo '${name}' already exists`);
-      const r = repos.find(x => x.name === old_name);
-      if (!r) throw new Error(`Repo '${old_name}' not found`);
-      r.name = name; r.path = path; r.color = color; r.group_id = group_id ?? null;
+      if (repos.some(r => r.name === name && r.name !== oldName)) throw new Error(`Repo '${name}' already exists`);
+      const r = repos.find(x => x.name === oldName);
+      if (!r) throw new Error(`Repo '${oldName}' not found`);
+      r.name = name; r.path = path; r.color = color; r.group_id = groupId ?? null;
       storeSet('repos', repos);
     },
     async search_filenames() { return []; },

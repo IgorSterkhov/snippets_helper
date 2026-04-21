@@ -327,7 +327,7 @@ async def run_tests():
     async def t10_remove_repo_group_cascade():
         setup = await cdp.eval("""(async () => {
           const g = await window.__TAURI__.core.invoke('add_repo_group', { name: 'CascadeGrp', icon: '', color: '#10b981' });
-          await window.__TAURI__.core.invoke('add_repo', { name: 'cascade-repo', path: '/tmp/cascade-repo', color: '#fff', group_id: g.id });
+          await window.__TAURI__.core.invoke('add_repo', { name: 'cascade-repo', path: '/tmp/cascade-repo', color: '#fff', groupId: g.id });
           return g.id;
         })()""")
         await cdp.eval(f"window.__TAURI__.core.invoke('remove_repo_group', {{ id: {setup} }})")
@@ -341,9 +341,9 @@ async def run_tests():
 
     async def t11_edit_repo_changes_group():
         await cdp.eval("""(async () => {
-          await window.__TAURI__.core.invoke('add_repo', { name: 'test-repo', path: '/tmp/test-repo', color: '#fff', group_id: null });
+          await window.__TAURI__.core.invoke('add_repo', { name: 'test-repo', path: '/tmp/test-repo', color: '#fff', groupId: null });
           const g = await window.__TAURI__.core.invoke('add_repo_group', { name: 'TestGrp', icon: '', color: '#3b82f6' });
-          await window.__TAURI__.core.invoke('update_repo', { old_name: 'test-repo', name: 'test-repo', path: '/tmp/test-repo', color: '#fff', group_id: g.id });
+          await window.__TAURI__.core.invoke('update_repo', { oldName: 'test-repo', name: 'test-repo', path: '/tmp/test-repo', color: '#fff', groupId: g.id });
         })()""")
         result = await cdp.eval("""(async () => {
           const repos = await window.__TAURI__.core.invoke('list_repos');
