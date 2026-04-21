@@ -599,6 +599,60 @@ function showGroupContextMenu(x, y, group) {
   setTimeout(() => document.addEventListener('click', close), 0);
 }
 
+function showRepoContextMenu(x, y, repo) {
+  const menu = document.createElement('div');
+  menu.className = 'rs-ctx-menu';
+  menu.style.cssText = `position:fixed;left:${x}px;top:${y}px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:5px;padding:4px 0;z-index:9999;min-width:140px`;
+  const make = (text, handler) => {
+    const item = document.createElement('div');
+    item.textContent = text;
+    item.style.cssText = 'padding:6px 14px;cursor:pointer;font-size:12px';
+    item.addEventListener('mouseenter', () => item.style.background = 'rgba(255,255,255,0.05)');
+    item.addEventListener('mouseleave', () => item.style.background = 'transparent');
+    item.addEventListener('click', () => { menu.remove(); handler(); });
+    return item;
+  };
+  menu.appendChild(make('Edit repo', () => showEditRepoModal(repo)));
+  menu.appendChild(make('Remove repo', () => { if (confirm(`Remove "${repo.name}"?`)) removeRepo(repo.name); }));
+  document.body.appendChild(menu);
+  const close = (e) => { if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('click', close); } };
+  setTimeout(() => document.addEventListener('click', close), 0);
+}
+
+async function showEditRepoModal(repo) {
+  const body = document.createElement('div');
+  body.innerHTML = `
+    <label style="display:block;margin-bottom:4px">Name</label>
+    <input id="r-name" style="width:100%" />
+    <label style="display:block;margin-top:10px;margin-bottom:4px">Color</label>
+    <input id="r-color" type="color" style="width:100%;height:30px" />
+    <label style="display:block;margin-top:10px;margin-bottom:4px">Group</label>
+    <select id="r-group" style="width:100%"></select>
+  `;
+  body.querySelector('#r-name').value = repo.name;
+  body.querySelector('#r-color').value = repo.color;
+  const sel = body.querySelector('#r-group');
+  sel.innerHTML = '<option value="">Ungrouped</option>' +
+    allGroups.map(g => `<option value="${g.id}" ${g.id === repo.group_id ? 'selected' : ''}>${g.icon ? g.icon + ' ' : ''}${g.name}</option>`).join('');
+
+  try {
+    await showModal({
+      title: 'Edit Repo',
+      body,
+      onConfirm: async () => {
+        const name = body.querySelector('#r-name').value.trim();
+        const color = body.querySelector('#r-color').value;
+        const group_id = body.querySelector('#r-group').value ? parseInt(body.querySelector('#r-group').value) : null;
+        if (!name) throw new Error('Name is required');
+        await call('update_repo', { old_name: repo.name, name, path: repo.path, color, group_id });
+      },
+    });
+    allRepos = await call('list_repos');
+    renderTabStrip();
+    renderRepoChips();
+  } catch { /* cancelled */ }
+}
+
 // ── Settings Panel ─────────────────────────────────────────
 
 async function loadSettingsPanel() {

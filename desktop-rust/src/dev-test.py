@@ -339,6 +339,19 @@ async def run_tests():
         assert result['still_present'] and result['group_id'] is None, result
     await check('T10 remove_repo_group cascades repos to Ungrouped', t10_remove_repo_group_cascade)
 
+    async def t11_edit_repo_changes_group():
+        await cdp.eval("""(async () => {
+          await window.__TAURI__.core.invoke('add_repo', { name: 'test-repo', path: '/tmp/test-repo', color: '#fff', group_id: null });
+          const g = await window.__TAURI__.core.invoke('add_repo_group', { name: 'TestGrp', icon: '', color: '#3b82f6' });
+          await window.__TAURI__.core.invoke('update_repo', { old_name: 'test-repo', name: 'test-repo', path: '/tmp/test-repo', color: '#fff', group_id: g.id });
+        })()""")
+        result = await cdp.eval("""(async () => {
+          const repos = await window.__TAURI__.core.invoke('list_repos');
+          return repos.find(r => r.name === 'test-repo')?.group_id;
+        })()""")
+        assert isinstance(result, int), f'expected int, got {result!r}'
+    await check('T11 update_repo changes group_id', t11_edit_repo_changes_group)
+
     # Summary
     print()
     passed = sum(1 for _, ok, _ in results if ok)
