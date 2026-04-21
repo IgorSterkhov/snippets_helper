@@ -146,6 +146,31 @@ pub fn add_repo_group(
 }
 
 #[tauri::command]
+pub fn update_repo_group(
+    state: State<DbState>,
+    id: i64,
+    name: String,
+    icon: String,
+    color: String,
+) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let cid = get_computer_id();
+    let mut groups = load_groups(&conn, &cid);
+    if name.trim().is_empty() {
+        return Err("Name is required".to_string());
+    }
+    if groups.iter().any(|g| g.name == name && g.id != id) {
+        return Err(format!("Group '{}' already exists", name));
+    }
+    let found = groups.iter_mut().find(|g| g.id == id);
+    match found {
+        Some(g) => { g.name = name; g.icon = icon; g.color = color; }
+        None => return Err(format!("Group #{} not found", id)),
+    }
+    save_groups(&conn, &cid, &groups)
+}
+
+#[tauri::command]
 pub fn list_repos(state: State<DbState>) -> Result<Vec<RepoEntry>, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     let cid = get_computer_id();
