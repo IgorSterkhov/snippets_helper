@@ -232,22 +232,10 @@ function renderRepoChips(barEl) {
       showRepoContextMenu(e.clientX, e.clientY, repo);
     });
 
-    // Drag-and-drop: chip is the source — tabs are the drop targets.
-    chip.draggable = true;
-    chip.addEventListener('dragstart', (e) => {
-      draggingRepoName = repo.name;
-      // Also set dataTransfer as fallback (text/plain works everywhere) so browser
-      // doesn't disable the drag entirely when dataTransfer is empty.
-      if (e.dataTransfer) {
-        e.dataTransfer.setData('text/plain', repo.name);
-        e.dataTransfer.effectAllowed = 'move';
-      }
-      chip.classList.add('rs-chip-dragging');
-    });
-    chip.addEventListener('dragend', () => {
-      draggingRepoName = null;
-      chip.classList.remove('rs-chip-dragging');
-    });
+    // Pointer-event-based drag: HTML5 DnD is unreliable inside Tauri on some
+    // platforms (Windows WebView2 eats drag events for file-drop; macOS WebKit
+    // strips custom MIME types in dragover). This runs identically everywhere.
+    chip.addEventListener('pointerdown', (e) => onChipPointerDown(e, repo, chip));
 
     chip.title = repo.path;
     bar.appendChild(chip);
@@ -293,6 +281,86 @@ function renderRepoChips(barEl) {
   bar.appendChild(addBtn);
 }
 
+// ── Pointer-based drag-drop (chip → tab) ──────────────────────
+
+function onChipPointerDown(e, repo, chipEl) {
+  // Only primary button; ignore text-selection drags.
+  if (e.button !== 0) return;
+  const startX = e.clientX, startY = e.clientY;
+  const DRAG_THRESHOLD = 4;   // px
+  let dragging = false;
+  let ghost = null;
+  let lastHoveredTab = null;
+
+  function moveGhost(x, y) {
+    if (!ghost) return;
+    ghost.style.left = (x + 8) + 'px';
+    ghost.style.top  = (y + 8) + 'px';
+  }
+
+  function onMove(ev) {
+    if (!dragging) {
+      const dx = ev.clientX - startX, dy = ev.clientY - startY;
+      if (dx * dx + dy * dy < DRAG_THRESHOLD * DRAG_THRESHOLD) return;
+      dragging = true;
+      draggingRepoName = repo.name;
+      chipEl.classList.add('rs-chip-dragging');
+      ghost = chipEl.cloneNode(true);
+      ghost.classList.add('rs-chip-ghost');
+      ghost.style.cssText += 'position:fixed;pointer-events:none;z-index:99999;opacity:0.85;';
+      document.body.appendChild(ghost);
+    }
+    moveGhost(ev.clientX, ev.clientY);
+    const tab = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('[data-drop-target-for="repo"]');
+    if (tab !== lastHoveredTab) {
+      lastHoveredTab?.classList.remove('rs-tab-drop');
+      lastHoveredTab = tab;
+      lastHoveredTab?.classList.add('rs-tab-drop');
+    }
+  }
+
+  async function onUp(ev) {
+    document.removeEventListener('pointermove', onMove);
+    document.removeEventListener('pointerup', onUp);
+    document.removeEventListener('pointercancel', onUp);
+    if (!dragging) return;  // plain click — let click handler do its thing
+    ev.preventDefault();
+    ev.stopPropagation();
+    chipEl.classList.remove('rs-chip-dragging');
+    ghost?.remove();
+    lastHoveredTab?.classList.remove('rs-tab-drop');
+    const tab = lastHoveredTab;
+    draggingRepoName = null;
+    if (!tab) return;
+    const targetId = tab.dataset.tabId;
+    const target = targetId === 'ungrouped'
+      ? null
+      : (Number.isFinite(+targetId) ? +targetId : null);
+    const r = allRepos.find(x => x.name === repo.name);
+    if (!r || r.group_id === target) return;
+    try {
+      await call('update_repo', {
+        oldName: r.name, name: r.name, path: r.path, color: r.color, groupId: target,
+      });
+      allRepos = await call('list_repos');
+      renderTabStrip();
+      renderRepoChips();
+    } catch (err) {
+      showToast('Move failed: ' + err, 'error');
+    }
+    // Suppress the chip's click handler that would otherwise toggle active state.
+    chipEl.addEventListener('click', function kill(ev2) {
+      ev2.stopPropagation();
+      ev2.preventDefault();
+      chipEl.removeEventListener('click', kill, true);
+    }, { capture: true, once: true });
+  }
+
+  document.addEventListener('pointermove', onMove);
+  document.addEventListener('pointerup', onUp);
+  document.addEventListener('pointercancel', onUp);
+}
+
 function renderTabStrip(containerEl) {
   const bar = containerEl || root.querySelector('#rs-tab-strip');
   if (!bar) return;
@@ -327,47 +395,10 @@ function renderTabStrip(containerEl) {
         showGroupContextMenu(e.clientX, e.clientY, allGroups.find(g => g.id === t.id));
       });
     }
-    // Drag-and-drop: accept repo drops onto a tab → move repo to that group.
+    // Drag-drop targets: all tabs except "All". Markers only — actual drop
+    // handling runs in the global pointerup from onChipPointerDown.
     if (t.id !== 'all') {
-      btn.addEventListener('dragover', (e) => {
-        // Module-level draggingRepoName is set by the chip's dragstart; we can't
-        // read `dataTransfer.getData` here (protected in dragover), and custom
-        // MIME types may be stripped from `types` by WebKit.
-        if (draggingRepoName) {
-          e.preventDefault();
-          if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-          btn.classList.add('rs-tab-drop');
-        }
-      });
-      btn.addEventListener('dragenter', (e) => {
-        if (draggingRepoName) e.preventDefault();
-      });
-      btn.addEventListener('dragleave', () => btn.classList.remove('rs-tab-drop'));
-      btn.addEventListener('drop', async (e) => {
-        btn.classList.remove('rs-tab-drop');
-        // Prefer module state; fall back to text/plain if needed.
-        const name = draggingRepoName || e.dataTransfer?.getData('text/plain') || '';
-        if (!name) return;
-        e.preventDefault();
-        const repo = allRepos.find(r => r.name === name);
-        if (!repo) return;
-        const target = t.id === 'ungrouped' ? null : t.id;
-        if (repo.group_id === target) return;
-        try {
-          await call('update_repo', {
-            oldName: repo.name,
-            name: repo.name,
-            path: repo.path,
-            color: repo.color,
-            groupId: target,
-          });
-          allRepos = await call('list_repos');
-          renderTabStrip();
-          renderRepoChips();
-        } catch (err) {
-          showToast('Move failed: ' + err, 'error');
-        }
-      });
+      btn.dataset.dropTargetFor = 'repo';
     }
     // Inline select controls on the active tab
     if (t.id === activeTabId) {
@@ -1352,6 +1383,11 @@ function css() {
   background: transparent;
   color: var(--text);
   user-select: none;
+  touch-action: none;  /* keep pointer events exclusive during drag */
+}
+.rs-chip-ghost {
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  transform: translateZ(0);
 }
 .rs-repo-chip:hover {
   border-color: var(--text-muted);
