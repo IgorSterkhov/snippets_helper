@@ -16,6 +16,7 @@ let allRepos = [];            // RepoEntry[]
 let allGroups = [];           // RepoGroup[]
 let activeTabId = 'all';      // 'all' | group.id (number) | 'ungrouped'
 let contextLines = 3;
+let draggingRepoName = null;  // populated during chip drag — tab drop-targets check this instead of dataTransfer (WebKit strips custom MIME types in dragover)
 
 export function init(container) {
   root = container;
@@ -234,11 +235,19 @@ function renderRepoChips(barEl) {
     // Drag-and-drop: chip is the source — tabs are the drop targets.
     chip.draggable = true;
     chip.addEventListener('dragstart', (e) => {
-      e.dataTransfer?.setData('application/x-repo-name', repo.name);
-      if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+      draggingRepoName = repo.name;
+      // Also set dataTransfer as fallback (text/plain works everywhere) so browser
+      // doesn't disable the drag entirely when dataTransfer is empty.
+      if (e.dataTransfer) {
+        e.dataTransfer.setData('text/plain', repo.name);
+        e.dataTransfer.effectAllowed = 'move';
+      }
       chip.classList.add('rs-chip-dragging');
     });
-    chip.addEventListener('dragend', () => chip.classList.remove('rs-chip-dragging'));
+    chip.addEventListener('dragend', () => {
+      draggingRepoName = null;
+      chip.classList.remove('rs-chip-dragging');
+    });
 
     chip.title = repo.path;
     bar.appendChild(chip);
@@ -321,15 +330,23 @@ function renderTabStrip(containerEl) {
     // Drag-and-drop: accept repo drops onto a tab → move repo to that group.
     if (t.id !== 'all') {
       btn.addEventListener('dragover', (e) => {
-        if (e.dataTransfer?.types.includes('application/x-repo-name')) {
+        // Module-level draggingRepoName is set by the chip's dragstart; we can't
+        // read `dataTransfer.getData` here (protected in dragover), and custom
+        // MIME types may be stripped from `types` by WebKit.
+        if (draggingRepoName) {
           e.preventDefault();
+          if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
           btn.classList.add('rs-tab-drop');
         }
+      });
+      btn.addEventListener('dragenter', (e) => {
+        if (draggingRepoName) e.preventDefault();
       });
       btn.addEventListener('dragleave', () => btn.classList.remove('rs-tab-drop'));
       btn.addEventListener('drop', async (e) => {
         btn.classList.remove('rs-tab-drop');
-        const name = e.dataTransfer?.getData('application/x-repo-name');
+        // Prefer module state; fall back to text/plain if needed.
+        const name = draggingRepoName || e.dataTransfer?.getData('text/plain') || '';
         if (!name) return;
         e.preventDefault();
         const repo = allRepos.find(r => r.name === name);
