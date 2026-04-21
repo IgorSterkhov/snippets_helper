@@ -323,6 +323,22 @@ async def run_tests():
         await wait_until(cdp, "[...document.querySelectorAll('.rs-tab')].some(b => b.textContent.includes('Airflow'))", timeout=3)
     await check('T9 create group via UI', t9_create_group_via_ui)
 
+    # ── T10: remove_repo_group cascades repos to Ungrouped ────
+    async def t10_remove_repo_group_cascade():
+        setup = await cdp.eval("""(async () => {
+          const g = await window.__TAURI__.core.invoke('add_repo_group', { name: 'CascadeGrp', icon: '', color: '#10b981' });
+          await window.__TAURI__.core.invoke('add_repo', { name: 'cascade-repo', path: '/tmp/cascade-repo', color: '#fff', group_id: g.id });
+          return g.id;
+        })()""")
+        await cdp.eval(f"window.__TAURI__.core.invoke('remove_repo_group', {{ id: {setup} }})")
+        result = await cdp.eval("""(async () => {
+          const repos = await window.__TAURI__.core.invoke('list_repos');
+          const r = repos.find(x => x.name === 'cascade-repo');
+          return { still_present: !!r, group_id: r?.group_id };
+        })()""")
+        assert result['still_present'] and result['group_id'] is None, result
+    await check('T10 remove_repo_group cascades repos to Ungrouped', t10_remove_repo_group_cascade)
+
     # Summary
     print()
     passed = sum(1 for _, ok, _ in results if ok)

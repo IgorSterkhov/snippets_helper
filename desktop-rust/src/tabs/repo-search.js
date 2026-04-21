@@ -274,6 +274,12 @@ function renderTabStrip(containerEl) {
       renderTabStrip();
       renderRepoChips();
     });
+    if (typeof t.id === 'number') {
+      btn.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        showGroupContextMenu(e.clientX, e.clientY, allGroups.find(g => g.id === t.id));
+      });
+    }
     // Inline select controls on the active tab
     if (t.id === activeTabId) {
       const selAll = document.createElement('span');
@@ -529,6 +535,40 @@ async function showNewGroupModal(existing) {
       },
     });
   } catch { /* user cancelled */ }
+}
+
+function showGroupContextMenu(x, y, group) {
+  if (!group) return;
+  const menu = document.createElement('div');
+  menu.className = 'rs-ctx-menu';
+  menu.style.cssText = `position:fixed;left:${x}px;top:${y}px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:5px;padding:4px 0;z-index:9999;min-width:140px`;
+  const make = (text, handler) => {
+    const item = document.createElement('div');
+    item.textContent = text;
+    item.style.cssText = 'padding:6px 14px;cursor:pointer;font-size:12px';
+    item.addEventListener('mouseenter', () => item.style.background = 'rgba(255,255,255,0.05)');
+    item.addEventListener('mouseleave', () => item.style.background = 'transparent');
+    item.addEventListener('click', () => { menu.remove(); handler(); });
+    return item;
+  };
+  menu.appendChild(make('Edit group', () => showNewGroupModal(group)));
+  menu.appendChild(make('Delete group', async () => {
+    try {
+      await showModal({
+        title: 'Delete Group',
+        body: `Delete group "${group.name}"? Repos will move to Ungrouped.`,
+        onConfirm: async () => { await call('remove_repo_group', { id: group.id }); },
+      });
+      if (activeTabId === group.id) activeTabId = 'all';
+      allGroups = await call('list_repo_groups');
+      allRepos = await call('list_repos');
+      renderTabStrip();
+      renderRepoChips();
+    } catch { /* cancelled */ }
+  }));
+  document.body.appendChild(menu);
+  const close = (e) => { if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('click', close); } };
+  setTimeout(() => document.addEventListener('click', close), 0);
 }
 
 // ── Settings Panel ─────────────────────────────────────────
