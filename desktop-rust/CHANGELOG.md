@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.1.0 (2026-04-21)
+
+- Repo Search: groups — organise repos into named, colored, icon-tagged
+  groups. Tab strip above the chip row filters both the visible chips
+  and the search scope per-tab.
+- Each active tab carries inline ✓ / ⊘ shortcuts for bulk
+  select / deselect within its scope.
+- Right-click on a group tab to rename, recolour, change icon, or delete
+  (repos keep existing, move to Ungrouped).
+- Add Repo → multi-folder select in one dialog; each folder becomes a
+  new repo with auto-derived name / random color, in the currently
+  active tab's group.
+- Right-click on a repo chip → Edit (name / color / group) or Remove.
+
 ## v1.0.0 (2026-04-20)
 
 **First stable release with frontend-over-the-air (OTA) updates.**
