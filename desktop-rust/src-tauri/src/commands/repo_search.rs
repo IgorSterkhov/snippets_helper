@@ -170,6 +170,34 @@ pub fn update_repo_group(
     save_groups(&conn, &cid, &groups)
 }
 
+fn clear_group_from_repos(repos: &mut [RepoEntry], gid: i64) -> bool {
+    let mut changed = false;
+    for r in repos.iter_mut() {
+        if r.group_id == Some(gid) {
+            r.group_id = None;
+            changed = true;
+        }
+    }
+    changed
+}
+
+#[tauri::command]
+pub fn remove_repo_group(state: State<DbState>, id: i64) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let cid = get_computer_id();
+
+    // 1. Cascade: clear group_id on every repo that pointed at this group.
+    let mut repos = load_repos(&conn, &cid);
+    if clear_group_from_repos(&mut repos, id) {
+        save_repos(&conn, &cid, &repos)?;
+    }
+
+    // 2. Drop the group.
+    let mut groups = load_groups(&conn, &cid);
+    groups.retain(|g| g.id != id);
+    save_groups(&conn, &cid, &groups)
+}
+
 #[tauri::command]
 pub fn list_repos(state: State<DbState>) -> Result<Vec<RepoEntry>, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
@@ -829,6 +857,21 @@ mod tests {
         let parsed: RepoEntry = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.name, "test");
         assert_eq!(parsed.color, "#f0883e");
+    }
+
+    #[test]
+    fn clear_group_from_repos_only_touches_matching_entries() {
+        let mut repos = vec![
+            RepoEntry { name: "a".into(), path: "/a".into(), color: "#fff".into(), group_id: Some(1) },
+            RepoEntry { name: "b".into(), path: "/b".into(), color: "#fff".into(), group_id: Some(2) },
+            RepoEntry { name: "c".into(), path: "/c".into(), color: "#fff".into(), group_id: None },
+        ];
+        assert!(clear_group_from_repos(&mut repos, 1));
+        assert!(repos[0].group_id.is_none());
+        assert_eq!(repos[1].group_id, Some(2));
+        assert!(repos[2].group_id.is_none());
+        // Second call on the same id — nothing changes.
+        assert!(!clear_group_from_repos(&mut repos, 1));
     }
 
     #[test]
