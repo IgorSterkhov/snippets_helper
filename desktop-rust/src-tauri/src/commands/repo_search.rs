@@ -14,11 +14,22 @@ const SKIP_DIRS: &[&str] = &[
 
 // ── Data types ───────────────────────────────────────────
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RepoEntry {
     pub name: String,
     pub path: String,
     pub color: String,
+    #[serde(default)]
+    pub group_id: Option<i64>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RepoGroup {
+    pub id: i64,
+    pub name: String,
+    pub icon: String,
+    pub color: String,
+    pub sort_order: i32,
 }
 
 #[derive(Serialize, Clone)]
@@ -102,7 +113,7 @@ pub fn add_repo(state: State<DbState>, name: String, path: String, color: String
     if repos.iter().any(|r| r.name == name) {
         return Err(format!("Repo with name '{}' already exists", name));
     }
-    repos.push(RepoEntry { name, path, color });
+    repos.push(RepoEntry { name, path, color, group_id: None });
     save_repos(&conn, &cid, &repos)
 }
 
@@ -740,10 +751,20 @@ mod tests {
             name: "test".to_string(),
             path: "/home/user/test".to_string(),
             color: "#f0883e".to_string(),
+            group_id: None,
         };
         let json = serde_json::to_string(&entry).unwrap();
         let parsed: RepoEntry = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.name, "test");
         assert_eq!(parsed.color, "#f0883e");
+    }
+
+    #[test]
+    fn legacy_repo_entry_deserialises_with_none_group() {
+        let legacy = r##"[{"name":"r1","path":"/tmp/r1","color":"#3b82f6"}]"##;
+        let parsed: Vec<RepoEntry> = serde_json::from_str(legacy).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].name, "r1");
+        assert!(parsed[0].group_id.is_none());
     }
 }
