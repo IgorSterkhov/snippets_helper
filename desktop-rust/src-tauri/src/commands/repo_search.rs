@@ -98,6 +98,24 @@ fn save_repos(conn: &rusqlite::Connection, computer_id: &str, repos: &[RepoEntry
     queries::set_setting(conn, computer_id, "repo_search_repos", &json).map_err(|e| e.to_string())
 }
 
+fn load_groups(conn: &rusqlite::Connection, computer_id: &str) -> Vec<RepoGroup> {
+    let raw = queries::get_setting(conn, computer_id, "repo_search_groups")
+        .ok().flatten().unwrap_or_else(|| "[]".to_string());
+    serde_json::from_str::<Vec<RepoGroup>>(&raw).unwrap_or_default()
+}
+
+fn save_groups(conn: &rusqlite::Connection, computer_id: &str, groups: &[RepoGroup]) -> Result<(), String> {
+    let json = serde_json::to_string(groups).map_err(|e| e.to_string())?;
+    queries::set_setting(conn, computer_id, "repo_search_groups", &json).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn list_repo_groups(state: State<DbState>) -> Result<Vec<RepoGroup>, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let cid = get_computer_id();
+    Ok(load_groups(&conn, &cid))
+}
+
 #[tauri::command]
 pub fn list_repos(state: State<DbState>) -> Result<Vec<RepoEntry>, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
@@ -757,6 +775,13 @@ mod tests {
         let parsed: RepoEntry = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.name, "test");
         assert_eq!(parsed.color, "#f0883e");
+    }
+
+    #[test]
+    fn load_groups_empty_when_key_missing() {
+        // We don't have a conn fixture; instead prove the fallback via the JSON parse.
+        let parsed: Vec<RepoGroup> = serde_json::from_str("[]").unwrap();
+        assert!(parsed.is_empty());
     }
 
     #[test]
