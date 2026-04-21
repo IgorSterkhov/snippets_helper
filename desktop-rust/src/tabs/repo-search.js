@@ -26,6 +26,7 @@ export function init(container) {
 
   loadInitData().then(() => {
     root.appendChild(buildLayout());
+    window.__rsRefreshAfterGroupDelete = reloadAndRerender;
   });
 }
 
@@ -565,6 +566,17 @@ async function showNewGroupModal(existing) {
   } catch { /* user cancelled */ }
 }
 
+async function reloadAndRerender() {
+  allGroups = await call('list_repo_groups');
+  allRepos = await call('list_repos');
+  // Clamp activeTabId if it points at a now-deleted group.
+  if (typeof activeTabId === 'number' && !allGroups.some(g => g.id === activeTabId)) {
+    activeTabId = 'all';
+  }
+  renderTabStrip();
+  renderRepoChips();
+}
+
 function showGroupContextMenu(x, y, group) {
   if (!group) return;
   const menu = document.createElement('div');
@@ -588,10 +600,7 @@ function showGroupContextMenu(x, y, group) {
         onConfirm: async () => { await call('remove_repo_group', { id: group.id }); },
       });
       if (activeTabId === group.id) activeTabId = 'all';
-      allGroups = await call('list_repo_groups');
-      allRepos = await call('list_repos');
-      renderTabStrip();
-      renderRepoChips();
+      await reloadAndRerender();
     } catch { /* cancelled */ }
   }));
   document.body.appendChild(menu);

@@ -352,6 +352,33 @@ async def run_tests():
         assert isinstance(result, int), f'expected int, got {result!r}'
     await check('T11 update_repo changes group_id', t11_edit_repo_changes_group)
 
+    # ── T12: delete active tab → fallback to All ──────────────
+    async def t12_delete_active_tab_falls_back_to_all():
+        gid = await cdp.eval("""(async () => {
+          const g = await window.__TAURI__.core.invoke('add_repo_group', { name: 'Trash', icon: '', color: '#ef4444' });
+          return g.id;
+        })()""")
+        # Refresh the tab strip so 'Trash' tab appears (mirrors what the UI does after add_repo_group)
+        await cdp.eval("window.__rsRefreshAfterGroupDelete && window.__rsRefreshAfterGroupDelete()")
+        await wait_until(cdp, "[...document.querySelectorAll('.rs-tab')].some(b => b.textContent.includes('Trash'))", timeout=3)
+        # Activate the 'Trash' tab via click so activeTabId == gid
+        await cdp.eval("""[...document.querySelectorAll('.rs-tab')].find(b => b.textContent.includes('Trash')).click()""")
+        await wait_until(cdp, "[...document.querySelectorAll('.rs-tab.active')].some(b => b.textContent.includes('Trash'))", timeout=2)
+        # Simulate the context-menu delete path: backend delete + UI reset
+        await cdp.eval(f"""(async () => {{
+          await window.__TAURI__.core.invoke('remove_repo_group', {{ id: {gid} }});
+          // These two lines mirror what showGroupContextMenu's Delete handler does:
+          // (mockable via the exposed hook)
+          window.__rsRefreshAfterGroupDelete && window.__rsRefreshAfterGroupDelete();
+        }})()""")
+        # Wait a tick, then assert UI has 'All' active and 'Trash' is gone.
+        await wait_until(cdp,
+          "![...document.querySelectorAll('.rs-tab')].some(b => b.textContent.includes('Trash'))",
+          timeout=3)
+        active_label = await cdp.eval("document.querySelector('.rs-tab.active')?.textContent || ''")
+        assert 'All' in active_label, f'expected All active, got {active_label!r}'
+    await check('T12 delete active tab → fallback to All', t12_delete_active_tab_falls_back_to_all)
+
     # Summary
     print()
     passed = sum(1 for _, ok, _ in results if ok)
