@@ -235,14 +235,20 @@ pub fn list_repos(state: State<DbState>) -> Result<Vec<RepoEntry>, String> {
 }
 
 #[tauri::command]
-pub fn add_repo(state: State<DbState>, name: String, path: String, color: String) -> Result<(), String> {
+pub fn add_repo(
+    state: State<DbState>,
+    name: String,
+    path: String,
+    color: String,
+    group_id: Option<i64>,
+) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     let cid = get_computer_id();
     let mut repos = load_repos(&conn, &cid);
     if repos.iter().any(|r| r.name == name) {
         return Err(format!("Repo with name '{}' already exists", name));
     }
-    repos.push(RepoEntry { name, path, color, group_id: None });
+    repos.push(RepoEntry { name, path, color, group_id });
     save_repos(&conn, &cid, &repos)
 }
 
