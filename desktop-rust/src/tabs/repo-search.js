@@ -11,6 +11,8 @@ let gitResults = [];
 let settingsOpen = false;
 let activeRepos = new Set();  // names of selected repos
 let allRepos = [];            // RepoEntry[]
+let allGroups = [];           // RepoGroup[]
+let activeTabId = 'all';      // 'all' | group.id (number) | 'ungrouped'
 let contextLines = 3;
 
 export function init(container) {
@@ -27,27 +29,37 @@ export function init(container) {
 }
 
 export function destroy() {
-  if (root) {
-    root.innerHTML = '';
-  }
+  if (root) root.innerHTML = '';
   results = [];
+  activeTabId = 'all';   // reset so the next init starts clean
 }
 
 async function loadInitData() {
   try {
     allRepos = await call('list_repos');
-    // All repos active by default
+    allGroups = await call('list_repo_groups');
     activeRepos = new Set(allRepos.map(r => r.name));
+    // Clamp activeTabId if it points at a now-deleted group.
+    if (typeof activeTabId === 'number' && !allGroups.some(g => g.id === activeTabId)) {
+      activeTabId = 'all';
+    }
   } catch {
-    allRepos = [];
-    activeRepos = new Set();
+    allRepos = []; allGroups = []; activeRepos = new Set(); activeTabId = 'all';
   }
   try {
     const val = await call('get_setting', { key: 'search_context_lines' });
     contextLines = parseInt(val) || 3;
-  } catch {
-    contextLines = 3;
-  }
+  } catch { contextLines = 3; }
+}
+
+function reposForActiveTab() {
+  if (activeTabId === 'all') return allRepos;
+  if (activeTabId === 'ungrouped') return allRepos.filter(r => !r.group_id);
+  return allRepos.filter(r => r.group_id === activeTabId);
+}
+
+function hasUngroupedRepos() {
+  return allRepos.some(r => !r.group_id);
 }
 
 // ── Layout ─────────────────────────────────────────────────
