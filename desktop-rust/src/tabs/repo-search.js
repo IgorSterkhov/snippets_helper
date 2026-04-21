@@ -224,12 +224,9 @@ function renderRepoChips(barEl) {
       renderRepoChips();
     });
 
-    // Right-click to remove
     chip.addEventListener('contextmenu', (e) => {
       e.preventDefault();
-      if (confirm(`Remove repo "${repo.name}"?`)) {
-        removeRepo(repo.name);
-      }
+      showRepoContextMenu(e.clientX, e.clientY, repo);
     });
 
     chip.title = repo.path;
@@ -241,7 +238,38 @@ function renderRepoChips(barEl) {
   addBtn.className = 'rs-repo-chip rs-repo-add';
   addBtn.textContent = '+';
   addBtn.title = 'Add repository';
-  addBtn.addEventListener('click', showAddRepoModal);
+  addBtn.addEventListener('click', async () => {
+    try {
+      const { open } = window.__TAURI__.dialog;
+      const picked = await open({ multiple: true, directory: true });
+      if (!picked) return;
+      const paths = Array.isArray(picked) ? picked : [picked];
+      const existingNames = new Set(allRepos.map(r => r.name));
+      const groupId = (typeof activeTabId === 'number') ? activeTabId : null;
+      const addedNames = [];
+      for (const p of paths) {
+        let base = p.split(/[\\/]/).filter(Boolean).pop() || 'repo';
+        let name = base;
+        let n = 2;
+        while (existingNames.has(name)) name = `${base} (${n++})`;
+        existingNames.add(name);
+        try {
+          await call('add_repo', { name, path: p, color: randomPaletteColor(), group_id: groupId });
+          addedNames.push(name);
+        } catch (e) {
+          showToast(`Skipped ${base}: ${e}`, 'error');
+        }
+      }
+      allRepos = await call('list_repos');
+      // Activate only what we just added (matching by the literal name we chose,
+      // not fuzzy path-suffix matching — that's broken for auto-deduped names).
+      for (const n of addedNames) activeRepos.add(n);
+      renderTabStrip();
+      renderRepoChips();
+    } catch (e) {
+      showToast('Error: ' + e, 'error');
+    }
+  });
   bar.appendChild(addBtn);
 }
 
