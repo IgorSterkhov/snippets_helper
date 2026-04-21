@@ -311,6 +311,18 @@ async def run_tests():
         assert result['count'] == 1 and result['name'] == 'Databases', result
     await check('T8 create group via mock', t8_create_group)
 
+    # ── T9: create group via UI (New Group modal) ─────────────
+    async def t9_create_group_via_ui():
+        # Navigate to Repo Search tab first
+        await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"repo-search\"]').click()")
+        await wait_until(cdp, "!!document.querySelector('.rs-tab-add')", timeout=5)
+        await cdp.eval("document.querySelector('.rs-tab-add').click()")
+        await wait_until(cdp, "!!document.querySelector('#g-name')", timeout=3)
+        await cdp.eval("document.querySelector('#g-name').value='Airflow'; document.querySelector('#g-name').dispatchEvent(new Event('input'))")
+        await cdp.eval("[...document.querySelectorAll('.modal-overlay')].pop().querySelector('.modal-actions button:last-child').click()")
+        await wait_until(cdp, "[...document.querySelectorAll('.rs-tab')].some(b => b.textContent.includes('Airflow'))", timeout=3)
+    await check('T9 create group via UI', t9_create_group_via_ui)
+
     # Summary
     print()
     passed = sum(1 for _, ok, _ in results if ok)

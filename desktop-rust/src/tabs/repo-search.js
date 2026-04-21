@@ -1,5 +1,6 @@
 import { call } from '../tauri-api.js';
 import { showToast } from '../components/toast.js';
+import { showModal } from '../components/modal.js';
 
 let root = null;
 let searchType = 'files';   // files | content | git
@@ -296,7 +297,7 @@ function renderTabStrip(containerEl) {
   addBtn.className = 'rs-tab rs-tab-add';
   addBtn.textContent = '+';
   addBtn.title = 'New group';
-  addBtn.addEventListener('click', showNewGroupModal);
+  addBtn.addEventListener('click', () => showNewGroupModal());
   bar.appendChild(addBtn);
 }
 
@@ -463,6 +464,71 @@ function showAddRepoModal(existing = null) {
 function randomColor() {
   const colors = ['#f0883e', '#3fb950', '#58a6ff', '#d2a8ff', '#f778ba', '#79c0ff', '#ffa657', '#7ee787'];
   return colors[Math.floor(Math.random() * colors.length)];
+}
+
+// ── Group CRUD UI ──────────────────────────────────────────
+
+const CURATED_ICONS = ['🗄','🔄','🌐','💻','📱','🔧','📄','⚡','🤖','📊','🔒','🧪','🚀','🎨','📁'];
+const PALETTE_COLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4','#84cc16','#f97316','#a855f7','#14b8a6','#f43f5e','#6366f1','#eab308','#8b949e'];
+function randomPaletteColor() { return PALETTE_COLORS[Math.floor(Math.random() * PALETTE_COLORS.length)]; }
+
+async function showNewGroupModal(existing) {
+  const body = document.createElement('div');
+  body.innerHTML = `
+    <label style="display:block;margin-bottom:4px">Name</label>
+    <input id="g-name" style="width:100%" placeholder="e.g. Databases" />
+    <label style="display:block;margin-top:10px;margin-bottom:4px">Icon</label>
+    <div id="g-icon-grid" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px"></div>
+    <input id="g-icon" style="width:100%" maxlength="2" placeholder="or type 1-2 chars / emoji" />
+    <label style="display:block;margin-top:10px;margin-bottom:4px">Color</label>
+    <div id="g-color-grid" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px"></div>
+    <input id="g-color" type="color" style="width:100%;height:30px" />
+  `;
+  body.querySelector('#g-name').value = existing?.name || '';
+  body.querySelector('#g-icon').value = existing?.icon || '';
+  body.querySelector('#g-color').value = existing?.color || randomPaletteColor();
+
+  const iconGrid = body.querySelector('#g-icon-grid');
+  for (const ic of CURATED_ICONS) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = ic;
+    btn.style.cssText = 'font-size:16px;padding:4px 8px;background:transparent;border:1px solid var(--border);border-radius:4px;cursor:pointer';
+    btn.addEventListener('click', () => { body.querySelector('#g-icon').value = ic; });
+    iconGrid.appendChild(btn);
+  }
+  const colorGrid = body.querySelector('#g-color-grid');
+  for (const c of PALETTE_COLORS) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.style.cssText = `width:20px;height:20px;background:${c};border:1px solid var(--border);border-radius:3px;cursor:pointer;padding:0`;
+    btn.addEventListener('click', () => { body.querySelector('#g-color').value = c; });
+    colorGrid.appendChild(btn);
+  }
+
+  try {
+    await showModal({
+      title: existing ? 'Edit Group' : 'New Group',
+      body,
+      // Refresh inside onConfirm so real errors don't get swallowed by the
+      // outer try/catch that also catches the modal's 'cancelled' rejection.
+      onConfirm: async () => {
+        const name = body.querySelector('#g-name').value.trim();
+        const icon = body.querySelector('#g-icon').value.trim();
+        const color = body.querySelector('#g-color').value;
+        if (!name) throw new Error('Name is required');
+        if (existing) {
+          await call('update_repo_group', { id: existing.id, name, icon, color });
+        } else {
+          const g = await call('add_repo_group', { name, icon, color });
+          activeTabId = g.id;
+        }
+        allGroups = await call('list_repo_groups');
+        renderTabStrip();
+        renderRepoChips();
+      },
+    });
+  } catch { /* user cancelled */ }
 }
 
 // ── Settings Panel ─────────────────────────────────────────
