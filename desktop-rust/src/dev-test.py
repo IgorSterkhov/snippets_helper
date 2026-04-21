@@ -301,6 +301,16 @@ async def run_tests():
         assert 'src.txt' in cmd and 'dst.txt' in cmd, cmd
     await check('T7 SCP template fills command textarea', t7)
 
+    # ── T8: create group via mock ─────────────────────────────
+    async def t8_create_group():
+        result = await cdp.eval("""(async () => {
+          const g = await window.__TAURI__.core.invoke('add_repo_group', { name: 'Databases', icon: '🗄', color: '#3b82f6' });
+          const list = await window.__TAURI__.core.invoke('list_repo_groups');
+          return { created: g, count: list.length, name: list[0]?.name };
+        })()""")
+        assert result['count'] == 1 and result['name'] == 'Databases', result
+    await check('T8 create group via mock', t8_create_group)
+
     # Summary
     print()
     passed = sum(1 for _, ok, _ in results if ok)

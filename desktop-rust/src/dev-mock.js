@@ -307,13 +307,51 @@
 
     // ── Repo Search ─────────────────────────────────────
     async list_repos() { return storeGet('repos', []); },
-    async add_repo(args) {
+    async add_repo({ name, path, color, group_id }) {
       const repos = storeGet('repos', []);
-      repos.push(args);
+      if (repos.some(r => r.name === name)) throw new Error(`Repo '${name}' already exists`);
+      repos.push({ name, path, color, group_id: group_id ?? null });
       storeSet('repos', repos);
     },
     async remove_repo({ name }) {
       storeSet('repos', storeGet('repos', []).filter(r => r.name !== name));
+    },
+    // Groups
+    async list_repo_groups() {
+      return storeGet('repo_groups', []);
+    },
+    async add_repo_group({ name, icon, color }) {
+      if (!name || !name.trim()) throw new Error('Name is required');
+      const groups = storeGet('repo_groups', []);
+      if (groups.some(g => g.name === name)) throw new Error(`Group '${name}' already exists`);
+      const id = (groups.reduce((m, g) => Math.max(m, g.id), 0)) + 1;
+      const group = { id, name, icon: icon || '', color: color || '#3b82f6', sort_order: 0 };
+      groups.push(group);
+      storeSet('repo_groups', groups);
+      return group;
+    },
+    async update_repo_group({ id, name, icon, color }) {
+      const groups = storeGet('repo_groups', []);
+      if (groups.some(g => g.name === name && g.id !== id)) throw new Error(`Group '${name}' already exists`);
+      const g = groups.find(g => g.id === id);
+      if (!g) throw new Error(`Group #${id} not found`);
+      g.name = name; g.icon = icon; g.color = color;
+      storeSet('repo_groups', groups);
+    },
+    async remove_repo_group({ id }) {
+      // Cascade
+      const repos = storeGet('repos', []).map(r => r.group_id === id ? { ...r, group_id: null } : r);
+      storeSet('repos', repos);
+      const groups = storeGet('repo_groups', []).filter(g => g.id !== id);
+      storeSet('repo_groups', groups);
+    },
+    async update_repo({ old_name, name, path, color, group_id }) {
+      const repos = storeGet('repos', []);
+      if (repos.some(r => r.name === name && r.name !== old_name)) throw new Error(`Repo '${name}' already exists`);
+      const r = repos.find(x => x.name === old_name);
+      if (!r) throw new Error(`Repo '${old_name}' not found`);
+      r.name = name; r.path = path; r.color = color; r.group_id = group_id ?? null;
+      storeSet('repos', repos);
     },
     async search_filenames() { return []; },
     async search_content() { return []; },
