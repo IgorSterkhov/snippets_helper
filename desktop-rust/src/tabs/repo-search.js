@@ -196,6 +196,27 @@ function renderRepoChips(barEl) {
   if (!bar) return;
   bar.innerHTML = '';
 
+  // Select-all / deselect-all for the current tab's scope. Placed at the
+  // start of the chip row so they're always in the same spot regardless of
+  // active tab.
+  const selAll = document.createElement('button');
+  selAll.className = 'rs-sel-btn';
+  selAll.textContent = '✓';
+  selAll.title = 'Select all in tab';
+  selAll.addEventListener('click', () => scopeSelect(true));
+  bar.appendChild(selAll);
+
+  const selNone = document.createElement('button');
+  selNone.className = 'rs-sel-btn';
+  selNone.textContent = '⊘';
+  selNone.title = 'Deselect all in tab';
+  selNone.addEventListener('click', () => scopeSelect(false));
+  bar.appendChild(selNone);
+
+  const divider = document.createElement('span');
+  divider.className = 'rs-sel-divider';
+  bar.appendChild(divider);
+
   const scope = reposForActiveTab();
   for (const repo of scope) {
     const isActive = activeRepos.has(repo.name);
@@ -399,21 +420,6 @@ function renderTabStrip(containerEl) {
     // handling runs in the global pointerup from onChipPointerDown.
     if (t.id !== 'all') {
       btn.dataset.dropTargetFor = 'repo';
-    }
-    // Inline select controls on the active tab
-    if (t.id === activeTabId) {
-      const selAll = document.createElement('span');
-      selAll.className = 'rs-tab-sel';
-      selAll.textContent = '✓';
-      selAll.title = 'Select all in tab';
-      selAll.addEventListener('click', (e) => { e.stopPropagation(); scopeSelect(true); });
-      btn.appendChild(selAll);
-      const selNone = document.createElement('span');
-      selNone.className = 'rs-tab-sel';
-      selNone.textContent = '⊘';
-      selNone.title = 'Deselect all in tab';
-      selNone.addEventListener('click', (e) => { e.stopPropagation(); scopeSelect(false); });
-      btn.appendChild(selNone);
     }
     bar.appendChild(btn);
   }
@@ -1266,15 +1272,26 @@ function css() {
   color: var(--text);
 }
 .rs-tab-icon { display: inline-flex; font-size: 11px; }
-.rs-tab-sel {
-  padding: 0 4px;
+.rs-sel-btn {
+  padding: 3px 7px;
+  font-size: 12px;
+  line-height: 1;
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
   cursor: pointer;
-  font-size: 11px;
-  opacity: 0.7;
-  margin-left: 3px;
-  border-radius: 3px;
+  margin-right: 2px;
 }
-.rs-tab-sel:hover { opacity: 1; background: rgba(255,255,255,0.05); }
+.rs-sel-btn:hover { color: var(--text); border-color: #484f58; }
+.rs-sel-divider {
+  display: inline-block;
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+  margin: 0 6px 0 2px;
+  vertical-align: middle;
+}
 .rs-tab-add { color: var(--text-muted); font-weight: bold; padding: 5px 8px; }
 .rs-tab-add:hover { color: var(--text); }
 .rs-tab.rs-tab-drop {
