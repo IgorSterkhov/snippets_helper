@@ -199,6 +199,35 @@ pub fn remove_repo_group(state: State<DbState>, id: i64) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn update_repo(
+    state: State<DbState>,
+    old_name: String,
+    name: String,
+    path: String,
+    color: String,
+    group_id: Option<i64>,
+) -> Result<(), String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let cid = get_computer_id();
+    let mut repos = load_repos(&conn, &cid);
+
+    if name.trim().is_empty() {
+        return Err("Name is required".to_string());
+    }
+    // Uniqueness (excluding the record being edited)
+    if repos.iter().any(|r| r.name == name && r.name != old_name) {
+        return Err(format!("Repo '{}' already exists", name));
+    }
+
+    let found = repos.iter_mut().find(|r| r.name == old_name);
+    match found {
+        Some(r) => { r.name = name; r.path = path; r.color = color; r.group_id = group_id; }
+        None => return Err(format!("Repo '{}' not found", old_name)),
+    }
+    save_repos(&conn, &cid, &repos)
+}
+
+#[tauri::command]
 pub fn list_repos(state: State<DbState>) -> Result<Vec<RepoEntry>, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     let cid = get_computer_id();
