@@ -120,6 +120,10 @@ function buildLayout() {
 
   wrap.appendChild(topBar);
 
+  const tabStrip = el('div', { class: 'rs-tab-strip', id: 'rs-tab-strip' });
+  wrap.appendChild(tabStrip);
+  renderTabStrip(tabStrip);
+
   // Repo chips bar
   const repoBar = el('div', { class: 'rs-repo-bar', id: 'rs-repo-bar' });
   wrap.appendChild(repoBar);
@@ -188,7 +192,8 @@ function renderRepoChips(barEl) {
   if (!bar) return;
   bar.innerHTML = '';
 
-  for (const repo of allRepos) {
+  const scope = reposForActiveTab();
+  for (const repo of scope) {
     const isActive = activeRepos.has(repo.name);
     const chip = document.createElement('div');
     chip.className = 'rs-repo-chip' + (isActive ? ' active' : '');
@@ -237,6 +242,71 @@ function renderRepoChips(barEl) {
   addBtn.title = 'Add repository';
   addBtn.addEventListener('click', showAddRepoModal);
   bar.appendChild(addBtn);
+}
+
+function renderTabStrip(containerEl) {
+  const bar = containerEl || root.querySelector('#rs-tab-strip');
+  if (!bar) return;
+  bar.innerHTML = '';
+
+  const tabs = [{ id: 'all', name: 'All', icon: '', color: '' }];
+  const sorted = [...allGroups].sort((a, b) => a.name.localeCompare(b.name));
+  tabs.push(...sorted.map(g => ({ id: g.id, name: g.name, icon: g.icon || '', color: g.color || '' })));
+  if (hasUngroupedRepos()) {
+    tabs.push({ id: 'ungrouped', name: 'Ungrouped', icon: '◌', color: '' });
+  }
+
+  for (const t of tabs) {
+    const btn = document.createElement('button');
+    btn.className = 'rs-tab' + (t.id === activeTabId ? ' active' : '');
+    btn.dataset.tabId = t.id;
+    if (t.icon) {
+      const ic = document.createElement('span');
+      ic.className = 'rs-tab-icon';
+      ic.textContent = t.icon;
+      if (t.color) ic.style.color = t.color;
+      btn.appendChild(ic);
+    }
+    btn.appendChild(document.createTextNode(t.name));
+    btn.addEventListener('click', () => {
+      activeTabId = t.id;
+      renderTabStrip();
+      renderRepoChips();
+    });
+    // Inline select controls on the active tab
+    if (t.id === activeTabId) {
+      const selAll = document.createElement('span');
+      selAll.className = 'rs-tab-sel';
+      selAll.textContent = '✓';
+      selAll.title = 'Select all in tab';
+      selAll.addEventListener('click', (e) => { e.stopPropagation(); scopeSelect(true); });
+      btn.appendChild(selAll);
+      const selNone = document.createElement('span');
+      selNone.className = 'rs-tab-sel';
+      selNone.textContent = '⊘';
+      selNone.title = 'Deselect all in tab';
+      selNone.addEventListener('click', (e) => { e.stopPropagation(); scopeSelect(false); });
+      btn.appendChild(selNone);
+    }
+    bar.appendChild(btn);
+  }
+
+  // "+" at the end
+  const addBtn = document.createElement('button');
+  addBtn.className = 'rs-tab rs-tab-add';
+  addBtn.textContent = '+';
+  addBtn.title = 'New group';
+  addBtn.addEventListener('click', showNewGroupModal);
+  bar.appendChild(addBtn);
+}
+
+function scopeSelect(select) {
+  const scope = reposForActiveTab();
+  for (const r of scope) {
+    if (select) activeRepos.add(r.name);
+    else activeRepos.delete(r.name);
+  }
+  renderRepoChips();
 }
 
 async function removeRepo(name) {
@@ -837,6 +907,44 @@ function formatSize(bytes) {
 
 function css() {
   return `
+.rs-tab-strip {
+  display: flex;
+  gap: 2px;
+  padding: 6px 12px 0;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+.rs-tab {
+  padding: 5px 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 5px 5px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.rs-tab.active {
+  background: var(--bg-secondary);
+  border-color: var(--border);
+  color: var(--text);
+}
+.rs-tab-icon { display: inline-flex; font-size: 11px; }
+.rs-tab-sel {
+  padding: 0 4px;
+  cursor: pointer;
+  font-size: 11px;
+  opacity: 0.7;
+  margin-left: 3px;
+  border-radius: 3px;
+}
+.rs-tab-sel:hover { opacity: 1; background: rgba(255,255,255,0.05); }
+.rs-tab-add { color: var(--text-muted); font-weight: bold; padding: 5px 8px; }
+.rs-tab-add:hover { color: var(--text); }
 .rs-wrap {
   display: flex;
   flex-direction: column;
