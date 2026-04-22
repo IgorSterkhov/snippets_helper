@@ -904,6 +904,91 @@ fn status_one(repo: &RepoEntry) -> RepoStatus {
     }
 }
 
+#[derive(Serialize)]
+pub struct PullOutcome {
+    pub name: String,
+    pub skipped: bool,
+    pub success: bool,
+    pub message: String,
+    pub commands_run: Vec<String>,
+}
+
+#[tauri::command]
+pub async fn repo_search_pull_main(
+    state: State<'_, DbState>,
+    paths: Vec<String>,
+    dry_run: bool,
+) -> Result<Vec<PullOutcome>, String> {
+    let repos = {
+        let conn = state.0.lock().map_err(|e| e.to_string())?;
+        let cid = get_computer_id();
+        let all = load_repos(&conn, &cid);
+        let set: std::collections::HashSet<_> = paths.into_iter().collect();
+        all.into_iter().filter(|r| set.contains(&r.path)).collect::<Vec<_>>()
+    };
+    let handles = repos.into_iter().map(|repo| {
+        tokio::task::spawn_blocking(move || pull_one(&repo, dry_run))
+    });
+    let mut out = Vec::new();
+    for h in handles {
+        out.push(h.await.map_err(|e| e.to_string())?);
+    }
+    Ok(out)
+}
+
+fn pull_one(repo: &RepoEntry, dry_run: bool) -> PullOutcome {
+    let path = &repo.path;
+    let name = repo.name.clone();
+    let dirty = git_run(path, &["status", "--porcelain"])
+        .map(|s| !s.is_empty())
+        .unwrap_or(false);
+    if dirty {
+        return PullOutcome {
+            name,
+            skipped: true,
+            success: false,
+            message: "uncommitted changes".to_string(),
+            commands_run: vec![],
+        };
+    }
+    let branch = match default_branch(path) {
+        Some(b) => b,
+        None => return PullOutcome {
+            name,
+            skipped: true,
+            success: false,
+            message: "no main/master/origin/HEAD".to_string(),
+            commands_run: vec![],
+        },
+    };
+    let planned = vec![
+        format!("git checkout {branch}"),
+        "git pull --ff-only".to_string(),
+    ];
+    if dry_run {
+        return PullOutcome {
+            name, skipped: false, success: true,
+            message: "dry-run".to_string(),
+            commands_run: planned,
+        };
+    }
+    if let Err(e) = git_run(path, &["checkout", &branch]) {
+        return PullOutcome { name, skipped: false, success: false, message: format!("checkout failed: {e}"), commands_run: planned };
+    }
+    match git_run(path, &["pull", "--ff-only"]) {
+        Ok(out) => PullOutcome {
+            name, skipped: false, success: true,
+            message: out.lines().last().unwrap_or("ok").to_string(),
+            commands_run: planned,
+        },
+        Err(e) => PullOutcome {
+            name, skipped: false, success: false,
+            message: format!("pull failed: {e}"),
+            commands_run: planned,
+        },
+    }
+}
+
 /// Spawn the user's editor with the given file. `editor_command` is a
 /// user-supplied template with `{path}` and optional `{line}` placeholders.
 /// Default: "code {path}:{line}".
