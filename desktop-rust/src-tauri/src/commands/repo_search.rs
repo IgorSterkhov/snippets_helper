@@ -819,6 +819,38 @@ pub async fn search_git_history(state: State<'_, DbState>, query: String, repos:
     Ok(all_results)
 }
 
+/// Spawn the user's editor with the given file. `editor_command` is a
+/// user-supplied template with `{path}` and optional `{line}` placeholders.
+/// Default: "code {path}:{line}".
+#[tauri::command]
+pub fn open_in_editor(
+    state: State<DbState>,
+    path: String,
+    line: Option<u64>,
+) -> Result<(), String> {
+    let template = {
+        let conn = state.0.lock().map_err(|e| e.to_string())?;
+        let cid = get_computer_id();
+        queries::get_setting(&conn, &cid, "editor_command")
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| "code {path}:{line}".to_string())
+    };
+    let line_str = line.map(|l| l.to_string()).unwrap_or_default();
+    let rendered = template
+        .replace("{path}", &path)
+        .replace("{line}", &line_str);
+    let parts: Vec<&str> = rendered.split_whitespace().collect();
+    if parts.is_empty() {
+        return Err("editor_command is empty".to_string());
+    }
+    std::process::Command::new(parts[0])
+        .args(&parts[1..])
+        .spawn()
+        .map_err(|e| format!("spawn {}: {}", parts[0], e))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
