@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.2.2 (2026-04-22)
+
+- Manage tab: per-row **Reset** button on dirty repos — runs
+  `git reset --hard HEAD` to discard uncommitted changes, with
+  confirmation. Untracked files are preserved.
+
+## v1.2.1 (2026-04-22)
+
+- Fix "Open in editor" on Windows/macOS: spawn the editor command
+  through the user's shell so PATHEXT (`code.cmd` / `code.bat`) and
+  login-shell PATH are honoured. Previously direct `spawn("code")`
+  failed with "program not found" even if `code` worked in a terminal.
+
 ## v1.2.0 (2026-04-22)
 
 **Repo Search — editor integration, full-file preview, Manage tab.**

@@ -396,6 +396,17 @@
         return { name, skipped: false, success: true, message: 'Already up to date.', commands_run: cmds };
       });
     },
+    async repo_search_reset_hard({ path }) {
+      // Flip the fixture row back to clean after reset.
+      const pathToName = new Map((storeGet('repos', [])).map(r => [r.path, r.name]));
+      const name = pathToName.get(path);
+      const statuses = storeGet('repo_statuses', null);
+      if (statuses && name) {
+        const next = statuses.map(s => s.name === name ? { ...s, is_dirty: false } : s);
+        storeSet('repo_statuses', next);
+      }
+      return 'HEAD is now at abc1234 (mock reset)';
+    },
 
     // ── VPS ─────────────────────────────────────────────
     async list_vps_environments() { return storeGet('vps_environments', []); },

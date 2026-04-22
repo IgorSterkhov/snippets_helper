@@ -989,6 +989,21 @@ fn pull_one(repo: &RepoEntry, dry_run: bool) -> PullOutcome {
     }
 }
 
+/// Discard all uncommitted changes (tracked files) in the given repo
+/// by running `git reset --hard HEAD`. Does NOT remove untracked files —
+/// user keeps scratch work.
+#[tauri::command]
+pub async fn repo_search_reset_hard(path: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        if git_run(&path, &["rev-parse", "--is-inside-work-tree"]).is_err() {
+            return Err(format!("not a git repository: {path}"));
+        }
+        git_run(&path, &["reset", "--hard", "HEAD"])
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Spawn the user's editor with the given file. `editor_command` is a
 /// user-supplied template with `{path}` and optional `{line}` placeholders.
 /// Default: "code {path}:{line}".

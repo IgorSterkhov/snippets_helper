@@ -168,6 +168,7 @@ pub fn run() {
             commands::repo_search::read_full_file,
             commands::repo_search::repo_search_status,
             commands::repo_search::repo_search_pull_main,
+            commands::repo_search::repo_search_reset_hard,
             // VPS
             commands::vps::list_vps_servers,
             commands::vps::add_vps_server,

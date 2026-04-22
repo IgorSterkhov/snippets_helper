@@ -248,19 +248,47 @@ function buildLayout() {
       const outcome = manageOutcomes?.find(o => o.name === s.name);
       const date = s.last_commit_iso ? new Date(s.last_commit_iso).toLocaleDateString() : '';
       const statusBadge = statusBadgeFor(s, outcome);
+      const resetBtn = s.is_dirty
+        ? `<button class="rs-row-btn rs-reset-btn" data-name="${escapeHtml(s.name)}" title="Discard uncommitted changes (git reset --hard)">Reset</button>`
+        : '';
       return `<tr class="${s.error ? 'rs-row-err' : s.is_dirty ? 'rs-row-dirty' : ''}">
         <td>${escapeHtml(s.name)}</td>
         <td>${escapeHtml(s.branch || '—')}</td>
         <td title="${escapeHtml(s.last_commit_subject)}">${escapeHtml(s.last_commit_subject || '—')}</td>
         <td>${escapeHtml(date)}</td>
         <td>${statusBadge}</td>
+        <td class="rs-row-actions">${resetBtn}</td>
       </tr>`;
     }).join('');
     tableWrap.innerHTML = `
       <table class="rs-manage">
-        <thead><tr><th>Name</th><th>Branch</th><th>Last commit</th><th>Date</th><th>Status</th></tr></thead>
+        <thead><tr><th>Name</th><th>Branch</th><th>Last commit</th><th>Date</th><th>Status</th><th></th></tr></thead>
         <tbody>${rows}</tbody>
       </table>`;
+    for (const btn of tableWrap.querySelectorAll('.rs-reset-btn')) {
+      btn.addEventListener('click', () => onResetClick(btn.dataset.name));
+    }
+  }
+
+  async function onResetClick(repoName) {
+    const repo = allRepos.find(r => r.name === repoName);
+    if (!repo) return;
+    const body = document.createElement('div');
+    body.innerHTML = `
+      <p style="margin:0 0 8px">Discard all uncommitted changes in <b>${escapeHtml(repoName)}</b>?</p>
+      <p style="margin:0 0 4px;font-size:11px;color:var(--text-muted)">Runs <code>git reset --hard HEAD</code>. Untracked files are NOT removed.</p>
+      <p style="margin:0;font-size:11px;color:var(--danger,#f85149)">This cannot be undone.</p>
+    `;
+    try {
+      await showModal({
+        title: 'Discard changes?',
+        body,
+        onConfirm: async () => { await call('repo_search_reset_hard', { path: repo.path }); },
+      });
+      if (manageOutcomes) manageOutcomes = manageOutcomes.filter(o => o.name !== repoName);
+      await loadManage();
+      showToast(`Reset ${repoName}`, 'success');
+    } catch { /* cancelled or modal reported error */ }
   }
 
   function statusBadgeFor(s, outcome) {
@@ -2156,6 +2184,18 @@ function css() {
 .rs-badge-ok   { background:rgba(63,185,80,0.12); color:#3fb950; }
 .rs-badge-skip { background:rgba(245,158,11,0.12); color:#f59e0b; }
 .rs-badge-err  { background:rgba(248,81,73,0.12); color:#f85149; }
+.rs-row-actions { text-align: right; }
+.rs-row-btn {
+  padding: 2px 8px;
+  font-size: 11px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.rs-row-btn:hover { color: var(--text); border-color: #484f58; }
+.rs-reset-btn:hover { color: var(--danger, #f85149); border-color: rgba(248,81,73,0.5); }
 /* Card action buttons */
 .rs-card-actions {
   display: flex;
