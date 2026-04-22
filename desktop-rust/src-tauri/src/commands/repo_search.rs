@@ -819,6 +819,91 @@ pub async fn search_git_history(state: State<'_, DbState>, query: String, repos:
     Ok(all_results)
 }
 
+fn git_run(repo: &str, args: &[&str]) -> Result<String, String> {
+    let out = std::process::Command::new("git")
+        .arg("-C").arg(repo)
+        .args(args)
+        .output()
+        .map_err(|e| format!("git: {e}"))?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+fn default_branch(repo: &str) -> Option<String> {
+    for b in ["main", "master"] {
+        if git_run(repo, &["show-ref", "--verify", "--quiet", &format!("refs/heads/{b}")]).is_ok() {
+            return Some(b.to_string());
+        }
+    }
+    // Fallback to origin/HEAD
+    git_run(repo, &["rev-parse", "--abbrev-ref", "origin/HEAD"])
+        .ok()
+        .and_then(|s| s.strip_prefix("origin/").map(|s| s.to_string()))
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct RepoStatus {
+    pub name: String,
+    pub branch: String,
+    pub last_commit_subject: String,
+    pub last_commit_iso: String,
+    pub is_dirty: bool,
+    pub error: Option<String>,
+}
+
+#[tauri::command]
+pub async fn repo_search_status(
+    state: State<'_, DbState>,
+) -> Result<Vec<RepoStatus>, String> {
+    let repos = {
+        let conn = state.0.lock().map_err(|e| e.to_string())?;
+        let cid = get_computer_id();
+        load_repos(&conn, &cid)
+    };
+    let handles = repos.into_iter().map(|repo| {
+        tokio::task::spawn_blocking(move || status_one(&repo))
+    });
+    let mut out = Vec::new();
+    for h in handles {
+        out.push(h.await.map_err(|e| e.to_string())?);
+    }
+    Ok(out)
+}
+
+fn status_one(repo: &RepoEntry) -> RepoStatus {
+    let path = &repo.path;
+    // Confirm it's a git repo
+    if git_run(path, &["rev-parse", "--is-inside-work-tree"]).is_err() {
+        return RepoStatus {
+            name: repo.name.clone(),
+            branch: String::new(),
+            last_commit_subject: String::new(),
+            last_commit_iso: String::new(),
+            is_dirty: false,
+            error: Some("not a git repository".to_string()),
+        };
+    }
+    let branch = git_run(path, &["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_default();
+    let last = git_run(path, &["log", "-1", "--format=%s|%cI"]).unwrap_or_default();
+    let (subject, iso) = match last.split_once('|') {
+        Some((s, d)) => (s.to_string(), d.to_string()),
+        None => (String::new(), String::new()),
+    };
+    let dirty = git_run(path, &["status", "--porcelain"])
+        .map(|s| !s.is_empty())
+        .unwrap_or(false);
+    RepoStatus {
+        name: repo.name.clone(),
+        branch,
+        last_commit_subject: subject,
+        last_commit_iso: iso,
+        is_dirty: dirty,
+        error: None,
+    }
+}
+
 /// Spawn the user's editor with the given file. `editor_command` is a
 /// user-supplied template with `{path}` and optional `{line}` placeholders.
 /// Default: "code {path}:{line}".
