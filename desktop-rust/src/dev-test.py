@@ -379,6 +379,66 @@ async def run_tests():
         assert 'All' in active_label, f'expected All active, got {active_label!r}'
     await check('T12 delete active tab → fallback to All', t12_delete_active_tab_falls_back_to_all)
 
+    # ── T13: Manage inner tab renders status table ────────────
+    async def t13_manage_tab_renders():
+        # Switch to repo-search tab
+        await cdp.eval(
+          'document.querySelector(\'.tab-btn[data-tab-id="repo-search"]\').click()'
+        )
+        await wait_until(cdp, "!!document.querySelector('.rs-inner-tab')", timeout=4)
+        # Click the Manage inner tab
+        await cdp.eval(
+          "[...document.querySelectorAll('.rs-inner-tab')].find(b => b.textContent.includes('Manage')).click()"
+        )
+        # Expect at least one row
+        await wait_until(
+          cdp,
+          "document.querySelectorAll('.rs-manage tbody tr').length >= 1",
+          timeout=5,
+        )
+        rows = await cdp.eval(
+          "[...document.querySelectorAll('.rs-manage tbody tr td:first-child')].map(td => td.textContent)"
+        )
+        assert 'snippets_helper' in rows or 'dags-core' in rows, rows
+    await check('T13 Manage tab shows status table', t13_manage_tab_renders)
+
+    # ── T14: expand/collapse file card ───────────────────────
+    async def t14_expand_collapse_file_card():
+        # Ensure we're on the Search inner tab
+        await cdp.eval(
+          "[...document.querySelectorAll('.rs-inner-tab')].find(b => b.textContent.includes('Search')).click()"
+        )
+        # The search results area is empty by default — we exercise the overlay directly
+        # via the rs-fullscreen toggle elements: the test validates the DOM wiring,
+        # since the actual expand button is only visible after a search.
+        # Simulate a minimal expand/collapse by clicking any button with text 'Expand' if present;
+        # otherwise skip gracefully by running a content search first.
+        has_expand = await cdp.eval(
+          "!!document.querySelector('[data-role=\"rs-expand\"]')"
+        )
+        if not has_expand:
+          # Run a fake search so a result-card with Expand button appears.
+          # Content search returns empty from mock; instead push a fake result via the UI shim:
+          await cdp.eval("""(() => {
+            // Render a fake file card manually in the results area
+            const area = document.getElementById('rs-results');
+            if (!area) return;
+            area.innerHTML = `<div class="rs-file-card">
+              <button data-role="rs-open" data-path="/tmp/sample.md" data-line="1">Open in editor</button>
+              <button>Copy path</button>
+              <button data-role="rs-expand" data-path="/tmp/sample.md">Expand ▸</button>
+            </div>`;
+          })()""")
+        # Click expand
+        await cdp.eval("document.querySelector('[data-role=\"rs-expand\"]').click()")
+        await wait_until(cdp, "!!document.getElementById('rs-fullscreen-overlay')", timeout=3)
+        # Click collapse
+        await cdp.eval(
+          "document.getElementById('rs-fullscreen-overlay').querySelector('[data-role=\"rs-collapse\"]').click()"
+        )
+        await wait_until(cdp, "!document.getElementById('rs-fullscreen-overlay')", timeout=3)
+    await check('T14 expand/collapse file card', t14_expand_collapse_file_card)
+
     # Summary
     print()
     passed = sum(1 for _, ok, _ in results if ok)
