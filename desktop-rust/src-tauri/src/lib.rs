@@ -164,6 +164,10 @@ pub fn run() {
             commands::repo_search::search_content,
             commands::repo_search::search_git_history,
             commands::repo_search::get_file_context,
+            commands::repo_search::open_in_editor,
+            commands::repo_search::read_full_file,
+            commands::repo_search::repo_search_status,
+            commands::repo_search::repo_search_pull_main,
             // VPS
             commands::vps::list_vps_servers,
             commands::vps::add_vps_server,
