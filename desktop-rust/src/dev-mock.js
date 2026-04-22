@@ -86,7 +86,9 @@
     storeSet('commit_history', []);
 
     storeSet('repos', [
-      { name: 'snippets_helper', path: '/home/dev/snippets_helper', color: '#3b82f6' },
+      { name: 'snippets_helper', path: '/home/dev/snippets_helper', color: '#3b82f6', group_id: null },
+      { name: 'dags-core',       path: '/home/dev/dags-core',       color: '#10b981', group_id: null },
+      { name: 'pg-analytics',    path: '/home/dev/pg-analytics',    color: '#f59e0b', group_id: null },
     ]);
 
     storeSet('analyzer_templates', []);
@@ -357,6 +359,43 @@
     async search_content() { return []; },
     async search_git_history() { return []; },
     async get_file_context() { return []; },
+
+    // v1.2.0 tools
+    async open_in_editor({ path, line }) {
+      console.log('[mock] open_in_editor', { path, line });
+    },
+    async read_full_file({ path }) {
+      const lang = (path.split('.').pop() || '').toLowerCase();
+      const samples = {
+        md: '# Sample markdown\n\nA mock file — in prod this reads the real disk.',
+        txt: 'plain text sample\nline two\nline three',
+        js: 'function hello(name) {\n  return `Hello, ${name}!`;\n}',
+        py: 'def hello(name):\n    return f"Hello, {name}!"',
+      };
+      const content = samples[lang] || `# ${path}\n(mock content for dev)`;
+      return { content, truncated: false, size: content.length };
+    },
+    async repo_search_status() {
+      return storeGet('repo_statuses', [
+        { name: 'snippets_helper', branch: 'main', last_commit_subject: 'add groups', last_commit_iso: '2026-04-21T11:20:00+00:00', is_dirty: false, error: null },
+        { name: 'dags-core',       branch: 'feature/etl', last_commit_subject: 'WIP', last_commit_iso: '2026-04-20T09:00:00+00:00', is_dirty: true,  error: null },
+        { name: 'pg-analytics',    branch: 'main', last_commit_subject: 'bump pg driver', last_commit_iso: '2026-04-19T18:14:00+00:00', is_dirty: false, error: null },
+      ]);
+    },
+    async repo_search_pull_main({ paths, dryRun }) {
+      const statuses = await this.repo_search_status();
+      const pathToName = new Map((storeGet('repos', [])).map(r => [r.path, r.name]));
+      return paths.map(p => {
+        const name = pathToName.get(p) || p;
+        const s = statuses.find(x => x.name === name);
+        if (s && s.is_dirty) {
+          return { name, skipped: true, success: false, message: 'uncommitted changes', commands_run: [] };
+        }
+        const cmds = [`git checkout ${s?.branch || 'main'}`, 'git pull --ff-only'];
+        if (dryRun) return { name, skipped: false, success: true, message: 'dry-run', commands_run: cmds };
+        return { name, skipped: false, success: true, message: 'Already up to date.', commands_run: cmds };
+      });
+    },
 
     // ── VPS ─────────────────────────────────────────────
     async list_vps_environments() { return storeGet('vps_environments', []); },
