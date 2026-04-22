@@ -1146,46 +1146,15 @@ function renderResults() {
       card.appendChild(matchEl);
     }
 
-    // Action buttons
-    const actions = el('div', { class: 'rs-card-actions' });
+    // Clicking the card opens the detail modal (same UX as content-search cards).
     const hitLine = r.match_line_num || 1;
-    const filePath = r.file_path;
-
-    const openBtn = document.createElement('button');
-    openBtn.className = 'rs-card-btn';
-    openBtn.textContent = 'Open in editor';
-    openBtn.dataset.role = 'rs-open';
-    openBtn.dataset.path = filePath;
-    openBtn.dataset.line = String(hitLine);
-    openBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      call('open_in_editor', { path: filePath, line: hitLine })
-        .catch(err => showToast('Editor error: ' + err, 'error'));
-    });
-
-    const copyBtn = document.createElement('button');
-    copyBtn.className = 'rs-card-btn';
-    copyBtn.textContent = 'Copy path';
-    copyBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      navigator.clipboard.writeText(filePath).then(() => showToast('Path copied', 'success')).catch(() => {});
-    });
-
-    const expandBtn = document.createElement('button');
-    expandBtn.className = 'rs-card-btn';
-    expandBtn.textContent = 'Expand ▸';
-    expandBtn.dataset.role = 'rs-expand';
-    expandBtn.dataset.path = filePath;
-    expandBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      expandFileCard(filePath);
-    });
-
-    actions.appendChild(openBtn);
-    actions.appendChild(copyBtn);
-    actions.appendChild(expandBtn);
-    card.appendChild(actions);
-    card.title = filePath;
+    card.addEventListener('click', () => showDetailModal({
+      repo_name: r.repo_name,
+      relative_path: r.relative_path,
+      file_path: r.file_path,
+      matches: [{ file_path: r.file_path, line_num: hitLine, line_text: r.match_line || '' }],
+    }));
+    card.title = 'Click to view context';
 
     resultsList.appendChild(card);
   }
@@ -1249,47 +1218,7 @@ function renderContentResults(fileResults) {
       card.appendChild(more);
     }
 
-    // Action buttons
-    const fActions = el('div', { class: 'rs-card-actions' });
-    const fHitLine = f.matches[0]?.line_num || 1;
-    const fPath = f.file_path;
-
-    const fOpenBtn = document.createElement('button');
-    fOpenBtn.className = 'rs-card-btn';
-    fOpenBtn.textContent = 'Open in editor';
-    fOpenBtn.dataset.role = 'rs-open';
-    fOpenBtn.dataset.path = fPath;
-    fOpenBtn.dataset.line = String(fHitLine);
-    fOpenBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      call('open_in_editor', { path: fPath, line: fHitLine })
-        .catch(err => showToast('Editor error: ' + err, 'error'));
-    });
-
-    const fCopyBtn = document.createElement('button');
-    fCopyBtn.className = 'rs-card-btn';
-    fCopyBtn.textContent = 'Copy path';
-    fCopyBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      navigator.clipboard.writeText(fPath).then(() => showToast('Path copied', 'success')).catch(() => {});
-    });
-
-    const fExpandBtn = document.createElement('button');
-    fExpandBtn.className = 'rs-card-btn';
-    fExpandBtn.textContent = 'Expand ▸';
-    fExpandBtn.dataset.role = 'rs-expand';
-    fExpandBtn.dataset.path = fPath;
-    fExpandBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      expandFileCard(fPath);
-    });
-
-    fActions.appendChild(fOpenBtn);
-    fActions.appendChild(fCopyBtn);
-    fActions.appendChild(fExpandBtn);
-    card.appendChild(fActions);
-
-    // Click card to show detail modal
+    // Click card to show detail modal (buttons live inside it now).
     card.addEventListener('click', () => showDetailModal(f));
     card.title = 'Click to view all matches with context';
 
@@ -1306,30 +1235,51 @@ async function showDetailModal(fileResult) {
   const modal = document.createElement('div');
   modal.className = 'modal rs-detail-modal';
 
-  // Header
+  // Header: left = repo badge + path, right = action buttons + close.
   const header = el('div', { class: 'rs-modal-header' });
-  const headerLeft = el('div', { style: 'display:flex;align-items:center;gap:8px;overflow:hidden;flex:1' });
+  const headerLeft = el('div', { style: 'display:flex;align-items:center;gap:8px;overflow:hidden;flex:1;min-width:0' });
   headerLeft.appendChild(buildRepoBadge(fileResult.repo_name));
   headerLeft.appendChild(el('span', { text: fileResult.relative_path, class: 'rs-detail-path' }));
   header.appendChild(headerLeft);
 
-  const closeBtn = el('button', { text: '\u2715', class: 'btn-secondary rs-modal-close' });
+  const headerActions = el('div', { class: 'rs-detail-actions' });
+  const detailHitLine = fileResult.matches?.[0]?.line_num || 1;
+
+  const openBtn = el('button', { text: 'Open in editor', class: 'rs-card-btn' });
+  openBtn.dataset.role = 'rs-open';
+  openBtn.dataset.path = fileResult.file_path;
+  openBtn.dataset.line = String(detailHitLine);
+  openBtn.addEventListener('click', () => {
+    call('open_in_editor', { path: fileResult.file_path, line: detailHitLine })
+      .catch(err => showToast('Editor error: ' + err, 'error'));
+  });
+  headerActions.appendChild(openBtn);
+
+  const copyBtn = el('button', { text: 'Copy path', class: 'rs-card-btn' });
+  copyBtn.addEventListener('click', () => {
+    navigator.clipboard.writeText(fileResult.file_path)
+      .then(() => showToast('Path copied', 'success'))
+      .catch(() => {});
+  });
+  headerActions.appendChild(copyBtn);
+
+  const expandBtn = el('button', { text: 'Expand ▸', class: 'rs-card-btn' });
+  expandBtn.dataset.role = 'rs-expand';
+  expandBtn.dataset.path = fileResult.file_path;
+  expandBtn.addEventListener('click', () => expandFileCard(fileResult.file_path));
+  headerActions.appendChild(expandBtn);
+
+  const closeBtn = el('button', { text: '✕', class: 'btn-secondary rs-modal-close' });
   closeBtn.addEventListener('click', () => overlay.remove());
-  header.appendChild(closeBtn);
+  headerActions.appendChild(closeBtn);
+
+  header.appendChild(headerActions);
   modal.appendChild(header);
 
-  // Copy path button
-  const copyRow = el('div', { class: 'rs-detail-copy-row' });
-  const fullPath = el('span', { text: fileResult.file_path, class: 'rs-detail-fullpath' });
-  copyRow.appendChild(fullPath);
-  const copyBtn = el('button', { text: 'Copy path', class: 'btn-secondary rs-copy-btn' });
-  copyBtn.addEventListener('click', () => {
-    navigator.clipboard.writeText(fileResult.file_path).then(() => {
-      showToast('Path copied', 'success');
-    }).catch(() => {});
-  });
-  copyRow.appendChild(copyBtn);
-  modal.appendChild(copyRow);
+  // Read-only full path as subheader.
+  const pathRow = el('div', { class: 'rs-detail-copy-row' });
+  pathRow.appendChild(el('span', { text: fileResult.file_path, class: 'rs-detail-fullpath' }));
+  modal.appendChild(pathRow);
 
   // Body with context
   const body = el('div', { class: 'rs-detail-body' });
@@ -2184,6 +2134,8 @@ function css() {
 .rs-badge-ok   { background:rgba(63,185,80,0.12); color:#3fb950; }
 .rs-badge-skip { background:rgba(245,158,11,0.12); color:#f59e0b; }
 .rs-badge-err  { background:rgba(248,81,73,0.12); color:#f85149; }
+.rs-detail-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.rs-detail-actions .rs-card-btn { margin: 0; }
 .rs-row-actions { text-align: right; }
 .rs-row-btn {
   padding: 2px 8px;
