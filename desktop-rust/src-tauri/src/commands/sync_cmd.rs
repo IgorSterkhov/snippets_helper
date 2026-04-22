@@ -138,8 +138,11 @@ pub async fn check_for_update(state: State<'_, DbState>) -> Result<Value, String
         .build()
         .map_err(|e| format!("build http client: {e}"))?;
 
-    // Use GitHub API to check latest release (works for both public and private repos with token)
-    let api_url = "https://api.github.com/repos/IgorSterkhov/snippets_helper/releases/latest";
+    // Use GitHub API to list recent releases. We iterate because /releases/latest
+    // returns the most recent release overall, which for us may be a frontend-only
+    // `f-*` tag without native installers. We want the newest release whose tag
+    // starts with `v` AND has a native asset for our platform.
+    let api_url = "https://api.github.com/repos/IgorSterkhov/snippets_helper/releases?per_page=30";
     let mut req = client.get(api_url);
     if let Some(ref token) = github_token {
         req = req.bearer_auth(token);
@@ -153,22 +156,8 @@ pub async fn check_for_update(state: State<'_, DbState>) -> Result<Value, String
         return Err(format!("GitHub API returned HTTP {}", resp.status()));
     }
 
-    let data: Value = resp.json().await.map_err(|e| format!("parse GitHub response: {e}"))?;
-    let tag = data
-        .get("tag_name")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim_start_matches('v')
-        .to_string();
-    let html_url = data
-        .get("html_url")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
+    let releases: Vec<Value> = resp.json().await.map_err(|e| format!("parse GitHub response: {e}"))?;
 
-    let has_update = version_is_newer(&current_version, &tag);
-
-    // Find the right asset for current platform
     let platform_suffix = if cfg!(target_os = "windows") {
         "x64-setup.exe"
     } else if cfg!(target_os = "macos") {
@@ -177,21 +166,51 @@ pub async fn check_for_update(state: State<'_, DbState>) -> Result<Value, String
         "amd64.AppImage"
     };
 
+    // Pick the most recent v* release whose platform asset exists.
+    let mut tag = String::new();
+    let mut html_url = String::new();
+    let mut download_url = String::new();
     let mut asset_ready = false;
-    let mut download_url = html_url.clone();
-    if let Some(assets) = data.get("assets").and_then(|v| v.as_array()) {
-        for asset in assets {
-            if let Some(name) = asset.get("name").and_then(|v| v.as_str()) {
-                if name.ends_with(platform_suffix) {
-                    asset_ready = true;
-                    if let Some(url) = asset.get("browser_download_url").and_then(|v| v.as_str()) {
-                        download_url = url.to_string();
+    let mut latest_v_tag_without_asset: Option<String> = None;
+    for rel in &releases {
+        let raw_tag = rel.get("tag_name").and_then(|v| v.as_str()).unwrap_or("");
+        if !raw_tag.starts_with('v') {
+            continue;   // skip f-* and other non-native tags
+        }
+        let stripped = raw_tag.trim_start_matches('v').to_string();
+        if tag.is_empty() {
+            tag = stripped.clone();
+            html_url = rel.get("html_url").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            download_url = html_url.clone();
+        }
+        if let Some(assets) = rel.get("assets").and_then(|v| v.as_array()) {
+            for asset in assets {
+                if let Some(name) = asset.get("name").and_then(|v| v.as_str()) {
+                    if name.ends_with(platform_suffix) {
+                        tag = stripped.clone();
+                        html_url = rel.get("html_url").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        download_url = asset.get("browser_download_url")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or(&html_url)
+                            .to_string();
+                        asset_ready = true;
+                        break;
                     }
-                    break;
                 }
             }
         }
+        if asset_ready { break; }
+        // Remember the newest v-tag even if the asset isn't ready yet (build in progress)
+        if latest_v_tag_without_asset.is_none() {
+            latest_v_tag_without_asset = Some(stripped);
+        }
     }
+    // Fallback: if no v-tag has the asset, at least report what's newest.
+    if tag.is_empty() {
+        if let Some(t) = latest_v_tag_without_asset { tag = t; }
+    }
+
+    let has_update = version_is_newer(&current_version, &tag);
 
     Ok(json!({
         "current_version": current_version,
