@@ -189,11 +189,122 @@ function buildLayout() {
   resultsList.innerHTML = '<p class="rs-placeholder">Enter a search pattern and press Enter</p>';
   searchPanel.appendChild(resultsList);
 
+  // ── Manage panel contents ──────────────────────────────────
+
+  const manageToolbar = el('div', { class: 'rs-manage-toolbar' });
+  const refreshBtn = el('button', { text: '⟲ Refresh', class: 'btn-secondary' });
+  const pullBtn = el('button', { text: 'Pull all to main' });
+  const dryWrap = document.createElement('label');
+  dryWrap.className = 'rs-dry-wrap';
+  dryWrap.innerHTML = '<input type="checkbox" id="rs-dry-run"/> Dry-run';
+  manageToolbar.appendChild(refreshBtn);
+  manageToolbar.appendChild(pullBtn);
+  manageToolbar.appendChild(dryWrap);
+  managePanel.appendChild(manageToolbar);
+
+  const tableWrap = el('div', { id: 'rs-manage-table', class: 'rs-manage-table-wrap' });
+  managePanel.appendChild(tableWrap);
+
+  // Manage state
+  let manageStatuses = null;
+  let manageOutcomes = null;
+  let manageLoaded = false;
+
+  async function loadManage() {
+    const scope = reposForActiveTab().filter(r => activeRepos.has(r.name));
+    if (!scope.length) {
+      tableWrap.innerHTML = '<p class="rs-manage-empty">No active repos in the current scope.</p>';
+      manageStatuses = null;
+      return;
+    }
+    tableWrap.innerHTML = '<p class="rs-manage-empty">Loading…</p>';
+    try {
+      const all = await call('repo_search_status');
+      const nameSet = new Set(scope.map(r => r.name));
+      manageStatuses = all.filter(s => nameSet.has(s.name));
+    } catch (e) {
+      tableWrap.innerHTML = `<p class="rs-manage-empty rs-err">${e}</p>`;
+      return;
+    }
+    renderManageTable();
+  }
+
+  function renderManageTable() {
+    if (!manageStatuses) return;
+    if (!manageStatuses.length) {
+      tableWrap.innerHTML = '<p class="rs-manage-empty">No active repos in the current scope.</p>';
+      return;
+    }
+    const rows = manageStatuses.map(s => {
+      const outcome = manageOutcomes?.find(o => o.name === s.name);
+      const date = s.last_commit_iso ? new Date(s.last_commit_iso).toLocaleDateString() : '';
+      const statusBadge = statusBadgeFor(s, outcome);
+      return `<tr class="${s.error ? 'rs-row-err' : s.is_dirty ? 'rs-row-dirty' : ''}">
+        <td>${escapeHtml(s.name)}</td>
+        <td>${escapeHtml(s.branch || '—')}</td>
+        <td title="${escapeHtml(s.last_commit_subject)}">${escapeHtml(s.last_commit_subject || '—')}</td>
+        <td>${escapeHtml(date)}</td>
+        <td>${statusBadge}</td>
+      </tr>`;
+    }).join('');
+    tableWrap.innerHTML = `
+      <table class="rs-manage">
+        <thead><tr><th>Name</th><th>Branch</th><th>Last commit</th><th>Date</th><th>Status</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  }
+
+  function statusBadgeFor(s, outcome) {
+    if (outcome) {
+      if (outcome.skipped) return `<span class="rs-badge rs-badge-skip">⚠ ${escapeHtml(outcome.message)}</span>`;
+      if (outcome.success) return `<span class="rs-badge rs-badge-ok">✓ ${escapeHtml(outcome.message)}</span>`;
+      return `<span class="rs-badge rs-badge-err">✗ ${escapeHtml(outcome.message)}</span>`;
+    }
+    if (s.error) return `<span class="rs-badge rs-badge-err">${escapeHtml(s.error)}</span>`;
+    if (s.is_dirty) return '<span class="rs-badge rs-badge-skip">⚠ dirty</span>';
+    return '<span class="rs-badge rs-badge-ok">✓ clean</span>';
+  }
+
+  function escapeHtml(s) {
+    return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  }
+
+  refreshBtn.addEventListener('click', () => { manageOutcomes = null; loadManage(); });
+
+  pullBtn.addEventListener('click', async () => {
+    if (!manageStatuses?.length) return;
+    const dryRun = document.getElementById('rs-dry-run').checked;
+    const pathsForNames = new Map(allRepos.map(r => [r.name, r.path]));
+    const paths = manageStatuses
+      .map(s => pathsForNames.get(s.name))
+      .filter(Boolean);
+    pullBtn.disabled = true;
+    const origLabel = pullBtn.textContent;
+    pullBtn.textContent = dryRun ? 'Previewing…' : 'Pulling…';
+    try {
+      manageOutcomes = await call('repo_search_pull_main', { paths, dryRun });
+      renderManageTable();
+      if (dryRun) {
+        const body = document.createElement('div');
+        body.innerHTML = manageOutcomes.map(o =>
+          `<div style="margin-bottom:8px"><strong>${escapeHtml(o.name)}</strong>${o.skipped ? ' — ' + escapeHtml(o.message) : ''}${(o.commands_run || []).map(c => `<div style="font-family:monospace;font-size:11px;color:var(--text-muted);margin-left:10px">${escapeHtml(c)}</div>`).join('')}</div>`
+        ).join('');
+        try { await showModal({ title: 'Dry-run — planned git commands', body, onConfirm: async () => {} }); } catch {}
+      }
+    } catch (e) {
+      showToast('Pull failed: ' + e, 'error');
+    } finally {
+      pullBtn.disabled = false;
+      pullBtn.textContent = origLabel;
+    }
+  });
+
   manageInner.addEventListener('click', () => {
     searchPanel.style.display = 'none';
     managePanel.style.display = '';
     manageInner.classList.add('active');
     searchInner.classList.remove('active');
+    if (!manageLoaded) { manageLoaded = true; loadManage(); }
   });
 
   searchInner.addEventListener('click', () => {
@@ -1820,5 +1931,21 @@ function css() {
 .rs-inner-tab.active { background:var(--bg-secondary); border-color:var(--border); color:var(--text); }
 .rs-inner-tab:hover:not(.active) { color:var(--text); }
 .rs-inner-panel { flex:1; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
+/* Manage panel */
+.rs-manage-toolbar { display:flex; align-items:center; gap:10px; padding:10px 14px; border-bottom:1px solid var(--border); flex-shrink:0; }
+.rs-dry-wrap { font-size:12px; color:var(--text-muted); display:flex; align-items:center; gap:4px; cursor:pointer; }
+.rs-manage-table-wrap { flex:1; overflow:auto; padding:6px 14px; }
+.rs-manage-empty { padding:14px; color:var(--text-muted); }
+.rs-err { color:var(--danger, #f85149); }
+.rs-manage { width:100%; border-collapse:collapse; font-size:12px; }
+.rs-manage th, .rs-manage td { text-align:left; padding:6px 10px; border-bottom:1px solid var(--border); }
+.rs-manage th { color:var(--text-muted); font-weight:500; }
+.rs-manage tbody tr:hover { background:rgba(255,255,255,0.03); }
+.rs-row-dirty td { color:var(--text); }
+.rs-row-err td { color:var(--danger, #f85149); }
+.rs-badge { padding:1px 8px; border-radius:10px; font-size:11px; }
+.rs-badge-ok   { background:rgba(63,185,80,0.12); color:#3fb950; }
+.rs-badge-skip { background:rgba(245,158,11,0.12); color:#f59e0b; }
+.rs-badge-err  { background:rgba(248,81,73,0.12); color:#f85149; }
 `;
 }
