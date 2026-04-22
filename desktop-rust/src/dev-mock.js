@@ -396,8 +396,7 @@
         return { name, skipped: false, success: true, message: 'Already up to date.', commands_run: cmds };
       });
     },
-    async repo_search_reset_hard({ path }) {
-      // Flip the fixture row back to clean after reset.
+    async repo_search_reset_hard({ path, clean }) {
       const pathToName = new Map((storeGet('repos', [])).map(r => [r.path, r.name]));
       const name = pathToName.get(path);
       const statuses = storeGet('repo_statuses', null);
@@ -405,10 +404,12 @@
         const next = statuses.map(s => s.name === name ? { ...s, is_dirty: false } : s);
         storeSet('repo_statuses', next);
       }
+      const cleaned = clean !== false;
       return {
-        output: 'HEAD is now at abc1234 (mock reset)',
+        output: `HEAD is now at abc1234 (mock reset)${cleaned ? '\nRemoving scratch.txt' : ''}`,
         dirty_before: true,
         dirty_after: false,
+        cleaned,
       };
     },
 

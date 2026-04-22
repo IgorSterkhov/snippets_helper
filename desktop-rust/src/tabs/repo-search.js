@@ -278,7 +278,11 @@ function buildLayout() {
     const body = document.createElement('div');
     body.innerHTML = `
       <p style="margin:0 0 8px">Discard all uncommitted changes in <b>${escapeHtml(repoName)}</b>?</p>
-      <p style="margin:0 0 4px;font-size:11px;color:var(--text-muted)">Runs <code>git reset --hard HEAD</code>. Untracked files are NOT removed.</p>
+      <p style="margin:0 0 6px;font-size:11px;color:var(--text-muted)">Runs <code>git reset --hard HEAD</code>.</p>
+      <label style="display:flex;align-items:center;gap:6px;margin:6px 0;font-size:12px">
+        <input type="checkbox" id="rs-reset-clean" checked/>
+        Also remove untracked files (<code>git clean -fd</code>)
+      </label>
       <p style="margin:0;font-size:11px;color:var(--danger,#f85149)">This cannot be undone.</p>
     `;
     try {
@@ -286,16 +290,19 @@ function buildLayout() {
       await showModal({
         title: 'Discard changes?',
         body,
-        onConfirm: async () => { result = await call('repo_search_reset_hard', { path: repo.path }); },
+        onConfirm: async () => {
+          const clean = body.querySelector('#rs-reset-clean')?.checked !== false;
+          result = await call('repo_search_reset_hard', { path: repo.path, clean });
+        },
       });
       if (manageOutcomes) manageOutcomes = manageOutcomes.filter(o => o.name !== repoName);
       await loadManage();
       if (result) {
+        const label = result.cleaned ? 'Reset + cleaned' : 'Reset';
         if (result.dirty_after) {
-          // Git said OK but the tree is still dirty — real problem on disk.
-          showToast(`Reset ${repoName}: tree still dirty — ${result.output || '(no output)'}`, 'error');
+          showToast(`${label} ${repoName}: tree still dirty — ${result.output || '(no output)'}`, 'error');
         } else {
-          showToast(`Reset ${repoName}: ${result.output || 'clean'}`, 'success');
+          showToast(`${label} ${repoName}: ${result.output || 'clean'}`, 'success');
         }
       } else {
         showToast(`Reset ${repoName}`, 'success');

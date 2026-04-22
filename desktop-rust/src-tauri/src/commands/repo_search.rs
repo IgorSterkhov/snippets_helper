@@ -1014,19 +1014,24 @@ fn pull_one(repo: &RepoEntry, dry_run: bool) -> PullOutcome {
 
 #[derive(Serialize)]
 pub struct ResetHardResult {
-    pub output: String,         // combined stdout/stderr of `git reset --hard`
+    pub output: String,         // combined stdout/stderr of git steps
     pub dirty_before: bool,
-    pub dirty_after: bool,      // should be false on a real reset
+    pub dirty_after: bool,      // should be false on a real reset (+clean)
+    pub cleaned: bool,           // whether git clean -fd also ran
 }
 
-/// Discard all uncommitted changes (tracked files) in the given repo
-/// by running `git reset --hard HEAD`. Does NOT remove untracked files —
-/// user keeps scratch work.
+/// Discard all uncommitted changes in the given repo.
 ///
-/// Returns detailed diagnostics so the caller can verify the reset took
-/// effect (dirty_before vs dirty_after).
+/// Always runs `git reset --hard HEAD`. If `clean = true` (default when the
+/// caller doesn't pass it), also runs `git clean -fd` to remove untracked
+/// files and directories (user asked for full cleanup including scratch
+/// work). Both outputs are joined in `output`.
 #[tauri::command]
-pub async fn repo_search_reset_hard(path: String) -> Result<ResetHardResult, String> {
+pub async fn repo_search_reset_hard(
+    path: String,
+    clean: Option<bool>,
+) -> Result<ResetHardResult, String> {
+    let want_clean = clean.unwrap_or(true);
     tokio::task::spawn_blocking(move || -> Result<ResetHardResult, String> {
         if git_run(&path, &["rev-parse", "--is-inside-work-tree"]).is_err() {
             return Err(format!("not a git repository: {path}"));
@@ -1034,11 +1039,24 @@ pub async fn repo_search_reset_hard(path: String) -> Result<ResetHardResult, Str
         let dirty_before = git_run(&path, &["status", "--porcelain"])
             .map(|s| !s.is_empty())
             .unwrap_or(false);
-        let output = git_run(&path, &["reset", "--hard", "HEAD"])?;
+        let reset_out = git_run(&path, &["reset", "--hard", "HEAD"])?;
+        let mut combined = reset_out;
+        if want_clean {
+            let clean_out = git_run(&path, &["clean", "-fd"])?;
+            if !clean_out.is_empty() {
+                if !combined.is_empty() { combined.push('\n'); }
+                combined.push_str(&clean_out);
+            }
+        }
         let dirty_after = git_run(&path, &["status", "--porcelain"])
             .map(|s| !s.is_empty())
             .unwrap_or(false);
-        Ok(ResetHardResult { output, dirty_before, dirty_after })
+        Ok(ResetHardResult {
+            output: combined,
+            dirty_before,
+            dirty_after,
+            cleaned: want_clean,
+        })
     })
     .await
     .map_err(|e| e.to_string())?
