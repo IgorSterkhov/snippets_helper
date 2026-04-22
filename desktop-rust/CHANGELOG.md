@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.2.0 (2026-04-22)
+
+**Repo Search — editor integration, full-file preview, Manage tab.**
+
+- **Open in editor** — new button on every result card opens the file
+  at the match line. Configurable editor command template in
+  Settings → General (`code {path}:{line}` by default; supports
+  `cursor`, `subl`, `pycharm`, etc.)
+- **Full-file preview** — `Expand ▸` button on result cards opens a
+  fullscreen view of the file with syntax highlighting (highlight.js
+  bundled, ~190 languages). 2 MB cap; ESC or `Collapse ◂` closes.
+- **Manage tab** — new inner tab under the group-tab strip showing a
+  per-repo git status table (branch, last commit + date, dirty flag).
+  Bulk **Pull all to main** action: skips dirty repos (highlighted in
+  red), falls back `main → master → origin/HEAD`. **Dry-run** checkbox
+  previews the exact `git` commands before executing.
+- Search input + type selector + gear now live on the Search inner
+  tab; chip strip (with select-all/none) remains shared across both
+  inner tabs as the scope selector.
+
 ## v1.1.0 (2026-04-21)
 
 - Repo Search: groups — organise repos into named, colored, icon-tagged
