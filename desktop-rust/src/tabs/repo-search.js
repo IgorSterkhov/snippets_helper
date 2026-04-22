@@ -122,7 +122,7 @@ function buildLayout() {
   });
   topBar.appendChild(gearBtn);
 
-  wrap.appendChild(topBar);
+  // topBar is appended to searchPanel (created below, after the chip strip)
 
   const tabStrip = el('div', { class: 'rs-tab-strip', id: 'rs-tab-strip' });
   wrap.appendChild(tabStrip);
@@ -133,12 +133,31 @@ function buildLayout() {
   wrap.appendChild(repoBar);
   renderRepoChips(repoBar);
 
-  // Settings panel (collapsible)
+  // Inner tab strip: Search | Manage
+  const innerTabs = el('div', { class: 'rs-inner-tabs' });
+  const searchInner = el('button', { text: 'Search', class: 'rs-inner-tab active' });
+  const manageInner = el('button', { text: 'Manage', class: 'rs-inner-tab' });
+  innerTabs.appendChild(searchInner);
+  innerTabs.appendChild(manageInner);
+  wrap.appendChild(innerTabs);
+
+  // Search panel — houses topbar + settings + sort + results
+  const searchPanel = el('div', { class: 'rs-inner-panel', id: 'rs-search-panel' });
+  // Manage panel
+  const managePanel = el('div', { class: 'rs-inner-panel', id: 'rs-manage-panel' });
+  managePanel.style.display = 'none';
+  wrap.appendChild(searchPanel);
+  wrap.appendChild(managePanel);
+
+  // Move topBar into search panel (was deferred above)
+  searchPanel.appendChild(topBar);
+
+  // Settings panel (collapsible) — inside search panel
   const settingsPanel = el('div', { class: 'rs-settings-panel', id: 'rs-settings-panel' });
   settingsPanel.style.display = 'none';
-  wrap.appendChild(settingsPanel);
+  searchPanel.appendChild(settingsPanel);
 
-  // Sort bar
+  // Sort bar — inside search panel
   const sortBar = el('div', { class: 'rs-sortbar' });
   const sortLabel = el('span', { text: 'Sort:', class: 'rs-sort-label' });
   sortBar.appendChild(sortLabel);
@@ -163,12 +182,26 @@ function buildLayout() {
 
   const countLabel = el('span', { text: '', class: 'rs-count', id: 'rs-count' });
   sortBar.appendChild(countLabel);
-  wrap.appendChild(sortBar);
+  searchPanel.appendChild(sortBar);
 
-  // Results area
+  // Results area — inside search panel
   const resultsList = el('div', { class: 'rs-results', id: 'rs-results' });
   resultsList.innerHTML = '<p class="rs-placeholder">Enter a search pattern and press Enter</p>';
-  wrap.appendChild(resultsList);
+  searchPanel.appendChild(resultsList);
+
+  manageInner.addEventListener('click', () => {
+    searchPanel.style.display = 'none';
+    managePanel.style.display = '';
+    manageInner.classList.add('active');
+    searchInner.classList.remove('active');
+  });
+
+  searchInner.addEventListener('click', () => {
+    searchPanel.style.display = '';
+    managePanel.style.display = 'none';
+    searchInner.classList.add('active');
+    manageInner.classList.remove('active');
+  });
 
   return wrap;
 }
@@ -1781,5 +1814,11 @@ function css() {
   white-space: pre;
   overflow-x: auto;
 }
+/* Inner tab strip */
+.rs-inner-tabs { display:flex; gap:2px; padding:4px 12px 0; border-bottom:1px solid var(--border); flex-shrink:0; }
+.rs-inner-tab { padding:6px 14px; font-size:12px; background:transparent; border:1px solid transparent; border-bottom:none; border-radius:5px 5px 0 0; color:var(--text-muted); cursor:pointer; }
+.rs-inner-tab.active { background:var(--bg-secondary); border-color:var(--border); color:var(--text); }
+.rs-inner-tab:hover:not(.active) { color:var(--text); }
+.rs-inner-panel { flex:1; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
 `;
 }
