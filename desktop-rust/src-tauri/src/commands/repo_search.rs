@@ -1010,14 +1010,28 @@ pub fn open_in_editor(
     let rendered = template
         .replace("{path}", &path)
         .replace("{line}", &line_str);
-    let parts: Vec<&str> = rendered.split_whitespace().collect();
-    if parts.is_empty() {
+    if rendered.trim().is_empty() {
         return Err("editor_command is empty".to_string());
     }
-    std::process::Command::new(parts[0])
-        .args(&parts[1..])
-        .spawn()
-        .map_err(|e| format!("spawn {}: {}", parts[0], e))?;
+    // Spawn through a shell so PATH resolution (macOS login env, Windows
+    // PATHEXT) works the same as from the terminal. Direct Command::new
+    // misses `.cmd`/`.bat` wrappers on Windows and the user's shell PATH
+    // on GUI-launched macOS apps.
+    #[cfg(unix)]
+    {
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+        std::process::Command::new(&shell)
+            .arg("-l").arg("-c").arg(&rendered)
+            .spawn()
+            .map_err(|e| format!("spawn {} -lc {:?}: {}", shell, rendered, e))?;
+    }
+    #[cfg(windows)]
+    {
+        std::process::Command::new("cmd")
+            .args(["/C", &rendered])
+            .spawn()
+            .map_err(|e| format!("spawn cmd /C {:?}: {}", rendered, e))?;
+    }
     Ok(())
 }
 
