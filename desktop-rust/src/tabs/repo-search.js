@@ -21,6 +21,7 @@ let draggingRepoName = null;  // populated during chip drag — tab drop-targets
 export function init(container) {
   root = container;
   root.innerHTML = '';
+  root.style.position = 'relative';
 
   const style = document.createElement('style');
   style.textContent = css();
@@ -187,6 +188,14 @@ function buildLayout() {
   // Results area — inside search panel
   const resultsList = el('div', { class: 'rs-results', id: 'rs-results' });
   resultsList.innerHTML = '<p class="rs-placeholder">Enter a search pattern and press Enter</p>';
+  // Delegated expand handler — works for both real and test-injected cards
+  resultsList.addEventListener('click', (e) => {
+    const expandTgt = e.target.closest('[data-role="rs-expand"]');
+    if (expandTgt) {
+      e.stopPropagation();
+      expandFileCard(expandTgt.dataset.path || '');
+    }
+  });
   searchPanel.appendChild(resultsList);
 
   // ── Manage panel contents ──────────────────────────────────
@@ -1109,12 +1118,46 @@ function renderResults() {
       card.appendChild(matchEl);
     }
 
-    card.addEventListener('click', () => {
-      navigator.clipboard.writeText(r.file_path).then(() => {
-        showToast('Path copied', 'success');
-      }).catch(() => {});
+    // Action buttons
+    const actions = el('div', { class: 'rs-card-actions' });
+    const hitLine = r.match_line_num || 1;
+    const filePath = r.file_path;
+
+    const openBtn = document.createElement('button');
+    openBtn.className = 'rs-card-btn';
+    openBtn.textContent = 'Open in editor';
+    openBtn.dataset.role = 'rs-open';
+    openBtn.dataset.path = filePath;
+    openBtn.dataset.line = String(hitLine);
+    openBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      call('open_in_editor', { path: filePath, line: hitLine })
+        .catch(err => showToast('Editor error: ' + err, 'error'));
     });
-    card.title = r.file_path;
+
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'rs-card-btn';
+    copyBtn.textContent = 'Copy path';
+    copyBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      navigator.clipboard.writeText(filePath).then(() => showToast('Path copied', 'success')).catch(() => {});
+    });
+
+    const expandBtn = document.createElement('button');
+    expandBtn.className = 'rs-card-btn';
+    expandBtn.textContent = 'Expand ▸';
+    expandBtn.dataset.role = 'rs-expand';
+    expandBtn.dataset.path = filePath;
+    expandBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      expandFileCard(filePath);
+    });
+
+    actions.appendChild(openBtn);
+    actions.appendChild(copyBtn);
+    actions.appendChild(expandBtn);
+    card.appendChild(actions);
+    card.title = filePath;
 
     resultsList.appendChild(card);
   }
@@ -1177,6 +1220,46 @@ function renderContentResults(fileResults) {
       const more = el('div', { text: '+' + (f.total_matches - MAX_SHOWN) + ' more', class: 'rs-more-label' });
       card.appendChild(more);
     }
+
+    // Action buttons
+    const fActions = el('div', { class: 'rs-card-actions' });
+    const fHitLine = f.matches[0]?.line_num || 1;
+    const fPath = f.file_path;
+
+    const fOpenBtn = document.createElement('button');
+    fOpenBtn.className = 'rs-card-btn';
+    fOpenBtn.textContent = 'Open in editor';
+    fOpenBtn.dataset.role = 'rs-open';
+    fOpenBtn.dataset.path = fPath;
+    fOpenBtn.dataset.line = String(fHitLine);
+    fOpenBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      call('open_in_editor', { path: fPath, line: fHitLine })
+        .catch(err => showToast('Editor error: ' + err, 'error'));
+    });
+
+    const fCopyBtn = document.createElement('button');
+    fCopyBtn.className = 'rs-card-btn';
+    fCopyBtn.textContent = 'Copy path';
+    fCopyBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      navigator.clipboard.writeText(fPath).then(() => showToast('Path copied', 'success')).catch(() => {});
+    });
+
+    const fExpandBtn = document.createElement('button');
+    fExpandBtn.className = 'rs-card-btn';
+    fExpandBtn.textContent = 'Expand ▸';
+    fExpandBtn.dataset.role = 'rs-expand';
+    fExpandBtn.dataset.path = fPath;
+    fExpandBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      expandFileCard(fPath);
+    });
+
+    fActions.appendChild(fOpenBtn);
+    fActions.appendChild(fCopyBtn);
+    fActions.appendChild(fExpandBtn);
+    card.appendChild(fActions);
 
     // Click card to show detail modal
     card.addEventListener('click', () => showDetailModal(f));
@@ -1335,6 +1418,131 @@ function renderGitResults(gitResults) {
   }
 }
 
+// ── Expand / fullscreen view ───────────────────────────────
+
+async function expandFileCard(path) {
+  if (document.getElementById('rs-fullscreen-overlay')) return;
+  if (!root) return;
+  await ensureHighlight();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'rs-fullscreen-overlay';
+  overlay.className = 'rs-fullscreen';
+
+  const header = document.createElement('div');
+  header.className = 'rs-fullscreen-header';
+  const fsPath = document.createElement('div');
+  fsPath.className = 'rs-fs-path';
+  fsPath.title = path;
+  fsPath.textContent = path.split(/[\\/]/).pop();
+  header.appendChild(fsPath);
+
+  const collapse = document.createElement('button');
+  collapse.className = 'rs-card-btn';
+  collapse.textContent = 'Collapse ◂';
+  collapse.dataset.role = 'rs-collapse';
+  collapse.addEventListener('click', closeFullscreen);
+  header.appendChild(collapse);
+  overlay.appendChild(header);
+
+  const codeWrap = document.createElement('div');
+  codeWrap.className = 'rs-fullscreen-code';
+  overlay.appendChild(codeWrap);
+
+  root.appendChild(overlay);
+  document.addEventListener('keydown', onFsKey);
+
+  let data;
+  try {
+    data = await call('read_full_file', { path });
+  } catch (e) {
+    codeWrap.innerHTML = `<div style="padding:20px;color:var(--danger)">Read error: ${e}</div>`;
+    return;
+  }
+
+  if (data.truncated) {
+    codeWrap.innerHTML = `<div style="padding:20px;color:var(--text-muted)">File too large (${(data.size / (1024 * 1024)).toFixed(1)} MB) — open in editor instead.</div>`;
+    return;
+  }
+
+  const lang = guessLang(path);
+  const pre = document.createElement('pre');
+  pre.className = 'rs-fs-pre';
+  const code = document.createElement('code');
+
+  if (lang && window.hljs?.getLanguage(lang)) {
+    code.className = `hljs language-${lang}`;
+    try {
+      code.innerHTML = window.hljs.highlight(data.content, { language: lang, ignoreIllegals: true }).value;
+    } catch {
+      code.textContent = data.content;
+    }
+  } else {
+    code.className = 'hljs';
+    try {
+      code.innerHTML = window.hljs.highlightAuto(data.content).value;
+    } catch {
+      code.textContent = data.content;
+    }
+  }
+
+  pre.appendChild(code);
+  codeWrap.appendChild(pre);
+}
+
+function closeFullscreen() {
+  document.getElementById('rs-fullscreen-overlay')?.remove();
+  document.removeEventListener('keydown', onFsKey);
+}
+
+function onFsKey(e) {
+  if (e.key === 'Escape') closeFullscreen();
+}
+
+function guessLang(path) {
+  const ext = path.split('.').pop()?.toLowerCase() || '';
+  const m = {
+    md: 'markdown', py: 'python', js: 'javascript', ts: 'typescript',
+    rs: 'rust', go: 'go', sql: 'sql', json: 'json',
+    yml: 'yaml', yaml: 'yaml', sh: 'bash', toml: 'toml',
+    xml: 'xml', html: 'html', css: 'css', dockerfile: 'dockerfile',
+    java: 'java', kt: 'kotlin',
+  };
+  return m[ext] || null;
+}
+
+let highlightLoaded = false;
+
+async function ensureHighlight() {
+  if (highlightLoaded) return;
+  await Promise.all([
+    loadScript('lib/highlight/highlight.min.js'),
+    loadStyle('lib/highlight/github-dark.min.css'),
+  ]);
+  highlightLoaded = true;
+}
+
+function loadScript(src) {
+  return new Promise((ok, fail) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = ok;
+    s.onerror = fail;
+    document.head.appendChild(s);
+  });
+}
+
+function loadStyle(href) {
+  return new Promise((ok) => {
+    const l = document.createElement('link');
+    l.rel = 'stylesheet';
+    l.href = href;
+    l.onload = ok;
+    l.onerror = ok;
+    document.head.appendChild(l);
+  });
+}
+
 // ── Helpers ────────────────────────────────────────────────
 
 function el(tag, opts = {}) {
@@ -1450,6 +1658,7 @@ function css() {
   display: flex;
   flex-direction: column;
   height: 100%;
+  position: relative;
 }
 .rs-topbar {
   display: flex;
@@ -1947,5 +2156,62 @@ function css() {
 .rs-badge-ok   { background:rgba(63,185,80,0.12); color:#3fb950; }
 .rs-badge-skip { background:rgba(245,158,11,0.12); color:#f59e0b; }
 .rs-badge-err  { background:rgba(248,81,73,0.12); color:#f85149; }
+/* Card action buttons */
+.rs-card-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+}
+.rs-card-btn {
+  padding: 4px 10px;
+  font-size: 11px;
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  margin-right: 0;
+}
+.rs-card-btn:hover { color: var(--text); border-color: #484f58; }
+/* Fullscreen overlay */
+.rs-fullscreen {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background: var(--bg, #0d1117);
+  display: flex;
+  flex-direction: column;
+}
+.rs-fullscreen-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.rs-fs-path {
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rs-fullscreen-code {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.rs-fs-pre {
+  margin: 0;
+  padding: 14px 18px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.rs-fs-pre code {
+  font-family: 'SF Mono','Consolas','Menlo',monospace;
+  white-space: pre;
+}
 `;
 }
