@@ -228,9 +228,11 @@ function buildLayout() {
     }
     tableWrap.innerHTML = '<p class="rs-manage-empty">Loading…</p>';
     try {
-      const all = await call('repo_search_status');
-      const nameSet = new Set(scope.map(r => r.name));
-      manageStatuses = all.filter(s => nameSet.has(s.name));
+      // Pass only the scope's paths — backend skips all other repos, saves
+      // N × 4 git spawns on large repo lists (and on Windows, N × 4 cmd-window
+      // flashes without CREATE_NO_WINDOW).
+      const paths = scope.map(r => r.path);
+      manageStatuses = await call('repo_search_status', { paths });
     } catch (e) {
       tableWrap.innerHTML = `<p class="rs-manage-empty rs-err">${e}</p>`;
       return;
@@ -280,14 +282,24 @@ function buildLayout() {
       <p style="margin:0;font-size:11px;color:var(--danger,#f85149)">This cannot be undone.</p>
     `;
     try {
+      let result = null;
       await showModal({
         title: 'Discard changes?',
         body,
-        onConfirm: async () => { await call('repo_search_reset_hard', { path: repo.path }); },
+        onConfirm: async () => { result = await call('repo_search_reset_hard', { path: repo.path }); },
       });
       if (manageOutcomes) manageOutcomes = manageOutcomes.filter(o => o.name !== repoName);
       await loadManage();
-      showToast(`Reset ${repoName}`, 'success');
+      if (result) {
+        if (result.dirty_after) {
+          // Git said OK but the tree is still dirty — real problem on disk.
+          showToast(`Reset ${repoName}: tree still dirty — ${result.output || '(no output)'}`, 'error');
+        } else {
+          showToast(`Reset ${repoName}: ${result.output || 'clean'}`, 'success');
+        }
+      } else {
+        showToast(`Reset ${repoName}`, 'success');
+      }
     } catch { /* cancelled or modal reported error */ }
   }
 

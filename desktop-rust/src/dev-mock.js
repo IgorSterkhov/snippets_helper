@@ -405,7 +405,11 @@
         const next = statuses.map(s => s.name === name ? { ...s, is_dirty: false } : s);
         storeSet('repo_statuses', next);
       }
-      return 'HEAD is now at abc1234 (mock reset)';
+      return {
+        output: 'HEAD is now at abc1234 (mock reset)',
+        dirty_before: true,
+        dirty_after: false,
+      };
     },
 
     // ── VPS ─────────────────────────────────────────────

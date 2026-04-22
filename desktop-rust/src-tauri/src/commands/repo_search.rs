@@ -820,15 +820,26 @@ pub async fn search_git_history(state: State<'_, DbState>, query: String, repos:
 }
 
 fn git_run(repo: &str, args: &[&str]) -> Result<String, String> {
-    let out = std::process::Command::new("git")
-        .arg("-C").arg(repo)
-        .args(args)
-        .output()
-        .map_err(|e| format!("git: {e}"))?;
+    let mut cmd = std::process::Command::new("git");
+    cmd.arg("-C").arg(repo).args(args);
+    // On Windows suppress the flashing cmd window that `spawn/output` otherwise
+    // creates for every invocation — this was visible as a window flickering on
+    // every Manage-tab refresh (4 git calls per repo).
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let out = cmd.output().map_err(|e| format!("git: {e}"))?;
     if !out.status.success() {
         return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
     }
-    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    // Some git commands (reset --hard, checkout) print to stderr on success.
+    // Prefer stdout; fall back to stderr so caller still gets a human message.
+    let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if !stdout.is_empty() { return Ok(stdout); }
+    Ok(String::from_utf8_lossy(&out.stderr).trim().to_string())
 }
 
 fn default_branch(repo: &str) -> Option<String> {
@@ -856,16 +867,27 @@ pub struct RepoStatus {
 #[tauri::command]
 pub async fn repo_search_status(
     state: State<'_, DbState>,
+    paths: Option<Vec<String>>,
 ) -> Result<Vec<RepoStatus>, String> {
     let repos = {
         let conn = state.0.lock().map_err(|e| e.to_string())?;
         let cid = get_computer_id();
-        load_repos(&conn, &cid)
+        let all = load_repos(&conn, &cid);
+        match paths {
+            Some(p) if !p.is_empty() => {
+                let set: std::collections::HashSet<_> = p.into_iter().collect();
+                all.into_iter().filter(|r| set.contains(&r.path)).collect::<Vec<_>>()
+            }
+            _ => all,
+        }
     };
-    let handles = repos.into_iter().map(|repo| {
-        tokio::task::spawn_blocking(move || status_one(&repo))
-    });
-    let mut out = Vec::new();
+    // Collect into Vec first so all spawns kick off before we start awaiting;
+    // otherwise the lazy iterator makes them serial.
+    let handles: Vec<_> = repos
+        .into_iter()
+        .map(|repo| tokio::task::spawn_blocking(move || status_one(&repo)))
+        .collect();
+    let mut out = Vec::with_capacity(handles.len());
     for h in handles {
         out.push(h.await.map_err(|e| e.to_string())?);
     }
@@ -926,10 +948,11 @@ pub async fn repo_search_pull_main(
         let set: std::collections::HashSet<_> = paths.into_iter().collect();
         all.into_iter().filter(|r| set.contains(&r.path)).collect::<Vec<_>>()
     };
-    let handles = repos.into_iter().map(|repo| {
-        tokio::task::spawn_blocking(move || pull_one(&repo, dry_run))
-    });
-    let mut out = Vec::new();
+    let handles: Vec<_> = repos
+        .into_iter()
+        .map(|repo| tokio::task::spawn_blocking(move || pull_one(&repo, dry_run)))
+        .collect();
+    let mut out = Vec::with_capacity(handles.len());
     for h in handles {
         out.push(h.await.map_err(|e| e.to_string())?);
     }
@@ -989,16 +1012,33 @@ fn pull_one(repo: &RepoEntry, dry_run: bool) -> PullOutcome {
     }
 }
 
+#[derive(Serialize)]
+pub struct ResetHardResult {
+    pub output: String,         // combined stdout/stderr of `git reset --hard`
+    pub dirty_before: bool,
+    pub dirty_after: bool,      // should be false on a real reset
+}
+
 /// Discard all uncommitted changes (tracked files) in the given repo
 /// by running `git reset --hard HEAD`. Does NOT remove untracked files —
 /// user keeps scratch work.
+///
+/// Returns detailed diagnostics so the caller can verify the reset took
+/// effect (dirty_before vs dirty_after).
 #[tauri::command]
-pub async fn repo_search_reset_hard(path: String) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || {
+pub async fn repo_search_reset_hard(path: String) -> Result<ResetHardResult, String> {
+    tokio::task::spawn_blocking(move || -> Result<ResetHardResult, String> {
         if git_run(&path, &["rev-parse", "--is-inside-work-tree"]).is_err() {
             return Err(format!("not a git repository: {path}"));
         }
-        git_run(&path, &["reset", "--hard", "HEAD"])
+        let dirty_before = git_run(&path, &["status", "--porcelain"])
+            .map(|s| !s.is_empty())
+            .unwrap_or(false);
+        let output = git_run(&path, &["reset", "--hard", "HEAD"])?;
+        let dirty_after = git_run(&path, &["status", "--porcelain"])
+            .map(|s| !s.is_empty())
+            .unwrap_or(false);
+        Ok(ResetHardResult { output, dirty_before, dirty_after })
     })
     .await
     .map_err(|e| e.to_string())?
