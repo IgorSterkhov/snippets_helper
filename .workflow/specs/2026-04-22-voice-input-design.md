@@ -7,7 +7,10 @@
 речь локально (без интернета) и вставляет результат в активное окно или
 в буфер обмена. Работает из любого приложения по глобальному hotkey.
 
-Цели: Windows (с/без GPU) и macOS M2+ (Metal из коробки).
+Цели: Windows 10+ (с/без GPU) и macOS 12+ Apple Silicon (M2 и новее, Metal
+из коробки). **Intel Macs в MVP не поддерживаются** — требуемое железо
+бандлит только aarch64 бинарь; Intel-поддержку добавим позже отдельным
+билдом при необходимости.
 
 ## Требования и скоуп
 
@@ -57,21 +60,50 @@
 - Есть кнопка **Unload now** для принудительной выгрузки (экономия VRAM/батареи)
 - Crash whisper-server → auto-restart при следующей записи
 
+**Поведение Stop во время warming:** пользователь может нажать Stop/отпустить
+hotkey до того как сервер поднялся. В этом случае cpal-запись
+останавливается сразу, PCM-буфер удерживается; как только сервер перейдёт
+в ready, буфер отправляется на `/inference` без дополнительного ввода.
+Cancel (✕ в overlay) — буфер отбрасывается, warm-up продолжается до конца
+и переводит сервис в ready.
+
 **Audio capture:** нативный — Rust crate `cpal` (кросс-платформенный),
 RMS уровня эмитится в overlay через Tauri-events ~20Hz.
 
-**Формат аудио:** WAV 16kHz mono (стандарт для whisper.cpp), кодирование через `hound`.
+**Формат аудио:** WAV 16kHz mono (стандарт для whisper.cpp), кодирование
+через `hound`. Если источник выдаёт другую частоту — ресемплинг на стороне
+audio.rs (linear interpolation достаточно для голоса).
+
+**Hotkey-интеграция:** используем существующий `tauri-plugin-global-shortcut`
+(уже установлен для Alt+Space основного приложения). Регистрация для
+Whisper идёт через plugin, а **не** через custom rdev-код в `hotkey/` —
+он работает только для двойных Shift/Ctrl. Плагин регистрирует
+Ctrl+Alt+Space и эмитит событие на start/end нажатия; наш toggle-режим
+использует только start.
+
+**Детект железа:** crate `sysinfo` для CPU-модели и RAM;
+`gpu_detect.rs` определяет NVIDIA (через опрос `nvidia-smi` или
+Windows WMI) и Apple Silicon (через uname + Metal).
 
 **Вставка в активное окно:** arboard (уже в проекте) + enigo для симуляции
 Ctrl+V/Cmd+V. Исходный clipboard сохраняется до вставки и восстанавливается
-после.
+после **с задержкой ~200мс** после key-up Ctrl+V — иначе целевое
+приложение успеет прочитать старый clipboard вместо нового транскрипта.
+Если sender целевого окна нестандартный и 200мс мало — пользователь
+может увеличить в настройках (hidden setting `whisper.clipboard_restore_delay_ms`).
 
 **Упаковка whisper.cpp:**
 - CPU-бинарь предбандлен в `src-tauri/binaries/` как Tauri `externalBin`
-  (~3 МБ Windows, ~2 МБ macOS Metal-built — работает и на CPU fallback)
+  (~3 МБ Windows, ~2 МБ macOS aarch64 Metal-built)
+- **Naming convention Tauri v2:** файлы обязаны называться
+  `<name>-<target-triple>` (для macOS — `whisper-server-aarch64-apple-darwin`,
+  для Windows — `whisper-server-x86_64-pc-windows-msvc.exe`). Вызывается через
+  `tauri::api::process::Command::new_sidecar("whisper-server")`. Несовпадение
+  triple приводит к `NotFound` в рантайме.
 - GPU-билды (Windows CUDA, Vulkan) — опциональны, скачиваются в
   `app_data_dir/whisper-bin/` при первом запуске если `gpu_detect` нашёл GPU
 - Модели **не** предбандлятся — пользователь ставит через onboarding
+- Храним модели в `app_data_dir/whisper-models/ggml-<name>.bin`
 
 ## UI
 
@@ -148,7 +180,7 @@ tabs/whisper/
 └── whisper-api.js           # обёртки над call('whisper_*', ...)
 ```
 
-Плюс одна строка в `main.js:15` (массив TABS):
+Плюс одна запись в массиве `TABS` (`desktop-rust/src/main.js`):
 ```javascript
 { id: 'whisper', label: 'Whisper', icon: '🎤',
   loader: (el) => import('./tabs/whisper/whisper-main.js').then(m => m.init(el)) },
@@ -178,6 +210,7 @@ whisper/
 - `cpal = "0.15"` — audio capture
 - `hound = "3.5"` — WAV encoding
 - `enigo = "0.2"` — keyboard simulation
+- `sysinfo = "0.30"` — CPU model / RAM для onboarding-подсказки
 
 ### Конфигурация Tauri
 
@@ -192,20 +225,20 @@ whisper/
 | Команда | Назначение |
 |---|---|
 | `whisper_list_models` | установленные модели из SQLite |
-| `whisper_list_catalog` | доступные для загрузки (hardcoded manifest + sha256) |
+| `whisper_list_catalog` | доступные для загрузки — `const CATALOG: &[ModelMeta]` в `whisper/catalog.rs` с полями `{name, display_name, size_bytes, sha256, download_url, ru_quality, recommended_for}` |
 | `whisper_install_model(name)` | скачать с HF, verify sha, записать в БД; эмитит `whisper:model-download` |
 | `whisper_delete_model(name)` | удалить файл + запись |
-| `whisper_set_default_model(name)` | `is_default=1` |
+| `whisper_set_default_model(name)` | единственный default. Реализуется транзакцией: `UPDATE whisper_models SET is_default=0; UPDATE whisper_models SET is_default=1 WHERE name=?`. Вызывается автоматически при `whisper_install_model` если других установленных моделей нет. |
 | `whisper_list_mics` | input-устройства из cpal |
 | `whisper_start_recording` | cpal-capture; lazy-стартует whisper-server если idle |
 | `whisper_stop_recording` | транскрипт (после postprocess); эмитит `whisper:transcribed` |
 | `whisper_cancel_recording` | отмена (✕ в overlay) |
 | `whisper_unload_now` | SIGTERM whisper-server |
-| `whisper_inject_text(text, method)` | copy/paste/type |
+| `whisper_inject_text(text, method)` | **только manual re-invoke** из history-пейна (кнопки Copy/Paste/Edit). Автоматическая вставка после `whisper_stop_recording` идёт внутри Rust-сервиса без отдельного вызова — чтобы не было двойной вставки. |
 | `whisper_get_history(limit)` | последние N записей |
 | `whisper_delete_history(id?)` | одну или все |
-| `whisper_gpu_info` | `{cuda:bool, metal:bool, vram_mb:u32}` |
-| `whisper_detect_whisper_bin` | установлен ли CUDA/Metal-билд, dl-URL если нет |
+| `whisper_gpu_info` | `{cuda:bool, metal:bool, vram_mb:u32, cpu_model:String, ram_mb:u32}` — для onboarding-плашки |
+| `whisper_detect_whisper_bin` | `{variant:"cpu"|"cuda"|"vulkan"|"metal", installed:bool, path:Option<String>, dl_url:Option<String>, dl_size_bytes:Option<u64>}` |
 
 ## Tauri-events (Rust → фронт)
 
@@ -217,7 +250,9 @@ whisper/
 
 ## Схема SQLite
 
-Новые миграции в `db/migrations/`:
+В проекте нет директории `migrations/` — схема живёт inline в
+`desktop-rust/src-tauri/src/db/mod.rs` как `CREATE TABLE IF NOT EXISTS …`
+внутри `init_db()`. Добавляем туда же две новых таблицы:
 
 ```sql
 -- Каталог скачанных моделей
@@ -245,10 +280,24 @@ CREATE TABLE whisper_history (
     created_at     INTEGER NOT NULL
 );
 CREATE INDEX idx_whisper_history_created ON whisper_history(created_at DESC);
--- Храним последние 200; при новой записи TRIM старые.
 ```
 
-Настройки — в существующую таблицу `settings` (key/value):
+**Тримминг истории до 200 записей** — не триггером, а app-level в конце
+`whisper_stop_recording` после INSERT:
+```sql
+DELETE FROM whisper_history
+WHERE id NOT IN (
+    SELECT id FROM whisper_history ORDER BY created_at DESC LIMIT 200
+);
+```
+
+**Настройки** — в существующую таблицу `app_settings` (схема:
+`(computer_id TEXT, setting_key TEXT, setting_value TEXT, PRIMARY KEY (computer_id, setting_key))`,
+см. `db/mod.rs:97`). API через `queries::get_setting(conn, computer_id, key)`
+и `set_setting(conn, computer_id, key, value)`. Все whisper-ключи — per-machine
+(синхронизация между устройствами не нужна: конкретный микрофон, hotkey,
+путь к GPU-бинарю, установленные модели — все зависят от конкретной
+машины). Ключи:
 ```
 whisper.hotkey                 = "Ctrl+Alt+Space"
 whisper.mic_device             = ""  (пусто = default OS)
@@ -282,9 +331,12 @@ whisper.postprocess_rules      = "true"
 
 ## Тестирование
 
-**Dev-mock для фронта** (`src/dev-mock.js`): стабы `whisper_*` команд, чтобы
-вкладка открывалась в браузере без Tauri (через `python3 -m http.server 8000`).
-Это основной режим UI-итерации — экономит минуты native-сборки.
+**Dev-mock для фронта** (`src/dev-mock.js`): стабы `whisper_*` команд +
+мок-event-эмиттеры для `whisper:state-changed`, `whisper:level`
+(синтетический синусоидальный паттерн 20Hz), `whisper:transcribed`,
+`whisper:model-download` — чтобы вкладка открывалась в браузере без Tauri
+(через `python3 -m http.server 8000`). Это основной режим UI-итерации —
+экономит минуты native-сборки.
 
 **Smoke-тесты** (`dev-test.py`, перед каждым тэгом): открывается вкладка,
 рендерится onboarding, открывается settings, элементы кликабельны.
@@ -311,7 +363,7 @@ whisper.postprocess_rules      = "true"
   - `whisper-server-x86_64-pc-windows-msvc.exe` (CPU, ~3 МБ)
   - `whisper-server-aarch64-apple-darwin` (Metal-built, ~2 МБ)
 - Добавляем как `externalBin` в `tauri.conf.json` — Tauri копирует в resources при `tauri build`
-- Скачиваем бинари из [ggerganov/whisper.cpp releases](https://github.com/ggerganov/whisper.cpp/releases)
+- Скачиваем бинари из [ggml-org/whisper.cpp releases](https://github.com/ggml-org/whisper.cpp/releases) (см. раздел «Изменения в CI» про zip-packaging и переименование)
 
 **GPU-билды on demand:**
 - При старте приложение вызывает `whisper_gpu_info` + `whisper_detect_whisper_bin`
@@ -321,9 +373,15 @@ whisper.postprocess_rules      = "true"
 **Модели:** не бандлим — пользователь сам ставит через onboarding с HuggingFace.
 
 **Изменения в CI** (`.github/workflows/release-desktop.yml`):
-- Добавить шаг перед `tauri build`: скачивание whisper.cpp-бинарей в
+- Добавить шаг перед `tauri build`: скачивание whisper.cpp-релиза в
   `src-tauri/binaries/` для целевой платформы (Windows / macOS)
-- Версия whisper.cpp фиксируется в отдельной константе/файле `WHISPER_CPP_VERSION`
+- Upstream переехал: `github.com/ggml-org/whisper.cpp/releases` (ранее
+  `ggerganov/whisper.cpp`). Релизы выкладываются как zip-архивы по
+  платформам/бэкендам (например, `whisper-bin-x64.zip`, `whisper-bin-macos.zip`),
+  **бинарь внутри архива** — CI должен распаковать и переименовать в
+  `whisper-server-<target-triple>(.exe)`
+- Версия whisper.cpp фиксируется в `desktop-rust/WHISPER_CPP_VERSION`
+  (например, `v1.7.3`) — читается и CI, и локальным dev-скриптом
 - При `f-*` (frontend-only) тегах — не трогаем бинари
 
 **RELEASES.md** дополнить:
@@ -338,7 +396,7 @@ whisper.postprocess_rules      = "true"
 - **Resource usage в idle:** 0 (процесс whisper-server не запущен)
 - **Первый транскрипт после idle:** 1–3с на warm-up + время записи + ~200мс
   на inference (для small); **последующие:** ~200мс от stop до вставки
-- **Кросс-платформенность:** Windows 10+, macOS 12+ (Apple Silicon и Intel)
+- **Кросс-платформенность:** Windows 10+, macOS 12+ Apple Silicon (M2 и новее). Intel — post-MVP.
 
 ## Открытые вопросы / future work
 
