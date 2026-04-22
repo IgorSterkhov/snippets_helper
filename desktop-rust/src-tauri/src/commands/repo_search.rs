@@ -851,6 +851,31 @@ pub fn open_in_editor(
     Ok(())
 }
 
+const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
+
+#[derive(Serialize)]
+pub struct FullFileResult {
+    pub content: String,
+    pub truncated: bool,
+    pub size: u64,
+}
+
+#[tauri::command]
+pub fn read_full_file(path: String) -> Result<FullFileResult, String> {
+    let meta = std::fs::metadata(&path).map_err(|e| format!("metadata: {e}"))?;
+    let size = meta.len();
+    if size > MAX_FILE_BYTES {
+        return Ok(FullFileResult {
+            content: String::new(),
+            truncated: true,
+            size,
+        });
+    }
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| format!("read_to_string: {e}"))?;
+    Ok(FullFileResult { content, truncated: false, size })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
