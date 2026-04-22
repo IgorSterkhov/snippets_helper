@@ -220,6 +220,24 @@ async function renderGeneral(container) {
   });
   aotRow.appendChild(aotCb);
   container.appendChild(aotRow);
+
+  // Editor command template
+  const editorRow = makeFormRow('Editor command template:');
+  const editorInput = document.createElement('input');
+  editorInput.type = 'text';
+  editorInput.className = 'settings-input';
+  editorInput.placeholder = 'code {path}:{line}';
+  editorInput.style.flex = '1';
+  editorInput.value = (await getSetting('editor_command')) || '';
+  editorInput.addEventListener('change', () => saveSetting('editor_command', editorInput.value));
+  editorRow.appendChild(editorInput);
+  container.appendChild(editorRow);
+
+  const editorHelp = document.createElement('p');
+  editorHelp.className = 'settings-help';
+  editorHelp.style.cssText = 'font-size:11px;color:var(--text-muted);margin:4px 0 12px';
+  editorHelp.innerHTML = 'Examples: <code>code {path}:{line}</code>, <code>cursor {path}</code>, <code>subl {path}:{line}</code>, <code>pycharm {path}</code>. The <code>{path}</code> and <code>{line}</code> placeholders are substituted when opening a file.';
+  container.appendChild(editorHelp);
 }
 
 // ── Shortcuts settings ────────────────────────────────────────
