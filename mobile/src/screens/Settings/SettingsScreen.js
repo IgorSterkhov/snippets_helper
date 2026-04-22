@@ -21,7 +21,7 @@ export default function SettingsScreen() {
       await performSync();
       Alert.alert('Синхронизация', 'Данные синхронизированы');
     } catch (e) {
-      Alert.alert('Ошибка', 'Не удалось синхронизировать');
+      Alert.alert('Ошибка синхронизации', String(e?.message || e));
     }
   };
 

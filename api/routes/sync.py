@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime
 from uuid import UUID
 from fastapi import APIRouter, Depends
 from sqlalchemy import select, update
@@ -65,15 +65,19 @@ async def push(
             client_updated = row_data.updated_at.replace(tzinfo=None) if row_data.updated_at else None
             is_deleted = row_data.is_deleted
 
-            # Parse string dates in extra fields to datetime
+            # Parse string dates in extra fields to datetime and strip timezone info
+            # (DB uses TIMESTAMP WITHOUT TIME ZONE — can't mix aware/naive).
             extra = row_data.model_extra or {}
             for key in list(extra.keys()):
                 val = extra[key]
                 if isinstance(val, str) and key in ("created_at", "updated_at"):
                     try:
-                        extra[key] = datetime.fromisoformat(val)
+                        val = datetime.fromisoformat(val.replace("Z", "+00:00"))
                     except (ValueError, TypeError):
-                        pass
+                        continue
+                    extra[key] = val
+                if isinstance(extra.get(key), datetime) and extra[key].tzinfo is not None:
+                    extra[key] = extra[key].replace(tzinfo=None)
 
             if existing:
                 # Conflict check: last-write-wins
@@ -89,12 +93,12 @@ async def push(
                 # Update existing row
                 if is_deleted:
                     existing.is_deleted = True
-                    existing.updated_at = client_updated or datetime.now(timezone.utc)
+                    existing.updated_at = client_updated or datetime.utcnow()
                 else:
                     for key, val in extra.items():
                         if hasattr(existing, key) and key not in ("uuid", "user_id"):
                             setattr(existing, key, val)
-                    existing.updated_at = client_updated or datetime.now(timezone.utc)
+                    existing.updated_at = client_updated or datetime.utcnow()
                     existing.is_deleted = False
                 accepted += 1
             else:
@@ -103,7 +107,7 @@ async def push(
                 for key, val in extra.items():
                     if hasattr(new_row, key) and key not in ("uuid", "user_id"):
                         setattr(new_row, key, val)
-                new_row.updated_at = client_updated or datetime.now(timezone.utc)
+                new_row.updated_at = client_updated or datetime.utcnow()
                 new_row.is_deleted = is_deleted
                 db.add(new_row)
                 accepted += 1
