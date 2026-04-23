@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.3.1 (2026-04-23)
+
+**Hotfix: poisoned-lock recovery + panic hook.**
+
+- Replace 107 `state.0.lock().map_err(...)?` call sites with a
+  `DbState::lock_recover()` helper that unpoisons automatically.
+  Rationale: SQLite transactions are atomic, so a prior panic can't
+  leave the DB in an inconsistent state — only the Rust-level guard
+  flag. Previously one panic inside a command wedged every subsequent
+  operation with `"poisoned lock: another task failed inside"`,
+  including the `check_for_update` path — which made even the auto-
+  updater unable to recover.
+- `SyncClient::process_push_response` no longer `.unwrap()`s on the
+  per-table rows array (was a potential panic source).
+- Global `panic::set_hook` appends panic location + message to
+  `<AppData>/keyboard-helper/crash.log` so we can actually see where
+  something went wrong next time.
+
 ## v1.3.0 (2026-04-23)
 
 **New module — Tasks.**

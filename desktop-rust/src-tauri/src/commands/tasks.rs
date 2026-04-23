@@ -10,7 +10,7 @@ use crate::db::{
 
 #[tauri::command]
 pub fn list_task_categories(state: State<DbState>) -> Result<Vec<TaskCategory>, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::list_task_categories(&conn).map_err(|e| e.to_string())
 }
 
@@ -20,7 +20,7 @@ pub fn create_task_category(
     name: String,
     color: String,
 ) -> Result<TaskCategory, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::create_task_category(&conn, &name, &color).map_err(|e| e.to_string())
 }
 
@@ -31,19 +31,19 @@ pub fn update_task_category(
     name: String,
     color: String,
 ) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::update_task_category(&conn, id, &name, &color).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn delete_task_category(state: State<DbState>, id: i64) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::delete_task_category(&conn, id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn reorder_task_categories(state: State<DbState>, ids: Vec<i64>) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::reorder_task_categories(&conn, &ids).map_err(|e| e.to_string())
 }
 
@@ -51,7 +51,7 @@ pub fn reorder_task_categories(state: State<DbState>, ids: Vec<i64>) -> Result<(
 
 #[tauri::command]
 pub fn list_task_statuses(state: State<DbState>) -> Result<Vec<TaskStatus>, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::list_task_statuses(&conn).map_err(|e| e.to_string())
 }
 
@@ -61,7 +61,7 @@ pub fn create_task_status(
     name: String,
     color: String,
 ) -> Result<TaskStatus, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::create_task_status(&conn, &name, &color).map_err(|e| e.to_string())
 }
 
@@ -72,19 +72,19 @@ pub fn update_task_status(
     name: String,
     color: String,
 ) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::update_task_status(&conn, id, &name, &color).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn delete_task_status(state: State<DbState>, id: i64) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::delete_task_status(&conn, id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn reorder_task_statuses(state: State<DbState>, ids: Vec<i64>) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::reorder_task_statuses(&conn, &ids).map_err(|e| e.to_string())
 }
 
@@ -96,7 +96,7 @@ pub fn list_tasks(
     category: Option<String>,
     status: Option<String>,
 ) -> Result<Vec<Task>, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     let cat = TaskFilter::from_opt_str(category.as_deref());
     let st = TaskFilter::from_opt_str(status.as_deref());
     queries::list_tasks(&conn, cat, st).map_err(|e| e.to_string())
@@ -104,7 +104,7 @@ pub fn list_tasks(
 
 #[tauri::command]
 pub fn list_pinned_tasks(state: State<DbState>) -> Result<Vec<Task>, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::list_pinned_tasks(&conn).map_err(|e| e.to_string())
 }
 
@@ -115,7 +115,7 @@ pub fn create_task(
     category_id: Option<i64>,
     status_id: Option<i64>,
 ) -> Result<Task, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::create_task(&conn, &title, category_id, status_id).map_err(|e| e.to_string())
 }
 
@@ -132,7 +132,7 @@ pub fn update_task(
     tracker_url: Option<String>,
     notes_md: String,
 ) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::update_task(
         &conn,
         id,
@@ -149,13 +149,13 @@ pub fn update_task(
 
 #[tauri::command]
 pub fn reorder_tasks(state: State<DbState>, ids: Vec<i64>) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::reorder_tasks(&conn, &ids).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn delete_task(state: State<DbState>, id: i64) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::delete_task(&conn, id).map_err(|e| e.to_string())
 }
 
@@ -163,7 +163,7 @@ pub fn delete_task(state: State<DbState>, id: i64) -> Result<(), String> {
 
 #[tauri::command]
 pub fn list_task_checkboxes(state: State<DbState>, task_id: i64) -> Result<Vec<TaskCheckbox>, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::list_task_checkboxes(&conn, task_id).map_err(|e| e.to_string())
 }
 
@@ -174,7 +174,7 @@ pub fn create_task_checkbox(
     parent_id: Option<i64>,
     text: String,
 ) -> Result<TaskCheckbox, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::create_task_checkbox(&conn, task_id, parent_id, &text).map_err(|e| e.to_string())
 }
 
@@ -185,7 +185,7 @@ pub fn update_task_checkbox(
     text: String,
     is_checked: bool,
 ) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::update_task_checkbox(&conn, id, &text, is_checked).map_err(|e| e.to_string())
 }
 
@@ -195,13 +195,13 @@ pub fn reorder_task_checkboxes(
     task_id: i64,
     entries: Vec<CheckboxReorderEntry>,
 ) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::reorder_task_checkboxes(&conn, task_id, &entries).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn delete_task_checkbox(state: State<DbState>, id: i64) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::delete_task_checkbox(&conn, id).map_err(|e| e.to_string())
 }
 
@@ -209,7 +209,7 @@ pub fn delete_task_checkbox(state: State<DbState>, id: i64) -> Result<(), String
 
 #[tauri::command]
 pub fn list_task_links(state: State<DbState>, task_id: i64) -> Result<Vec<TaskLink>, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::list_task_links(&conn, task_id).map_err(|e| e.to_string())
 }
 
@@ -220,7 +220,7 @@ pub fn create_task_link(
     url: String,
     label: Option<String>,
 ) -> Result<TaskLink, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::create_task_link(&conn, task_id, &url, label.as_deref()).map_err(|e| e.to_string())
 }
 
@@ -231,7 +231,7 @@ pub fn update_task_link(
     url: String,
     label: Option<String>,
 ) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::update_task_link(&conn, id, &url, label.as_deref()).map_err(|e| e.to_string())
 }
 
@@ -241,12 +241,12 @@ pub fn reorder_task_links(
     task_id: i64,
     ids: Vec<i64>,
 ) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::reorder_task_links(&conn, task_id, &ids).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn delete_task_link(state: State<DbState>, id: i64) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::delete_task_link(&conn, id).map_err(|e| e.to_string())
 }

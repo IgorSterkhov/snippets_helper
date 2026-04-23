@@ -2,9 +2,26 @@ pub mod models;
 pub mod queries;
 
 use rusqlite::Connection;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 
 pub struct DbState(pub Mutex<Connection>);
+
+impl DbState {
+    /// Lock the DB mutex, recovering from poisoning. SQLite transactions
+    /// are atomic, so a prior panic can't leave the DB in an inconsistent
+    /// state — only the Rust-level guard flag is set. Recovering is safe
+    /// and lets the app keep working instead of wedging every command
+    /// with "poisoned lock" for the rest of the session.
+    pub fn lock_recover(&self) -> MutexGuard<'_, Connection> {
+        match self.0.lock() {
+            Ok(g) => g,
+            Err(poison) => {
+                eprintln!("[db] recovered from poisoned mutex");
+                poison.into_inner()
+            }
+        }
+    }
+}
 
 pub fn init_db() -> Result<DbState, rusqlite::Error> {
     let db_path = dirs::data_dir()

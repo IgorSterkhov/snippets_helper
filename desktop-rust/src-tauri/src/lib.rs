@@ -18,7 +18,40 @@ fn write_log(msg: &str) {
     let _ = std::fs::write(&log_path, format!("{}\n", msg));
 }
 
+fn append_log(msg: &str) {
+    use std::io::Write;
+    let log_path = dirs::data_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("keyboard-helper")
+        .join("crash.log");
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&log_path) {
+        let ts = chrono::Utc::now().to_rfc3339();
+        let _ = writeln!(f, "{} {}", ts, msg);
+    }
+}
+
 pub fn run() {
+    // Install a panic hook so we capture *where* a panic happened. Without
+    // this the only evidence is "poisoned lock" when the next operation
+    // tries to acquire the Mutex — no stack, no message.
+    std::panic::set_hook(Box::new(|info| {
+        let loc = info
+            .location()
+            .map(|l| format!("{}:{}", l.file(), l.line()))
+            .unwrap_or_else(|| "?".to_string());
+        let msg = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|s| s.to_string())
+            .or_else(|| {
+                info.payload().downcast_ref::<String>().cloned()
+            })
+            .unwrap_or_else(|| "<no message>".to_string());
+        let line = format!("[panic] at {}: {}", loc, msg);
+        eprintln!("{}", line);
+        append_log(&line);
+    }));
+
     let db = match db::init_db() {
         Ok(db) => db,
         Err(e) => {
@@ -227,7 +260,7 @@ pub fn run() {
 
             // Read hotkey mode from settings
             let db = app.state::<db::DbState>();
-            let conn = db.0.lock().unwrap();
+            let conn = db.lock_recover();
             let computer_id = hostname::get()
                 .unwrap_or_default()
                 .to_string_lossy()

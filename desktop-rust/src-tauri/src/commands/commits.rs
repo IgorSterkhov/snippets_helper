@@ -5,7 +5,7 @@ use crate::db::{DbState, queries, models::{CommitHistory, CommitTag}};
 
 #[tauri::command]
 pub fn list_commit_history(state: State<DbState>, computer_id: String) -> Result<Vec<CommitHistory>, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::list_commit_history(&conn, &computer_id).map_err(|e| e.to_string())
 }
 
@@ -26,7 +26,7 @@ pub fn create_commit_history(
     transfer_connect: String,
     test_dag: String,
 ) -> Result<CommitHistory, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::create_commit_history(
         &conn,
         &computer_id,
@@ -48,7 +48,7 @@ pub fn create_commit_history(
 
 #[tauri::command]
 pub fn delete_commit_history(state: State<DbState>, id: i64) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::delete_commit_history(&conn, id).map_err(|e| e.to_string())
 }
 
@@ -56,7 +56,7 @@ pub fn delete_commit_history(state: State<DbState>, id: i64) -> Result<(), Strin
 
 #[tauri::command]
 pub fn list_commit_tags(state: State<DbState>, computer_id: String) -> Result<Vec<CommitTag>, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::list_commit_tags(&conn, &computer_id).map_err(|e| e.to_string())
 }
 
@@ -67,12 +67,12 @@ pub fn create_commit_tag(
     tag_name: String,
     is_default: bool,
 ) -> Result<CommitTag, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::create_commit_tag(&conn, &computer_id, &tag_name, is_default).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn delete_commit_tag(state: State<DbState>, id: i64) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::delete_commit_tag(&conn, id).map_err(|e| e.to_string())
 }

@@ -113,7 +113,7 @@ fn build_ssh_cmd(user: &str, host: &str, port: u16, key_file: &str, remote_cmd: 
 
 #[tauri::command]
 pub fn list_vps_environments(state: State<DbState>) -> Result<Vec<Value>, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     let cid = get_computer_id();
     ensure_default_environment(&conn, &cid)?;
     let envs = load_environments(&conn, &cid);
@@ -129,7 +129,7 @@ pub fn add_vps_environment(state: State<DbState>, name: String) -> Result<(), St
     if name.is_empty() {
         return Err("Environment name cannot be empty".to_string());
     }
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     let cid = get_computer_id();
     let mut envs = load_environments(&conn, &cid);
     if envs.iter().any(|e| e.name == name) {
@@ -146,7 +146,7 @@ pub fn rename_vps_environment(state: State<DbState>, old_name: String, new_name:
     if new_name.is_empty() {
         return Err("Environment name cannot be empty".to_string());
     }
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     let cid = get_computer_id();
 
     let mut envs = load_environments(&conn, &cid);
@@ -172,7 +172,7 @@ pub fn rename_vps_environment(state: State<DbState>, old_name: String, new_name:
 
 #[tauri::command]
 pub fn remove_vps_environment(state: State<DbState>, name: String) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     let cid = get_computer_id();
 
     let mut envs = load_environments(&conn, &cid);
@@ -200,7 +200,7 @@ pub fn remove_vps_environment(state: State<DbState>, name: String) -> Result<(),
 
 #[tauri::command]
 pub fn reorder_vps_environments(state: State<DbState>, names: Vec<String>) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     let cid = get_computer_id();
     let mut envs = load_environments(&conn, &cid);
 
@@ -226,7 +226,7 @@ pub fn reorder_vps_environments(state: State<DbState>, names: Vec<String>) -> Re
 
 #[tauri::command]
 pub fn list_vps_servers(state: State<DbState>) -> Result<Vec<Value>, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     let cid = get_computer_id();
     ensure_default_environment(&conn, &cid)?;
     let servers = load_servers(&conn, &cid);
@@ -240,7 +240,7 @@ pub fn list_vps_servers(state: State<DbState>) -> Result<Vec<Value>, String> {
 pub fn add_vps_server(state: State<DbState>, server: Value) -> Result<(), String> {
     let mut new_server: VpsServer = serde_json::from_value(server)
         .map_err(|e| format!("Invalid server data: {}", e))?;
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     let cid = get_computer_id();
 
     // Default environment if not specified
@@ -260,7 +260,7 @@ pub fn add_vps_server(state: State<DbState>, server: Value) -> Result<(), String
 pub fn update_vps_server(state: State<DbState>, index: usize, server: Value) -> Result<(), String> {
     let updated: VpsServer = serde_json::from_value(server)
         .map_err(|e| format!("Invalid server data: {}", e))?;
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     let cid = get_computer_id();
     let mut servers = load_servers(&conn, &cid);
     if index >= servers.len() {
@@ -272,7 +272,7 @@ pub fn update_vps_server(state: State<DbState>, index: usize, server: Value) -> 
 
 #[tauri::command]
 pub fn remove_vps_server(state: State<DbState>, index: usize) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     let cid = get_computer_id();
     let mut servers = load_servers(&conn, &cid);
     if index >= servers.len() {
@@ -284,7 +284,7 @@ pub fn remove_vps_server(state: State<DbState>, index: usize) -> Result<(), Stri
 
 #[tauri::command]
 pub fn move_vps_server(state: State<DbState>, index: usize, target_env: String) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     let cid = get_computer_id();
     let mut servers = load_servers(&conn, &cid);
     if index >= servers.len() {

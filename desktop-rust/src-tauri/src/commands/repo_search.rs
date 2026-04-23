@@ -124,7 +124,7 @@ fn save_groups(conn: &rusqlite::Connection, computer_id: &str, groups: &[RepoGro
 
 #[tauri::command]
 pub fn list_repo_groups(state: State<DbState>) -> Result<Vec<RepoGroup>, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     let cid = get_computer_id();
     Ok(load_groups(&conn, &cid))
 }
@@ -136,7 +136,7 @@ pub fn add_repo_group(
     icon: String,
     color: String,
 ) -> Result<RepoGroup, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     let cid = get_computer_id();
     let mut groups = load_groups(&conn, &cid);
     if name.trim().is_empty() {
@@ -166,7 +166,7 @@ pub fn update_repo_group(
     icon: String,
     color: String,
 ) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     let cid = get_computer_id();
     let mut groups = load_groups(&conn, &cid);
     if name.trim().is_empty() {
@@ -196,7 +196,7 @@ fn clear_group_from_repos(repos: &mut [RepoEntry], gid: i64) -> bool {
 
 #[tauri::command]
 pub fn remove_repo_group(state: State<DbState>, id: i64) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     let cid = get_computer_id();
 
     // 1. Cascade: clear group_id on every repo that pointed at this group.
@@ -220,7 +220,7 @@ pub fn update_repo(
     color: String,
     group_id: Option<i64>,
 ) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     let cid = get_computer_id();
     let mut repos = load_repos(&conn, &cid);
 
@@ -242,7 +242,7 @@ pub fn update_repo(
 
 #[tauri::command]
 pub fn list_repos(state: State<DbState>) -> Result<Vec<RepoEntry>, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     let cid = get_computer_id();
     Ok(load_repos(&conn, &cid))
 }
@@ -255,7 +255,7 @@ pub fn add_repo(
     color: String,
     group_id: Option<i64>,
 ) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     let cid = get_computer_id();
     let mut repos = load_repos(&conn, &cid);
     if repos.iter().any(|r| r.name == name) {
@@ -267,7 +267,7 @@ pub fn add_repo(
 
 #[tauri::command]
 pub fn remove_repo(state: State<DbState>, name: String) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     let cid = get_computer_id();
     let mut repos = load_repos(&conn, &cid);
     repos.retain(|r| r.name != name);
@@ -343,7 +343,7 @@ fn glob_to_regex(pattern: &str) -> String {
 #[tauri::command]
 pub async fn search_filenames(state: State<'_, DbState>, pattern: String, repos: Vec<String>) -> Result<Vec<SearchResult>, String> {
     let entries = {
-        let conn = state.0.lock().map_err(|e| e.to_string())?;
+        let conn = state.lock_recover();
         let cid = get_computer_id();
         resolve_repo_paths(&conn, &cid, &repos)
     };
@@ -635,7 +635,7 @@ fn group_matches(raw: Vec<RawMatch>) -> Vec<FileSearchResult> {
 #[tauri::command]
 pub async fn search_content(state: State<'_, DbState>, query: String, repos: Vec<String>, file_pattern: Option<String>) -> Result<Vec<FileSearchResult>, String> {
     let entries = {
-        let conn = state.0.lock().map_err(|e| e.to_string())?;
+        let conn = state.lock_recover();
         let cid = get_computer_id();
         resolve_repo_paths(&conn, &cid, &repos)
     };
@@ -804,7 +804,7 @@ fn get_commit_files(repo_path: &str, hash: &str) -> Vec<String> {
 #[tauri::command]
 pub async fn search_git_history(state: State<'_, DbState>, query: String, repos: Vec<String>) -> Result<Vec<GitSearchResult>, String> {
     let entries = {
-        let conn = state.0.lock().map_err(|e| e.to_string())?;
+        let conn = state.lock_recover();
         let cid = get_computer_id();
         resolve_repo_paths(&conn, &cid, &repos)
     };
@@ -874,7 +874,7 @@ pub async fn repo_search_status(
     paths: Option<Vec<String>>,
 ) -> Result<Vec<RepoStatus>, String> {
     let repos = {
-        let conn = state.0.lock().map_err(|e| e.to_string())?;
+        let conn = state.lock_recover();
         let cid = get_computer_id();
         let all = load_repos(&conn, &cid);
         match paths {
@@ -946,7 +946,7 @@ pub async fn repo_search_pull_main(
     dry_run: bool,
 ) -> Result<Vec<PullOutcome>, String> {
     let repos = {
-        let conn = state.0.lock().map_err(|e| e.to_string())?;
+        let conn = state.lock_recover();
         let cid = get_computer_id();
         let all = load_repos(&conn, &cid);
         let set: std::collections::HashSet<_> = paths.into_iter().collect();
@@ -1102,7 +1102,7 @@ pub fn open_in_editor(
     line: Option<u64>,
 ) -> Result<(), String> {
     let template = {
-        let conn = state.0.lock().map_err(|e| e.to_string())?;
+        let conn = state.lock_recover();
         let cid = get_computer_id();
         queries::get_setting(&conn, &cid, "editor_command")
             .ok()
