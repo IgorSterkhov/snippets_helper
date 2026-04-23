@@ -19,8 +19,185 @@
 
 **Important testing convention for this project:**
 - UI iteration: `cd desktop-rust/src && python3 -m http.server 8000` then open `dev.html`. Uses `dev-mock.js` for Tauri command stubs.
-- Smoke tests: `cd desktop-rust/src && python3 dev-test.py` (CDP-based, 7 tests must pass before any `v-*` tag).
+- Smoke tests: `cd desktop-rust/src && python3 dev-test.py` (CDP-based; run and match whatever pass count the script reports — the bar is "no regressions", not a fixed number).
 - Native dev: `cd desktop-rust && ./dev-docker.sh dev` (real Tauri + WebKit in Docker).
+
+---
+
+## ⚠ Final-review fixes (read first, apply inline during each referenced task)
+
+A rigorous final pass by Opus 4.7 caught 7 blocking issues after the original plan draft. Applying these as you reach each referenced task yields a working implementation; skipping any of them causes compile errors, silent data loss, or a leaked child process.
+
+### F1 — `reqwest` needs `stream` + `multipart` features (affects Task 1.1)
+
+`Cargo.toml` currently has `reqwest = { version = "0.12", features = ["json"] }`. Chunk 2's download code calls `resp.bytes_stream()` (needs `stream`) and Chunk 4's transcribe code uses `reqwest::multipart::Form` (needs `multipart`). In Task 1.1 Step 2, **additionally modify** the existing `reqwest` line to:
+
+```toml
+reqwest = { version = "0.12", features = ["json", "stream", "multipart"] }
+```
+
+(Don't duplicate the line; edit the existing one.)
+
+### F2 — `computer_id` must come from hostname, not `app_settings` (affects Task 6.2)
+
+The rest of the codebase (`commands/settings.rs:8`, `lib.rs:203`) uses `hostname::get()` as the computer_id. The plan's `commands/whisper.rs` helper reads a `"computer_id"` setting that does not exist — all whisper settings would persist under key `"default"` while the settings modal's save-path would use the real hostname, splitting the read and write partitions.
+
+**Replace** the `computer_id(...)` helper in Chunk 6 Task 6.2 Step 1 with:
+
+```rust
+fn computer_id() -> String {
+    hostname::get().unwrap_or_default().to_string_lossy().to_string()
+}
+```
+
+Drop the `db` argument everywhere it's called (4 call sites inside the file). `hostname = "0.4"` is already in `Cargo.toml`.
+
+### F3 — dev-mock event bridge (affects Task 7.2 Step 3)
+
+`dev-mock.js` already defines `window.__TAURI__.event.listen` as a no-op stub. `whisperApi.onWhisperEvent` does `window.__TAURI__?.event?.listen || window.__TAURI_LISTEN__` — the `||` short-circuits on the existing no-op, so every CustomEvent dispatched in mock is silently dropped.
+
+**Instead of adding `__TAURI_LISTEN__`**, in Task 7.2 Step 3 locate the existing stub inside `dev-mock.js` (search for `event: {` or `event.listen`) and replace it with a real bridge:
+
+```javascript
+event: {
+  listen: async (evt, cb) => {
+    const h = (e) => cb({ payload: e.detail });
+    window.addEventListener(evt, h);
+    return () => window.removeEventListener(evt, h);
+  },
+  emit: async () => {},
+},
+```
+
+Then remove the `__TAURI_LISTEN__` shim and the `|| window.__TAURI_LISTEN__` fallback from `whisper-api.js`. The `onWhisperEvent` helper just does `const listen = window.__TAURI__.event.listen;` directly.
+
+### F4 — plumb real `duration_ms` + `transcribe_ms` through stop-flow (affects Tasks 4.4 and 6.2)
+
+The plan sets both to 0 in the history INSERT and in the emitted `TranscribedPayload` — the history UI would always display "duration 0ms · transcribe 0ms" and the spec's schema contract (`design.md` §"Схема SQLite") would be violated.
+
+Change `WhisperService::stop_recording` (Chunk 4 Task 4.4) to return the durations:
+
+```rust
+pub struct StopOutcome {
+    pub result: crate::whisper::server::InferenceResult,
+    pub duration_ms: u64,
+    pub transcribe_ms: u64,
+    pub model_name: String,
+}
+
+// In stop_recording, before returning:
+Ok(StopOutcome { result, duration_ms, transcribe_ms, model_name })
+```
+
+`duration_ms` comes from `recorder.duration_ms()` (captured before `finish_wav()`); `transcribe_ms` comes from the `start.elapsed()` computation already present. `model_name` is the `model_name` local already computed.
+
+In Chunk 6 Task 6.2's `whisper_stop_recording`, replace `result = svc.stop_recording(lang).await?` with `let outcome = svc.stop_recording(lang).await?; let result = outcome.result;` and use `outcome.duration_ms`, `outcome.transcribe_ms`, `outcome.model_name` both in the `TranscribedPayload` and in the `whisper_insert_history` call (drop the separate DB read that fetches `model_name`).
+
+### F5 — Cancel during warming must not leave a dangling server (affects Task 4.4)
+
+Current plan: user cancels during Warming → state=Idle immediately, but the background warm-up task finishes 2s later and transitions state back to `Recording`. The recorder is `None`, so next Stop returns "not recording", leaving the spawned whisper-server process alive forever with no way to shut it down.
+
+Spec says: "Cancel — буфер отбрасывается, warm-up продолжается до конца и переводит сервис в ready."
+
+**Fix in `service.rs`:**
+
+1. Add a third field to `Inner` alongside `pending_stop`:
+   ```rust
+   cancelled: bool,
+   ```
+
+2. In `cancel_recording`, when `state == Warming`, set `g.cancelled = true; g.recorder = None;` and leave state as `Warming` (do **not** go to Idle/Ready). The background task will flip the state correctly.
+
+3. In the background warm-up spawn, when the server comes up, extend the branching:
+   ```rust
+   let mut g = inner.lock().await;
+   g.server = Some(server);
+   if g.cancelled {
+       g.cancelled = false;
+       g.state = State::Ready;
+       // arm idle-timer here or rely on subsequent start_recording; keeping simple:
+       emit_state(&app, g.state, g.model_name.clone());
+   } else if g.pending_stop {
+       g.pending_stop = false;
+       g.state = State::Transcribing;
+       emit_state(&app, g.state, g.model_name.clone());
+   } else {
+       g.state = State::Recording;
+       emit_state(&app, g.state, g.model_name.clone());
+   }
+   ```
+
+4. When `cancel_recording` runs while `state == Recording` (server already up), keep existing behaviour: drop recorder, set state to Ready.
+
+### F6 — Tauri v2 capabilities: add overlay window + sidecar permission (affects Tasks 1.2 and 4.3)
+
+The existing `capabilities/default.json` only lists `"windows": ["main"]`. Adding the overlay window without updating capabilities means the overlay cannot invoke any command.
+
+In **Task 1.2** after declaring the overlay window, add a Step 3:
+
+- [ ] Step 3: Update capabilities
+  ```bash
+  grep -n '"windows"' /home/aster/dev/snippets_helper-feat-whisper/desktop-rust/src-tauri/capabilities/default.json
+  ```
+  Extend the `"windows"` array to `["main", "whisper-overlay"]`. Leave the rest of the file unchanged.
+
+In **Task 4.3** where the shell plugin is wired, also add to `capabilities/default.json`'s `"permissions"` array (append — do NOT replace):
+
+```json
+"shell:default",
+{
+  "identifier": "shell:allow-execute",
+  "allow": [
+    { "name": "binaries/whisper-server", "sidecar": true, "args": true }
+  ]
+}
+```
+
+The `"name"` must match what `tauri.conf.json`'s `externalBin` declares; plan uses `"binaries/whisper-server"`.
+
+### F7 — CI: default to build-from-source; skip unreliable prebuilt-zip fetch (affects Task 12.2)
+
+`ggml-org/whisper.cpp` releases do not consistently ship a prebuilt `whisper-server` — they ship `whisper-cli`/`main`. Relying on a curl-fetched zip breaks randomly between releases.
+
+**Make build-from-source the default strategy** for both platforms. Replace Task 12.2 Step 2's macOS and Windows snippets with:
+
+```yaml
+      - name: Build whisper-server (macOS)
+        if: runner.os == 'macOS' && startsWith(github.ref, 'refs/tags/v')
+        run: |
+          VERSION=$(cat desktop-rust/WHISPER_CPP_VERSION)
+          git clone --depth 1 --branch "${VERSION}" https://github.com/ggml-org/whisper.cpp /tmp/wcpp
+          cd /tmp/wcpp
+          cmake -B build -DWHISPER_BUILD_SERVER=ON -DGGML_METAL=ON
+          cmake --build build -j --target whisper-server
+          mkdir -p ${{ github.workspace }}/desktop-rust/src-tauri/binaries
+          cp build/bin/whisper-server ${{ github.workspace }}/desktop-rust/src-tauri/binaries/whisper-server-aarch64-apple-darwin
+          chmod +x ${{ github.workspace }}/desktop-rust/src-tauri/binaries/whisper-server-aarch64-apple-darwin
+
+      - name: Build whisper-server (Windows)
+        if: runner.os == 'Windows' && startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          VERSION=$(cat desktop-rust/WHISPER_CPP_VERSION)
+          git clone --depth 1 --branch "${VERSION}" https://github.com/ggml-org/whisper.cpp /tmp/wcpp
+          cd /tmp/wcpp
+          cmake -B build -DWHISPER_BUILD_SERVER=ON
+          cmake --build build --config Release -j --target whisper-server
+          mkdir -p "${GITHUB_WORKSPACE}/desktop-rust/src-tauri/binaries"
+          cp build/bin/Release/whisper-server.exe "${GITHUB_WORKSPACE}/desktop-rust/src-tauri/binaries/whisper-server-x86_64-pc-windows-msvc.exe"
+```
+
+Adjust the cmake flag for `-DWHISPER_BUILD_SERVER=ON` if the upstream flag has been renamed in the pinned VERSION — check upstream CMakeLists.txt for the exact flag name.
+
+Update `desktop-rust/scripts/fetch-whisper-bin.sh` (Task 12.4) analogously: drop the `curl unzip` path on macOS, replace with the same cmake build-from-source.
+
+### Additional smaller fixes to apply during execution
+
+- **Task 3.2 cpal closures:** move `since_emit_samples`, `rms_accum_sq`, `rms_accum_n`, `emit_every` *inside* each `match` arm's `move` closure. They can't be captured by three separate `move` closures simultaneously when declared outside.
+- **Task 11.3 `cancel_recording` hide overlay:** explicitly call `hide_overlay(&self.app)` at the end of `WhisperService::cancel_recording` after the state transition.
+- **Spec note (no code change):** `design.md` line 102 mentions `tauri::api::process::Command::new_sidecar` (Tauri v1 API) — harmless prose. The plan correctly uses the v2 `app.shell().sidecar(...)` form.
+
+Apply these alongside the 7 main fixes above. Every subsequent `cargo check` or `cargo test` either still passes or produces a clear error pointing back to the relevant fix.
 
 ---
 
