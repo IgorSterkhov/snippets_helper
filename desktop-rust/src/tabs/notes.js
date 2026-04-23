@@ -7,6 +7,7 @@ import { attachToolbar } from '../components/md-toolbar.js';
 let root = null;
 let folders = [];
 let notes = [];
+let pinnedNotes = [];
 let selectedFolderId = null;
 let editingNote = null; // null = list view, object = editing
 let previewMode = false;
@@ -32,6 +33,12 @@ export async function init(container) {
 function buildLayout() {
   const wrap = el('div', { class: 'notes-wrap' });
 
+  // Pinned notes chip strip — spans full width above folders + notes.
+  const chips = el('div', { class: 'pinned-chips-row empty', id: 'pinned-chips' });
+  wrap.appendChild(chips);
+
+  const body = el('div', { class: 'notes-body' });
+
   // Left panel - folders
   const left = el('div', { class: 'notes-left' });
   const leftHeader = el('div', { class: 'notes-panel-header' });
@@ -48,8 +55,9 @@ function buildLayout() {
   const right = el('div', { class: 'notes-right', id: 'notes-right' });
   right.innerHTML = '<p style="padding:16px;color:var(--text-muted)">Select a folder</p>';
 
-  wrap.appendChild(left);
-  wrap.appendChild(right);
+  body.appendChild(left);
+  body.appendChild(right);
+  wrap.appendChild(body);
 
   // Inject scoped styles
   const style = document.createElement('style');
@@ -57,6 +65,47 @@ function buildLayout() {
   wrap.appendChild(style);
 
   return wrap;
+}
+
+async function loadPinnedNotes() {
+  try {
+    const results = await Promise.all(
+      folders.map(f => call('list_notes', { folderId: f.id }).catch(() => []))
+    );
+    pinnedNotes = results
+      .flat()
+      .filter(n => n && n.is_pinned)
+      .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''));
+  } catch {
+    pinnedNotes = [];
+  }
+  renderPinnedChips();
+}
+
+function renderPinnedChips() {
+  const row = root && root.querySelector('#pinned-chips');
+  if (!row) return;
+  row.innerHTML = '';
+  if (!pinnedNotes.length) {
+    row.classList.add('empty');
+    return;
+  }
+  row.classList.remove('empty');
+  for (const n of pinnedNotes) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'pinned-chip';
+    chip.title = n.title || '(untitled)';
+    const icon = el('span', { class: 'pinned-chip-icon' });
+    icon.textContent = '📌';
+    chip.appendChild(icon);
+    chip.appendChild(el('span', { text: n.title || '(untitled)', class: 'pinned-chip-label' }));
+    chip.addEventListener('click', () => {
+      if (n.folder_id != null) selectedFolderId = n.folder_id;
+      openEditor(n);
+    });
+    row.appendChild(chip);
+  }
 }
 
 // ── Folder tree helpers ─────────────────────────────────────────
@@ -111,6 +160,7 @@ async function loadFolders() {
   try {
     folders = await call('list_note_folders');
     renderFolders();
+    await loadPinnedNotes();
     if (folders.length && !selectedFolderId) {
       selectFolder(folders[0].id);
     } else if (selectedFolderId) {
@@ -479,7 +529,9 @@ function hasMarkdownMarkers(text) {
 
 function openEditor(note) {
   editingNote = { ...note };
-  previewMode = hasMarkdownMarkers(note.content);
+  // Always open existing notes in preview — double-click switches to edit.
+  // Empty notes fall back to edit so the user can type straight away.
+  previewMode = !!(note.content && note.content.trim());
   renderEditor();
 }
 
@@ -535,6 +587,11 @@ function renderEditor() {
   if (previewMode) {
     const previewDiv = el('div', { class: 'note-preview markdown-body' });
     previewDiv.innerHTML = editingNote.content ? marked(editingNote.content) : '<p style="color:var(--text-muted)">(empty)</p>';
+    previewDiv.title = 'Double-click to edit';
+    previewDiv.addEventListener('dblclick', () => {
+      previewMode = false;
+      renderEditor();
+    });
     right.appendChild(previewDiv);
   } else {
     const textarea = document.createElement('textarea');
@@ -585,6 +642,7 @@ async function onSaveNote() {
     editingNote = null;
     previewMode = false;
     await loadNotes();
+    await loadPinnedNotes();
   } catch (e) {
     showToast('Failed to save note: ' + e, 'error');
   }
@@ -603,6 +661,7 @@ async function onDeleteNote() {
     editingNote = null;
     previewMode = false;
     await loadNotes();
+    await loadPinnedNotes();
   } catch (_) { /* cancelled */ }
 }
 
@@ -624,8 +683,58 @@ function notesCSS() {
   return `
 .notes-wrap {
   display: flex;
+  flex-direction: column;
   height: 100%;
   gap: 0;
+}
+
+.notes-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  gap: 0;
+}
+
+.pinned-chips-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  min-height: 36px;
+}
+.pinned-chips-row.empty { display: none; }
+
+.pinned-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  background: transparent;
+  color: var(--text);
+  user-select: none;
+  max-width: 240px;
+}
+.pinned-chip:hover {
+  border-color: var(--text-muted);
+  background: var(--bg-secondary);
+}
+.pinned-chip-icon {
+  font-size: 11px;
+  line-height: 1;
+}
+.pinned-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .notes-left {

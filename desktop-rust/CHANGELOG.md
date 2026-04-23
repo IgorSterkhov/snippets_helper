@@ -17,6 +17,13 @@
   decimal `1. 2. 3.` instead of bullet circles. Removed a stray
   `.note-preview li { list-style: disc }` override that beat the
   `.markdown-body ol { list-style-type: decimal }` parent rule.
+- **f-20260423-21** — Notes: non-empty notes open in Markdown preview by
+  default; double-click the preview to switch to Edit. Empty/new notes
+  still open in Edit mode.
+- **f-20260423-21** — Notes: pinned chip strip above folders/notes panel
+  (same visual style as Repo Search chips). Each chip is a pinned note
+  — click to open it directly in the right panel, auto-switching folder
+  if needed. Updates on save/delete.
 
 ## v1.2.8 (2026-04-23)
 
