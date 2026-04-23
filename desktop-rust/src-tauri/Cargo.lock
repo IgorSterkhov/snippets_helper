@@ -2494,6 +2494,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-global-shortcut",
  "tauri-plugin-updater",
+ "tempfile",
  "tokio",
  "uuid",
  "zip 2.4.2",
