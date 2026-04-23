@@ -1285,10 +1285,7 @@ async function showDetailModal(fileResult) {
   const expandBtn = el('button', { text: 'Expand ▸', class: 'rs-card-btn' });
   expandBtn.dataset.role = 'rs-expand';
   expandBtn.dataset.path = fileResult.file_path;
-  expandBtn.addEventListener('click', () => {
-    overlay.remove();   // close this modal so the fullscreen isn't stuck behind it
-    expandFileCard(fileResult.file_path);
-  });
+  expandBtn.addEventListener('click', () => expandFileCard(fileResult.file_path));
   headerActions.appendChild(expandBtn);
 
   const closeBtn = el('button', { text: '✕', class: 'btn-secondary rs-modal-close' });
@@ -1324,40 +1321,55 @@ async function showDetailModal(fileResult) {
   }
   document.addEventListener('keydown', onKey, true);
 
-  // Load context for all match lines
+  // Load context for all match lines, merge overlapping ranges, and render
+  // as a single stream with "…" separators between non-contiguous chunks.
   try {
     body.innerHTML = '';
     const matchLineNums = new Set(fileResult.matches.map(m => m.line_num));
 
-    for (let i = 0; i < fileResult.matches.length; i++) {
-      const m = fileResult.matches[i];
-
-      if (i > 0) {
-        body.appendChild(el('div', { class: 'rs-context-separator' }));
-      }
-
-      try {
-        const lines = await call('get_file_context', {
+    if (fileResult.matches.length === 0) {
+      body.appendChild(el('p', { text: 'No matches', class: 'rs-placeholder' }));
+    } else {
+      // Fetch contexts for every match in parallel.
+      const blocks = await Promise.all(fileResult.matches.map(m =>
+        call('get_file_context', {
           filePath: m.file_path || fileResult.file_path,
           lineNum: m.line_num,
           contextLines: contextLines,
-        });
+        }).catch(err => ({ __err: String(err), line_num: m.line_num }))
+      ));
 
-        const block = el('div', { class: 'rs-context-block' });
-        for (const line of lines) {
-          const lineEl = el('div', { class: 'rs-context-line' + (matchLineNums.has(line.line_num) ? ' is-match' : '') });
-          lineEl.appendChild(el('span', { text: String(line.line_num).padStart(4, ' '), class: 'rs-ctx-linenum' }));
-          lineEl.appendChild(el('span', { text: line.text, class: 'rs-ctx-text' }));
-          block.appendChild(lineEl);
+      // Deduplicate: collapse all lines into a Map keyed by line_num.
+      const linesByNum = new Map();
+      const errors = [];
+      for (const b of blocks) {
+        if (b && b.__err !== undefined) { errors.push(b); continue; }
+        for (const line of b) {
+          if (!linesByNum.has(line.line_num)) {
+            linesByNum.set(line.line_num, line.text);
+          }
         }
-        body.appendChild(block);
-      } catch (err) {
-        body.appendChild(el('p', { text: 'Error loading context for L' + m.line_num + ': ' + err, style: 'color:var(--danger);font-size:12px' }));
       }
-    }
+      for (const e of errors) {
+        body.appendChild(el('p', { text: `Error loading context for L${e.line_num}: ${e.__err}`, style: 'color:var(--danger);font-size:12px' }));
+      }
 
-    if (fileResult.matches.length === 0) {
-      body.appendChild(el('p', { text: 'No matches', class: 'rs-placeholder' }));
+      const sorted = [...linesByNum.keys()].sort((a, b) => a - b);
+      const block = el('div', { class: 'rs-context-block' });
+      let prev = null;
+      for (const n of sorted) {
+        if (prev != null && n > prev + 1) {
+          const gap = el('div', { class: 'rs-context-gap' });
+          gap.textContent = '···';
+          block.appendChild(gap);
+        }
+        const lineEl = el('div', { class: 'rs-context-line' + (matchLineNums.has(n) ? ' is-match' : '') });
+        lineEl.appendChild(el('span', { text: String(n).padStart(4, ' '), class: 'rs-ctx-linenum' }));
+        lineEl.appendChild(el('span', { text: linesByNum.get(n), class: 'rs-ctx-text' }));
+        block.appendChild(lineEl);
+        prev = n;
+      }
+      body.appendChild(block);
     }
   } catch (e) {
     body.innerHTML = '';
@@ -1451,10 +1463,7 @@ async function showCommitModal(gitResult) {
   headerActions.appendChild(fullBtn);
 
   const expandBtn = el('button', { text: 'Expand ▸', class: 'rs-card-btn' });
-  expandBtn.addEventListener('click', () => {
-    overlay.remove();
-    expandGitResults(gitResults, gitResult.commit_hash);
-  });
+  expandBtn.addEventListener('click', () => expandGitResults(gitResults, gitResult.commit_hash));
   headerActions.appendChild(expandBtn);
 
   const closeBtn = el('button', { text: '✕', class: 'btn-secondary rs-modal-close' });
@@ -2493,9 +2502,9 @@ function css() {
 }
 /* Fullscreen overlay */
 .rs-fullscreen {
-  position: absolute;
+  position: fixed;
   inset: 0;
-  z-index: 20;
+  z-index: 2000;           /* above modal-overlay (~1000) so fullscreen covers the source modal */
   background: var(--bg, #0d1117);
   display: flex;
   flex-direction: column;
