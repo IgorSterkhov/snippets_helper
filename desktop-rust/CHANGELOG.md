@@ -9,6 +9,10 @@
   URL from the clipboard if it looks like one (http/https/ftp/mailto/www).
   If the clipboard isn't a URL, the caret lands inside the empty `()` so
   you can type immediately — no more modal prompt.
+- **f-20260423-19** — Markdown editor: paste-over-selection now creates a
+  Markdown link. Select text, press Ctrl+V with a URL in the clipboard →
+  get `[selected](url)`. Non-URL clipboard or empty selection paste
+  behaves normally.
 
 ## v1.2.8 (2026-04-23)
 

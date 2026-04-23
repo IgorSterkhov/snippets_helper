@@ -192,6 +192,23 @@ export function attachToolbar(textarea) {
     toolbar.appendChild(el);
   }
 
+  // Paste-over-selection shortcut: if the user has text selected and the
+  // clipboard holds what looks like a URL, transform the paste into a
+  // Markdown link — same output as the 🔗 toolbar button. Anything else
+  // (no selection, or non-URL clipboard) falls through to a normal paste.
+  textarea.addEventListener('paste', (e) => {
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    if (start === end) return;
+    const pasted = e.clipboardData && e.clipboardData.getData('text/plain');
+    if (!pasted || !looksLikeUrl(pasted)) return;
+    e.preventDefault();
+    const selected = textarea.value.substring(start, end);
+    const replacement = `[${selected}](${pasted.trim()})`;
+    textarea.setRangeText(replacement, start, end, 'end');
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+
   // Insert toolbar before textarea
   textarea.parentNode.insertBefore(toolbar, textarea);
 
