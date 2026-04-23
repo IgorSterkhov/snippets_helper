@@ -1285,7 +1285,10 @@ async function showDetailModal(fileResult) {
   const expandBtn = el('button', { text: 'Expand ▸', class: 'rs-card-btn' });
   expandBtn.dataset.role = 'rs-expand';
   expandBtn.dataset.path = fileResult.file_path;
-  expandBtn.addEventListener('click', () => expandFileCard(fileResult.file_path));
+  expandBtn.addEventListener('click', () => {
+    overlay.remove();   // close this modal so the fullscreen isn't stuck behind it
+    expandFileCard(fileResult.file_path);
+  });
   headerActions.appendChild(expandBtn);
 
   const closeBtn = el('button', { text: '✕', class: 'btn-secondary rs-modal-close' });
