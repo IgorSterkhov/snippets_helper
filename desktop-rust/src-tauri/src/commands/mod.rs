@@ -10,3 +10,4 @@ pub mod help;
 pub mod repo_search;
 pub mod vps;
 pub mod ota;
+pub mod whisper;

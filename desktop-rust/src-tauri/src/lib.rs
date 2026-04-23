@@ -9,6 +9,7 @@ mod tray;
 mod hotkey;
 mod sync;
 mod autostart;
+mod whisper;
 
 fn write_log(msg: &str) {
     let log_path = dirs::data_dir()
