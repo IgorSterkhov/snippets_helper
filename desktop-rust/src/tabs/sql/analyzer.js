@@ -1,6 +1,8 @@
 import { call } from '../../tauri-api.js';
 import { showToast } from '../../components/toast.js';
 import { showModal } from '../../components/modal.js';
+import { helpButton } from './sql-help.js';
+import { ANALYZER_HELP_HTML } from './help-content.js';
 
 let root = null;
 let templates = [];
@@ -15,7 +17,10 @@ export function init(container) {
 
   const wrap = el('div', { class: 'sql-analyzer-wrap' });
 
-  wrap.appendChild(el('h2', { text: 'Table Analyzer' }));
+  const hdr = el('div', { class: 'sql-help-header' });
+  hdr.appendChild(el('h2', { text: 'Table Analyzer' }));
+  hdr.appendChild(helpButton('Table Analyzer — справка', ANALYZER_HELP_HTML));
+  wrap.appendChild(hdr);
   wrap.appendChild(el('p', { text: 'Generate SELECT queries from ClickHouse DDL' }));
 
   // DDL input

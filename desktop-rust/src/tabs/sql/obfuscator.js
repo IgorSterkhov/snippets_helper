@@ -1,5 +1,7 @@
 import { call } from '../../tauri-api.js';
 import { showToast } from '../../components/toast.js';
+import { helpButton } from './sql-help.js';
+import { OBFUSCATOR_HELP_HTML } from './help-content.js';
 
 let root = null;
 let currentMappings = [];
@@ -14,7 +16,10 @@ export function init(container) {
 
   const wrap = el('div', { class: 'sql-obf-wrap' });
 
-  wrap.appendChild(el('h2', { text: 'SQL Obfuscator' }));
+  const hdr = el('div', { class: 'sql-help-header' });
+  hdr.appendChild(el('h2', { text: 'SQL Obfuscator' }));
+  hdr.appendChild(helpButton('SQL Obfuscator — справка', OBFUSCATOR_HELP_HTML));
+  wrap.appendChild(hdr);
   wrap.appendChild(el('p', { text: 'Replace table/column/variable names with generic aliases for safe sharing' }));
 
   // Input

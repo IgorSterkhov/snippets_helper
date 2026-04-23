@@ -1,6 +1,8 @@
 import { call } from '../../tauri-api.js';
 import { showToast } from '../../components/toast.js';
 import { showModal } from '../../components/modal.js';
+import { helpButton } from './sql-help.js';
+import { MACROSING_HELP_HTML } from './help-content.js';
 
 let root = null;
 let templates = [];
@@ -16,7 +18,10 @@ export function init(container) {
 
   const wrap = el('div', { class: 'sql-macrosing-wrap' });
 
-  wrap.appendChild(el('h2', { text: 'SQL Macrosing' }));
+  const hdr = el('div', { class: 'sql-help-header' });
+  hdr.appendChild(el('h2', { text: 'SQL Macrosing' }));
+  hdr.appendChild(helpButton('SQL Macrosing — справка', MACROSING_HELP_HTML));
+  wrap.appendChild(hdr);
   wrap.appendChild(el('p', { text: 'Generate SQL variations from a template with placeholders' }));
 
   // Templates row
