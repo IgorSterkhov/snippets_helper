@@ -1,5 +1,7 @@
 import { call } from '../../tauri-api.js';
 import { showToast } from '../../components/toast.js';
+import { helpButton } from './sql-help.js';
+import { FORMATTER_HELP_HTML } from './help-content.js';
 
 let root = null;
 
@@ -13,7 +15,10 @@ export function init(container) {
 
   const wrap = el('div', { class: 'sql-fmt-wrap' });
 
-  wrap.appendChild(el('h2', { text: 'SQL Formatter' }));
+  const hdr = el('div', { class: 'sql-help-header' });
+  hdr.appendChild(el('h2', { text: 'SQL Formatter' }));
+  hdr.appendChild(helpButton('SQL Formatter — справка', FORMATTER_HELP_HTML));
+  wrap.appendChild(hdr);
   wrap.appendChild(el('p', { text: 'Format SQL with keyword case conversion (supports Jinja2 templates)' }));
 
   // Input

@@ -1,6 +1,92 @@
 // Help text for SQL sub-tabs — plain HTML strings rendered inside the
 // shared help modal. Kept separate from UI code to keep each tab file lean.
 
+// ──────────────────────────── Formatter ───────────────────────────────
+
+export const FORMATTER_HELP_HTML = `
+<p><strong>SQL Formatter</strong> — приводит SQL к читаемому виду:
+разносит по строкам, выравнивает, приводит ключевые слова к одному
+регистру. Поддерживает <code>Jinja2</code>-шаблоны (<code>{{ var }}</code>,
+<code>{% if %}</code> — не ломаются). Отдельный режим <strong>Format
+DDL</strong> табулирует колонки <code>CREATE&nbsp;TABLE</code> и
+выбрасывает бэктики.</p>
+
+<h4>Кнопки</h4>
+<ul>
+  <li><strong>Format SQL</strong> — обычное форматирование любого SQL
+      (SELECT/INSERT/UPDATE/DDL/...). Под капотом — бэкенд-форматтер.</li>
+  <li><strong>Format DDL</strong> — специальный режим для
+      <code>CREATE&nbsp;TABLE</code>:
+      <ul>
+        <li>колонки табулируются на 3 позиции: <code>name</code>,
+            <code>type</code>, <code>rest</code> (COMMENT / DEFAULT /
+            ALIAS и т.п.);</li>
+        <li>бэктики вокруг идентификаторов удаляются (но не внутри
+            строковых литералов <code>'...'</code> / <code>"..."</code>
+            и комментов <code>--</code>/<code>/* */</code>);</li>
+        <li>если в поле ввода нет <code>CREATE&nbsp;TABLE</code> — кнопка
+            падает в обычный форматтер (с toast-ом).</li>
+      </ul>
+  </li>
+  <li><strong>Clear</strong> — очистить ввод и вывод.</li>
+  <li><strong>Copy Result</strong> — скопировать отформатированный SQL
+      в буфер.</li>
+</ul>
+
+<h4>Keywords: UPPER / lower</h4>
+<p>Регистр ключевых слов SQL. Применяется к зарезервированным словам
+(<code>SELECT</code>, <code>JOIN</code>, <code>WHERE</code>...) — имена
+таблиц и колонок не трогаются. Строковые литералы и комменты не
+переписываются.</p>
+
+<h4>Подсветка синтаксиса</h4>
+<p>Результат рендерится с подсветкой через <code>highlight.js</code>
+(language=sql). Копирование всё равно берёт чистый текст.</p>
+
+<hr />
+
+<h4>Пример 1 — обычный SELECT</h4>
+
+<h5>Вход</h5>
+<pre><code>select u.id, u.name, count(o.id) as orders_cnt from users u left join orders o on o.user_id = u.id where u.created_at &gt;= '2024-01-01' group by u.id, u.name;</code></pre>
+
+<h5>После Format SQL (UPPER)</h5>
+<pre><code>SELECT
+    u.id,
+    u.name,
+    count(o.id) AS orders_cnt
+FROM users u
+LEFT JOIN orders o
+    ON o.user_id = u.id
+WHERE u.created_at &gt;= '2024-01-01'
+GROUP BY u.id, u.name;</code></pre>
+
+<h4>Пример 2 — DDL с бэктиками</h4>
+
+<h5>Вход</h5>
+<pre><code>CREATE TABLE datamart.supply (
+  \`supplier_id\` Int32 COMMENT 'Продавец',
+  \`barcode\` String COMMENT 'Баркод',
+  \`dt\` DateTime COMMENT 'Дата',
+  \`country_code\` String COMMENT 'Код страны'
+) ENGINE = MergeTree ORDER BY (supplier_id);</code></pre>
+
+<h5>После Format DDL</h5>
+<pre><code>CREATE TABLE datamart.supply (
+    supplier_id  Int32    COMMENT 'Продавец',
+    barcode      String   COMMENT 'Баркод',
+    dt           DateTime COMMENT 'Дата',
+    country_code String   COMMENT 'Код страны'
+) ENGINE = MergeTree ORDER BY (supplier_id);</code></pre>
+
+<h4>Jinja2</h4>
+<p>Шаблонные вставки не ломаются:</p>
+<pre><code>SELECT *
+FROM {{ params.schema }}.events
+WHERE dt = '{{ ds }}'
+{% if limit %}LIMIT {{ limit }}{% endif %};</code></pre>
+`;
+
 // ─────────────────────────── Table Analyzer ───────────────────────────
 
 export const ANALYZER_HELP_HTML = `
