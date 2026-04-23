@@ -18,3 +18,10 @@
 7. Процесс релизов, OTA-обновлений, CI, локального тестирования десктопного приложения описан в `desktop-rust/RELEASES.md`. Перед любым изменением в `desktop-rust/src-tauri/`, `desktop-rust/src/` или `.github/workflows/release-desktop.yml` — прочитай этот файл. Там же — известные грабли, ключи, структура state-файлов OTA, команды для Docker/browser mock/CDP тестов.
 
 8. Процесс релизов, OTA-обновлений, сборки APK, инфраструктуры сервера и отладки мобильного приложения описан в `mobile/RELEASES.md`. Перед любым изменением в `mobile/src/`, `mobile/android/`, `mobile/package.json` или серверных путях `/opt/isterapp/releases/snippets-updates/` — прочитай этот файл. Там же — известные грабли (jcenter-фикс для sqlite-storage, Let's Encrypt вместо self-signed, обязательный `MainApplication.kt`-setup для OTA, формат zip-бандла), команды для сборки APK и OTA, ключи подписи, чек-листы перед релизом.
+
+9. При выкатке релиза (как `v*`, так и `f-*`), если в нём есть новая фича или существенное изменение поведения — **обязательно** обнови:
+   - **Справку в левой панели** (знак «?» в сайдбаре) — файл `desktop-rust/src/tabs/help.js`. Там есть i18n-словарь `en` / `ru` и секции *Features* / *Hotkeys* / *Changelog*. Добавь/поправь описание фичи на обоих языках.
+   - **Историю релизов** — файл `desktop-rust/CHANGELOG.md`. Новая секция сверху: `## vX.Y.Z (YYYY-MM-DD)` с кратким списком изменений.
+   - Если справка/changelog для конкретной под-вкладки (SQL Analyzer / Macrosing / Obfuscator / Formatter) — обнови также `desktop-rust/src/tabs/sql/help-content.js` (модалка по «?» в шапке таба).
+
+   Чисто-технические правки (рефакторинг, CI-скрипты, внутренние фиксы) без изменения поведения для пользователя — в справку можно не вносить, в changelog — по желанию.
