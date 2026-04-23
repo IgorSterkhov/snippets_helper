@@ -388,8 +388,11 @@ impl SyncClient {
         if !name_field.is_empty() {
             if let Some(val) = obj.get(name_field).and_then(|v| v.as_str()) {
                 if !val.is_empty() {
-                    let truncated = if val.len() > 40 {
-                        format!("{}...", &val[..37])
+                    // Truncate by CHARS, not bytes — otherwise a multibyte
+                    // UTF-8 (e.g. Cyrillic) name slices mid-char and panics.
+                    let truncated = if val.chars().count() > 40 {
+                        let head: String = val.chars().take(37).collect();
+                        format!("{}...", head)
                     } else {
                         val.to_string()
                     };
@@ -402,8 +405,11 @@ impl SyncClient {
         if table == "sql_table_analyzer_templates" {
             if let Some(val) = obj.get("template_text").and_then(|v| v.as_str()) {
                 if !val.is_empty() {
-                    let truncated = if val.len() > 40 {
-                        format!("{}...", &val[..37])
+                    // Char-based truncation (see above) — template_text may
+                    // contain Cyrillic comments etc.
+                    let truncated = if val.chars().count() > 40 {
+                        let head: String = val.chars().take(37).collect();
+                        format!("{}...", head)
                     } else {
                         val.to_string()
                     };
@@ -418,5 +424,34 @@ impl SyncClient {
         }
 
         "unknown".to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn extract_display_name_truncates_cyrillic_without_panic() {
+        // Cyrillic chars are 2 bytes each, so byte-based slicing at 37
+        // would land mid-char. This must NOT panic.
+        let title = "Голосовой ввод задач и списков для будущих доработок";
+        let obj = json!({ "title": title }).as_object().unwrap().clone();
+        let got = SyncClient::extract_display_name("notes", &obj);
+        assert!(got.ends_with("..."));
+        assert!(got.chars().count() <= 40); // 37 chars + "..."
+    }
+
+    #[test]
+    fn extract_display_name_passes_short_names_through() {
+        let obj = json!({ "name": "short" }).as_object().unwrap().clone();
+        assert_eq!(SyncClient::extract_display_name("shortcuts", &obj), "short");
+    }
+
+    #[test]
+    fn extract_display_name_falls_back_to_uuid() {
+        let obj = json!({ "uuid": "abcdef0123456789" }).as_object().unwrap().clone();
+        assert_eq!(SyncClient::extract_display_name("tasks", &obj), "abcdef01");
     }
 }

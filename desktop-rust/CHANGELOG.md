@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.3.2 (2026-04-23)
+
+**Root cause of the poisoned-lock wedge in v1.3.0.**
+
+- `SyncClient::extract_display_name` was slicing names/template_text by
+  BYTE index (`&val[..37]`), which panics on multibyte UTF-8 chars —
+  Cyrillic letters take 2 bytes, so a note titled e.g.
+  "Голосовой ввод задач и списков" crashed the sync worker the moment
+  it entered the pending queue. Every subsequent app launch kept
+  triggering the same panic because that note was still `pending`,
+  poisoning the DbState mutex over and over and breaking the auto-
+  updater. Replaced with char-based truncation (`val.chars().take(37)`)
+  and added a regression test.
+- v1.3.1's `lock_recover` helper already unwedged the mutex on restart
+  — v1.3.2 removes the actual source of the panic.
+
 ## v1.3.1 (2026-04-23)
 
 **Hotfix: poisoned-lock recovery + panic hook.**
