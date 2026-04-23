@@ -75,15 +75,49 @@ function buildLayout() {
   // Top bar: search input + type selector + settings gear
   const topBar = el('div', { class: 'rs-topbar' });
 
+  // Pill-shaped search field: icon + input + clear-button wrapped in a
+  // bordered container. The container gets the focus styling via
+  // :focus-within so the outer border lights up when the input is active.
+  const searchWrap = el('div', { class: 'rs-search-wrap' });
+  const searchIcon = el('span', { text: '\u{1F50D}', class: 'rs-search-icon' });
+  searchWrap.appendChild(searchIcon);
+
   const searchInput = document.createElement('input');
   searchInput.type = 'text';
   searchInput.id = 'rs-search-input';
   searchInput.className = 'rs-search-input';
   searchInput.placeholder = 'Search pattern...';
+  // Disable browser autofill/history — we serve our own dark dropdown below.
+  searchInput.autocomplete = 'off';
+  searchInput.spellcheck = false;
+  searchInput.setAttribute('autocorrect', 'off');
+  searchInput.setAttribute('autocapitalize', 'off');
   searchInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') doSearch();
+    if (e.key === 'Enter') { hideSearchHistory(); doSearch(); }
+    else if (e.key === 'Escape') { hideSearchHistory(); }
+    else if (e.key === 'ArrowDown') { focusHistoryItem(0); e.preventDefault(); }
   });
-  topBar.appendChild(searchInput);
+  searchInput.addEventListener('input', () => {
+    // Toggle clear button visibility + update history suggestions.
+    searchClear.style.display = searchInput.value ? '' : 'none';
+    showSearchHistory();
+  });
+  searchInput.addEventListener('focus', showSearchHistory);
+  searchInput.addEventListener('blur', () => setTimeout(hideSearchHistory, 150));
+  searchWrap.appendChild(searchInput);
+
+  const searchClear = el('button', { text: '✕', class: 'rs-search-clear' });
+  searchClear.type = 'button';
+  searchClear.title = 'Clear';
+  searchClear.style.display = 'none';
+  searchClear.addEventListener('click', () => {
+    searchInput.value = '';
+    searchClear.style.display = 'none';
+    searchInput.focus();
+  });
+  searchWrap.appendChild(searchClear);
+
+  topBar.appendChild(searchWrap);
 
   const searchBtn = el('button', { text: 'Search', class: 'rs-search-btn' });
   searchBtn.addEventListener('click', doSearch);
@@ -387,6 +421,86 @@ function updatePlaceholder() {
       input.placeholder = 'Search commits (message or code changes)...';
       break;
   }
+}
+
+// ── Search history + dropdown ─────────────────────────────
+const HISTORY_KEY = 'repo_search_history';
+const HISTORY_MAX = 10;
+let searchHistory = null;           // cached array, lazily loaded
+let historyDropdown = null;         // DOM ref when visible
+
+async function loadSearchHistory() {
+  if (searchHistory !== null) return searchHistory;
+  try {
+    const raw = await call('get_setting', { key: HISTORY_KEY });
+    searchHistory = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(searchHistory)) searchHistory = [];
+  } catch {
+    searchHistory = [];
+  }
+  return searchHistory;
+}
+
+async function pushSearchHistory(query) {
+  if (!query) return;
+  await loadSearchHistory();
+  searchHistory = [query, ...searchHistory.filter(q => q !== query)].slice(0, HISTORY_MAX);
+  try { await call('set_setting', { key: HISTORY_KEY, value: JSON.stringify(searchHistory) }); }
+  catch {}
+}
+
+async function showSearchHistory() {
+  hideSearchHistory();
+  const input = root?.querySelector('#rs-search-input');
+  if (!input) return;
+  await loadSearchHistory();
+  const q = input.value.trim().toLowerCase();
+  const items = q
+    ? searchHistory.filter(h => h.toLowerCase().includes(q) && h.toLowerCase() !== q)
+    : searchHistory.slice();
+  if (!items.length) return;
+
+  const dd = document.createElement('div');
+  dd.className = 'rs-search-dd';
+  const wrap = input.closest('.rs-search-wrap');
+  for (const h of items) {
+    const row = document.createElement('div');
+    row.className = 'rs-search-dd-item';
+    row.tabIndex = 0;
+    const text = document.createElement('span');
+    text.textContent = h;
+    row.appendChild(text);
+    const hint = el('span', { text: 'recent', class: 'rs-search-dd-hint' });
+    row.appendChild(hint);
+    row.addEventListener('mousedown', (e) => {   // mousedown beats input blur
+      e.preventDefault();
+      input.value = h;
+      input.dispatchEvent(new Event('input'));
+      hideSearchHistory();
+      doSearch();
+    });
+    row.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); input.value = h; hideSearchHistory(); doSearch(); }
+      else if (e.key === 'ArrowDown') { e.preventDefault(); const n = row.nextElementSibling; if (n) n.focus(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); const p = row.previousElementSibling; if (p) p.focus(); else input.focus(); }
+      else if (e.key === 'Escape') { hideSearchHistory(); input.focus(); }
+    });
+    dd.appendChild(row);
+  }
+  // Position under the input (relative to the wrap which is position:relative).
+  historyDropdown = dd;
+  wrap.appendChild(dd);
+}
+function hideSearchHistory() {
+  if (historyDropdown && historyDropdown.parentNode) historyDropdown.parentNode.removeChild(historyDropdown);
+  historyDropdown = null;
+}
+function focusHistoryItem(idx) {
+  if (!historyDropdown) showSearchHistory();
+  setTimeout(() => {
+    const rows = historyDropdown?.querySelectorAll('.rs-search-dd-item');
+    if (rows && rows[idx]) rows[idx].focus();
+  }, 0);
 }
 
 // ── Repo Chips ────────────────────────────────────────────
@@ -1085,6 +1199,8 @@ async function doSearch() {
 
   const query = input.value.trim();
   if (!query) return;
+
+  pushSearchHistory(query);
 
   resultsList.innerHTML = '<p class="rs-placeholder">Searching...</p>';
   if (countLabel) countLabel.textContent = '';
@@ -1953,19 +2069,90 @@ function css() {
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
+.rs-search-wrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  position: relative;
+}
+.rs-search-wrap:focus-within {
+  border-color: var(--accent, #3b82f6);
+  box-shadow: 0 0 0 3px rgba(59,130,246,0.14);
+}
+.rs-search-icon {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1;
+  flex-shrink: 0;
+  user-select: none;
+  pointer-events: none;
+}
 .rs-search-input {
   flex: 1;
-  padding: 7px 12px;
+  padding: 4px 0;
   font-size: 13px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  border: none;
+  outline: none;
+  min-width: 0;
+}
+.rs-search-input::placeholder { color: var(--text-muted); opacity: 0.8; }
+/* Kill Chromium's white autofill flash that overrides the dark theme. */
+.rs-search-input:-webkit-autofill,
+.rs-search-input:-webkit-autofill:hover,
+.rs-search-input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 100px var(--bg-secondary) inset !important;
+  -webkit-text-fill-color: var(--text) !important;
+  caret-color: var(--text);
+  transition: background-color 9999s ease-in-out 0s;
+}
+.rs-search-clear {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 0 4px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.rs-search-clear:hover { color: var(--text); }
+
+.rs-search-dd {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  max-height: 280px;
+  overflow-y: auto;
   background: var(--bg-secondary);
   color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 0;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.45);
+  font-size: 12px;
 }
-.rs-search-input:focus {
-  border-color: var(--accent);
+.rs-search-dd-item {
+  padding: 6px 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
   outline: none;
 }
+.rs-search-dd-item:hover,
+.rs-search-dd-item:focus { background: rgba(59,130,246,0.12); }
+.rs-search-dd-hint { color: var(--text-muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; }
 .rs-search-btn {
   padding: 7px 16px;
   font-size: 13px;
