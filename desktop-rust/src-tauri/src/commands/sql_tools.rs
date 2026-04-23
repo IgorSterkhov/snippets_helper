@@ -94,7 +94,7 @@ pub fn generate_macros(
 pub fn list_analyzer_templates(
     state: State<DbState>,
 ) -> Result<Vec<SqlTableAnalyzerTemplate>, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::list_sql_table_analyzer_templates(&conn).map_err(|e| e.to_string())
 }
 
@@ -103,13 +103,13 @@ pub fn create_analyzer_template(
     state: State<DbState>,
     template_text: String,
 ) -> Result<SqlTableAnalyzerTemplate, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::create_sql_table_analyzer_template(&conn, &template_text).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn delete_analyzer_template(state: State<DbState>, id: i64) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::delete_sql_table_analyzer_template(&conn, id).map_err(|e| e.to_string())
 }
 
@@ -119,7 +119,7 @@ pub fn delete_analyzer_template(state: State<DbState>, id: i64) -> Result<(), St
 pub fn list_macrosing_templates(
     state: State<DbState>,
 ) -> Result<Vec<SqlMacrosingTemplate>, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::list_sql_macrosing_templates(&conn).map_err(|e| e.to_string())
 }
 
@@ -132,7 +132,7 @@ pub fn create_macrosing_template(
     combination_mode: String,
     separator: String,
 ) -> Result<SqlMacrosingTemplate, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::create_sql_macrosing_template(
         &conn,
         &template_name,
@@ -154,7 +154,7 @@ pub fn update_macrosing_template(
     combination_mode: String,
     separator: String,
 ) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::update_sql_macrosing_template(
         &conn,
         id,
@@ -169,6 +169,6 @@ pub fn update_macrosing_template(
 
 #[tauri::command]
 pub fn delete_macrosing_template(state: State<DbState>, id: i64) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::delete_sql_macrosing_template(&conn, id).map_err(|e| e.to_string())
 }

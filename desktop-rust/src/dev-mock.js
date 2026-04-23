@@ -413,6 +413,13 @@
         return { name, skipped: false, success: true, message: 'Already up to date.', commands_run: cmds };
       });
     },
+    async repo_search_commit_diff({ repoPath, hash, fullContext }) {
+      const hdr = `commit ${hash}\nAuthor: Mock User <mock@example.com>\nDate:   ${now()}\n\n    mock subject\n\n`;
+      if (fullContext) {
+        return hdr + `diff --git a/src/mock.py b/src/mock.py\n@@ -1,15 +1,15 @@\n-def old():\n+def new():\n     return 42\n\n     x = 1\n     y = 2\n     z = 3\n     a = 4\n     b = 5\n     c = 6\n     d = 7\n     e = 8\n     f = 9\n     g = 10\n     h = 11\n`;
+      }
+      return hdr + `diff --git a/src/mock.py b/src/mock.py\n@@ -1,3 +1,3 @@\n-def old():\n+def new():\n     return 42\n`;
+    },
     async repo_search_reset_hard({ path, clean }) {
       const pathToName = new Map((storeGet('repos', [])).map(r => [r.path, r.name]));
       const name = pathToName.get(path);

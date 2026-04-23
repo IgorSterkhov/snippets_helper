@@ -75,15 +75,49 @@ function buildLayout() {
   // Top bar: search input + type selector + settings gear
   const topBar = el('div', { class: 'rs-topbar' });
 
+  // Pill-shaped search field: icon + input + clear-button wrapped in a
+  // bordered container. The container gets the focus styling via
+  // :focus-within so the outer border lights up when the input is active.
+  const searchWrap = el('div', { class: 'rs-search-wrap' });
+  const searchIcon = el('span', { text: '\u{1F50D}', class: 'rs-search-icon' });
+  searchWrap.appendChild(searchIcon);
+
   const searchInput = document.createElement('input');
   searchInput.type = 'text';
   searchInput.id = 'rs-search-input';
   searchInput.className = 'rs-search-input';
   searchInput.placeholder = 'Search pattern...';
+  // Disable browser autofill/history — we serve our own dark dropdown below.
+  searchInput.autocomplete = 'off';
+  searchInput.spellcheck = false;
+  searchInput.setAttribute('autocorrect', 'off');
+  searchInput.setAttribute('autocapitalize', 'off');
   searchInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') doSearch();
+    if (e.key === 'Enter') { hideSearchHistory(); doSearch(); }
+    else if (e.key === 'Escape') { hideSearchHistory(); }
+    else if (e.key === 'ArrowDown') { focusHistoryItem(0); e.preventDefault(); }
   });
-  topBar.appendChild(searchInput);
+  searchInput.addEventListener('input', () => {
+    // Toggle clear button visibility + update history suggestions.
+    searchClear.style.display = searchInput.value ? '' : 'none';
+    showSearchHistory();
+  });
+  searchInput.addEventListener('focus', showSearchHistory);
+  searchInput.addEventListener('blur', () => setTimeout(hideSearchHistory, 150));
+  searchWrap.appendChild(searchInput);
+
+  const searchClear = el('button', { text: '✕', class: 'rs-search-clear' });
+  searchClear.type = 'button';
+  searchClear.title = 'Clear';
+  searchClear.style.display = 'none';
+  searchClear.addEventListener('click', () => {
+    searchInput.value = '';
+    searchClear.style.display = 'none';
+    searchInput.focus();
+  });
+  searchWrap.appendChild(searchClear);
+
+  topBar.appendChild(searchWrap);
 
   const searchBtn = el('button', { text: 'Search', class: 'rs-search-btn' });
   searchBtn.addEventListener('click', doSearch);
@@ -387,6 +421,86 @@ function updatePlaceholder() {
       input.placeholder = 'Search commits (message or code changes)...';
       break;
   }
+}
+
+// ── Search history + dropdown ─────────────────────────────
+const HISTORY_KEY = 'repo_search_history';
+const HISTORY_MAX = 10;
+let searchHistory = null;           // cached array, lazily loaded
+let historyDropdown = null;         // DOM ref when visible
+
+async function loadSearchHistory() {
+  if (searchHistory !== null) return searchHistory;
+  try {
+    const raw = await call('get_setting', { key: HISTORY_KEY });
+    searchHistory = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(searchHistory)) searchHistory = [];
+  } catch {
+    searchHistory = [];
+  }
+  return searchHistory;
+}
+
+async function pushSearchHistory(query) {
+  if (!query) return;
+  await loadSearchHistory();
+  searchHistory = [query, ...searchHistory.filter(q => q !== query)].slice(0, HISTORY_MAX);
+  try { await call('set_setting', { key: HISTORY_KEY, value: JSON.stringify(searchHistory) }); }
+  catch {}
+}
+
+async function showSearchHistory() {
+  hideSearchHistory();
+  const input = root?.querySelector('#rs-search-input');
+  if (!input) return;
+  await loadSearchHistory();
+  const q = input.value.trim().toLowerCase();
+  const items = q
+    ? searchHistory.filter(h => h.toLowerCase().includes(q) && h.toLowerCase() !== q)
+    : searchHistory.slice();
+  if (!items.length) return;
+
+  const dd = document.createElement('div');
+  dd.className = 'rs-search-dd';
+  const wrap = input.closest('.rs-search-wrap');
+  for (const h of items) {
+    const row = document.createElement('div');
+    row.className = 'rs-search-dd-item';
+    row.tabIndex = 0;
+    const text = document.createElement('span');
+    text.textContent = h;
+    row.appendChild(text);
+    const hint = el('span', { text: 'recent', class: 'rs-search-dd-hint' });
+    row.appendChild(hint);
+    row.addEventListener('mousedown', (e) => {   // mousedown beats input blur
+      e.preventDefault();
+      input.value = h;
+      input.dispatchEvent(new Event('input'));
+      hideSearchHistory();
+      doSearch();
+    });
+    row.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); input.value = h; hideSearchHistory(); doSearch(); }
+      else if (e.key === 'ArrowDown') { e.preventDefault(); const n = row.nextElementSibling; if (n) n.focus(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); const p = row.previousElementSibling; if (p) p.focus(); else input.focus(); }
+      else if (e.key === 'Escape') { hideSearchHistory(); input.focus(); }
+    });
+    dd.appendChild(row);
+  }
+  // Position under the input (relative to the wrap which is position:relative).
+  historyDropdown = dd;
+  wrap.appendChild(dd);
+}
+function hideSearchHistory() {
+  if (historyDropdown && historyDropdown.parentNode) historyDropdown.parentNode.removeChild(historyDropdown);
+  historyDropdown = null;
+}
+function focusHistoryItem(idx) {
+  if (!historyDropdown) showSearchHistory();
+  setTimeout(() => {
+    const rows = historyDropdown?.querySelectorAll('.rs-search-dd-item');
+    if (rows && rows[idx]) rows[idx].focus();
+  }, 0);
 }
 
 // ── Repo Chips ────────────────────────────────────────────
@@ -1086,6 +1200,8 @@ async function doSearch() {
   const query = input.value.trim();
   if (!query) return;
 
+  pushSearchHistory(query);
+
   resultsList.innerHTML = '<p class="rs-placeholder">Searching...</p>';
   if (countLabel) countLabel.textContent = '';
 
@@ -1321,40 +1437,55 @@ async function showDetailModal(fileResult) {
   }
   document.addEventListener('keydown', onKey, true);
 
-  // Load context for all match lines
+  // Load context for all match lines, merge overlapping ranges, and render
+  // as a single stream with "…" separators between non-contiguous chunks.
   try {
     body.innerHTML = '';
     const matchLineNums = new Set(fileResult.matches.map(m => m.line_num));
 
-    for (let i = 0; i < fileResult.matches.length; i++) {
-      const m = fileResult.matches[i];
-
-      if (i > 0) {
-        body.appendChild(el('div', { class: 'rs-context-separator' }));
-      }
-
-      try {
-        const lines = await call('get_file_context', {
+    if (fileResult.matches.length === 0) {
+      body.appendChild(el('p', { text: 'No matches', class: 'rs-placeholder' }));
+    } else {
+      // Fetch contexts for every match in parallel.
+      const blocks = await Promise.all(fileResult.matches.map(m =>
+        call('get_file_context', {
           filePath: m.file_path || fileResult.file_path,
           lineNum: m.line_num,
           contextLines: contextLines,
-        });
+        }).catch(err => ({ __err: String(err), line_num: m.line_num }))
+      ));
 
-        const block = el('div', { class: 'rs-context-block' });
-        for (const line of lines) {
-          const lineEl = el('div', { class: 'rs-context-line' + (matchLineNums.has(line.line_num) ? ' is-match' : '') });
-          lineEl.appendChild(el('span', { text: String(line.line_num).padStart(4, ' '), class: 'rs-ctx-linenum' }));
-          lineEl.appendChild(el('span', { text: line.text, class: 'rs-ctx-text' }));
-          block.appendChild(lineEl);
+      // Deduplicate: collapse all lines into a Map keyed by line_num.
+      const linesByNum = new Map();
+      const errors = [];
+      for (const b of blocks) {
+        if (b && b.__err !== undefined) { errors.push(b); continue; }
+        for (const line of b) {
+          if (!linesByNum.has(line.line_num)) {
+            linesByNum.set(line.line_num, line.text);
+          }
         }
-        body.appendChild(block);
-      } catch (err) {
-        body.appendChild(el('p', { text: 'Error loading context for L' + m.line_num + ': ' + err, style: 'color:var(--danger);font-size:12px' }));
       }
-    }
+      for (const e of errors) {
+        body.appendChild(el('p', { text: `Error loading context for L${e.line_num}: ${e.__err}`, style: 'color:var(--danger);font-size:12px' }));
+      }
 
-    if (fileResult.matches.length === 0) {
-      body.appendChild(el('p', { text: 'No matches', class: 'rs-placeholder' }));
+      const sorted = [...linesByNum.keys()].sort((a, b) => a - b);
+      const block = el('div', { class: 'rs-context-block' });
+      let prev = null;
+      for (const n of sorted) {
+        if (prev != null && n > prev + 1) {
+          const gap = el('div', { class: 'rs-context-gap' });
+          gap.textContent = '···';
+          block.appendChild(gap);
+        }
+        const lineEl = el('div', { class: 'rs-context-line' + (matchLineNums.has(n) ? ' is-match' : '') });
+        lineEl.appendChild(el('span', { text: String(n).padStart(4, ' '), class: 'rs-ctx-linenum' }));
+        lineEl.appendChild(el('span', { text: linesByNum.get(n), class: 'rs-ctx-text' }));
+        block.appendChild(lineEl);
+        prev = n;
+      }
+      body.appendChild(block);
     }
   } catch (e) {
     body.innerHTML = '';
@@ -1404,14 +1535,287 @@ function renderGitResults(gitResults) {
     metaLine.appendChild(el('span', { text: formatDate(r.commit_date) }));
     card.appendChild(metaLine);
 
-    card.addEventListener('click', () => {
-      navigator.clipboard.writeText(r.commit_hash).then(() => {
-        showToast('Hash copied', 'success');
-      }).catch(() => {});
-    });
-    card.title = 'Click to copy hash: ' + r.commit_hash;
+    card.addEventListener('click', () => showCommitModal(r));
+    card.title = 'Click to view diff';
 
     resultsList.appendChild(card);
+  }
+}
+
+// ── Commit diff modal ──────────────────────────────────────
+
+async function showCommitModal(gitResult) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay rs-modal-overlay';
+  const modal = document.createElement('div');
+  modal.className = 'modal rs-detail-modal';
+
+  // Header
+  const header = el('div', { class: 'rs-modal-header' });
+  const headerLeft = el('div', { style: 'display:flex;align-items:center;gap:8px;overflow:hidden;flex:1;min-width:0' });
+  headerLeft.appendChild(buildRepoBadge(gitResult.repo_name));
+  headerLeft.appendChild(el('span', { text: gitResult.commit_hash.substring(0, 10), class: 'rs-commit-hash' }));
+  headerLeft.appendChild(el('span', { text: gitResult.message, class: 'rs-detail-path' }));
+  header.appendChild(headerLeft);
+
+  const headerActions = el('div', { class: 'rs-detail-actions' });
+
+  const copyBtn = el('button', { text: 'Copy hash', class: 'rs-card-btn' });
+  copyBtn.addEventListener('click', () => {
+    navigator.clipboard.writeText(gitResult.commit_hash)
+      .then(() => showToast('Hash copied', 'success'))
+      .catch(() => {});
+  });
+  headerActions.appendChild(copyBtn);
+
+  let fullCtx = false;
+  const fullBtn = el('button', { text: 'Full file ▸', class: 'rs-card-btn' });
+  fullBtn.addEventListener('click', async () => {
+    fullCtx = !fullCtx;
+    fullBtn.textContent = fullCtx ? 'Hunks ◂' : 'Full file ▸';
+    fullBtn.classList.toggle('active', fullCtx);
+    await renderDiff();
+  });
+  headerActions.appendChild(fullBtn);
+
+  const expandBtn = el('button', { text: 'Expand ▸', class: 'rs-card-btn' });
+  expandBtn.addEventListener('click', () => expandGitResults(gitResults, gitResult.commit_hash));
+  headerActions.appendChild(expandBtn);
+
+  const closeBtn = el('button', { text: '✕', class: 'btn-secondary rs-modal-close' });
+  closeBtn.addEventListener('click', () => overlay.remove());
+  headerActions.appendChild(closeBtn);
+
+  header.appendChild(headerActions);
+  modal.appendChild(header);
+
+  // Metadata subheader (author + date)
+  const meta = el('div', { class: 'rs-detail-copy-row' });
+  meta.appendChild(el('span', { text: `${gitResult.author} — ${formatDate(gitResult.commit_date)}`, class: 'rs-detail-fullpath' }));
+  modal.appendChild(meta);
+
+  // Body: diff
+  const body = el('div', { class: 'rs-detail-body' });
+  body.innerHTML = '<p class="rs-placeholder">Loading diff...</p>';
+  modal.appendChild(body);
+
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  function onKey(e) {
+    if (e.key === 'Escape') { e.stopPropagation(); overlay.remove(); document.removeEventListener('keydown', onKey, true); }
+  }
+  document.addEventListener('keydown', onKey, true);
+
+  // Cache diffs per mode for instant toggle after the first load of each.
+  const modeCache = new Map();
+
+  async function renderDiff() {
+    try {
+      await ensureHighlight();
+      const repoPath = (allRepos.find(r => r.name === gitResult.repo_name) || {}).path;
+      if (!repoPath) throw new Error('Repo path not found for ' + gitResult.repo_name);
+      body.innerHTML = '<p class="rs-placeholder">Loading diff...</p>';
+      const key = fullCtx ? 'full' : 'short';
+      let diff = modeCache.get(key);
+      if (diff === undefined) {
+        diff = await call('repo_search_commit_diff', {
+          repoPath, hash: gitResult.commit_hash, fullContext: fullCtx,
+        });
+        modeCache.set(key, diff);
+      }
+      body.innerHTML = '';
+      const pre = document.createElement('pre');
+      pre.className = 'rs-fs-pre';
+      const code = document.createElement('code');
+      code.className = 'hljs language-diff';
+      try { code.innerHTML = window.hljs.highlight(diff, { language: 'diff', ignoreIllegals: true }).value; }
+      catch { code.textContent = diff; }
+      pre.appendChild(code);
+      body.appendChild(pre);
+    } catch (e) {
+      body.innerHTML = '';
+      body.appendChild(el('p', { text: 'Error: ' + e, style: 'color:var(--danger)' }));
+    }
+  }
+  try {
+    await renderDiff();
+  } catch (e) {
+    body.innerHTML = '';
+    body.appendChild(el('p', { text: 'Error: ' + e, style: 'color:var(--danger)' }));
+  }
+}
+
+// ── Multi-commit expand view ───────────────────────────────
+
+async function expandGitResults(allCommits, startHash) {
+  if (!root) return;
+  if (document.getElementById('rs-fullscreen-overlay')) return;
+  await ensureHighlight();
+
+  // Overlay-local state.
+  const enabled = new Set(allCommits.map(c => c.commit_hash));
+  // Cache key = `${hash}|${mode}` where mode = 'short' | 'full'
+  const diffs = new Map();
+  let fullContext = false;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'rs-fullscreen-overlay';
+  overlay.className = 'rs-fullscreen';
+
+  const header = document.createElement('div');
+  header.className = 'rs-fullscreen-header';
+  const titleEl = el('div', { text: `${allCommits.length} commits`, class: 'rs-fs-path' });
+  header.appendChild(titleEl);
+
+  const headerRight = el('div', { style: 'display:flex;align-items:center;gap:10px' });
+  const fullCtxLabel = document.createElement('label');
+  fullCtxLabel.className = 'rs-fs-toggle';
+  fullCtxLabel.innerHTML = '<input type="checkbox" id="rs-fs-fullctx"/> Full file context';
+  headerRight.appendChild(fullCtxLabel);
+
+  const collapse = document.createElement('button');
+  collapse.className = 'rs-card-btn';
+  collapse.textContent = 'Collapse ◂';
+  collapse.dataset.role = 'rs-collapse';
+  collapse.addEventListener('click', closeFs);
+  headerRight.appendChild(collapse);
+  header.appendChild(headerRight);
+  overlay.appendChild(header);
+
+  // Wire toggle after mount (need the checkbox DOM ref)
+  setTimeout(() => {
+    const cb = overlay.querySelector('#rs-fs-fullctx');
+    if (cb) cb.addEventListener('change', () => { fullContext = cb.checked; renderBody(); });
+  }, 0);
+
+  const split = document.createElement('div');
+  split.className = 'rs-fs-split';
+  overlay.appendChild(split);
+
+  // Sidebar
+  const sidebar = document.createElement('div');
+  sidebar.className = 'rs-fs-sidebar';
+  split.appendChild(sidebar);
+
+  // Sidebar controls
+  const sbCtrl = document.createElement('div');
+  sbCtrl.className = 'rs-fs-sidebar-ctrl';
+  const allBtn = el('button', { text: 'All', class: 'rs-card-btn' });
+  const noneBtn = el('button', { text: 'None', class: 'rs-card-btn' });
+  allBtn.addEventListener('click', () => { allCommits.forEach(c => enabled.add(c.commit_hash)); renderSidebar(); renderBody(); });
+  noneBtn.addEventListener('click', () => { enabled.clear(); renderSidebar(); renderBody(); });
+  sbCtrl.appendChild(allBtn);
+  sbCtrl.appendChild(noneBtn);
+  sidebar.appendChild(sbCtrl);
+
+  const sbList = document.createElement('div');
+  sbList.className = 'rs-fs-sidebar-list';
+  sidebar.appendChild(sbList);
+
+  const bodyWrap = document.createElement('div');
+  bodyWrap.className = 'rs-fs-body';
+  split.appendChild(bodyWrap);
+
+  function renderSidebar() {
+    sbList.innerHTML = '';
+    for (const c of allCommits) {
+      const row = document.createElement('div');
+      row.className = 'rs-fs-cmt' + (enabled.has(c.commit_hash) ? ' on' : '');
+      const check = document.createElement('span');
+      check.className = 'rs-fs-cmt-check';
+      check.textContent = enabled.has(c.commit_hash) ? '✓' : '';
+      row.appendChild(check);
+      const info = document.createElement('div');
+      info.className = 'rs-fs-cmt-info';
+      info.innerHTML = `<div class="rs-fs-cmt-hash">${c.commit_hash.substring(0,8)}</div>
+        <div class="rs-fs-cmt-msg" title="${c.message.replace(/"/g, '&quot;')}">${c.message}</div>
+        <div class="rs-fs-cmt-meta">${c.author} — ${formatDate(c.commit_date)}</div>`;
+      row.appendChild(info);
+      row.addEventListener('click', () => {
+        if (enabled.has(c.commit_hash)) enabled.delete(c.commit_hash);
+        else enabled.add(c.commit_hash);
+        renderSidebar();
+        renderBody();
+      });
+      sbList.appendChild(row);
+    }
+  }
+
+  async function renderBody() {
+    bodyWrap.innerHTML = '';
+    const active = allCommits.filter(c => enabled.has(c.commit_hash));
+    if (!active.length) {
+      bodyWrap.innerHTML = '<p class="rs-placeholder" style="padding:20px">No commits selected — click entries in the sidebar.</p>';
+      return;
+    }
+    for (const c of active) {
+      const section = document.createElement('div');
+      section.className = 'rs-fs-cmt-section';
+      const dt = formatDateTime(c.commit_date);
+      section.innerHTML = `<div class="rs-fs-cmt-section-head">
+        <strong>${c.commit_hash.substring(0,10)}</strong>
+        <span class="rs-fs-cmt-section-dt">${dt}</span>
+        — ${escapeHtmlCommit(c.message)}
+        <span class="rs-fs-cmt-section-meta">${escapeHtmlCommit(c.author)}</span>
+      </div>`;
+      const pre = document.createElement('pre');
+      pre.className = 'rs-fs-pre';
+      const code = document.createElement('code');
+      code.className = 'hljs language-diff';
+      pre.appendChild(code);
+      section.appendChild(pre);
+      bodyWrap.appendChild(section);
+
+      const cacheKey = `${c.commit_hash}|${fullContext ? 'full' : 'short'}`;
+      if (!diffs.has(cacheKey)) {
+        code.textContent = 'Loading…';
+        try {
+          const repoPath = (allRepos.find(r => r.name === c.repo_name) || {}).path;
+          const diff = await call('repo_search_commit_diff', {
+            repoPath,
+            hash: c.commit_hash,
+            fullContext,
+          });
+          diffs.set(cacheKey, diff);
+        } catch (e) {
+          diffs.set(cacheKey, `Error loading diff: ${e}`);
+        }
+      }
+      const diff = diffs.get(cacheKey);
+      try { code.innerHTML = window.hljs.highlight(diff, { language: 'diff', ignoreIllegals: true }).value; }
+      catch { code.textContent = diff; }
+    }
+  }
+
+  function formatDateTime(iso) {
+    if (!iso) return '';
+    try {
+      const d = new Date(iso);
+      const pad = n => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    } catch { return iso; }
+  }
+  function escapeHtmlCommit(s) {
+    return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]);
+  }
+
+  function closeFs() { overlay.remove(); document.removeEventListener('keydown', onFsKey); }
+  function onFsKey(e) { if (e.key === 'Escape') closeFs(); }
+  document.addEventListener('keydown', onFsKey);
+
+  root.appendChild(overlay);
+  renderSidebar();
+  renderBody();
+
+  // Scroll the start commit into view in the sidebar.
+  if (startHash) {
+    setTimeout(() => {
+      const rows = sbList.querySelectorAll('.rs-fs-cmt');
+      const idx = allCommits.findIndex(c => c.commit_hash === startHash);
+      if (idx >= 0) rows[idx]?.scrollIntoView({ block: 'start' });
+    }, 30);
   }
 }
 
@@ -1665,19 +2069,90 @@ function css() {
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
+.rs-search-wrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  position: relative;
+}
+.rs-search-wrap:focus-within {
+  border-color: var(--accent, #3b82f6);
+  box-shadow: 0 0 0 3px rgba(59,130,246,0.14);
+}
+.rs-search-icon {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1;
+  flex-shrink: 0;
+  user-select: none;
+  pointer-events: none;
+}
 .rs-search-input {
   flex: 1;
-  padding: 7px 12px;
+  padding: 4px 0;
   font-size: 13px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  border: none;
+  outline: none;
+  min-width: 0;
+}
+.rs-search-input::placeholder { color: var(--text-muted); opacity: 0.8; }
+/* Kill Chromium's white autofill flash that overrides the dark theme. */
+.rs-search-input:-webkit-autofill,
+.rs-search-input:-webkit-autofill:hover,
+.rs-search-input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 100px var(--bg-secondary) inset !important;
+  -webkit-text-fill-color: var(--text) !important;
+  caret-color: var(--text);
+  transition: background-color 9999s ease-in-out 0s;
+}
+.rs-search-clear {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 0 4px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.rs-search-clear:hover { color: var(--text); }
+
+.rs-search-dd {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  max-height: 280px;
+  overflow-y: auto;
   background: var(--bg-secondary);
   color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 0;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.45);
+  font-size: 12px;
 }
-.rs-search-input:focus {
-  border-color: var(--accent);
+.rs-search-dd-item {
+  padding: 6px 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
   outline: none;
 }
+.rs-search-dd-item:hover,
+.rs-search-dd-item:focus { background: rgba(59,130,246,0.12); }
+.rs-search-dd-hint { color: var(--text-muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; }
 .rs-search-btn {
   padding: 7px 16px;
   font-size: 13px;
@@ -2207,11 +2682,16 @@ function css() {
   margin-right: 0;
 }
 .rs-card-btn:hover { color: var(--text); border-color: #484f58; }
+.rs-card-btn.active {
+  color: var(--accent, #3b82f6);
+  border-color: rgba(59,130,246,0.5);
+  background: rgba(59,130,246,0.08);
+}
 /* Fullscreen overlay */
 .rs-fullscreen {
-  position: absolute;
+  position: fixed;
   inset: 0;
-  z-index: 20;
+  z-index: 2000;           /* above modal-overlay (~1000) so fullscreen covers the source modal */
   background: var(--bg, #0d1117);
   display: flex;
   flex-direction: column;
@@ -2247,5 +2727,64 @@ function css() {
   font-family: 'SF Mono','Consolas','Menlo',monospace;
   white-space: pre;
 }
+
+/* Multi-commit expand overlay */
+.rs-fs-toggle {
+  font-size: 12px; color: var(--text-muted);
+  display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+  user-select: none;
+}
+.rs-fs-split {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.rs-fs-sidebar {
+  width: 260px;
+  min-width: 220px;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg, #0d1117);
+}
+.rs-fs-sidebar-ctrl {
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.rs-fs-sidebar-ctrl button { flex: 1; padding: 3px 8px; font-size: 11px; }
+.rs-fs-sidebar-list { flex: 1; overflow-y: auto; padding: 4px; }
+.rs-fs-cmt {
+  display: flex; gap: 6px; padding: 6px 8px; border-radius: 4px;
+  margin-bottom: 2px; cursor: pointer; font-size: 11px;
+  align-items: flex-start;
+}
+.rs-fs-cmt:hover { background: rgba(255,255,255,0.04); }
+.rs-fs-cmt.on { background: rgba(59,130,246,0.10); }
+.rs-fs-cmt-check {
+  width: 14px; text-align: center; color: transparent; font-weight: bold;
+  flex-shrink: 0; margin-top: 1px;
+}
+.rs-fs-cmt.on .rs-fs-cmt-check { color: #3fb950; }
+.rs-fs-cmt-info { flex: 1; min-width: 0; }
+.rs-fs-cmt-hash { font-family: monospace; font-size: 10px; color: #f0883e; }
+.rs-fs-cmt-msg { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rs-fs-cmt-meta { color: var(--text-muted); font-size: 10px; }
+.rs-fs-body { flex: 1; overflow: auto; padding: 10px 14px; }
+.rs-fs-cmt-section { margin-bottom: 16px; }
+.rs-fs-cmt-section-head {
+  font-size: 12px; color: var(--text-muted);
+  padding: 6px 0; border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+}
+.rs-fs-cmt-section-head strong { color: #f0883e; font-family: monospace; }
+.rs-fs-cmt-section-dt {
+  font-family: monospace; font-size: 11px; color: var(--text-muted);
+  padding: 1px 6px; background: var(--bg-secondary); border-radius: 3px;
+}
+.rs-fs-cmt-section-meta { color: var(--text-muted); font-size: 11px; margin-left: auto; }
 `;
 }

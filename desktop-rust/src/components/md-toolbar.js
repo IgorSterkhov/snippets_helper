@@ -42,6 +42,23 @@ function insertAtCursor(textarea, text) {
   textarea.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
+// Accepts http(s)://, ftp://, mailto:, www.* — rejects anything with
+// whitespace or newlines, so pasted prose never ends up inside (…).
+function looksLikeUrl(s) {
+  if (!s || typeof s !== 'string') return false;
+  const t = s.trim();
+  if (!t || /\s/.test(t)) return false;
+  return /^(https?:\/\/|ftp:\/\/|mailto:|www\.)\S+$/i.test(t);
+}
+
+async function readUrlFromClipboard() {
+  try {
+    const t = await navigator.clipboard.readText();
+    if (t && looksLikeUrl(t)) return t.trim();
+  } catch { /* permission denied / unavailable */ }
+  return '';
+}
+
 // ── Button definitions ────────────────────────────────────────
 
 function getButtons(textarea) {
@@ -83,17 +100,20 @@ function getButtons(textarea) {
       },
     },
     {
-      label: '\uD83D\uDD17', title: 'Link',
-      action: () => {
+      label: '\uD83D\uDD17', title: 'Link (URL from clipboard if it looks like one)',
+      action: async () => {
         const start = textarea.selectionStart;
         const end = textarea.selectionEnd;
         const selected = textarea.value.substring(start, end);
-        const url = prompt('URL:', 'https://');
-        if (url === null) return;
         const linkText = selected || 'link text';
+        const url = await readUrlFromClipboard();
         const replacement = `[${linkText}](${url})`;
-        textarea.setRangeText(replacement, start, end, 'select');
+        textarea.setRangeText(replacement, start, end, 'end');
         textarea.focus();
+        if (!url) {
+          const caret = start + linkText.length + 3; // past "[text]("
+          textarea.setSelectionRange(caret, caret);
+        }
         textarea.dispatchEvent(new Event('input', { bubbles: true }));
       },
     },
@@ -171,6 +191,23 @@ export function attachToolbar(textarea) {
     });
     toolbar.appendChild(el);
   }
+
+  // Paste-over-selection shortcut: if the user has text selected and the
+  // clipboard holds what looks like a URL, transform the paste into a
+  // Markdown link — same output as the 🔗 toolbar button. Anything else
+  // (no selection, or non-URL clipboard) falls through to a normal paste.
+  textarea.addEventListener('paste', (e) => {
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    if (start === end) return;
+    const pasted = e.clipboardData && e.clipboardData.getData('text/plain');
+    if (!pasted || !looksLikeUrl(pasted)) return;
+    e.preventDefault();
+    const selected = textarea.value.substring(start, end);
+    const replacement = `[${selected}](${pasted.trim()})`;
+    textarea.setRangeText(replacement, start, end, 'end');
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  });
 
   // Insert toolbar before textarea
   textarea.parentNode.insertBefore(toolbar, textarea);

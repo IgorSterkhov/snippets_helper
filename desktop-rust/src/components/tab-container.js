@@ -1,3 +1,27 @@
+/**
+ * Render a tab icon. Supports:
+ *   - plain emoji/text  →  "🔖"
+ *   - Simple Icons logo →  "logo:apachesuperset" (must exist under icons/logos/<slug>.svg)
+ */
+function renderTabIcon(icon) {
+  const raw = icon || '';
+  if (raw.startsWith('logo:')) {
+    const slug = raw.slice(5).replace(/[^a-z0-9-]/gi, '');
+    const style = [
+      'display:inline-block',
+      'width:1em','height:1em',
+      'vertical-align:middle',
+      'background-color:currentColor',
+      `mask-image:url(icons/logos/${slug}.svg)`,
+      'mask-size:contain','mask-repeat:no-repeat','mask-position:center',
+      `-webkit-mask-image:url(icons/logos/${slug}.svg)`,
+      '-webkit-mask-size:contain','-webkit-mask-repeat:no-repeat','-webkit-mask-position:center',
+    ].join(';');
+    return `<span class="tab-icon tab-icon-logo" style="${style}"></span>`;
+  }
+  return `<span class="tab-icon">${raw}</span>`;
+}
+
 export class TabContainer {
   constructor(containerEl, tabs) {
     this.tabs = tabs;
@@ -20,7 +44,8 @@ export class TabContainer {
       const btn = document.createElement('button');
       btn.className = 'tab-btn';
       btn.dataset.tabId = tab.id;
-      btn.innerHTML = `<span class="tab-icon">${tab.icon}</span><span class="tab-label">${tab.label}</span>`;
+      const iconHtml = renderTabIcon(tab.icon);
+      btn.innerHTML = `${iconHtml}<span class="tab-label">${tab.label}</span>`;
       btn.addEventListener('click', () => this.activate(tab.id));
       this.tabBar.appendChild(btn);
       this.buttons[tab.id] = btn;

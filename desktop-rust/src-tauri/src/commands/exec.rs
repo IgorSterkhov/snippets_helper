@@ -9,25 +9,25 @@ static STOP_FLAG: AtomicBool = AtomicBool::new(false);
 
 #[tauri::command]
 pub fn list_exec_categories(state: State<DbState>) -> Result<Vec<ExecCategory>, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::list_exec_categories(&conn).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn create_exec_category(state: State<DbState>, name: String, sort_order: i32) -> Result<ExecCategory, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::create_exec_category(&conn, &name, sort_order).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn update_exec_category(state: State<DbState>, id: i64, name: String, sort_order: i32) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::update_exec_category(&conn, id, &name, sort_order).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn delete_exec_category(state: State<DbState>, id: i64) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::delete_exec_category(&conn, id).map_err(|e| e.to_string())
 }
 
@@ -35,7 +35,7 @@ pub fn delete_exec_category(state: State<DbState>, id: i64) -> Result<(), String
 
 #[tauri::command]
 pub fn list_exec_commands(state: State<DbState>, category_id: i64) -> Result<Vec<ExecCommand>, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::list_exec_commands(&conn, category_id).map_err(|e| e.to_string())
 }
 
@@ -49,7 +49,7 @@ pub fn create_exec_command(
     sort_order: i32,
     hide_after_run: bool,
 ) -> Result<ExecCommand, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::create_exec_command(&conn, category_id, &name, &command, &description, sort_order, hide_after_run)
         .map_err(|e| e.to_string())
 }
@@ -64,14 +64,14 @@ pub fn update_exec_command(
     sort_order: i32,
     hide_after_run: bool,
 ) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::update_exec_command(&conn, id, &name, &command, &description, sort_order, hide_after_run)
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn delete_exec_command(state: State<DbState>, id: i64) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::delete_exec_command(&conn, id).map_err(|e| e.to_string())
 }
 

@@ -12,7 +12,7 @@ pub async fn trigger_sync(state: State<'_, DbState>) -> Result<Value, String> {
 
     // Read sync settings while holding the lock briefly
     let (api_url, api_key, ca_cert) = {
-        let conn = state.0.lock().map_err(|e| e.to_string())?;
+        let conn = state.lock_recover();
         let url = queries::get_setting(&conn, &computer_id, "sync_api_url")
             .map_err(|e| e.to_string())?;
         let key = queries::get_setting(&conn, &computer_id, "sync_api_key")
@@ -29,7 +29,7 @@ pub async fn trigger_sync(state: State<'_, DbState>) -> Result<Value, String> {
 
     // Ensure user_id is saved (needed for pull to fill user_id on rows)
     let needs_user_id = {
-        let conn = state.0.lock().map_err(|e| e.to_string())?;
+        let conn = state.lock_recover();
         queries::get_setting(&conn, &computer_id, "sync_user_id").ok().flatten().is_none()
     };
     if needs_user_id {
@@ -41,7 +41,7 @@ pub async fn trigger_sync(state: State<'_, DbState>) -> Result<Value, String> {
             .bearer_auth(&key).send().await {
             if let Ok(data) = resp.json::<serde_json::Value>().await {
                 if let Some(uid) = data.get("user_id").and_then(|v| v.as_str()) {
-                    let conn = state.0.lock().map_err(|e| e.to_string())?;
+                    let conn = state.lock_recover();
                     let _ = queries::set_setting(&conn, &computer_id, "sync_user_id", uid);
                 }
             }
@@ -68,7 +68,7 @@ pub async fn register_sync(state: State<'_, DbState>, api_url: String, name: Str
 
     // Build HTTP client that accepts self-signed certs
     let ca_cert = {
-        let conn = state.0.lock().map_err(|e| e.to_string())?;
+        let conn = state.lock_recover();
         queries::get_setting(&conn, &computer_id, "sync_ca_cert")
             .map_err(|e| e.to_string())?
     };
@@ -126,7 +126,7 @@ pub async fn check_for_update(state: State<'_, DbState>) -> Result<Value, String
     // Read GitHub token from settings (needed for private repos)
     let github_token = {
         let computer_id = hostname::get().unwrap_or_default().to_string_lossy().to_string();
-        let conn = state.0.lock().map_err(|e| e.to_string())?;
+        let conn = state.lock_recover();
         queries::get_setting(&conn, &computer_id, "github_token")
             .map_err(|e| e.to_string())?
     };
@@ -230,7 +230,7 @@ pub async fn force_full_sync(state: State<'_, DbState>) -> Result<Value, String>
 
     // Delete last_sync_at to force full pull (null, not empty string)
     {
-        let conn = state.0.lock().map_err(|e| e.to_string())?;
+        let conn = state.lock_recover();
         conn.execute(
             "DELETE FROM app_settings WHERE computer_id = ?1 AND setting_key = 'last_sync_at'",
             rusqlite::params![computer_id],
@@ -249,7 +249,7 @@ pub async fn debug_sync(state: State<'_, DbState>) -> Result<Value, String> {
         .to_string();
 
     let (api_url, api_key, ca_cert) = {
-        let conn = state.0.lock().map_err(|e| e.to_string())?;
+        let conn = state.lock_recover();
         let url = queries::get_setting(&conn, &computer_id, "sync_api_url")
             .map_err(|e| e.to_string())?;
         let key = queries::get_setting(&conn, &computer_id, "sync_api_key")
@@ -284,7 +284,7 @@ pub async fn debug_sync(state: State<'_, DbState>) -> Result<Value, String> {
 
     // Try pull with CURRENT last_sync_at
     let last_sync = {
-        let conn = state.0.lock().map_err(|e| e.to_string())?;
+        let conn = state.lock_recover();
         queries::get_setting(&conn, &computer_id, "last_sync_at")
             .map_err(|e| e.to_string())?
     };
@@ -308,7 +308,7 @@ pub async fn debug_sync(state: State<'_, DbState>) -> Result<Value, String> {
 
     // Count local rows
     let local_counts = {
-        let conn = state.0.lock().map_err(|e| e.to_string())?;
+        let conn = state.lock_recover();
         let mut counts = serde_json::Map::new();
         for table in &["shortcuts", "note_folders", "notes", "sql_table_analyzer_templates", "sql_macrosing_templates", "obfuscation_mappings"] {
             let count: i64 = conn.query_row(

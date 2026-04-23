@@ -1,7 +1,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use tauri::Manager;
 
 static RUNNING: AtomicBool = AtomicBool::new(false);
 
@@ -50,15 +49,7 @@ pub fn start_polling(app_handle: tauri::AppHandle, mode: &str) -> Result<(), Str
 
                     if *pc >= 2 {
                         *pc = 0;
-                        if let Some(window) = handle_c.get_webview_window("main") {
-                            let visible = window.is_visible().unwrap_or(false);
-                            if visible {
-                                let _ = window.hide();
-                            } else {
-                                let _ = window.show();
-                                let _ = window.set_focus();
-                            }
-                        }
+                        super::toggle_main_window(&handle_c);
                     }
                 } else {
                     let mut pc = press_count_c.lock().unwrap();

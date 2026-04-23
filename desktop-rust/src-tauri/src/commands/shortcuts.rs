@@ -4,26 +4,26 @@ use serde_json;
 
 #[tauri::command]
 pub fn list_shortcuts(state: State<DbState>) -> Result<Vec<Shortcut>, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::list_shortcuts(&conn).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn search_shortcuts(state: State<DbState>, query: String) -> Result<Vec<Shortcut>, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::search_shortcuts(&conn, &query).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn create_shortcut(state: State<DbState>, name: String, value: String, description: String, links: String, obsidian_note: Option<String>) -> Result<Shortcut, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     let note = obsidian_note.unwrap_or_default();
     queries::create_shortcut(&conn, &name, &value, &description, &links, &note).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn update_shortcut(state: State<DbState>, id: i64, name: String, value: String, description: String, links: String, obsidian_note: Option<String>) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     let note = obsidian_note.unwrap_or_default();
     queries::update_shortcut(&conn, id, &name, &value, &description, &links, &note).map_err(|e| e.to_string())
 }
@@ -54,7 +54,7 @@ pub async fn open_link_window(app: tauri::AppHandle, url: String, title: String)
 
 #[tauri::command]
 pub fn delete_shortcut(state: State<DbState>, id: i64) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::delete_shortcut(&conn, id).map_err(|e| e.to_string())
 }
 
@@ -62,7 +62,7 @@ pub fn delete_shortcut(state: State<DbState>, id: i64) -> Result<(), String> {
 
 #[tauri::command]
 pub fn list_snippet_tags(state: State<DbState>) -> Result<Vec<SnippetTag>, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::list_snippet_tags(&conn).map_err(|e| e.to_string())
 }
 
@@ -74,7 +74,7 @@ pub fn create_snippet_tag(
     color: String,
     sort_order: i32,
 ) -> Result<SnippetTag, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::create_snippet_tag(&conn, &name, &patterns, &color, sort_order)
         .map_err(|e| e.to_string())
 }
@@ -88,14 +88,14 @@ pub fn update_snippet_tag(
     color: String,
     sort_order: i32,
 ) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::update_snippet_tag(&conn, id, &name, &patterns, &color, sort_order)
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn delete_snippet_tag(state: State<DbState>, id: i64) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::delete_snippet_tag(&conn, id).map_err(|e| e.to_string())
 }
 
@@ -105,7 +105,7 @@ pub fn filter_shortcuts(
     patterns: Vec<String>,
     query: String,
 ) -> Result<Vec<Shortcut>, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::filter_shortcuts_by_patterns(&conn, &patterns, &query)
         .map_err(|e| e.to_string())
 }
@@ -115,7 +115,7 @@ pub fn filter_shortcuts(
 /// List vault directories from the configured Obsidian path
 #[tauri::command]
 pub fn list_obsidian_vaults(state: State<DbState>) -> Result<Vec<String>, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     let computer_id = hostname::get().unwrap_or_default().to_string_lossy().to_string();
     let path = queries::get_setting(&conn, &computer_id, "obsidian_vaults_path")
         .map_err(|e| e.to_string())?
@@ -137,7 +137,7 @@ pub fn list_obsidian_vaults(state: State<DbState>) -> Result<Vec<String>, String
 /// List folders inside a vault
 #[tauri::command]
 pub fn list_obsidian_folders(state: State<DbState>, vault: String) -> Result<Vec<String>, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     let computer_id = hostname::get().unwrap_or_default().to_string_lossy().to_string();
     let base = queries::get_setting(&conn, &computer_id, "obsidian_vaults_path")
         .map_err(|e| e.to_string())?
@@ -165,7 +165,7 @@ pub fn list_obsidian_folders(state: State<DbState>, vault: String) -> Result<Vec
 /// List markdown files inside a vault (recursive)
 #[tauri::command]
 pub fn list_obsidian_files(state: State<DbState>, vault: String) -> Result<Vec<String>, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     let computer_id = hostname::get().unwrap_or_default().to_string_lossy().to_string();
     let base = queries::get_setting(&conn, &computer_id, "obsidian_vaults_path")
         .map_err(|e| e.to_string())?
@@ -202,7 +202,7 @@ pub fn create_obsidian_note(
     folder: String,
     filename: String,
 ) -> Result<String, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     let computer_id = hostname::get().unwrap_or_default().to_string_lossy().to_string();
     let base = queries::get_setting(&conn, &computer_id, "obsidian_vaults_path")
         .map_err(|e| e.to_string())?
@@ -257,7 +257,7 @@ pub fn create_obsidian_note(
 /// Read an Obsidian note content (markdown)
 #[tauri::command]
 pub fn read_obsidian_note(state: State<DbState>, note_path: String) -> Result<String, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     let computer_id = hostname::get().unwrap_or_default().to_string_lossy().to_string();
     let base = queries::get_setting(&conn, &computer_id, "obsidian_vaults_path")
         .map_err(|e| e.to_string())?
@@ -271,7 +271,7 @@ pub fn read_obsidian_note(state: State<DbState>, note_path: String) -> Result<St
 /// Link an existing note to a snippet (set obsidian_note field)
 #[tauri::command]
 pub fn link_obsidian_note(state: State<DbState>, snippet_id: i64, note_path: String) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     queries::update_shortcut_obsidian_note(&conn, snippet_id, &note_path)
         .map_err(|e| e.to_string())
 }

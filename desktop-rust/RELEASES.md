@@ -239,6 +239,64 @@ first and falls back to bundled assets via `app.asset_resolver()`.
   at a specific SHA; amending detaches it.
 - **Matching `v` and `src-tauri/tauri.conf.json version`** — both must be
   the same string as the tag suffix. Mismatch breaks tauri-action.
+- **Windows: always spawn subprocesses with `CREATE_NO_WINDOW`.** Any
+  `std::process::Command::new("git"|"rg"|"grep"|"cmd"|"node"|…)` spawned
+  from the Tauri GUI on Windows pops a black console window for the
+  lifetime of the subprocess. For a repeated call (search, status
+  refresh) this shows as a flickering window and blocks input. Use the
+  `spawn()` helper in `commands/repo_search.rs`:
+
+  ```rust
+  fn spawn(program: &str) -> std::process::Command {
+      let mut c = std::process::Command::new(program);
+      #[cfg(windows)]
+      {
+          use std::os::windows::process::CommandExt;
+          const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+          c.creation_flags(CREATE_NO_WINDOW);
+      }
+      c
+  }
+  ```
+
+  **Rule:** in any new Rust code that shells out, call `spawn(program)`
+  — never `Command::new(program)` directly. If the spawn lives in a
+  different module, duplicate the helper there with the same name. Unix
+  doesn't need this (GUI apps don't get a console attached), the
+  `#[cfg(windows)]` guard covers that. Bug shipped as flickering cmd
+  windows in v1.2.0 for search, partially fixed in v1.2.4 for the
+  Manage tab, fully fixed in v1.2.6.
+- **`spawn_blocking` is lazy inside an iterator.** `repos.iter().map(|r|
+  task::spawn_blocking(move || …))` returns an iterator where the
+  closures only run when polled. If you then `for h in handles { h.await
+  }`, you're forcing serial execution — each spawn doesn't start until
+  the previous awaits. Always `.collect::<Vec<_>>()` the handles first,
+  then loop-await, so all tasks run in parallel. Shipped as the slow
+  Manage-tab refresh in v1.2.0, fixed in v1.2.4.
+- **`open_in_editor` and shell PATH.** On Windows, `code` is often
+  `code.cmd`, which `Command::new("code")` can't find (Rust doesn't
+  consult PATHEXT). On macOS, GUI-launched apps inherit launchd's
+  minimal PATH, not the user's `.zprofile`. Spawn through the shell:
+  `cmd /C "…"` on Windows, `$SHELL -lc "…"` on Unix. See
+  `commands/repo_search.rs::open_in_editor`.
+- **`tokio::task::spawn_blocking` is required around blocking Rust
+  calls** inside `async` Tauri commands — otherwise the Tauri async
+  runtime deadlocks when another invoke arrives while a slow
+  filesystem/git call is in flight.
+- **Camel-case vs snake-case params.** Tauri v2 auto-translates Rust
+  snake_case param names to camelCase on the JS side. Rust fn
+  `update_repo(old_name, group_id)` is called from JS as
+  `invoke('update_repo', { oldName, groupId })` — **not**
+  `old_name/group_id`. The mismatch fails silently at best, at worst
+  with "missing required key `oldName`". Same applies to the browser
+  mock: destructure camelCase. Bug shipped in v1.1.0 group-edit flow,
+  fixed in v1.1.x OTA.
+- **`check_for_update` must skip `f-*` tags.** `/releases/latest`
+  returns the most recent release regardless of tag prefix, which can
+  be a frontend-only `f-*` release without native assets. The native
+  updater must walk `/releases` and pick the most recent `v*` tag that
+  carries the platform installer. Bug shipped in v1.2.2 ("You are up
+  to date" pointing at `f-20260422-6`), fixed in v1.2.3.
 
 ---
 

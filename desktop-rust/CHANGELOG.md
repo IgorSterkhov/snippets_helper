@@ -1,6 +1,6 @@
 # Changelog
 
-## v1.3.0 (2026-04-23)
+## v1.3.3 (2026-04-23)
 
 **Whisper Voice Input — new left-sidebar tab for local voice dictation.**
 
@@ -30,12 +30,124 @@
   delete per row and in-place editing.
 - **Microphone selection** in settings. Language auto-detect with
   RU / EN explicit override.
+- All new `#[tauri::command]` handlers use `DbState::lock_recover()`
+  per CLAUDE.md §11 — no poisoned-lock cascade risk.
 - Windows 10+ and macOS 12+ Apple Silicon (M2+). Intel Macs — post-MVP.
 
 Spans `desktop-rust/src-tauri/src/whisper/` (11 Rust modules),
 `desktop-rust/src/tabs/whisper/` (6 JS/HTML files), 15 new Tauri
 commands, 2 new SQLite tables, and a CI step that builds
 `whisper-server` from source on `v-*` tags.
+
+## v1.3.2 (2026-04-23)
+
+**Root cause of the poisoned-lock wedge in v1.3.0.**
+
+- `SyncClient::extract_display_name` was slicing names/template_text by
+  BYTE index (`&val[..37]`), which panics on multibyte UTF-8 chars —
+  Cyrillic letters take 2 bytes, so a note titled e.g.
+  "Голосовой ввод задач и списков" crashed the sync worker the moment
+  it entered the pending queue. Every subsequent app launch kept
+  triggering the same panic because that note was still `pending`,
+  poisoning the DbState mutex over and over and breaking the auto-
+  updater. Replaced with char-based truncation (`val.chars().take(37)`)
+  and added a regression test.
+- v1.3.1's `lock_recover` helper already unwedged the mutex on restart
+  — v1.3.2 removes the actual source of the panic.
+
+## v1.3.1 (2026-04-23)
+
+**Hotfix: poisoned-lock recovery + panic hook.**
+
+- Replace 107 `state.0.lock().map_err(...)?` call sites with a
+  `DbState::lock_recover()` helper that unpoisons automatically.
+  Rationale: SQLite transactions are atomic, so a prior panic can't
+  leave the DB in an inconsistent state — only the Rust-level guard
+  flag. Previously one panic inside a command wedged every subsequent
+  operation with `"poisoned lock: another task failed inside"`,
+  including the `check_for_update` path — which made even the auto-
+  updater unable to recover.
+- `SyncClient::process_push_response` no longer `.unwrap()`s on the
+  per-table rows array (was a potential panic source).
+- Global `panic::set_hook` appends panic location + message to
+  `<AppData>/keyboard-helper/crash.log` so we can actually see where
+  something went wrong next time.
+
+## v1.3.0 (2026-04-23)
+
+**New module — Tasks.**
+
+- New top-level tab **Tasks** (between Notes and SQL, icon ✅). Personal
+  task manager with hierarchical checkboxes, categories, statuses,
+  tracker links, card colors and full sync.
+- **Cards**: collapsed shows title, Category / Status badges, tracker
+  button (🎫), checkbox list (scrollable after N items — see
+  `tasks_card_max_checkboxes` setting, default 10), pin marker and
+  expand ▼. Expanded opens full editor for title, category/status,
+  tracker URL, aux links list, background color (palette + custom),
+  checkbox tree (editable), Markdown notes with toolbar, delete button.
+- **Checkboxes**: max 3 levels deep. Enter = new item, Tab = nest under
+  previous sibling, Shift+Tab = outdent, Backspace on empty = delete.
+  Last row is a translucent `+ Add item…`.
+- **Pinned chip strip** at top — click chip to jump to the task
+  (auto-switches layout row if needed and opens expanded view).
+- **Filter dropdowns** (Category / Status) — single-select, with `All`
+  plus a `None` item that appears only when at least one task has no
+  value. Right-click on a dropdown opens a Manage modal to rename,
+  reorder, recolor, add or delete categories / statuses. Deleting a
+  category / status doesn't delete tasks — it nulls the reference, and
+  affected tasks show up under `None`.
+- **Drag-and-drop** (pointer-based, works in Tauri WebView2):
+  - card ⋮⋮ → dropdown: auto-opens menu after 250ms hover, drop on item
+    sets task.category_id / status_id (filter itself doesn't change);
+  - card ⋮⋮ → another card: reorder in the list (persisted);
+  - checkbox ⋮⋮ → another row in the same task: reorder / nest (drag
+    rightward by >30px to nest under the target, honoring the 3-level
+    depth limit).
+- **Layout toggle** — SVG button in the top-right of the filter row:
+  one square = single-column list, split square = two-column row-major
+  (zigzag: 1 top-left, 2 top-right, 3 left-row-2, 4 right-row-2, ...).
+  Saved in setting `tasks_layout_mode`.
+- **Help** — ❓ button in the tab header opens a dedicated help modal;
+  sidebar Help tab also gets a new "Tasks" section (en + ru).
+- **Sync** — all 5 new tables (`task_categories`, `task_statuses`,
+  `tasks`, `task_checkboxes`, `task_links`) are included in the standard
+  sync flow.
+
+## 1.2.8 OTA patches
+
+- **f-20260423-18** — Shortcuts: Copy strips Markdown code fences
+  (triple-backtick blocks and single-line backtick-wraps) before writing
+  to the clipboard, so pasted code doesn't carry stray `\`\`\`` markers.
+- **f-20260423-18** — Markdown editor: Link button (🔗) auto-fills the
+  URL from the clipboard if it looks like one (http/https/ftp/mailto/www).
+  If the clipboard isn't a URL, the caret lands inside the empty `()` so
+  you can type immediately — no more modal prompt.
+- **f-20260423-19** — Markdown editor: paste-over-selection now creates a
+  Markdown link. Select text, press Ctrl+V with a URL in the clipboard →
+  get `[selected](url)`. Non-URL clipboard or empty selection paste
+  behaves normally.
+- **f-20260423-20** — Notes preview: numbered lists (`1. …`) now render as
+  decimal `1. 2. 3.` instead of bullet circles. Removed a stray
+  `.note-preview li { list-style: disc }` override that beat the
+  `.markdown-body ol { list-style-type: decimal }` parent rule.
+- **f-20260423-21** — Notes: non-empty notes open in Markdown preview by
+  default; double-click the preview to switch to Edit. Empty/new notes
+  still open in Edit mode.
+- **f-20260423-21** — Notes: pinned chip strip above folders/notes panel
+  (same visual style as Repo Search chips). Each chip is a pinned note
+  — click to open it directly in the right panel, auto-switching folder
+  if needed. Updates on save/delete.
+
+## v1.2.8 (2026-04-23)
+
+- Hotkey: bring main window to front on a single press when it's visible
+  but behind another app. Previously the first press hid it (because it
+  was still "visible") and you needed a second press to bring it back.
+  Now the window is only hidden when it's visible, focused and not
+  minimized — otherwise it's unminimized + shown + focused.
+- SQL help modals: Ctrl + mouse wheel zooms the text; size persists in
+  localStorage across sessions.
 
 ## v1.2.2 (2026-04-22)
 

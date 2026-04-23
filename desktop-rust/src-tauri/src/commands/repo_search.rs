@@ -12,6 +12,19 @@ const SKIP_DIRS: &[&str] = &[
     ".git", "node_modules", "target", "__pycache__", ".venv", ".idea", ".vs",
 ];
 
+/// Build a `Command` that won't flash a console window on Windows.
+/// Every git/rg/grep spawn must go through this to keep the UI clean.
+fn spawn(program: &str) -> std::process::Command {
+    let mut c = std::process::Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        c.creation_flags(CREATE_NO_WINDOW);
+    }
+    c
+}
+
 // ── Data types ───────────────────────────────────────────
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -111,7 +124,7 @@ fn save_groups(conn: &rusqlite::Connection, computer_id: &str, groups: &[RepoGro
 
 #[tauri::command]
 pub fn list_repo_groups(state: State<DbState>) -> Result<Vec<RepoGroup>, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     let cid = get_computer_id();
     Ok(load_groups(&conn, &cid))
 }
@@ -123,7 +136,7 @@ pub fn add_repo_group(
     icon: String,
     color: String,
 ) -> Result<RepoGroup, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     let cid = get_computer_id();
     let mut groups = load_groups(&conn, &cid);
     if name.trim().is_empty() {
@@ -153,7 +166,7 @@ pub fn update_repo_group(
     icon: String,
     color: String,
 ) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     let cid = get_computer_id();
     let mut groups = load_groups(&conn, &cid);
     if name.trim().is_empty() {
@@ -183,7 +196,7 @@ fn clear_group_from_repos(repos: &mut [RepoEntry], gid: i64) -> bool {
 
 #[tauri::command]
 pub fn remove_repo_group(state: State<DbState>, id: i64) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     let cid = get_computer_id();
 
     // 1. Cascade: clear group_id on every repo that pointed at this group.
@@ -207,7 +220,7 @@ pub fn update_repo(
     color: String,
     group_id: Option<i64>,
 ) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     let cid = get_computer_id();
     let mut repos = load_repos(&conn, &cid);
 
@@ -229,7 +242,7 @@ pub fn update_repo(
 
 #[tauri::command]
 pub fn list_repos(state: State<DbState>) -> Result<Vec<RepoEntry>, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     let cid = get_computer_id();
     Ok(load_repos(&conn, &cid))
 }
@@ -242,7 +255,7 @@ pub fn add_repo(
     color: String,
     group_id: Option<i64>,
 ) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     let cid = get_computer_id();
     let mut repos = load_repos(&conn, &cid);
     if repos.iter().any(|r| r.name == name) {
@@ -254,7 +267,7 @@ pub fn add_repo(
 
 #[tauri::command]
 pub fn remove_repo(state: State<DbState>, name: String) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     let cid = get_computer_id();
     let mut repos = load_repos(&conn, &cid);
     repos.retain(|r| r.name != name);
@@ -330,7 +343,7 @@ fn glob_to_regex(pattern: &str) -> String {
 #[tauri::command]
 pub async fn search_filenames(state: State<'_, DbState>, pattern: String, repos: Vec<String>) -> Result<Vec<SearchResult>, String> {
     let entries = {
-        let conn = state.0.lock().map_err(|e| e.to_string())?;
+        let conn = state.lock_recover();
         let cid = get_computer_id();
         resolve_repo_paths(&conn, &cid, &repos)
     };
@@ -412,7 +425,7 @@ struct RawMatch {
 }
 
 fn try_ripgrep(query: &str, repo_path: &str, repo_name: &str, max_results: usize) -> Option<Vec<RawMatch>> {
-    let output = std::process::Command::new("rg")
+    let output = spawn("rg")
         .args([
             "--json",
             "--glob", "!.git",
@@ -476,7 +489,7 @@ fn try_ripgrep(query: &str, repo_path: &str, repo_name: &str, max_results: usize
 }
 
 fn try_grep(query: &str, repo_path: &str, repo_name: &str, max_results: usize) -> Option<Vec<RawMatch>> {
-    let output = std::process::Command::new("grep")
+    let output = spawn("grep")
         .args([
             "-rn",
             "-i",
@@ -622,7 +635,7 @@ fn group_matches(raw: Vec<RawMatch>) -> Vec<FileSearchResult> {
 #[tauri::command]
 pub async fn search_content(state: State<'_, DbState>, query: String, repos: Vec<String>, file_pattern: Option<String>) -> Result<Vec<FileSearchResult>, String> {
     let entries = {
-        let conn = state.0.lock().map_err(|e| e.to_string())?;
+        let conn = state.lock_recover();
         let cid = get_computer_id();
         resolve_repo_paths(&conn, &cid, &repos)
     };
@@ -692,7 +705,7 @@ fn search_git_in_repo(query: &str, repo_path: &str, repo_name: &str, max_results
     let mut seen_hashes = std::collections::HashSet::new();
 
     // Search by commit message
-    if let Ok(output) = std::process::Command::new("git")
+    if let Ok(output) = spawn("git")
         .args([
             "-C", repo_path,
             "log", "--all", "--oneline",
@@ -734,7 +747,7 @@ fn search_git_in_repo(query: &str, repo_path: &str, repo_name: &str, max_results
     // Search by code changes (pickaxe)
     if results.len() < max_results {
         let remaining = max_results - results.len();
-        if let Ok(output) = std::process::Command::new("git")
+        if let Ok(output) = spawn("git")
             .args([
                 "-C", repo_path,
                 "log", "--all",
@@ -777,7 +790,7 @@ fn search_git_in_repo(query: &str, repo_path: &str, repo_name: &str, max_results
 }
 
 fn get_commit_files(repo_path: &str, hash: &str) -> Vec<String> {
-    if let Ok(output) = std::process::Command::new("git")
+    if let Ok(output) = spawn("git")
         .args(["-C", repo_path, "diff-tree", "--no-commit-id", "-r", "--name-only", hash])
         .output()
     {
@@ -791,7 +804,7 @@ fn get_commit_files(repo_path: &str, hash: &str) -> Vec<String> {
 #[tauri::command]
 pub async fn search_git_history(state: State<'_, DbState>, query: String, repos: Vec<String>) -> Result<Vec<GitSearchResult>, String> {
     let entries = {
-        let conn = state.0.lock().map_err(|e| e.to_string())?;
+        let conn = state.lock_recover();
         let cid = get_computer_id();
         resolve_repo_paths(&conn, &cid, &repos)
     };
@@ -820,17 +833,8 @@ pub async fn search_git_history(state: State<'_, DbState>, query: String, repos:
 }
 
 fn git_run(repo: &str, args: &[&str]) -> Result<String, String> {
-    let mut cmd = std::process::Command::new("git");
+    let mut cmd = spawn("git");
     cmd.arg("-C").arg(repo).args(args);
-    // On Windows suppress the flashing cmd window that `spawn/output` otherwise
-    // creates for every invocation — this was visible as a window flickering on
-    // every Manage-tab refresh (4 git calls per repo).
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
     let out = cmd.output().map_err(|e| format!("git: {e}"))?;
     if !out.status.success() {
         return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
@@ -870,7 +874,7 @@ pub async fn repo_search_status(
     paths: Option<Vec<String>>,
 ) -> Result<Vec<RepoStatus>, String> {
     let repos = {
-        let conn = state.0.lock().map_err(|e| e.to_string())?;
+        let conn = state.lock_recover();
         let cid = get_computer_id();
         let all = load_repos(&conn, &cid);
         match paths {
@@ -942,7 +946,7 @@ pub async fn repo_search_pull_main(
     dry_run: bool,
 ) -> Result<Vec<PullOutcome>, String> {
     let repos = {
-        let conn = state.0.lock().map_err(|e| e.to_string())?;
+        let conn = state.lock_recover();
         let cid = get_computer_id();
         let all = load_repos(&conn, &cid);
         let set: std::collections::HashSet<_> = paths.into_iter().collect();
@@ -1020,6 +1024,32 @@ pub struct ResetHardResult {
     pub cleaned: bool,           // whether git clean -fd also ran
 }
 
+/// Return `git show <hash>` output for the given commit. Includes the
+/// commit header (hash, author, date, subject, body) plus the unified
+/// diff. Front-end renders it with highlight.js `diff` lang.
+///
+/// When `full_context = Some(true)`, adds `-U9999` so the diff carries
+/// the full file content with changes highlighted inline.
+#[tauri::command]
+pub async fn repo_search_commit_diff(
+    repo_path: String,
+    hash: String,
+    full_context: Option<bool>,
+) -> Result<String, String> {
+    if hash.is_empty() || hash.len() > 64 || !hash.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err("invalid hash".to_string());
+    }
+    let full = full_context.unwrap_or(false);
+    tokio::task::spawn_blocking(move || {
+        let mut args: Vec<&str> = vec!["show", "--no-color"];
+        if full { args.push("-U9999"); }
+        args.push(&hash);
+        git_run(&repo_path, &args)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Discard all uncommitted changes in the given repo.
 ///
 /// Always runs `git reset --hard HEAD`. If `clean = true` (default when the
@@ -1072,7 +1102,7 @@ pub fn open_in_editor(
     line: Option<u64>,
 ) -> Result<(), String> {
     let template = {
-        let conn = state.0.lock().map_err(|e| e.to_string())?;
+        let conn = state.lock_recover();
         let cid = get_computer_id();
         queries::get_setting(&conn, &cid, "editor_command")
             .ok()
@@ -1100,7 +1130,7 @@ pub fn open_in_editor(
     }
     #[cfg(windows)]
     {
-        std::process::Command::new("cmd")
+        spawn("cmd")
             .args(["/C", &rendered])
             .spawn()
             .map_err(|e| format!("spawn cmd /C {:?}: {}", rendered, e))?;

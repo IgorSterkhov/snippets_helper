@@ -39,7 +39,7 @@ pub fn whisper_list_catalog() -> Vec<ModelMeta> {
 
 #[tauri::command]
 pub fn whisper_list_models(db: State<DbState>) -> Result<Vec<WhisperModelRow>, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let conn = db.lock_recover();
     queries::whisper_list_models(&conn).map_err(|e| e.to_string())
 }
 
@@ -54,7 +54,7 @@ pub async fn whisper_install_model(
     let path = models::download_and_install(&app, &app_data_dir, meta).await?;
     let should_set_default;
     {
-        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        let conn = db.lock_recover();
         queries::whisper_insert_or_upgrade_model(
             &conn,
             meta.name,
@@ -67,10 +67,10 @@ pub async fn whisper_install_model(
         should_set_default = all.len() == 1;
     }
     if should_set_default {
-        let mut conn2 = db.0.lock().map_err(|e| e.to_string())?;
+        let mut conn2 = db.lock_recover();
         queries::whisper_set_default_model(&mut conn2, meta.name).map_err(|e| e.to_string())?;
     }
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let conn = db.lock_recover();
     let rows = queries::whisper_list_models(&conn).map_err(|e| e.to_string())?;
     rows.into_iter()
         .find(|m| m.name == meta.name)
@@ -86,13 +86,13 @@ pub fn whisper_delete_model(
     let app_data_dir = app_data(&app);
     let path = models::model_path(&app_data_dir, &name);
     let _ = std::fs::remove_file(&path);
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let conn = db.lock_recover();
     queries::whisper_delete_model(&conn, &name).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn whisper_set_default_model(db: State<DbState>, name: String) -> Result<(), String> {
-    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut conn = db.lock_recover();
     queries::whisper_set_default_model(&mut conn, &name).map_err(|e| e.to_string())
 }
 
@@ -104,7 +104,7 @@ pub async fn whisper_start_recording(
     svc: State<'_, WhisperService>,
 ) -> Result<(), String> {
     let (model_path, model_name, device_name, idle_timeout_sec) = {
-        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        let conn = db.lock_recover();
         let def = queries::whisper_get_default_model(&conn).map_err(|e| e.to_string())?
             .ok_or_else(|| "no default model installed".to_string())?;
         let cid = computer_id();
@@ -125,7 +125,7 @@ pub async fn whisper_stop_recording(
 ) -> Result<String, String> {
     // Read settings
     let (inject_method_str, restore_delay_ms, rules_on, llm_cfg_opt, lang) = {
-        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        let conn = db.lock_recover();
         let cid = computer_id();
         let inj = queries::get_setting(&conn, &cid, "whisper.inject_method").ok().flatten().unwrap_or_else(|| "paste".into());
         let delay = queries::get_setting(&conn, &cid, "whisper.clipboard_restore_delay_ms").ok().flatten()
@@ -178,7 +178,7 @@ pub async fn whisper_stop_recording(
 
     // F4: persist real durations
     {
-        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        let conn = db.lock_recover();
         let text_raw_opt = if raw != text { Some(raw.as_str()) } else { None };
         queries::whisper_insert_history(
             &conn,
@@ -214,7 +214,7 @@ pub async fn whisper_inject_text(
     db: State<'_, DbState>,
 ) -> Result<&'static str, String> {
     let delay = {
-        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        let conn = db.lock_recover();
         let cid = computer_id();
         queries::get_setting(&conn, &cid, "whisper.clipboard_restore_delay_ms").ok().flatten()
             .and_then(|s| s.parse::<u64>().ok()).unwrap_or(200)
@@ -226,13 +226,13 @@ pub async fn whisper_inject_text(
 
 #[tauri::command]
 pub fn whisper_get_history(db: State<DbState>, limit: Option<i64>) -> Result<Vec<WhisperHistoryRow>, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let conn = db.lock_recover();
     queries::whisper_list_history(&conn, limit.unwrap_or(200)).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn whisper_delete_history(db: State<DbState>, id: Option<i64>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let conn = db.lock_recover();
     queries::whisper_delete_history(&conn, id).map_err(|e| e.to_string())
 }
 

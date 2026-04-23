@@ -4,7 +4,7 @@ use crate::sync::client::SyncClient;
 
 #[tauri::command]
 pub fn get_setting(state: State<DbState>, key: String) -> Result<Option<String>, String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     let computer_id = hostname::get()
         .unwrap_or_default()
         .to_string_lossy()
@@ -14,7 +14,7 @@ pub fn get_setting(state: State<DbState>, key: String) -> Result<Option<String>,
 
 #[tauri::command]
 pub fn set_setting(state: State<DbState>, key: String, value: String) -> Result<(), String> {
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let conn = state.lock_recover();
     let computer_id = hostname::get()
         .unwrap_or_default()
         .to_string_lossy()
@@ -39,7 +39,7 @@ pub async fn hide_and_sync(window: tauri::WebviewWindow, state: State<'_, DbStat
 
     // Read sync settings
     let (url_opt, key_opt, ca_cert) = {
-        let db = state.0.lock().map_err(|e| e.to_string())?;
+        let db = state.lock_recover();
         let url = queries::get_setting(&db, &computer_id, "sync_api_url").ok().flatten();
         let key = queries::get_setting(&db, &computer_id, "sync_api_key").ok().flatten();
         let cert = queries::get_setting(&db, &computer_id, "sync_ca_cert").ok().flatten();
