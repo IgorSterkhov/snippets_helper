@@ -2475,6 +2475,7 @@ dependencies = [
  "dirs 5.0.1",
  "enigo",
  "env_logger",
+ "futures-util",
  "hex",
  "hostname",
  "hound",

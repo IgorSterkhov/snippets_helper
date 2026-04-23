@@ -26,6 +26,120 @@ pub fn verify_file_sha256(path: &Path, expected: &str) -> bool {
     hex.eq_ignore_ascii_case(expected)
 }
 
+use crate::whisper::events::{self, ModelDownloadPayload};
+use std::io::Write;
+use std::time::Instant;
+use tauri::{AppHandle, Emitter};
+
+/// Download a model to a temp file, verify SHA256, then atomically rename
+/// into place. Emits progress events at ~5Hz while downloading.
+///
+/// On error, the partial temp file is removed.
+/// On success returns the final file path.
+pub async fn download_and_install(
+    app: &AppHandle,
+    app_data: &Path,
+    meta: &ModelMeta,
+) -> Result<PathBuf, String> {
+    std::fs::create_dir_all(models_dir(app_data))
+        .map_err(|e| format!("create models dir: {e}"))?;
+
+    let final_path = model_path(app_data, meta.name);
+    let tmp_path = final_path.with_extension("bin.part");
+
+    // If already installed + verified, short-circuit.
+    if final_path.exists() && verify_file_sha256(&final_path, meta.sha256) {
+        emit_done(app, meta.name, meta.size_bytes);
+        return Ok(final_path);
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60 * 30)) // 30 min cap per download
+        .build()
+        .map_err(|e| format!("http client: {e}"))?;
+
+    let resp = client.get(meta.download_url)
+        .send().await
+        .map_err(|e| format!("http get: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("http status {}", resp.status()));
+    }
+    let total = resp.content_length().unwrap_or(meta.size_bytes);
+
+    let mut file = std::fs::File::create(&tmp_path)
+        .map_err(|e| format!("create tmp: {e}"))?;
+    let mut stream = resp.bytes_stream();
+
+    let mut done: u64 = 0;
+    let mut last_emit = Instant::now();
+    let started = Instant::now();
+    use futures_util::StreamExt;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| {
+            let _ = std::fs::remove_file(&tmp_path);
+            format!("chunk: {e}")
+        })?;
+        file.write_all(&chunk).map_err(|e| {
+            let _ = std::fs::remove_file(&tmp_path);
+            format!("write: {e}")
+        })?;
+        done += chunk.len() as u64;
+        if last_emit.elapsed().as_millis() > 200 {
+            let secs = started.elapsed().as_secs_f64().max(0.001);
+            let speed = (done as f64 / secs) as u64;
+            let _ = app.emit(
+                events::EVT_MODEL_DOWNLOAD,
+                ModelDownloadPayload {
+                    model: meta.name.to_string(),
+                    bytes_done: done,
+                    bytes_total: total,
+                    speed_bps: speed,
+                    finished: false,
+                    error: None,
+                },
+            );
+            last_emit = Instant::now();
+        }
+    }
+    drop(file);
+
+    if !verify_file_sha256(&tmp_path, meta.sha256) {
+        let _ = std::fs::remove_file(&tmp_path);
+        let _ = app.emit(
+            events::EVT_MODEL_DOWNLOAD,
+            ModelDownloadPayload {
+                model: meta.name.to_string(),
+                bytes_done: done,
+                bytes_total: total,
+                speed_bps: 0,
+                finished: true,
+                error: Some("sha256 mismatch".into()),
+            },
+        );
+        return Err("sha256 mismatch".into());
+    }
+
+    std::fs::rename(&tmp_path, &final_path)
+        .map_err(|e| format!("rename: {e}"))?;
+
+    emit_done(app, meta.name, total);
+    Ok(final_path)
+}
+
+fn emit_done(app: &AppHandle, name: &str, total: u64) {
+    let _ = app.emit(
+        events::EVT_MODEL_DOWNLOAD,
+        ModelDownloadPayload {
+            model: name.to_string(),
+            bytes_done: total,
+            bytes_total: total,
+            speed_bps: 0,
+            finished: true,
+            error: None,
+        },
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
