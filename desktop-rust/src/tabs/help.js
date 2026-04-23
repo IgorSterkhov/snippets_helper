@@ -34,12 +34,16 @@ const i18n = {
     vps_name: 'VPS Management',
     vps_desc: 'Monitor remote servers via SSH. Add named servers with color coding. Dashboard shows CPU, RAM, and Disk usage with color-coded progress bars. Auto-refresh with configurable interval per server. Test connection before saving. Supports custom SSH key files and ports.',
 
+    whisper_name: 'Whisper Voice Input',
+    whisper_desc: 'Local voice dictation via whisper.cpp sidecar. Onboarding installer picks from 6 ggml models (tiny → large-v3) with progress download + SHA256 verify. Lazy server lifecycle: 0 RAM at idle → warm-up on first record → auto-unload after 5 min. Floating always-on-top overlay shows mic level, timer, state from any focused window. Global hotkey (default Ctrl+Alt+Space, toggle). Configurable inject method: clipboard, clipboard+Ctrl+V with restore, or typed simulation. Optional rule-based cleanup (filler words, capitalize) + external LLM API post-processing (fail-soft). History of last 200 transcripts with copy/paste/type/delete. Per-machine settings. RU + EN.',
+
     // Hotkeys tab
     hotkey_show_hide: 'Show / hide main window',
     hotkey_escape: 'Hide window to system tray',
     hotkey_enter: 'Copy selected snippet and hide window',
     hotkey_arrows: 'Navigate snippet list',
     hotkey_tab_switch: 'Switch between tabs',
+    hotkey_whisper: 'Whisper: start/stop voice recording (global)',
 
     // Changelog
     changelog_loading: 'Loading changelog...',
@@ -76,12 +80,16 @@ const i18n = {
     vps_name: 'Управление VPS',
     vps_desc: 'Мониторинг удалённых серверов по SSH. Добавляйте именованные серверы с цветовым кодированием. Дашборд показывает CPU, RAM и Disk с цветными индикаторами. Автообновление с настраиваемым интервалом для каждого сервера. Поддержка SSH-ключей и нестандартных портов.',
 
+    whisper_name: 'Голосовой ввод Whisper',
+    whisper_desc: 'Локальное распознавание речи через whisper.cpp-sidecar. Онбординг с выбором из 6 ggml-моделей (tiny → large-v3), скачивание с прогрессом и проверкой SHA256. Умный lifecycle: 0 RAM в idle → прогрев при первой записи → авто-выгрузка через 5 мин без активности. Плавающий overlay (всегда поверх) показывает уровень микрофона, таймер и состояние из любого активного окна. Глобальный hotkey (по умолчанию Ctrl+Alt+Space, toggle). Настраиваемый метод вставки: clipboard, clipboard+Ctrl+V с восстановлением, или посимвольный набор. Опциональная чистка правилами (filler-слова, капитализация) + постобработка через внешний LLM API (fail-soft). История последних 200 транскриптов с copy/paste/type/delete. Per-machine настройки. RU + EN.',
+
     // Hotkeys tab
     hotkey_show_hide: 'Показать / скрыть главное окно',
     hotkey_escape: 'Свернуть в системный трей',
     hotkey_enter: 'Скопировать выбранный сниппет и скрыть окно',
     hotkey_arrows: 'Навигация по списку сниппетов',
     hotkey_tab_switch: 'Переключение между вкладками',
+    hotkey_whisper: 'Whisper: старт/стоп голосовой записи (глобально)',
 
     // Changelog
     changelog_loading: 'Загрузка истории изменений...',
@@ -252,6 +260,7 @@ function renderFeatures(container, lang) {
     { name: t(lang, 'exec_name'),      desc: t(lang, 'exec_desc') },
     { name: t(lang, 'search_name'),    desc: t(lang, 'search_desc') },
     { name: t(lang, 'vps_name'),       desc: t(lang, 'vps_desc') },
+    { name: t(lang, 'whisper_name'),   desc: t(lang, 'whisper_desc') },
   ];
 
   for (const f of features) {
@@ -271,6 +280,7 @@ function renderHotkeys(container, lang) {
     { key: 'Enter',                    desc: t(lang, 'hotkey_enter') },
     { key: 'Arrow Up / Arrow Down',    desc: t(lang, 'hotkey_arrows') },
     { key: 'Ctrl+Tab / Ctrl+Shift+Tab', desc: t(lang, 'hotkey_tab_switch') },
+    { key: 'Ctrl+Alt+Space',            desc: t(lang, 'hotkey_whisper') },
   ];
 
   for (const h of hotkeys) {
