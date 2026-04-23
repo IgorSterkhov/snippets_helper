@@ -16,6 +16,9 @@ const i18n = {
     notes_name: 'Notes',
     notes_desc: 'Organize notes in nested folders (tree view with arbitrary depth). Built-in Markdown editor with toolbar and live preview. Expandable card previews in the note list. Auto markdown rendering on open. Pin important notes to the top.',
 
+    tasks_name: 'Tasks',
+    tasks_desc: 'Personal task manager with hierarchical checkboxes (up to 3 levels), customizable categories and statuses with colors, pinned chip strip, drag-and-drop card→dropdown to change category/status, inline keyboard editing (Enter/Tab/Shift+Tab), Markdown notes per task, Tracker link + auxiliary links, card background palette, 1- or 2-column zigzag layout. Full sync with the server.',
+
     sql_name: 'SQL Tools',
     sql_desc: 'A suite of SQL utilities with five sub-tools: Parser extracts table names from queries, Analyzer generates DDL analysis using templates, Macrosing wraps queries in Jinja macros, Formatter beautifies SQL code, and Obfuscator replaces sensitive values with placeholders.',
 
@@ -57,6 +60,9 @@ const i18n = {
 
     notes_name: 'Заметки',
     notes_desc: 'Организуйте заметки во вложенных папках (древовидная структура). Встроенный Markdown-редактор с панелью инструментов и предпросмотром. Раскрываемые карточки в списке заметок. Авто-рендеринг Markdown при открытии. Закрепление важных заметок.',
+
+    tasks_name: 'Задачи',
+    tasks_desc: 'Личный task-менеджер с иерархическими чекбоксами (до 3 уровней), настраиваемыми категориями и статусами с цветами, панелью чипов для запиненных задач, drag-and-drop карточки на dropdown для смены категории/статуса, inline-клавиатурой (Enter/Tab/Shift+Tab), Markdown-заметками, Tracker-ссылкой + вспомогательными ссылками, палитрой фона карточек, 1- или 2-колоночным зигзаг-layout-ом. Полная синхронизация с сервером.',
 
     sql_name: 'SQL Инструменты',
     sql_desc: 'Набор SQL-утилит из пяти инструментов: Парсер извлекает имена таблиц из запросов, Анализатор генерирует анализ DDL по шаблонам, Макросинг оборачивает запросы в Jinja-макросы, Форматтер форматирует SQL-код, Обфускатор заменяет чувствительные данные заглушками.',
@@ -246,6 +252,7 @@ function renderFeatures(container, lang) {
   const features = [
     { name: t(lang, 'shortcuts_name'), desc: t(lang, 'shortcuts_desc') },
     { name: t(lang, 'notes_name'),     desc: t(lang, 'notes_desc') },
+    { name: t(lang, 'tasks_name'),     desc: t(lang, 'tasks_desc') },
     { name: t(lang, 'sql_name'),       desc: t(lang, 'sql_desc') },
     { name: t(lang, 'superset_name'),  desc: t(lang, 'superset_desc') },
     { name: t(lang, 'commits_name'),   desc: t(lang, 'commits_desc') },

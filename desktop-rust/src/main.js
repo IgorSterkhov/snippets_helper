@@ -6,6 +6,7 @@ import { createStatusBar, doSync, checkUpdateStatus, checkFrontendUpdateStatus, 
 const TABS = [
   { id: 'shortcuts', label: 'Shortcuts', icon: '\u{1F3F7}\u{FE0F}', loader: (el) => import('./tabs/shortcuts.js').then(m => m.init(el)) },
   { id: 'notes',     label: 'Notes',     icon: '\u{1F5D2}\u{FE0F}', loader: (el) => import('./tabs/notes.js').then(m => m.init(el)) },
+  { id: 'tasks',     label: 'Tasks',     icon: '✅',    loader: (el) => import('./tabs/tasks/index.js').then(m => m.init(el)) },
   { id: 'sql',       label: 'SQL',       icon: '\u{1F5C3}', loader: (el) => import('./tabs/sql/sql-main.js').then(m => m.init(el)) },
   { id: 'superset',  label: 'Superset',  icon: 'logo:apachesuperset', loader: (el) => import('./tabs/superset/superset-main.js').then(m => m.init(el)) },
   { id: 'commits',   label: 'Commits',   icon: '\u{1F500}', loader: (el) => import('./tabs/commits.js').then(m => m.init(el)) },

@@ -160,6 +160,80 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
             sync_status     TEXT NOT NULL DEFAULT 'pending',
             user_id         TEXT NOT NULL DEFAULT ''
         );
+
+        CREATE TABLE IF NOT EXISTS task_categories (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            name            TEXT NOT NULL DEFAULT '',
+            color           TEXT NOT NULL DEFAULT '#8b949e',
+            sort_order      INTEGER NOT NULL DEFAULT 0,
+            created_at      TIMESTAMP NOT NULL,
+            updated_at      TIMESTAMP NOT NULL,
+            uuid            TEXT UNIQUE NOT NULL,
+            sync_status     TEXT NOT NULL DEFAULT 'pending',
+            user_id         TEXT NOT NULL DEFAULT ''
+        );
+
+        CREATE TABLE IF NOT EXISTS task_statuses (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            name            TEXT NOT NULL DEFAULT '',
+            color           TEXT NOT NULL DEFAULT '#8b949e',
+            sort_order      INTEGER NOT NULL DEFAULT 0,
+            created_at      TIMESTAMP NOT NULL,
+            updated_at      TIMESTAMP NOT NULL,
+            uuid            TEXT UNIQUE NOT NULL,
+            sync_status     TEXT NOT NULL DEFAULT 'pending',
+            user_id         TEXT NOT NULL DEFAULT ''
+        );
+
+        CREATE TABLE IF NOT EXISTS tasks (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            title           TEXT NOT NULL DEFAULT '',
+            category_id     INTEGER REFERENCES task_categories(id) ON DELETE SET NULL,
+            status_id       INTEGER REFERENCES task_statuses(id)   ON DELETE SET NULL,
+            is_pinned       INTEGER NOT NULL DEFAULT 0,
+            bg_color        TEXT,
+            tracker_url     TEXT,
+            notes_md        TEXT NOT NULL DEFAULT '',
+            sort_order      INTEGER NOT NULL DEFAULT 0,
+            created_at      TIMESTAMP NOT NULL,
+            updated_at      TIMESTAMP NOT NULL,
+            uuid            TEXT UNIQUE NOT NULL,
+            sync_status     TEXT NOT NULL DEFAULT 'pending',
+            user_id         TEXT NOT NULL DEFAULT ''
+        );
+
+        CREATE TABLE IF NOT EXISTS task_checkboxes (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id         INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            parent_id       INTEGER REFERENCES task_checkboxes(id) ON DELETE CASCADE,
+            text            TEXT NOT NULL DEFAULT '',
+            is_checked      INTEGER NOT NULL DEFAULT 0,
+            sort_order      INTEGER NOT NULL DEFAULT 0,
+            created_at      TIMESTAMP NOT NULL,
+            updated_at      TIMESTAMP NOT NULL,
+            uuid            TEXT UNIQUE NOT NULL,
+            sync_status     TEXT NOT NULL DEFAULT 'pending',
+            user_id         TEXT NOT NULL DEFAULT ''
+        );
+
+        CREATE TABLE IF NOT EXISTS task_links (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id         INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            url             TEXT NOT NULL DEFAULT '',
+            label           TEXT,
+            sort_order      INTEGER NOT NULL DEFAULT 0,
+            created_at      TIMESTAMP NOT NULL,
+            updated_at      TIMESTAMP NOT NULL,
+            uuid            TEXT UNIQUE NOT NULL,
+            sync_status     TEXT NOT NULL DEFAULT 'pending',
+            user_id         TEXT NOT NULL DEFAULT ''
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_tasks_sort      ON tasks(is_pinned DESC, sort_order ASC);
+        CREATE INDEX IF NOT EXISTS idx_tasks_category  ON tasks(category_id);
+        CREATE INDEX IF NOT EXISTS idx_tasks_status    ON tasks(status_id);
+        CREATE INDEX IF NOT EXISTS idx_checkboxes_task ON task_checkboxes(task_id, parent_id, sort_order);
+        CREATE INDEX IF NOT EXISTS idx_links_task      ON task_links(task_id, sort_order);
         ",
     )?;
 
@@ -171,6 +245,52 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
 
     // Migration: add parent_id column to note_folders (may already exist)
     conn.execute_batch("ALTER TABLE note_folders ADD COLUMN parent_id INTEGER DEFAULT NULL").ok();
+
+    // Seed Tasks module defaults on a fresh DB. Idempotent — only inserts
+    // when tables are empty, so existing users' custom sets aren't clobbered.
+    seed_task_defaults(conn).ok();
+
+    Ok(())
+}
+
+fn seed_task_defaults(conn: &Connection) -> Result<(), rusqlite::Error> {
+    use chrono::Utc;
+    // Same format as queries.rs `now_str()` so parse_dt round-trips cleanly.
+    let now = Utc::now().naive_utc().format("%Y-%m-%d %H:%M:%S%.f").to_string();
+
+    let cat_count: i64 =
+        conn.query_row("SELECT COUNT(*) FROM task_categories", [], |r| r.get(0))?;
+    if cat_count == 0 {
+        let defaults = [
+            ("Work", "#388bfd", 0_i64),
+            ("Home", "#3fb950", 1),
+        ];
+        for (name, color, ord) in defaults {
+            conn.execute(
+                "INSERT INTO task_categories (name, color, sort_order, created_at, updated_at, uuid, sync_status, user_id)
+                 VALUES (?1, ?2, ?3, ?4, ?4, ?5, 'pending', '')",
+                rusqlite::params![name, color, ord, &now, uuid::Uuid::new_v4().to_string()],
+            )?;
+        }
+    }
+
+    let st_count: i64 =
+        conn.query_row("SELECT COUNT(*) FROM task_statuses", [], |r| r.get(0))?;
+    if st_count == 0 {
+        let defaults = [
+            ("Open",        "#8b949e", 0_i64),
+            ("In progress", "#d29922", 1),
+            ("Blocked",     "#f85149", 2),
+            ("Done",        "#3fb950", 3),
+        ];
+        for (name, color, ord) in defaults {
+            conn.execute(
+                "INSERT INTO task_statuses (name, color, sort_order, created_at, updated_at, uuid, sync_status, user_id)
+                 VALUES (?1, ?2, ?3, ?4, ?4, ?5, 'pending', '')",
+                rusqlite::params![name, color, ord, &now, uuid::Uuid::new_v4().to_string()],
+            )?;
+        }
+    }
 
     Ok(())
 }
@@ -194,7 +314,7 @@ mod tests {
     }
 
     #[test]
-    fn test_all_13_tables_exist() {
+    fn test_all_tables_exist() {
         let conn = init_test_db();
 
         let tables: Vec<String> = conn
@@ -221,6 +341,11 @@ mod tests {
             "sql_macrosing_templates",
             "sql_table_analyzer_templates",
             "superset_settings",
+            "task_categories",
+            "task_checkboxes",
+            "task_links",
+            "task_statuses",
+            "tasks",
         ];
 
         for table_name in &expected {
@@ -231,5 +356,38 @@ mod tests {
             );
         }
         assert_eq!(tables.len(), expected.len(), "Unexpected extra tables");
+    }
+
+    #[test]
+    fn test_task_defaults_seeded() {
+        let conn = init_test_db();
+        let cats: Vec<String> = conn
+            .prepare("SELECT name FROM task_categories ORDER BY sort_order")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+        assert_eq!(cats, vec!["Work", "Home"]);
+
+        let sts: Vec<String> = conn
+            .prepare("SELECT name FROM task_statuses ORDER BY sort_order")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+        assert_eq!(sts, vec!["Open", "In progress", "Blocked", "Done"]);
+    }
+
+    #[test]
+    fn test_task_seed_idempotent() {
+        let conn = init_test_db();
+        // Running migrations again must not duplicate seed rows.
+        run_migrations(&conn).unwrap();
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM task_categories", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 2);
     }
 }

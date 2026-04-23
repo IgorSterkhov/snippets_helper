@@ -1,5 +1,46 @@
 # Changelog
 
+## v1.3.0 (2026-04-23)
+
+**New module — Tasks.**
+
+- New top-level tab **Tasks** (between Notes and SQL, icon ✅). Personal
+  task manager with hierarchical checkboxes, categories, statuses,
+  tracker links, card colors and full sync.
+- **Cards**: collapsed shows title, Category / Status badges, tracker
+  button (🎫), checkbox list (scrollable after N items — see
+  `tasks_card_max_checkboxes` setting, default 10), pin marker and
+  expand ▼. Expanded opens full editor for title, category/status,
+  tracker URL, aux links list, background color (palette + custom),
+  checkbox tree (editable), Markdown notes with toolbar, delete button.
+- **Checkboxes**: max 3 levels deep. Enter = new item, Tab = nest under
+  previous sibling, Shift+Tab = outdent, Backspace on empty = delete.
+  Last row is a translucent `+ Add item…`.
+- **Pinned chip strip** at top — click chip to jump to the task
+  (auto-switches layout row if needed and opens expanded view).
+- **Filter dropdowns** (Category / Status) — single-select, with `All`
+  plus a `None` item that appears only when at least one task has no
+  value. Right-click on a dropdown opens a Manage modal to rename,
+  reorder, recolor, add or delete categories / statuses. Deleting a
+  category / status doesn't delete tasks — it nulls the reference, and
+  affected tasks show up under `None`.
+- **Drag-and-drop** (pointer-based, works in Tauri WebView2):
+  - card ⋮⋮ → dropdown: auto-opens menu after 250ms hover, drop on item
+    sets task.category_id / status_id (filter itself doesn't change);
+  - card ⋮⋮ → another card: reorder in the list (persisted);
+  - checkbox ⋮⋮ → another row in the same task: reorder / nest (drag
+    rightward by >30px to nest under the target, honoring the 3-level
+    depth limit).
+- **Layout toggle** — SVG button in the top-right of the filter row:
+  one square = single-column list, split square = two-column row-major
+  (zigzag: 1 top-left, 2 top-right, 3 left-row-2, 4 right-row-2, ...).
+  Saved in setting `tasks_layout_mode`.
+- **Help** — ❓ button in the tab header opens a dedicated help modal;
+  sidebar Help tab also gets a new "Tasks" section (en + ru).
+- **Sync** — all 5 new tables (`task_categories`, `task_statuses`,
+  `tasks`, `task_checkboxes`, `task_links`) are included in the standard
+  sync flow.
+
 ## 1.2.8 OTA patches
 
 - **f-20260423-18** — Shortcuts: Copy strips Markdown code fences

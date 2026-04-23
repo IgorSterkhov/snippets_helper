@@ -94,6 +94,79 @@ pub struct ObfuscationMapping {
     pub user_id: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskCategory {
+    pub id: Option<i64>,
+    pub name: String,
+    pub color: String,
+    pub sort_order: i32,
+    pub created_at: NaiveDateTime,
+    pub updated_at: NaiveDateTime,
+    pub uuid: String,
+    pub sync_status: String,
+    pub user_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskStatus {
+    pub id: Option<i64>,
+    pub name: String,
+    pub color: String,
+    pub sort_order: i32,
+    pub created_at: NaiveDateTime,
+    pub updated_at: NaiveDateTime,
+    pub uuid: String,
+    pub sync_status: String,
+    pub user_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Task {
+    pub id: Option<i64>,
+    pub title: String,
+    pub category_id: Option<i64>,
+    pub status_id: Option<i64>,
+    pub is_pinned: bool,
+    pub bg_color: Option<String>,
+    pub tracker_url: Option<String>,
+    pub notes_md: String,
+    pub sort_order: i32,
+    pub created_at: NaiveDateTime,
+    pub updated_at: NaiveDateTime,
+    pub uuid: String,
+    pub sync_status: String,
+    pub user_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskCheckbox {
+    pub id: Option<i64>,
+    pub task_id: i64,
+    pub parent_id: Option<i64>,
+    pub text: String,
+    pub is_checked: bool,
+    pub sort_order: i32,
+    pub created_at: NaiveDateTime,
+    pub updated_at: NaiveDateTime,
+    pub uuid: String,
+    pub sync_status: String,
+    pub user_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskLink {
+    pub id: Option<i64>,
+    pub task_id: i64,
+    pub url: String,
+    pub label: Option<String>,
+    pub sort_order: i32,
+    pub created_at: NaiveDateTime,
+    pub updated_at: NaiveDateTime,
+    pub uuid: String,
+    pub sync_status: String,
+    pub user_id: String,
+}
+
 // ── Local tables ─────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

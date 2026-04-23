@@ -7,6 +7,11 @@ pub const SYNCED_TABLES: &[&str] = &[
     "notes",
     "obfuscation_mappings",
     "snippet_tags",
+    "task_categories",
+    "task_statuses",
+    "tasks",
+    "task_checkboxes",
+    "task_links",
 ];
 
 /// Columns present on every synced table (uuid, updated_at, sync_status, user_id).
@@ -35,6 +40,28 @@ pub fn data_columns(table: &str) -> &'static [&'static str] {
             "created_at",
         ],
         "snippet_tags" => &["name", "patterns", "color", "sort_order"],
+        "task_categories" => &["name", "color", "sort_order", "created_at"],
+        "task_statuses" => &["name", "color", "sort_order", "created_at"],
+        "tasks" => &[
+            "title",
+            "category_id",
+            "status_id",
+            "is_pinned",
+            "bg_color",
+            "tracker_url",
+            "notes_md",
+            "sort_order",
+            "created_at",
+        ],
+        "task_checkboxes" => &[
+            "task_id",
+            "parent_id",
+            "text",
+            "is_checked",
+            "sort_order",
+            "created_at",
+        ],
+        "task_links" => &["task_id", "url", "label", "sort_order", "created_at"],
         _ => &[],
     }
 }
