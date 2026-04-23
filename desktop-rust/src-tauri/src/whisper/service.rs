@@ -122,6 +122,8 @@ impl WhisperService {
                 g.model_name = Some(model_name.clone());
                 g.state = State::Warming;
                 emit_state(&self.app, g.state, g.model_name.clone());
+                position_overlay(&self.app, "bottom-right");
+                show_overlay(&self.app);
                 drop(g);
 
                 let app = self.app.clone();
@@ -188,6 +190,8 @@ impl WhisperService {
             State::Ready => {
                 g.state = State::Recording;
                 emit_state(&self.app, g.state, g.model_name.clone());
+                position_overlay(&self.app, "bottom-right");
+                show_overlay(&self.app);
             }
             _ => return Err(format!("cannot start from state {:?}", g.state)),
         }
@@ -266,6 +270,12 @@ impl WhisperService {
             });
             if let Some(old) = g.idle_timer.replace(handle) { old.abort(); }
         }
+
+        let app_c = self.app.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            hide_overlay(&app_c);
+        });
 
         Ok(StopOutcome {
             result,
@@ -346,11 +356,27 @@ fn overlay_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
     app.get_webview_window("whisper-overlay")
 }
 
-#[allow(dead_code)]
 fn show_overlay(app: &AppHandle) {
     if let Some(w) = overlay_window(app) {
         let _ = w.show();
     }
+}
+
+fn position_overlay(app: &AppHandle, corner: &str) {
+    let Some(w) = overlay_window(app) else { return; };
+    let Ok(Some(mon)) = w.current_monitor() else { return; };
+    let size = mon.size();
+    let scale = mon.scale_factor();
+    let w_w = (260.0 * scale) as i32;
+    let w_h = (90.0 * scale) as i32;
+    let margin = (16.0 * scale) as i32;
+    let (x, y) = match corner {
+        "bottom-left"  => (margin, (size.height as i32) - w_h - margin),
+        "top-right"    => ((size.width as i32) - w_w - margin, margin),
+        "top-left"     => (margin, margin),
+        _              => ((size.width as i32) - w_w - margin, (size.height as i32) - w_h - margin), // bottom-right (default)
+    };
+    let _ = w.set_position(tauri::PhysicalPosition { x, y });
 }
 
 fn hide_overlay(app: &AppHandle) {
