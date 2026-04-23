@@ -196,7 +196,8 @@ impl WhisperService {
 
     /// Called by `whisper_stop_recording`. Returns the full outcome (F4).
     pub async fn stop_recording(&self, language: Option<String>) -> Result<StopOutcome, String> {
-        let (recorder, model_name) = {
+        // Extract recorder data in a sync block before any await — Recorder is !Send.
+        let (duration_ms, wav, model_name) = {
             let mut g = self.inner.lock().await;
             let rec = g.recorder.take().ok_or_else(|| "not recording".to_string())?.0;
             let name = g.model_name.clone().unwrap_or_default();
@@ -206,11 +207,11 @@ impl WhisperService {
                 g.state = State::Transcribing;
                 emit_state(&self.app, g.state, g.model_name.clone());
             }
-            (rec, name)
+            // Consume Recorder (finish_wav takes ownership) before first await.
+            let dur = rec.duration_ms();
+            let w = rec.finish_wav()?;
+            (dur, w, name)
         };
-
-        let duration_ms = recorder.duration_ms();
-        let wav = recorder.finish_wav()?;
 
         // Wait for server to become available; warm-up task flips state to Transcribing
         let t0 = std::time::Instant::now();

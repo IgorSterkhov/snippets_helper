@@ -195,6 +195,22 @@ pub fn run() {
             commands::ota::revert_frontend,
             commands::ota::drop_frontend_override,
             commands::ota::confirm_frontend_boot,
+            // Whisper
+            commands::whisper::whisper_list_catalog,
+            commands::whisper::whisper_list_models,
+            commands::whisper::whisper_install_model,
+            commands::whisper::whisper_delete_model,
+            commands::whisper::whisper_set_default_model,
+            commands::whisper::whisper_start_recording,
+            commands::whisper::whisper_stop_recording,
+            commands::whisper::whisper_cancel_recording,
+            commands::whisper::whisper_unload_now,
+            commands::whisper::whisper_inject_text,
+            commands::whisper::whisper_get_history,
+            commands::whisper::whisper_delete_history,
+            commands::whisper::whisper_list_mics,
+            commands::whisper::whisper_gpu_info,
+            commands::whisper::whisper_detect_whisper_bin,
         ])
         .setup(|app| {
             let svc = crate::whisper::service::WhisperService::new(app.handle().clone());
