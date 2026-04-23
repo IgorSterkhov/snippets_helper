@@ -12,6 +12,19 @@ const SKIP_DIRS: &[&str] = &[
     ".git", "node_modules", "target", "__pycache__", ".venv", ".idea", ".vs",
 ];
 
+/// Build a `Command` that won't flash a console window on Windows.
+/// Every git/rg/grep spawn must go through this to keep the UI clean.
+fn spawn(program: &str) -> std::process::Command {
+    let mut c = std::process::Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        c.creation_flags(CREATE_NO_WINDOW);
+    }
+    c
+}
+
 // ── Data types ───────────────────────────────────────────
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -412,7 +425,7 @@ struct RawMatch {
 }
 
 fn try_ripgrep(query: &str, repo_path: &str, repo_name: &str, max_results: usize) -> Option<Vec<RawMatch>> {
-    let output = std::process::Command::new("rg")
+    let output = spawn("rg")
         .args([
             "--json",
             "--glob", "!.git",
@@ -476,7 +489,7 @@ fn try_ripgrep(query: &str, repo_path: &str, repo_name: &str, max_results: usize
 }
 
 fn try_grep(query: &str, repo_path: &str, repo_name: &str, max_results: usize) -> Option<Vec<RawMatch>> {
-    let output = std::process::Command::new("grep")
+    let output = spawn("grep")
         .args([
             "-rn",
             "-i",
@@ -692,7 +705,7 @@ fn search_git_in_repo(query: &str, repo_path: &str, repo_name: &str, max_results
     let mut seen_hashes = std::collections::HashSet::new();
 
     // Search by commit message
-    if let Ok(output) = std::process::Command::new("git")
+    if let Ok(output) = spawn("git")
         .args([
             "-C", repo_path,
             "log", "--all", "--oneline",
@@ -734,7 +747,7 @@ fn search_git_in_repo(query: &str, repo_path: &str, repo_name: &str, max_results
     // Search by code changes (pickaxe)
     if results.len() < max_results {
         let remaining = max_results - results.len();
-        if let Ok(output) = std::process::Command::new("git")
+        if let Ok(output) = spawn("git")
             .args([
                 "-C", repo_path,
                 "log", "--all",
@@ -777,7 +790,7 @@ fn search_git_in_repo(query: &str, repo_path: &str, repo_name: &str, max_results
 }
 
 fn get_commit_files(repo_path: &str, hash: &str) -> Vec<String> {
-    if let Ok(output) = std::process::Command::new("git")
+    if let Ok(output) = spawn("git")
         .args(["-C", repo_path, "diff-tree", "--no-commit-id", "-r", "--name-only", hash])
         .output()
     {
@@ -820,17 +833,8 @@ pub async fn search_git_history(state: State<'_, DbState>, query: String, repos:
 }
 
 fn git_run(repo: &str, args: &[&str]) -> Result<String, String> {
-    let mut cmd = std::process::Command::new("git");
+    let mut cmd = spawn("git");
     cmd.arg("-C").arg(repo).args(args);
-    // On Windows suppress the flashing cmd window that `spawn/output` otherwise
-    // creates for every invocation — this was visible as a window flickering on
-    // every Manage-tab refresh (4 git calls per repo).
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
     let out = cmd.output().map_err(|e| format!("git: {e}"))?;
     if !out.status.success() {
         return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
@@ -1100,7 +1104,7 @@ pub fn open_in_editor(
     }
     #[cfg(windows)]
     {
-        std::process::Command::new("cmd")
+        spawn("cmd")
             .args(["/C", &rendered])
             .spawn()
             .map_err(|e| format!("spawn cmd /C {:?}: {}", rendered, e))?;
