@@ -13,6 +13,10 @@
   Markdown link. Select text, press Ctrl+V with a URL in the clipboard →
   get `[selected](url)`. Non-URL clipboard or empty selection paste
   behaves normally.
+- **f-20260423-20** — Notes preview: numbered lists (`1. …`) now render as
+  decimal `1. 2. 3.` instead of bullet circles. Removed a stray
+  `.note-preview li { list-style: disc }` override that beat the
+  `.markdown-body ol { list-style-type: decimal }` parent rule.
 
 ## v1.2.8 (2026-04-23)
 

@@ -923,10 +923,6 @@ function notesCSS() {
   border-top: 1px solid var(--border);
   margin: 12px 0;
 }
-.note-preview li {
-  margin-left: 16px;
-  list-style: disc;
-}
 .note-preview strong { color: var(--text); }
 
 .note-toolbar {
