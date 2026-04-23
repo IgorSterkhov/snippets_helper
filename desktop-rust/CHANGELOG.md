@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.8 OTA patches
+
+- **f-20260423-18** — Shortcuts: Copy strips Markdown code fences
+  (triple-backtick blocks and single-line backtick-wraps) before writing
+  to the clipboard, so pasted code doesn't carry stray `\`\`\`` markers.
+- **f-20260423-18** — Markdown editor: Link button (🔗) auto-fills the
+  URL from the clipboard if it looks like one (http/https/ftp/mailto/www).
+  If the clipboard isn't a URL, the caret lands inside the empty `()` so
+  you can type immediately — no more modal prompt.
+
 ## v1.2.8 (2026-04-23)
 
 - Hotkey: bring main window to front on a single press when it's visible

@@ -1024,9 +1024,30 @@ function scrollToSelected() {
   }
 }
 
+// Strip Markdown code fences before copying. Removes:
+//   - whole lines consisting of triple-backticks (with optional language
+//     tag and leading indent) — both opening and closing fences;
+//   - wrapping single backticks when the entire (trimmed) snippet is
+//     a single inline `code` span.
+// Inner content, surrounding prose and intentional blank lines are kept.
+function stripMarkdownFences(text) {
+  if (typeof text !== 'string' || !text) return text;
+  let s = text.replace(/^[ \t]*```[^\n]*(\n|$)/gm, '');
+  const trimmed = s.trim();
+  if (
+    trimmed.length >= 2 &&
+    trimmed.startsWith('`') &&
+    trimmed.endsWith('`') &&
+    !trimmed.slice(1, -1).includes('`')
+  ) {
+    s = trimmed.slice(1, -1);
+  }
+  return s;
+}
+
 async function copyToClipboard(text) {
   try {
-    await navigator.clipboard.writeText(text);
+    await navigator.clipboard.writeText(stripMarkdownFences(text));
     showToast('Copied to clipboard', 'success');
   } catch (err) {
     showToast('Failed to copy: ' + err, 'error');
@@ -1035,7 +1056,7 @@ async function copyToClipboard(text) {
 
 async function copyAndHide(text) {
   try {
-    await navigator.clipboard.writeText(text);
+    await navigator.clipboard.writeText(stripMarkdownFences(text));
     await call('hide_and_sync');
   } catch (err) {
     showToast('Failed to copy: ' + err, 'error');
