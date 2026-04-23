@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.2.8 (2026-04-23)
+
+- Hotkey: bring main window to front on a single press when it's visible
+  but behind another app. Previously the first press hid it (because it
+  was still "visible") and you needed a second press to bring it back.
+  Now the window is only hidden when it's visible, focused and not
+  minimized — otherwise it's unminimized + shown + focused.
+- SQL help modals: Ctrl + mouse wheel zooms the text; size persists in
+  localStorage across sessions.
+
 ## v1.2.2 (2026-04-22)
 
 - Manage tab: per-row **Reset** button on dirty repos — runs

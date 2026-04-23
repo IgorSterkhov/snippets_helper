@@ -1,6 +1,21 @@
 // Shared help modal for SQL sub-tabs. One-button ("Close") info modal with
-// wide content area, scrollable body, and styling for nested <pre>, <code>,
-// lists and headings.
+// wide content area, scrollable body, Ctrl+wheel zoom, and styling for
+// nested <pre>, <code>, lists and headings.
+
+const FONT_STORAGE_KEY = 'sql-help-font-size';
+const MIN_FONT = 10;
+const MAX_FONT = 28;
+const DEFAULT_FONT = 13;
+
+function getStoredFontSize() {
+  const v = parseInt(localStorage.getItem(FONT_STORAGE_KEY), 10);
+  if (!Number.isFinite(v) || v < MIN_FONT || v > MAX_FONT) return DEFAULT_FONT;
+  return v;
+}
+
+function setStoredFontSize(v) {
+  try { localStorage.setItem(FONT_STORAGE_KEY, String(v)); } catch {}
+}
 
 export function showSqlHelp(title, innerHtml) {
   ensureCss();
@@ -18,10 +33,17 @@ export function showSqlHelp(title, innerHtml) {
   const body = document.createElement('div');
   body.className = 'modal-body sql-help-body';
   body.innerHTML = innerHtml;
+  body.style.fontSize = getStoredFontSize() + 'px';
   modal.appendChild(body);
 
   const actions = document.createElement('div');
   actions.className = 'modal-actions';
+
+  const zoomHint = document.createElement('span');
+  zoomHint.className = 'sql-help-zoom-hint';
+  zoomHint.textContent = 'Ctrl + \u{1F5B1} — zoom';
+  actions.appendChild(zoomHint);
+
   const closeBtn = document.createElement('button');
   closeBtn.textContent = 'Close';
   actions.appendChild(closeBtn);
@@ -29,6 +51,16 @@ export function showSqlHelp(title, innerHtml) {
 
   overlay.appendChild(modal);
   document.body.appendChild(overlay);
+
+  modal.addEventListener('wheel', (e) => {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    let size = parseInt(body.style.fontSize, 10) || DEFAULT_FONT;
+    size += e.deltaY < 0 ? 1 : -1;
+    size = Math.max(MIN_FONT, Math.min(MAX_FONT, size));
+    body.style.fontSize = size + 'px';
+    setStoredFontSize(size);
+  }, { passive: false });
 
   const close = () => {
     overlay.remove();
@@ -128,6 +160,15 @@ function ensureCss() {
   display: flex; align-items: center; gap: 10px;
 }
 .sql-help-header h2 { margin: 0; }
+.sql-help-modal .modal-actions {
+  justify-content: space-between;
+  align-items: center;
+}
+.sql-help-zoom-hint {
+  color: var(--text-muted);
+  font-size: 11px;
+  user-select: none;
+}
 `;
   document.head.appendChild(s);
 }
