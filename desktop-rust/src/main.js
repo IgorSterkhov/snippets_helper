@@ -12,6 +12,7 @@ const TABS = [
   { id: 'exec',      label: 'Exec',      icon: '\u26A1',    loader: (el) => import('./tabs/exec.js').then(m => m.init(el)) },
   { id: 'repo-search', label: 'Search', icon: '\uD83D\uDD0D', loader: (el) => import('./tabs/repo-search.js').then(m => m.init(el)) },
   { id: 'vps', label: 'VPS', icon: '\uD83D\uDDA5', loader: (el) => import('./tabs/vps.js').then(m => m.init(el)) },
+  { id: 'whisper', label: 'Whisper', icon: '🎤', loader: (el) => import('./tabs/whisper/whisper-main.js').then(m => m.init(el)) },
 ];
 
 async function main() {
