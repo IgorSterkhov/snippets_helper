@@ -44,27 +44,19 @@ export function init(container) {
   lowerLabel.setAttribute('for', 'kw-lower');
   optRow.appendChild(lowerLabel);
 
-  // Separator + DDL alignment toggle
-  const sep = document.createElement('span');
-  sep.style.cssText = 'width:1px;height:16px;background:var(--border);margin:0 10px';
-  optRow.appendChild(sep);
-
-  const ddlCb = document.createElement('input');
-  ddlCb.type = 'checkbox'; ddlCb.id = 'fmt-ddl';
-  optRow.appendChild(ddlCb);
-  const ddlLabel = el('label', { text: 'Align DDL columns', style: 'cursor:pointer' });
-  ddlLabel.setAttribute('for', 'fmt-ddl');
-  ddlLabel.title = 'Tabulate CREATE TABLE columns so name / type / comment line up on fixed vertical columns';
-  optRow.appendChild(ddlLabel);
-
   wrap.appendChild(optRow);
 
   // Buttons
   const btnRow = el('div', { class: 'sql-btn-row' });
 
   const fmtBtn = el('button', { text: 'Format SQL' });
-  fmtBtn.addEventListener('click', onFormat);
+  fmtBtn.addEventListener('click', () => onFormat(false));
   btnRow.appendChild(fmtBtn);
+
+  const fmtDdlBtn = el('button', { text: 'Format DDL' });
+  fmtDdlBtn.title = 'Align CREATE TABLE columns on fixed positions and strip backtick quotes from identifiers';
+  fmtDdlBtn.addEventListener('click', () => onFormat(true));
+  btnRow.appendChild(fmtDdlBtn);
 
   const clearBtn = el('button', { text: 'Clear', class: 'btn-secondary' });
   clearBtn.addEventListener('click', () => {
@@ -100,7 +92,7 @@ export function init(container) {
   ensureHighlight().catch(() => {});
 }
 
-async function onFormat() {
+async function onFormat(alignDdl) {
   const input = document.getElementById('fmt-input').value.trim();
   const outputCode = document.getElementById('fmt-output-code');
   if (!input) {
@@ -109,7 +101,6 @@ async function onFormat() {
   }
 
   const keywordsUpper = document.getElementById('kw-upper').checked;
-  const alignDdl = document.getElementById('fmt-ddl').checked;
 
   try {
     let finalSql;
@@ -267,7 +258,9 @@ function alignDdlColumns(sql) {
   const after  = sql.slice(closeIdx);
 
   // Split inner on top-level commas (ignore commas inside parens/strings).
-  const entries = splitTopLevel(inner, ',').map(s => s.trim()).filter(Boolean);
+  const entries = splitTopLevel(inner, ',')
+    .map(s => stripBackticksOutsideStrings(s).trim())
+    .filter(Boolean);
   if (!entries.length) return null;
 
   // Tokenise each entry → [name, type, rest]. Skip table-level constraints
@@ -312,6 +305,44 @@ function splitTopLevel(s, sep) {
     }
   }
   out.push(s.slice(start));
+  return out;
+}
+
+// Remove backtick identifier-quotes while preserving anything inside
+// string literals ('...', "...") and comments (-- …, /* … */).
+function stripBackticksOutsideStrings(s) {
+  let out = '';
+  let i = 0;
+  while (i < s.length) {
+    const c = s[i];
+    const two = s.substr(i, 2);
+    if (c === "'" || c === '"') {
+      const q = c;
+      let end = i + 1;
+      while (end < s.length) {
+        if (s[end] === '\\') { end += 2; continue; }
+        if (s[end] === q) { end += 1; break; }
+        end += 1;
+      }
+      out += s.slice(i, end);
+      i = end;
+    } else if (two === '--') {
+      const nl = s.indexOf('\n', i);
+      const end = nl < 0 ? s.length : nl + 1;
+      out += s.slice(i, end);
+      i = end;
+    } else if (two === '/*') {
+      const end = s.indexOf('*/', i + 2);
+      const stop = end < 0 ? s.length : end + 2;
+      out += s.slice(i, stop);
+      i = stop;
+    } else if (c === '`') {
+      i++;
+    } else {
+      out += c;
+      i++;
+    }
+  }
   return out;
 }
 
