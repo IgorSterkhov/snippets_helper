@@ -20,6 +20,20 @@
         "decorations": true,
         "alwaysOnTop": true,
         "devtools": true
+      },
+      {
+        "label": "whisper-overlay",
+        "url": "khapp://localhost/tabs/whisper/whisper-overlay.html",
+        "title": "Whisper",
+        "width": 260,
+        "height": 90,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "focus": false
       }
     ],
     "security": {
@@ -35,7 +49,10 @@
       "icons/icon.png",
       "icons/icon.ico"
     ],
-    "createUpdaterArtifacts": "v1Compatible"
+    "createUpdaterArtifacts": "v1Compatible",
+    "externalBin": [
+      "binaries/whisper-server"
+    ]
   },
   "plugins": {
     "updater": {
