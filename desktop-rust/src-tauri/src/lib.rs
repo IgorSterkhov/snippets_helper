@@ -197,6 +197,9 @@ pub fn run() {
             commands::ota::confirm_frontend_boot,
         ])
         .setup(|app| {
+            let svc = crate::whisper::service::WhisperService::new(app.handle().clone());
+            app.manage(svc);
+
             tray::create_tray(app)?;
 
             // Read hotkey mode from settings
