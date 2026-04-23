@@ -1398,3 +1398,223 @@ mod tests {
         assert_eq!(list.len(), 0);
     }
 }
+
+// ---------- whisper_models ----------
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct WhisperModelRow {
+    pub id: i64,
+    pub name: String,
+    pub display_name: String,
+    pub file_path: String,
+    pub size_bytes: i64,
+    pub sha256: String,
+    pub is_default: bool,
+    pub installed_at: i64,
+}
+
+pub fn whisper_list_models(conn: &Connection) -> Result<Vec<WhisperModelRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, name, display_name, file_path, size_bytes, sha256, is_default, installed_at
+         FROM whisper_models ORDER BY installed_at ASC",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        Ok(WhisperModelRow {
+            id: r.get(0)?,
+            name: r.get(1)?,
+            display_name: r.get(2)?,
+            file_path: r.get(3)?,
+            size_bytes: r.get(4)?,
+            sha256: r.get(5)?,
+            is_default: r.get::<_, i64>(6)? != 0,
+            installed_at: r.get(7)?,
+        })
+    })?;
+    rows.collect::<Result<Vec<_>>>()
+}
+
+pub fn whisper_insert_or_upgrade_model(
+    conn: &Connection,
+    name: &str,
+    display_name: &str,
+    file_path: &str,
+    size_bytes: i64,
+    sha256: &str,
+) -> Result<()> {
+    let now = chrono::Utc::now().timestamp();
+    conn.execute(
+        "INSERT INTO whisper_models (name, display_name, file_path, size_bytes, sha256, is_default, installed_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6)
+         ON CONFLICT(name) DO UPDATE SET
+           display_name = excluded.display_name,
+           file_path = excluded.file_path,
+           size_bytes = excluded.size_bytes,
+           sha256 = excluded.sha256,
+           installed_at = excluded.installed_at",
+        params![name, display_name, file_path, size_bytes, sha256, now],
+    )?;
+    Ok(())
+}
+
+pub fn whisper_delete_model(conn: &Connection, name: &str) -> Result<()> {
+    conn.execute("DELETE FROM whisper_models WHERE name = ?1", params![name])?;
+    Ok(())
+}
+
+pub fn whisper_set_default_model(conn: &mut Connection, name: &str) -> Result<()> {
+    let tx = conn.transaction()?;
+    tx.execute("UPDATE whisper_models SET is_default = 0", [])?;
+    let changed = tx.execute(
+        "UPDATE whisper_models SET is_default = 1 WHERE name = ?1",
+        params![name],
+    )?;
+    if changed == 0 {
+        return Err(rusqlite::Error::QueryReturnedNoRows);
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+pub fn whisper_get_default_model(conn: &Connection) -> Result<Option<WhisperModelRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, name, display_name, file_path, size_bytes, sha256, is_default, installed_at
+         FROM whisper_models WHERE is_default = 1 LIMIT 1",
+    )?;
+    let mut rows = stmt.query_map([], |r| {
+        Ok(WhisperModelRow {
+            id: r.get(0)?,
+            name: r.get(1)?,
+            display_name: r.get(2)?,
+            file_path: r.get(3)?,
+            size_bytes: r.get(4)?,
+            sha256: r.get(5)?,
+            is_default: r.get::<_, i64>(6)? != 0,
+            installed_at: r.get(7)?,
+        })
+    })?;
+    Ok(rows.next().transpose()?)
+}
+
+// ---------- whisper_history ----------
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct WhisperHistoryRow {
+    pub id: i64,
+    pub text: String,
+    pub text_raw: Option<String>,
+    pub model_name: String,
+    pub duration_ms: i64,
+    pub transcribe_ms: i64,
+    pub language: Option<String>,
+    pub injected_to: Option<String>,
+    pub created_at: i64,
+}
+
+pub fn whisper_insert_history(
+    conn: &Connection,
+    text: &str,
+    text_raw: Option<&str>,
+    model_name: &str,
+    duration_ms: i64,
+    transcribe_ms: i64,
+    language: Option<&str>,
+    injected_to: Option<&str>,
+) -> Result<i64> {
+    let now = chrono::Utc::now().timestamp();
+    conn.execute(
+        "INSERT INTO whisper_history (text, text_raw, model_name, duration_ms, transcribe_ms, language, injected_to, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![text, text_raw, model_name, duration_ms, transcribe_ms, language, injected_to, now],
+    )?;
+    // Trim to last 200 (by id — autoincrement ensures insertion order)
+    conn.execute(
+        "DELETE FROM whisper_history WHERE id NOT IN
+            (SELECT id FROM whisper_history ORDER BY id DESC LIMIT 200)",
+        [],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+pub fn whisper_list_history(conn: &Connection, limit: i64) -> Result<Vec<WhisperHistoryRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, text, text_raw, model_name, duration_ms, transcribe_ms, language, injected_to, created_at
+         FROM whisper_history ORDER BY created_at DESC, id DESC LIMIT ?1",
+    )?;
+    let rows = stmt.query_map(params![limit], |r| {
+        Ok(WhisperHistoryRow {
+            id: r.get(0)?,
+            text: r.get(1)?,
+            text_raw: r.get(2)?,
+            model_name: r.get(3)?,
+            duration_ms: r.get(4)?,
+            transcribe_ms: r.get(5)?,
+            language: r.get(6)?,
+            injected_to: r.get(7)?,
+            created_at: r.get(8)?,
+        })
+    })?;
+    rows.collect::<Result<Vec<_>>>()
+}
+
+pub fn whisper_delete_history(conn: &Connection, id: Option<i64>) -> Result<()> {
+    match id {
+        Some(id) => { conn.execute("DELETE FROM whisper_history WHERE id = ?1", params![id])?; }
+        None => { conn.execute("DELETE FROM whisper_history", [])?; }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod whisper_crud_tests {
+    use super::*;
+    use crate::db::init_test_db;
+
+    #[test]
+    fn model_insert_then_list_roundtrip() {
+        let conn = init_test_db();
+        whisper_insert_or_upgrade_model(&conn, "ggml-small", "small", "/tmp/small.bin", 100, "abc").unwrap();
+        let models = whisper_list_models(&conn).unwrap();
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].name, "ggml-small");
+        assert!(!models[0].is_default);
+    }
+
+    #[test]
+    fn set_default_clears_previous_default() {
+        let mut conn = init_test_db();
+        whisper_insert_or_upgrade_model(&conn, "ggml-a", "a", "/tmp/a", 1, "h1").unwrap();
+        whisper_insert_or_upgrade_model(&conn, "ggml-b", "b", "/tmp/b", 2, "h2").unwrap();
+        whisper_set_default_model(&mut conn, "ggml-a").unwrap();
+        whisper_set_default_model(&mut conn, "ggml-b").unwrap();
+        let defaults: Vec<_> = whisper_list_models(&conn).unwrap()
+            .into_iter().filter(|m| m.is_default).collect();
+        assert_eq!(defaults.len(), 1);
+        assert_eq!(defaults[0].name, "ggml-b");
+    }
+
+    #[test]
+    fn set_default_errors_for_unknown_model() {
+        let mut conn = init_test_db();
+        assert!(whisper_set_default_model(&mut conn, "ggml-missing").is_err());
+    }
+
+    #[test]
+    fn history_trim_keeps_last_200() {
+        let conn = init_test_db();
+        for i in 0..250 {
+            whisper_insert_history(&conn, &format!("t{}", i), None, "ggml-small", 100, 50, None, None).unwrap();
+        }
+        let rows = whisper_list_history(&conn, 1000).unwrap();
+        assert_eq!(rows.len(), 200);
+        // Newest first
+        assert_eq!(rows[0].text, "t249");
+    }
+
+    #[test]
+    fn delete_history_all() {
+        let conn = init_test_db();
+        whisper_insert_history(&conn, "x", None, "m", 0, 0, None, None).unwrap();
+        whisper_delete_history(&conn, None).unwrap();
+        assert!(whisper_list_history(&conn, 100).unwrap().is_empty());
+    }
+}
