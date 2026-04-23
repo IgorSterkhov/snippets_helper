@@ -1437,6 +1437,16 @@ async function showCommitModal(gitResult) {
   });
   headerActions.appendChild(copyBtn);
 
+  let fullCtx = false;
+  const fullBtn = el('button', { text: 'Full file ▸', class: 'rs-card-btn' });
+  fullBtn.addEventListener('click', async () => {
+    fullCtx = !fullCtx;
+    fullBtn.textContent = fullCtx ? 'Hunks ◂' : 'Full file ▸';
+    fullBtn.classList.toggle('active', fullCtx);
+    await renderDiff();
+  });
+  headerActions.appendChild(fullBtn);
+
   const expandBtn = el('button', { text: 'Expand ▸', class: 'rs-card-btn' });
   expandBtn.addEventListener('click', () => {
     overlay.remove();
@@ -1470,20 +1480,39 @@ async function showCommitModal(gitResult) {
   }
   document.addEventListener('keydown', onKey, true);
 
+  // Cache diffs per mode for instant toggle after the first load of each.
+  const modeCache = new Map();
+
+  async function renderDiff() {
+    try {
+      await ensureHighlight();
+      const repoPath = (allRepos.find(r => r.name === gitResult.repo_name) || {}).path;
+      if (!repoPath) throw new Error('Repo path not found for ' + gitResult.repo_name);
+      body.innerHTML = '<p class="rs-placeholder">Loading diff...</p>';
+      const key = fullCtx ? 'full' : 'short';
+      let diff = modeCache.get(key);
+      if (diff === undefined) {
+        diff = await call('repo_search_commit_diff', {
+          repoPath, hash: gitResult.commit_hash, fullContext: fullCtx,
+        });
+        modeCache.set(key, diff);
+      }
+      body.innerHTML = '';
+      const pre = document.createElement('pre');
+      pre.className = 'rs-fs-pre';
+      const code = document.createElement('code');
+      code.className = 'hljs language-diff';
+      try { code.innerHTML = window.hljs.highlight(diff, { language: 'diff', ignoreIllegals: true }).value; }
+      catch { code.textContent = diff; }
+      pre.appendChild(code);
+      body.appendChild(pre);
+    } catch (e) {
+      body.innerHTML = '';
+      body.appendChild(el('p', { text: 'Error: ' + e, style: 'color:var(--danger)' }));
+    }
+  }
   try {
-    await ensureHighlight();
-    const repoPath = (allRepos.find(r => r.name === gitResult.repo_name) || {}).path;
-    if (!repoPath) throw new Error('Repo path not found for ' + gitResult.repo_name);
-    const diff = await call('repo_search_commit_diff', { repoPath, hash: gitResult.commit_hash });
-    body.innerHTML = '';
-    const pre = document.createElement('pre');
-    pre.className = 'rs-fs-pre';
-    const code = document.createElement('code');
-    code.className = 'hljs language-diff';
-    try { code.innerHTML = window.hljs.highlight(diff, { language: 'diff', ignoreIllegals: true }).value; }
-    catch { code.textContent = diff; }
-    pre.appendChild(code);
-    body.appendChild(pre);
+    await renderDiff();
   } catch (e) {
     body.innerHTML = '';
     body.appendChild(el('p', { text: 'Error: ' + e, style: 'color:var(--danger)' }));
@@ -2454,6 +2483,11 @@ function css() {
   margin-right: 0;
 }
 .rs-card-btn:hover { color: var(--text); border-color: #484f58; }
+.rs-card-btn.active {
+  color: var(--accent, #3b82f6);
+  border-color: rgba(59,130,246,0.5);
+  background: rgba(59,130,246,0.08);
+}
 /* Fullscreen overlay */
 .rs-fullscreen {
   position: absolute;
