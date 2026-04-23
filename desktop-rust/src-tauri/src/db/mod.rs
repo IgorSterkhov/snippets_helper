@@ -160,7 +160,34 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
             sync_status     TEXT NOT NULL DEFAULT 'pending',
             user_id         TEXT NOT NULL DEFAULT ''
         );
+
+        CREATE TABLE IF NOT EXISTS whisper_models (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            name            TEXT NOT NULL UNIQUE,
+            display_name    TEXT NOT NULL,
+            file_path       TEXT NOT NULL,
+            size_bytes      INTEGER NOT NULL,
+            sha256          TEXT NOT NULL,
+            is_default      INTEGER NOT NULL DEFAULT 0,
+            installed_at    INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS whisper_history (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            text            TEXT NOT NULL,
+            text_raw        TEXT,
+            model_name      TEXT NOT NULL,
+            duration_ms     INTEGER NOT NULL,
+            transcribe_ms   INTEGER NOT NULL,
+            language        TEXT,
+            injected_to     TEXT,
+            created_at      INTEGER NOT NULL
+        );
         ",
+    )?;
+
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_whisper_history_created ON whisper_history(created_at DESC);",
     )?;
 
     // Migration: add links column to shortcuts (may already exist)
@@ -194,7 +221,7 @@ mod tests {
     }
 
     #[test]
-    fn test_all_13_tables_exist() {
+    fn test_all_15_tables_exist() {
         let conn = init_test_db();
 
         let tables: Vec<String> = conn
@@ -221,6 +248,8 @@ mod tests {
             "sql_macrosing_templates",
             "sql_table_analyzer_templates",
             "superset_settings",
+            "whisper_history",
+            "whisper_models",
         ];
 
         for table_name in &expected {
@@ -230,6 +259,23 @@ mod tests {
                 table_name
             );
         }
-        assert_eq!(tables.len(), expected.len(), "Unexpected extra tables");
+        assert_eq!(tables.len(), expected.len(), "Unexpected extra tables: {:?}", tables);
+    }
+
+    #[test]
+    fn whisper_history_index_created() {
+        let conn = init_test_db();
+        let indexes: Vec<String> = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='whisper_history'")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+        assert!(
+            indexes.iter().any(|n| n == "idx_whisper_history_created"),
+            "indexes on whisper_history: {:?}",
+            indexes,
+        );
     }
 }
