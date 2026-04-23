@@ -1024,6 +1024,32 @@ pub struct ResetHardResult {
     pub cleaned: bool,           // whether git clean -fd also ran
 }
 
+/// Return `git show <hash>` output for the given commit. Includes the
+/// commit header (hash, author, date, subject, body) plus the unified
+/// diff. Front-end renders it with highlight.js `diff` lang.
+///
+/// When `full_context = Some(true)`, adds `-U9999` so the diff carries
+/// the full file content with changes highlighted inline.
+#[tauri::command]
+pub async fn repo_search_commit_diff(
+    repo_path: String,
+    hash: String,
+    full_context: Option<bool>,
+) -> Result<String, String> {
+    if hash.is_empty() || hash.len() > 64 || !hash.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err("invalid hash".to_string());
+    }
+    let full = full_context.unwrap_or(false);
+    tokio::task::spawn_blocking(move || {
+        let mut args: Vec<&str> = vec!["show", "--no-color"];
+        if full { args.push("-U9999"); }
+        args.push(&hash);
+        git_run(&repo_path, &args)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Discard all uncommitted changes in the given repo.
 ///
 /// Always runs `git reset --hard HEAD`. If `clean = true` (default when the

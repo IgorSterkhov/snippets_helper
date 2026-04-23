@@ -169,6 +169,7 @@ pub fn run() {
             commands::repo_search::repo_search_status,
             commands::repo_search::repo_search_pull_main,
             commands::repo_search::repo_search_reset_hard,
+            commands::repo_search::repo_search_commit_diff,
             // VPS
             commands::vps::list_vps_servers,
             commands::vps::add_vps_server,

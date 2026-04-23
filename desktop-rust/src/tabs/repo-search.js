@@ -1404,14 +1404,261 @@ function renderGitResults(gitResults) {
     metaLine.appendChild(el('span', { text: formatDate(r.commit_date) }));
     card.appendChild(metaLine);
 
-    card.addEventListener('click', () => {
-      navigator.clipboard.writeText(r.commit_hash).then(() => {
-        showToast('Hash copied', 'success');
-      }).catch(() => {});
-    });
-    card.title = 'Click to copy hash: ' + r.commit_hash;
+    card.addEventListener('click', () => showCommitModal(r));
+    card.title = 'Click to view diff';
 
     resultsList.appendChild(card);
+  }
+}
+
+// ── Commit diff modal ──────────────────────────────────────
+
+async function showCommitModal(gitResult) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay rs-modal-overlay';
+  const modal = document.createElement('div');
+  modal.className = 'modal rs-detail-modal';
+
+  // Header
+  const header = el('div', { class: 'rs-modal-header' });
+  const headerLeft = el('div', { style: 'display:flex;align-items:center;gap:8px;overflow:hidden;flex:1;min-width:0' });
+  headerLeft.appendChild(buildRepoBadge(gitResult.repo_name));
+  headerLeft.appendChild(el('span', { text: gitResult.commit_hash.substring(0, 10), class: 'rs-commit-hash' }));
+  headerLeft.appendChild(el('span', { text: gitResult.message, class: 'rs-detail-path' }));
+  header.appendChild(headerLeft);
+
+  const headerActions = el('div', { class: 'rs-detail-actions' });
+
+  const copyBtn = el('button', { text: 'Copy hash', class: 'rs-card-btn' });
+  copyBtn.addEventListener('click', () => {
+    navigator.clipboard.writeText(gitResult.commit_hash)
+      .then(() => showToast('Hash copied', 'success'))
+      .catch(() => {});
+  });
+  headerActions.appendChild(copyBtn);
+
+  const expandBtn = el('button', { text: 'Expand ▸', class: 'rs-card-btn' });
+  expandBtn.addEventListener('click', () => {
+    overlay.remove();
+    expandGitResults(gitResults, gitResult.commit_hash);
+  });
+  headerActions.appendChild(expandBtn);
+
+  const closeBtn = el('button', { text: '✕', class: 'btn-secondary rs-modal-close' });
+  closeBtn.addEventListener('click', () => overlay.remove());
+  headerActions.appendChild(closeBtn);
+
+  header.appendChild(headerActions);
+  modal.appendChild(header);
+
+  // Metadata subheader (author + date)
+  const meta = el('div', { class: 'rs-detail-copy-row' });
+  meta.appendChild(el('span', { text: `${gitResult.author} — ${formatDate(gitResult.commit_date)}`, class: 'rs-detail-fullpath' }));
+  modal.appendChild(meta);
+
+  // Body: diff
+  const body = el('div', { class: 'rs-detail-body' });
+  body.innerHTML = '<p class="rs-placeholder">Loading diff...</p>';
+  modal.appendChild(body);
+
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  function onKey(e) {
+    if (e.key === 'Escape') { e.stopPropagation(); overlay.remove(); document.removeEventListener('keydown', onKey, true); }
+  }
+  document.addEventListener('keydown', onKey, true);
+
+  try {
+    await ensureHighlight();
+    const repoPath = (allRepos.find(r => r.name === gitResult.repo_name) || {}).path;
+    if (!repoPath) throw new Error('Repo path not found for ' + gitResult.repo_name);
+    const diff = await call('repo_search_commit_diff', { repoPath, hash: gitResult.commit_hash });
+    body.innerHTML = '';
+    const pre = document.createElement('pre');
+    pre.className = 'rs-fs-pre';
+    const code = document.createElement('code');
+    code.className = 'hljs language-diff';
+    try { code.innerHTML = window.hljs.highlight(diff, { language: 'diff', ignoreIllegals: true }).value; }
+    catch { code.textContent = diff; }
+    pre.appendChild(code);
+    body.appendChild(pre);
+  } catch (e) {
+    body.innerHTML = '';
+    body.appendChild(el('p', { text: 'Error: ' + e, style: 'color:var(--danger)' }));
+  }
+}
+
+// ── Multi-commit expand view ───────────────────────────────
+
+async function expandGitResults(allCommits, startHash) {
+  if (!root) return;
+  if (document.getElementById('rs-fullscreen-overlay')) return;
+  await ensureHighlight();
+
+  // Overlay-local state.
+  const enabled = new Set(allCommits.map(c => c.commit_hash));
+  // Cache key = `${hash}|${mode}` where mode = 'short' | 'full'
+  const diffs = new Map();
+  let fullContext = false;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'rs-fullscreen-overlay';
+  overlay.className = 'rs-fullscreen';
+
+  const header = document.createElement('div');
+  header.className = 'rs-fullscreen-header';
+  const titleEl = el('div', { text: `${allCommits.length} commits`, class: 'rs-fs-path' });
+  header.appendChild(titleEl);
+
+  const headerRight = el('div', { style: 'display:flex;align-items:center;gap:10px' });
+  const fullCtxLabel = document.createElement('label');
+  fullCtxLabel.className = 'rs-fs-toggle';
+  fullCtxLabel.innerHTML = '<input type="checkbox" id="rs-fs-fullctx"/> Full file context';
+  headerRight.appendChild(fullCtxLabel);
+
+  const collapse = document.createElement('button');
+  collapse.className = 'rs-card-btn';
+  collapse.textContent = 'Collapse ◂';
+  collapse.dataset.role = 'rs-collapse';
+  collapse.addEventListener('click', closeFs);
+  headerRight.appendChild(collapse);
+  header.appendChild(headerRight);
+  overlay.appendChild(header);
+
+  // Wire toggle after mount (need the checkbox DOM ref)
+  setTimeout(() => {
+    const cb = overlay.querySelector('#rs-fs-fullctx');
+    if (cb) cb.addEventListener('change', () => { fullContext = cb.checked; renderBody(); });
+  }, 0);
+
+  const split = document.createElement('div');
+  split.className = 'rs-fs-split';
+  overlay.appendChild(split);
+
+  // Sidebar
+  const sidebar = document.createElement('div');
+  sidebar.className = 'rs-fs-sidebar';
+  split.appendChild(sidebar);
+
+  // Sidebar controls
+  const sbCtrl = document.createElement('div');
+  sbCtrl.className = 'rs-fs-sidebar-ctrl';
+  const allBtn = el('button', { text: 'All', class: 'rs-card-btn' });
+  const noneBtn = el('button', { text: 'None', class: 'rs-card-btn' });
+  allBtn.addEventListener('click', () => { allCommits.forEach(c => enabled.add(c.commit_hash)); renderSidebar(); renderBody(); });
+  noneBtn.addEventListener('click', () => { enabled.clear(); renderSidebar(); renderBody(); });
+  sbCtrl.appendChild(allBtn);
+  sbCtrl.appendChild(noneBtn);
+  sidebar.appendChild(sbCtrl);
+
+  const sbList = document.createElement('div');
+  sbList.className = 'rs-fs-sidebar-list';
+  sidebar.appendChild(sbList);
+
+  const bodyWrap = document.createElement('div');
+  bodyWrap.className = 'rs-fs-body';
+  split.appendChild(bodyWrap);
+
+  function renderSidebar() {
+    sbList.innerHTML = '';
+    for (const c of allCommits) {
+      const row = document.createElement('div');
+      row.className = 'rs-fs-cmt' + (enabled.has(c.commit_hash) ? ' on' : '');
+      const check = document.createElement('span');
+      check.className = 'rs-fs-cmt-check';
+      check.textContent = enabled.has(c.commit_hash) ? '✓' : '';
+      row.appendChild(check);
+      const info = document.createElement('div');
+      info.className = 'rs-fs-cmt-info';
+      info.innerHTML = `<div class="rs-fs-cmt-hash">${c.commit_hash.substring(0,8)}</div>
+        <div class="rs-fs-cmt-msg" title="${c.message.replace(/"/g, '&quot;')}">${c.message}</div>
+        <div class="rs-fs-cmt-meta">${c.author} — ${formatDate(c.commit_date)}</div>`;
+      row.appendChild(info);
+      row.addEventListener('click', () => {
+        if (enabled.has(c.commit_hash)) enabled.delete(c.commit_hash);
+        else enabled.add(c.commit_hash);
+        renderSidebar();
+        renderBody();
+      });
+      sbList.appendChild(row);
+    }
+  }
+
+  async function renderBody() {
+    bodyWrap.innerHTML = '';
+    const active = allCommits.filter(c => enabled.has(c.commit_hash));
+    if (!active.length) {
+      bodyWrap.innerHTML = '<p class="rs-placeholder" style="padding:20px">No commits selected — click entries in the sidebar.</p>';
+      return;
+    }
+    for (const c of active) {
+      const section = document.createElement('div');
+      section.className = 'rs-fs-cmt-section';
+      const dt = formatDateTime(c.commit_date);
+      section.innerHTML = `<div class="rs-fs-cmt-section-head">
+        <strong>${c.commit_hash.substring(0,10)}</strong>
+        <span class="rs-fs-cmt-section-dt">${dt}</span>
+        — ${escapeHtmlCommit(c.message)}
+        <span class="rs-fs-cmt-section-meta">${escapeHtmlCommit(c.author)}</span>
+      </div>`;
+      const pre = document.createElement('pre');
+      pre.className = 'rs-fs-pre';
+      const code = document.createElement('code');
+      code.className = 'hljs language-diff';
+      pre.appendChild(code);
+      section.appendChild(pre);
+      bodyWrap.appendChild(section);
+
+      const cacheKey = `${c.commit_hash}|${fullContext ? 'full' : 'short'}`;
+      if (!diffs.has(cacheKey)) {
+        code.textContent = 'Loading…';
+        try {
+          const repoPath = (allRepos.find(r => r.name === c.repo_name) || {}).path;
+          const diff = await call('repo_search_commit_diff', {
+            repoPath,
+            hash: c.commit_hash,
+            fullContext,
+          });
+          diffs.set(cacheKey, diff);
+        } catch (e) {
+          diffs.set(cacheKey, `Error loading diff: ${e}`);
+        }
+      }
+      const diff = diffs.get(cacheKey);
+      try { code.innerHTML = window.hljs.highlight(diff, { language: 'diff', ignoreIllegals: true }).value; }
+      catch { code.textContent = diff; }
+    }
+  }
+
+  function formatDateTime(iso) {
+    if (!iso) return '';
+    try {
+      const d = new Date(iso);
+      const pad = n => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    } catch { return iso; }
+  }
+  function escapeHtmlCommit(s) {
+    return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]);
+  }
+
+  function closeFs() { overlay.remove(); document.removeEventListener('keydown', onFsKey); }
+  function onFsKey(e) { if (e.key === 'Escape') closeFs(); }
+  document.addEventListener('keydown', onFsKey);
+
+  root.appendChild(overlay);
+  renderSidebar();
+  renderBody();
+
+  // Scroll the start commit into view in the sidebar.
+  if (startHash) {
+    setTimeout(() => {
+      const rows = sbList.querySelectorAll('.rs-fs-cmt');
+      const idx = allCommits.findIndex(c => c.commit_hash === startHash);
+      if (idx >= 0) rows[idx]?.scrollIntoView({ block: 'start' });
+    }, 30);
   }
 }
 
@@ -2247,5 +2494,64 @@ function css() {
   font-family: 'SF Mono','Consolas','Menlo',monospace;
   white-space: pre;
 }
+
+/* Multi-commit expand overlay */
+.rs-fs-toggle {
+  font-size: 12px; color: var(--text-muted);
+  display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+  user-select: none;
+}
+.rs-fs-split {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.rs-fs-sidebar {
+  width: 260px;
+  min-width: 220px;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg, #0d1117);
+}
+.rs-fs-sidebar-ctrl {
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.rs-fs-sidebar-ctrl button { flex: 1; padding: 3px 8px; font-size: 11px; }
+.rs-fs-sidebar-list { flex: 1; overflow-y: auto; padding: 4px; }
+.rs-fs-cmt {
+  display: flex; gap: 6px; padding: 6px 8px; border-radius: 4px;
+  margin-bottom: 2px; cursor: pointer; font-size: 11px;
+  align-items: flex-start;
+}
+.rs-fs-cmt:hover { background: rgba(255,255,255,0.04); }
+.rs-fs-cmt.on { background: rgba(59,130,246,0.10); }
+.rs-fs-cmt-check {
+  width: 14px; text-align: center; color: transparent; font-weight: bold;
+  flex-shrink: 0; margin-top: 1px;
+}
+.rs-fs-cmt.on .rs-fs-cmt-check { color: #3fb950; }
+.rs-fs-cmt-info { flex: 1; min-width: 0; }
+.rs-fs-cmt-hash { font-family: monospace; font-size: 10px; color: #f0883e; }
+.rs-fs-cmt-msg { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rs-fs-cmt-meta { color: var(--text-muted); font-size: 10px; }
+.rs-fs-body { flex: 1; overflow: auto; padding: 10px 14px; }
+.rs-fs-cmt-section { margin-bottom: 16px; }
+.rs-fs-cmt-section-head {
+  font-size: 12px; color: var(--text-muted);
+  padding: 6px 0; border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+}
+.rs-fs-cmt-section-head strong { color: #f0883e; font-family: monospace; }
+.rs-fs-cmt-section-dt {
+  font-family: monospace; font-size: 11px; color: var(--text-muted);
+  padding: 1px 6px; background: var(--bg-secondary); border-radius: 3px;
+}
+.rs-fs-cmt-section-meta { color: var(--text-muted); font-size: 11px; margin-left: auto; }
 `;
 }
