@@ -44,6 +44,19 @@ export function init(container) {
   lowerLabel.setAttribute('for', 'kw-lower');
   optRow.appendChild(lowerLabel);
 
+  // Separator + DDL alignment toggle
+  const sep = document.createElement('span');
+  sep.style.cssText = 'width:1px;height:16px;background:var(--border);margin:0 10px';
+  optRow.appendChild(sep);
+
+  const ddlCb = document.createElement('input');
+  ddlCb.type = 'checkbox'; ddlCb.id = 'fmt-ddl';
+  optRow.appendChild(ddlCb);
+  const ddlLabel = el('label', { text: 'Align DDL columns', style: 'cursor:pointer' });
+  ddlLabel.setAttribute('for', 'fmt-ddl');
+  ddlLabel.title = 'Tabulate CREATE TABLE columns so name / type / comment line up on fixed vertical columns';
+  optRow.appendChild(ddlLabel);
+
   wrap.appendChild(optRow);
 
   // Buttons
@@ -89,16 +102,133 @@ async function onFormat() {
   }
 
   const keywordsUpper = document.getElementById('kw-upper').checked;
+  const alignDdl = document.getElementById('fmt-ddl').checked;
 
   try {
-    const [formatted, error] = await call('format_sql', { sql: input, keywordsUpper });
-    output.textContent = formatted;
-    if (error) {
-      showToast('Warning: ' + error, 'info');
+    let result = input;
+    if (alignDdl) {
+      const aligned = alignDdlColumns(input);
+      if (aligned == null) {
+        showToast('DDL alignment: could not detect CREATE TABLE — falling back to normal format', 'info');
+      } else {
+        result = aligned;
+      }
     }
+    // Still run the SQL formatter for keyword case, unless DDL-only and user
+    // doesn't want more processing. We always run it — it's idempotent on
+    // already-formatted DDL and lets keyword case apply to the CREATE line.
+    const [formatted, error] = await call('format_sql', { sql: result, keywordsUpper });
+    output.textContent = formatted;
+    if (error) showToast('Warning: ' + error, 'info');
   } catch (e) {
     showToast('Format error: ' + e, 'error');
   }
+}
+
+/**
+ * Align columns inside a CREATE TABLE DDL on fixed vertical columns:
+ *   name<pad> type<pad> rest
+ * Returns null if the input doesn't look like a CREATE TABLE with a
+ * parenthesised column list.
+ */
+function alignDdlColumns(sql) {
+  // Find "CREATE TABLE …name… (" — column list opens at the first '(' after CREATE TABLE.
+  const ctRe = /\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMPORARY\s+)?TABLE\b[^\(]*\(/i;
+  const m = ctRe.exec(sql);
+  if (!m) return null;
+  const openIdx = m.index + m[0].length - 1;   // position of '('
+  // Find matching close paren, respecting nesting.
+  let depth = 0, closeIdx = -1;
+  let inStr = null;
+  for (let i = openIdx; i < sql.length; i++) {
+    const c = sql[i];
+    if (inStr) {
+      if (c === inStr && sql[i - 1] !== '\\') inStr = null;
+      continue;
+    }
+    if (c === "'" || c === '"' || c === '`') { inStr = c; continue; }
+    if (c === '(') depth++;
+    else if (c === ')') {
+      depth--;
+      if (depth === 0) { closeIdx = i; break; }
+    }
+  }
+  if (closeIdx < 0) return null;
+
+  const before = sql.slice(0, openIdx + 1);
+  const inner  = sql.slice(openIdx + 1, closeIdx);
+  const after  = sql.slice(closeIdx);
+
+  // Split inner on top-level commas (ignore commas inside parens/strings).
+  const entries = splitTopLevel(inner, ',').map(s => s.trim()).filter(Boolean);
+  if (!entries.length) return null;
+
+  // Tokenise each entry → [name, type, rest]. Skip table-level constraints
+  // (PRIMARY KEY, KEY, CONSTRAINT, ...) — leave them verbatim.
+  const CONSTRAINT_PREFIXES = /^(primary\s+key|key|unique(\s+key)?|constraint|foreign\s+key|check|index|fulltext|spatial|partition\s+by|order\s+by|pk\s*\()/i;
+  const parts = entries.map(e => {
+    if (CONSTRAINT_PREFIXES.test(e)) return { kind: 'raw', text: e };
+    return { kind: 'col', ...splitColumn(e) };
+  });
+
+  // Figure out column widths (only `col` rows contribute).
+  const cols = parts.filter(p => p.kind === 'col');
+  const nameW = Math.max(0, ...cols.map(c => c.name.length));
+  const typeW = Math.max(0, ...cols.map(c => c.type.length));
+
+  const pad = (s, n) => s + ' '.repeat(Math.max(0, n - s.length));
+  const lines = parts.map(p => {
+    if (p.kind === 'raw') return '    ' + p.text;
+    const rest = p.rest ? ' ' + p.rest : '';
+    return '    ' + pad(p.name, nameW) + ' ' + pad(p.type, typeW) + rest;
+  });
+
+  const reformatted = '\n' + lines.join(',\n') + '\n';
+  return before + reformatted + after;
+}
+
+function splitTopLevel(s, sep) {
+  const out = [];
+  let depth = 0, start = 0, inStr = null;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (inStr) {
+      if (c === inStr && s[i - 1] !== '\\') inStr = null;
+      continue;
+    }
+    if (c === "'" || c === '"' || c === '`') { inStr = c; continue; }
+    if (c === '(') depth++;
+    else if (c === ')') depth--;
+    else if (depth === 0 && c === sep) {
+      out.push(s.slice(start, i));
+      start = i + 1;
+    }
+  }
+  out.push(s.slice(start));
+  return out;
+}
+
+function splitColumn(entry) {
+  // name  type  rest
+  // "type" may include parenthesised params like Decimal(10, 2) or Nullable(Int32).
+  const s = entry.trim();
+  const m = /^(\S+)\s+(.*)$/.exec(s);
+  if (!m) return { name: s, type: '', rest: '' };
+  const name = m[1];
+  const tail = m[2];
+
+  // Collect type: one or more words until we hit a space (respecting parens).
+  let i = 0, depth = 0;
+  while (i < tail.length) {
+    const c = tail[i];
+    if (c === '(') depth++;
+    else if (c === ')') depth--;
+    else if (c === ' ' && depth === 0) break;
+    i++;
+  }
+  const type = tail.slice(0, i);
+  const rest = tail.slice(i).trim();
+  return { name, type, rest };
 }
 
 function el(tag, opts = {}) {
