@@ -1,4 +1,5 @@
 import { whisperApi, onWhisperEvent } from './whisper-api.js';
+import { gemmaApi } from './gemma-api.js';
 import { openSettingsModal } from './whisper-settings.js';
 
 export async function initTab(container) {
@@ -355,6 +356,29 @@ export async function initTab(container) {
     actions.appendChild(btn('📋 Copy', async () => { await whisperApi.injectText(textarea.value, 'copy'); toast('Скопировано'); }));
     actions.appendChild(btn('⎘ Paste', async () => { await whisperApi.injectText(textarea.value, 'paste'); toast('Вставлено'); }));
     actions.appendChild(btn('Type', async () => { await whisperApi.injectText(textarea.value, 'type'); toast('Напечатано'); }));
+    // Gemma post-processing: rewrite current textarea contents in place.
+    // The first run warms the llama-server sidecar (~30-60s on CPU), later
+    // runs reuse it. Error if no model installed — user is nudged to Settings.
+    const ppBtn = btn('✨ Post-process', async () => {
+      const src = textarea.value.trim();
+      if (!src) { toast('Nothing to post-process', { kind: 'warn' }); return; }
+      const origLabel = ppBtn.textContent;
+      ppBtn.textContent = '✨ Processing…';
+      ppBtn.disabled = true;
+      ppBtn.style.opacity = '0.6';
+      try {
+        const cleaned = await gemmaApi.postprocess(src);
+        textarea.value = cleaned;
+        toast('Post-processed');
+      } catch (e) {
+        toast(`Post-process failed: ${e}`, { kind: 'error' });
+      } finally {
+        ppBtn.textContent = origLabel;
+        ppBtn.disabled = false;
+        ppBtn.style.opacity = '1';
+      }
+    });
+    actions.appendChild(ppBtn);
     actions.appendChild(btn('🗑 Delete', async () => {
       if (!confirm('Удалить эту запись?')) return;
       await whisperApi.deleteHistory(h.id);

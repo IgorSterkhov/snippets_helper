@@ -1,5 +1,37 @@
 # Changelog
 
+## v1.3.19 (2026-04-24)
+
+**New: Bundled local LLM post-processing for Whisper transcripts (Gemma).**
+
+- Second sidecar — `llama-server` from llama.cpp — built from source in CI
+  (static link, CPU-only, no CUDA dep). Lives alongside `whisper-server` in
+  Tauri `externalBin`. Pinned at `LLAMA_CPP_VERSION = b8920`.
+- New Rust module `src/gemma/` mirroring `src/whisper/`:
+  - `catalog.rs` — two models from HuggingFace ggml-org: `gemma-3-1b-it-Q4_K_M`
+    (~800 MB, fast) and `gemma-3-4b-it-Q4_K_M` (~2.5 GB, recommended).
+  - `models.rs` — download with progress, SHA256 verify.
+  - `server.rs` — spawn llama-server, TCP-probe readiness (180 s timeout
+    because mmap+load of 4 B weights is slow on cold CPU), `/completion`
+    endpoint.
+  - `postprocess.rs` — Gemma-3 chat-format prompt ("Исправь пунктуацию и
+    опечатки в voice-транскрипте. Не меняй смысл."), output sanitizer
+    (char-based, not byte-based — CLAUDE.md §10).
+  - `service.rs` — lazy warm, 5-min idle unload, `set_default_model`.
+- New commands: `gemma_list_catalog`, `gemma_list_models`,
+  `gemma_install_model`, `gemma_delete_model`, `gemma_set_default_model`,
+  `gemma_postprocess`, `gemma_unload_now`.
+- Shutdown on `RunEvent::Exit` + NSIS pre-install `taskkill /IM
+  llama-server.exe` so auto-updater can replace the sidecar on Windows.
+- UI:
+  - Settings → new "Gemma post-processing" block with installed models,
+    per-model Install / Delete / Make default, inline progress.
+  - Whisper tab detail view gets **✨ Post-process** button next to Copy /
+    Paste / Type / Delete. Click rewrites the textarea in place, first run
+    warms the server (~30-60 s on CPU), later runs reuse it.
+- Phase 2 (auto-postprocess toggle in header + overlay, model dropdown in
+  header, custom prompt in Settings) is a follow-up.
+
 ## 1.3.18 OTA patches
 
 - **f-20260424-1** — Whisper tab header: the active-model label is now a

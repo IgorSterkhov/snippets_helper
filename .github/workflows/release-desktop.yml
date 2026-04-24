@@ -79,6 +79,34 @@ jobs:
           cp "$BIN_SRC" "$BIN_DST"
           chmod +x "$BIN_DST" || true
 
+      - name: Build llama-server from source (for Gemma post-processing)
+        if: startsWith(github.ref, 'refs/tags/v') && (runner.os == 'macOS' || runner.os == 'Windows')
+        shell: bash
+        run: |
+          VERSION=$(cat desktop-rust/LLAMA_CPP_VERSION)
+          git clone --depth 1 --branch "${VERSION}" https://github.com/ggml-org/llama.cpp /tmp/lcpp
+          cd /tmp/lcpp
+          # Target name in llama.cpp is `llama-server` (examples/server → CMake
+          # target). Same rationale as whisper.cpp for BUILD_SHARED_LIBS=OFF:
+          # statically link ggml + llama into the server binary so we don't have
+          # to ship separate .dll/.dylib companions via externalBin.
+          # CURL OFF: avoid libcurl dep on Windows (we don't use server's model
+          # download feature — we download models ourselves from the frontend).
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            cmake -B build -DLLAMA_BUILD_SERVER=ON -DLLAMA_CURL=OFF -DGGML_METAL=ON -DBUILD_SHARED_LIBS=OFF
+            cmake --build build -j --target llama-server
+            BIN_SRC=build/bin/llama-server
+            BIN_DST="$GITHUB_WORKSPACE/desktop-rust/src-tauri/binaries/llama-server-aarch64-apple-darwin"
+          else
+            cmake -B build -DLLAMA_BUILD_SERVER=ON -DLLAMA_CURL=OFF -DBUILD_SHARED_LIBS=OFF
+            cmake --build build --config Release -j --target llama-server
+            BIN_SRC=build/bin/Release/llama-server.exe
+            BIN_DST="$GITHUB_WORKSPACE/desktop-rust/src-tauri/binaries/llama-server-x86_64-pc-windows-msvc.exe"
+          fi
+          mkdir -p "$(dirname "$BIN_DST")"
+          cp "$BIN_SRC" "$BIN_DST"
+          chmod +x "$BIN_DST" || true
+
       - name: Build and release
         uses: tauri-apps/tauri-action@v0
         env:

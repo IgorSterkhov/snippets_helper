@@ -10,6 +10,7 @@ mod hotkey;
 mod sync;
 mod autostart;
 mod whisper;
+mod gemma;
 
 fn write_log(msg: &str) {
     let log_path = dirs::data_dir()
@@ -272,10 +273,20 @@ pub fn run() {
             commands::whisper::whisper_list_mics,
             commands::whisper::whisper_gpu_info,
             commands::whisper::whisper_detect_whisper_bin,
+            // Gemma post-processing
+            commands::gemma::gemma_list_catalog,
+            commands::gemma::gemma_list_models,
+            commands::gemma::gemma_install_model,
+            commands::gemma::gemma_delete_model,
+            commands::gemma::gemma_set_default_model,
+            commands::gemma::gemma_postprocess,
+            commands::gemma::gemma_unload_now,
         ])
         .setup(|app| {
             let svc = crate::whisper::service::WhisperService::new(app.handle().clone());
             app.manage(svc);
+            let gsvc = crate::gemma::service::GemmaService::new(app.handle().clone());
+            app.manage(gsvc);
 
             tray::create_tray(app)?;
 
@@ -386,6 +397,11 @@ pub fn run() {
                     tauri::async_runtime::block_on(async {
                         svc.unload_now().await;
                     });
+                }
+                // llama-server sidecar too — same reason (Windows installer
+                // file-lock on auto-update).
+                if let Some(gsvc) = app_handle.try_state::<crate::gemma::service::GemmaService>() {
+                    gsvc.shutdown_blocking();
                 }
             }
         });

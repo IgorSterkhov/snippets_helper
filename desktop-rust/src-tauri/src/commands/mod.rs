@@ -12,3 +12,4 @@ pub mod vps;
 pub mod ota;
 pub mod tasks;
 pub mod whisper;
+pub mod gemma;

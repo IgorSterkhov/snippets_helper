@@ -17,6 +17,8 @@
   ; exit codes — the image may not be running (exit code 128), which is fine.
   nsExec::Exec 'taskkill /F /T /IM whisper-server.exe'
   Pop $0
+  nsExec::Exec 'taskkill /F /T /IM llama-server.exe'
+  Pop $0
   nsExec::Exec 'taskkill /F /T /IM keyboard-helper.exe'
   Pop $0
   ; Give Windows a moment to release file locks.
@@ -26,6 +28,8 @@
 !macro NSIS_HOOK_PREUNINSTALL
   DetailPrint "Stopping running Keyboard Helper processes..."
   nsExec::Exec 'taskkill /F /T /IM whisper-server.exe'
+  Pop $0
+  nsExec::Exec 'taskkill /F /T /IM llama-server.exe'
   Pop $0
   nsExec::Exec 'taskkill /F /T /IM keyboard-helper.exe'
   Pop $0

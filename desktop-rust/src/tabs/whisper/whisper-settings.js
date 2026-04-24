@@ -1,4 +1,5 @@
 import { whisperApi } from './whisper-api.js';
+import { gemmaApi, onGemmaEvent } from './gemma-api.js';
 
 export async function openSettingsModal() {
   const backdrop = document.createElement('div');
@@ -48,6 +49,11 @@ export async function openSettingsModal() {
   content.appendChild(section('Метод вставки', injectRadio(s['whisper.inject_method'] || 'paste')));
   content.appendChild(section('Idle timeout (сек)', numInput('idle_timeout_sec', s['whisper.idle_timeout_sec'] || '300', 60, 1800, 30)));
   content.appendChild(section('Постобработка', checkbox('postprocess_rules', (s['whisper.postprocess_rules'] || 'true') === 'true', 'Лёгкие правила (убрать «эээ», заглавная буква)')));
+  content.appendChild(await gemmaBlock(() => {
+    // Reload settings modal to reflect the new installed Gemma model list.
+    backdrop.remove();
+    openSettingsModal();
+  }));
   content.appendChild(llmBlock(s));
   content.appendChild(section('Overlay', overlayBlock(s)));
 
@@ -347,3 +353,149 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 }
 function escapeAttr(s) { return escapeHtml(s); }
+
+// ── Gemma post-processing (local LLM via bundled llama-server) ──
+//
+// Mirrors modelsBlock / openCatalogPicker for whisper. Separate functions so
+// the two catalogs / model dirs don't get tangled.
+async function gemmaBlock(onChange) {
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'display:flex;flex-direction:column;gap:6px;padding:10px;border:1px dashed var(--border,#30363d);border-radius:4px';
+
+  const header = document.createElement('div');
+  header.style.cssText = 'color:var(--text-muted,#8b949e);font-size:11px;text-transform:uppercase;letter-spacing:.5px';
+  header.textContent = 'Gemma post-processing (local LLM)';
+  wrap.appendChild(header);
+
+  const desc = document.createElement('div');
+  desc.textContent = 'Локальный LLM для чистки голосовых транскриптов. Bundled llama-server + скачиваемая Gemma-модель. Работает без интернета после установки модели.';
+  desc.style.cssText = 'font-size:11px;color:var(--text-muted,#8b949e)';
+  wrap.appendChild(desc);
+
+  let installed = [];
+  try { installed = await gemmaApi.listModels(); } catch (e) { console.error('gemma list', e); }
+
+  if (installed.length === 0) {
+    const empty = document.createElement('div');
+    empty.textContent = 'Модели не установлены.';
+    empty.style.cssText = 'font-size:12px;color:var(--text-muted,#8b949e)';
+    wrap.appendChild(empty);
+  } else {
+    for (const m of installed) {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:4px 0';
+      const name = document.createElement('span');
+      name.textContent = m.display_name + (m.is_default ? '  · default' : '');
+      name.style.cssText = 'flex:1;font-size:12px';
+      row.appendChild(name);
+      const size = document.createElement('span');
+      size.textContent = formatBytes(m.size_bytes);
+      size.style.cssText = 'color:var(--text-muted,#8b949e);font-size:11px';
+      row.appendChild(size);
+      if (!m.is_default) {
+        const setDef = document.createElement('button');
+        setDef.textContent = 'Make default';
+        setDef.style.cssText = 'padding:3px 8px;background:transparent;border:1px solid var(--border,#30363d);color:var(--text,#c9d1d9);border-radius:3px;cursor:pointer;font-size:11px';
+        setDef.onclick = async () => {
+          try {
+            await gemmaApi.setDefaultModel(m.name);
+            await gemmaApi.unloadNow();
+            onChange();
+          } catch (e) { alert('setDefault failed: ' + e); }
+        };
+        row.appendChild(setDef);
+      }
+      const del = document.createElement('button');
+      del.textContent = 'Удалить';
+      del.style.cssText = 'padding:3px 8px;background:transparent;border:1px solid var(--border,#30363d);color:var(--red,#f85149);border-radius:3px;cursor:pointer;font-size:11px';
+      del.onclick = async () => {
+        if (!confirm(`Удалить ${m.display_name}? Файл будет стерт с диска.`)) return;
+        try {
+          await gemmaApi.deleteModel(m.name);
+          onChange();
+        } catch (e) { alert('Delete failed: ' + e); }
+      };
+      row.appendChild(del);
+      wrap.appendChild(row);
+    }
+  }
+
+  const installBtn = document.createElement('button');
+  installBtn.textContent = '+ Установить Gemma-модель…';
+  installBtn.style.cssText = 'margin-top:6px;padding:6px 10px;background:var(--accent,#388bfd);color:#fff;border:0;border-radius:4px;cursor:pointer;font-size:12px';
+  installBtn.onclick = () => openGemmaCatalogPicker(installed, onChange);
+  wrap.appendChild(installBtn);
+
+  return wrap;
+}
+
+async function openGemmaCatalogPicker(installedModels, onChange) {
+  const installedNames = new Set(installedModels.map(m => m.name));
+  const catalog = await gemmaApi.listCatalog();
+  const available = catalog.filter(m => !installedNames.has(m.name));
+
+  const picker = document.createElement('div');
+  picker.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1001;display:flex;align-items:center;justify-content:center';
+  const panel = document.createElement('div');
+  panel.style.cssText = 'background:var(--bg,#0d1117);border:1px solid var(--border,#30363d);border-radius:8px;width:min(520px,92vw);max-height:85vh;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:10px;color:var(--text,#c9d1d9)';
+  picker.appendChild(panel);
+  document.body.appendChild(picker);
+
+  panel.innerHTML = `
+    <div style="display:flex;align-items:center">
+      <h3 style="margin:0;font-size:14px">Установить Gemma-модель</h3>
+      <button id="gcpx" style="margin-left:auto;background:transparent;border:0;color:var(--text-muted,#8b949e);font-size:16px;cursor:pointer">✕</button>
+    </div>
+  `;
+  panel.querySelector('#gcpx').onclick = () => picker.remove();
+
+  if (available.length === 0) {
+    const done = document.createElement('div');
+    done.textContent = 'Все Gemma-модели уже установлены.';
+    done.style.cssText = 'color:var(--text-muted,#8b949e);font-size:12px;padding:10px 0';
+    panel.appendChild(done);
+    return;
+  }
+
+  for (const meta of available) {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px;border:1px solid var(--border,#30363d);border-radius:4px';
+    const info = document.createElement('div');
+    info.style.cssText = 'flex:1;font-size:12px';
+    const stars = '★'.repeat(meta.ru_quality) + '☆'.repeat(5 - meta.ru_quality);
+    info.innerHTML = `<b>${escapeHtml(meta.display_name)}</b> · ${formatBytes(meta.size_bytes)} · RU ${stars}<br><span style="color:var(--text-muted,#8b949e)">${escapeHtml(meta.notes)}</span>`;
+    row.appendChild(info);
+    const btn = document.createElement('button');
+    btn.textContent = 'Install';
+    btn.style.cssText = 'padding:6px 12px;background:var(--accent,#388bfd);color:#fff;border:0;border-radius:4px;cursor:pointer;font-size:12px';
+    btn.onclick = async () => {
+      row.querySelectorAll('button').forEach(b => b.disabled = true);
+      const bar = document.createElement('div');
+      bar.style.cssText = 'height:3px;background:var(--border,#30363d);border-radius:2px;overflow:hidden;margin-top:6px';
+      const fill = document.createElement('div');
+      fill.style.cssText = 'height:100%;width:0%;background:var(--accent,#388bfd);transition:width 200ms linear';
+      bar.appendChild(fill);
+      info.appendChild(bar);
+
+      const unlisten = await onGemmaEvent('modelDownload', (p) => {
+        if (p.model !== meta.name) return;
+        if (p.bytes_total > 0) fill.style.width = Math.min(100, p.bytes_done / p.bytes_total * 100) + '%';
+        if (p.finished && p.error) {
+          info.innerHTML += `<div style="color:var(--red,#f85149);margin-top:4px">Ошибка: ${escapeHtml(p.error)}</div>`;
+        }
+      });
+      try {
+        await gemmaApi.installModel(meta.name);
+        picker.remove();
+        onChange();
+      } catch (e) {
+        info.innerHTML += `<div style="color:var(--red,#f85149);margin-top:4px">Install failed: ${escapeHtml(String(e))}</div>`;
+        row.querySelectorAll('button').forEach(b => b.disabled = false);
+      } finally {
+        if (typeof unlisten === 'function') unlisten();
+      }
+    };
+    row.appendChild(btn);
+    panel.appendChild(row);
+  }
+}
