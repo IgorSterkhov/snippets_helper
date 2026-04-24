@@ -51,11 +51,21 @@ export async function openSettingsModal() {
   content.appendChild(llmBlock(s));
   content.appendChild(section('Overlay', overlayBlock(s)));
 
+  const prevDefault = (models.find(m => m.is_default) || {}).name || null;
+
   modal.querySelector('#close-btn').onclick = () => backdrop.remove();
   modal.querySelector('#save-btn').onclick = async () => {
     const formValues = collect(modal);
     for (const [key, value] of Object.entries(formValues)) {
       await whisperApi.setSetting(key, value);
+    }
+    // If default model changed: flip the is_default flag in the whisper_models
+    // table (which is what backend reads), and unload any already-warm server
+    // so the next record uses the new model.
+    const newDefault = formValues['whisper.default_model'];
+    if (newDefault && newDefault !== prevDefault) {
+      try { await whisperApi.setDefaultModel(newDefault); } catch (e) { console.error('setDefaultModel', e); }
+      try { await whisperApi.unloadNow(); } catch (e) { console.error('unloadNow', e); }
     }
     backdrop.remove();
     window.dispatchEvent(new CustomEvent('whisper:settings-changed'));

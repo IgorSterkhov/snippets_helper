@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.3.18 (2026-04-24)
+
+**Fix: "Model by default" selector in Settings actually switches the model.**
+
+- Settings modal saved the pick into `app_settings.whisper.default_model`
+  (key/value), but the backend reads the default from the `whisper_models`
+  table's `is_default` column — two different places. Result: user
+  changed default to `small`, but whisper-server kept transcribing with
+  the previously-warmed `large-v3-q5_0`.
+- Save now additionally calls `whisperApi.setDefaultModel(name)`
+  (transactional flip of `is_default` for all rows) and
+  `whisperApi.unloadNow()` so the next record warms up the newly
+  selected model. Header label refreshes via a new
+  `whisper:settings-changed` listener.
+
 ## v1.3.17 (2026-04-24)
 
 **Fix: cmd window flicker during transcribe on Windows.**

@@ -121,9 +121,26 @@ export async function initTab(container) {
 
   const offState = await onWhisperEvent('stateChanged', (p) => {
     setChip(p.state);
-    if (p.model) modelLabel.textContent = p.model;
+    if (p.model) {
+      modelLabel.textContent = p.model;
+    } else if (p.state === 'idle') {
+      // Clear stale model name when service is fully idle (post-unload).
+      refreshDefaultModelLabel();
+    }
   });
   state.cleanup.push(offState);
+
+  async function refreshDefaultModelLabel() {
+    try {
+      const ms = await whisperApi.listModels();
+      const d = ms.find(m => m.is_default);
+      modelLabel.textContent = d ? d.display_name : '';
+    } catch (e) { /* ignore */ }
+  }
+
+  const onSettingsChanged = () => { refreshDefaultModelLabel(); };
+  window.addEventListener('whisper:settings-changed', onSettingsChanged);
+  state.cleanup.push(() => window.removeEventListener('whisper:settings-changed', onSettingsChanged));
 
   const offTranscribed = await onWhisperEvent('transcribed', async () => {
     await reloadHistory();
