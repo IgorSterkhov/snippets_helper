@@ -155,11 +155,20 @@ impl Recorder {
     }
 
     /// Consume the recorder and return a WAV byte buffer (16kHz mono i16 PCM).
+    ///
+    /// We explicitly destructure so the stream is dropped (stopping the
+    /// cpal callback thread) BEFORE we touch the buffer. Even then the
+    /// callback thread may own an extra `Arc` clone for a few ms, so we
+    /// don't use `Arc::try_unwrap` — instead we lock the mutex and clone
+    /// the samples out. Extra copy of the PCM vector is cheap next to the
+    /// whisper inference that follows.
     pub fn finish_wav(self) -> Result<Vec<u8>, String> {
-        let samples = Arc::try_unwrap(self.buffer)
-            .map_err(|_| "buffer still shared".to_string())?
-            .into_inner()
-            .map_err(|e| format!("mutex poisoned: {e}"))?;
+        let Self { _stream, buffer, .. } = self;
+        drop(_stream);
+        let samples = buffer
+            .lock()
+            .map_err(|e| format!("mutex poisoned: {e}"))?
+            .clone();
         encode_wav(&samples)
     }
 }

@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.3.14 (2026-04-24)
+
+**Fix: "Whisper error: buffer still shared" on Stop.**
+
+- `Recorder::finish_wav` used `Arc::try_unwrap` on the PCM buffer, which
+  fails if any other `Arc` clone still exists — and the cpal callback
+  thread holds one for a few ms even after the stream is dropped,
+  causing the error immediately when the user presses Stop.
+- Replaced try_unwrap with `drop(stream) + buffer.lock().clone()`:
+  extra Vec copy is cheap, no race with callback shutdown.
+
 ## v1.3.13 (2026-04-24)
 
 **NSIS installer: taskkill on pre-install to free locked .exe files.**
