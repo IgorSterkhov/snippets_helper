@@ -4,9 +4,13 @@
   <meta charset="UTF-8">
   <title>Whisper</title>
   <style>
-    html, body { margin:0; padding:0; height:100%; background:transparent; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; color:#c9d1d9; overflow:hidden; user-select:none; -webkit-app-region:drag; }
+    html, body { margin:0; padding:0; height:100%; background:transparent; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; color:#c9d1d9; overflow:hidden; user-select:none; }
     .card { box-sizing:border-box; width:100%; height:100%; background:#161b22; border:1px solid #30363d; border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,.4); padding:12px; display:flex; flex-direction:column; gap:8px; }
+    /* Only the top row is a drag-region; the rest stays clickable.
+       Previous version set `-webkit-app-region:drag` on <body>, which in
+       Tauri 2 / WebView2 swallowed clicks on nested buttons on Windows. */
     .row { display:flex; align-items:center; gap:8px; }
+    .row.drag-handle { cursor:move; }
     .dot { width:8px; height:8px; border-radius:50%; background:#8b949e; }
     .dot.rec { background:#f85149; animation:pulse 1s infinite; }
     @keyframes pulse { 0% { opacity:1 } 50% { opacity:.4 } 100% { opacity:1 } }
@@ -24,10 +28,10 @@
 </head>
 <body>
   <div class="card">
-    <div class="row">
-      <span id="dot" class="dot"></span>
-      <span id="title" class="title">Whisper</span>
-      <span id="timer" class="timer"></span>
+    <div class="row drag-handle" data-tauri-drag-region>
+      <span id="dot" class="dot" data-tauri-drag-region></span>
+      <span id="title" class="title" data-tauri-drag-region>Whisper</span>
+      <span id="timer" class="timer" data-tauri-drag-region></span>
     </div>
     <div id="body">
       <div id="bars" class="bars" style="display:none">

@@ -20,6 +20,7 @@ export async function initTab(container) {
     <span id="state-chip" style="padding:2px 8px;background:var(--bg,#0d1117);border-radius:10px;font-size:11px;color:var(--text-muted,#8b949e)">○ idle</span>
     <select id="model-select" title="Active model (switching unloads the warmed server)" style="margin-left:8px;padding:3px 6px;background:var(--bg,#0d1117);color:var(--text,#c9d1d9);border:1px solid var(--border,#30363d);border-radius:4px;font-size:11px;cursor:pointer;max-width:240px"></select>
     <span style="flex:1"></span>
+    <button id="cancel-btn" title="Cancel without transcribing (Esc)" style="padding:5px 10px;background:transparent;color:var(--red,#f85149);border:1px solid var(--red,#f85149);border-radius:4px;cursor:pointer;font-weight:500;display:none">✕ Cancel</button>
     <button id="record-btn" style="padding:5px 14px;background:var(--accent,#388bfd);color:#fff;border:0;border-radius:4px;cursor:pointer;font-weight:600">🎤 Record</button>
     <button id="settings-btn" style="padding:5px 10px;background:transparent;color:var(--text-muted,#8b949e);border:1px solid var(--border,#30363d);border-radius:4px;cursor:pointer">⚙</button>
   `;
@@ -48,6 +49,7 @@ export async function initTab(container) {
   const chip = header.querySelector('#state-chip');
   const modelSelect = header.querySelector('#model-select');
   const recordBtn = header.querySelector('#record-btn');
+  const cancelBtn = header.querySelector('#cancel-btn');
 
   // Cached last-committed default name. Used to revert the dropdown if the
   // backend rejects the change. We also use it to suppress the change
@@ -108,6 +110,10 @@ export async function initTab(container) {
     modelSelect.disabled = lock;
     modelSelect.style.opacity = lock ? '0.55' : '1';
     modelSelect.style.cursor = lock ? 'not-allowed' : 'pointer';
+
+    // Show Cancel while the service is in any active state; it drops the
+    // in-flight audio and any transcription pending for it.
+    cancelBtn.style.display = lock ? '' : 'none';
   }
 
   recordBtn.onclick = async () => {
@@ -123,17 +129,32 @@ export async function initTab(container) {
       alert(`Whisper error: ${e}`);
     }
   };
+  cancelBtn.onclick = async () => {
+    try {
+      await whisperApi.cancelRecording();
+      toast('Cancelled');
+    } catch (e) {
+      toast(`Cancel failed: ${e}`, { kind: 'error' });
+    }
+  };
   header.querySelector('#settings-btn').onclick = () => openSettingsModal();
 
-  // Ctrl+Space as in-tab shortcut (different from global hotkey)
+  // Ctrl+Space as in-tab shortcut (different from global hotkey).
+  // Esc during active states cancels without saving — registered on
+  // capture phase so we beat main.js's Esc → hide_and_sync handler.
   const onKey = (e) => {
     if (e.ctrlKey && e.code === 'Space' && !e.repeat) {
       e.preventDefault();
       recordBtn.click();
+    } else if (e.key === 'Escape' && !e.repeat && cancelBtn.style.display !== 'none') {
+      if (document.querySelector('.modal-overlay')) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      cancelBtn.click();
     }
   };
-  document.addEventListener('keydown', onKey);
-  state.cleanup.push(() => document.removeEventListener('keydown', onKey));
+  document.addEventListener('keydown', onKey, true);
+  state.cleanup.push(() => document.removeEventListener('keydown', onKey, true));
 
   const offState = await onWhisperEvent('stateChanged', (p) => {
     setChip(p.state);
@@ -272,13 +293,37 @@ export async function initTab(container) {
   function renderHistoryRow(h, onClick) {
     const row = document.createElement('div');
     row.dataset.id = String(h.id);
-    row.style.cssText = 'padding:8px 10px;border-bottom:1px solid var(--border,#30363d);cursor:pointer';
+    row.style.cssText = 'padding:8px 10px;border-bottom:1px solid var(--border,#30363d);cursor:pointer;position:relative';
     const when = formatRelativeTime(h.created_at);
+    const text = (h.text || '').trim();
+    const isBlank = text === '' || text === '[BLANK_AUDIO]';
+    const textStyle = isBlank
+      ? 'color:var(--text-muted,#8b949e);font-size:12px;font-style:italic;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'
+      : 'color:var(--text,#c9d1d9);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+    const display = isBlank ? '(empty / no speech)' : escapeHtml(h.text.slice(0, 120));
+    const words = text.split(/\s+/).filter(Boolean).length;
     row.innerHTML = `
-      <div style="color:var(--text,#c9d1d9);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml((h.text || '').slice(0, 120))}</div>
-      <div style="color:var(--text-muted,#8b949e);font-size:10px;margin-top:2px">${when} · ${h.model_name} · ${(h.text || '').trim().split(/\s+/).filter(Boolean).length} words</div>
+      <div style="padding-right:22px">
+        <div style="${textStyle}">${display}</div>
+        <div style="color:var(--text-muted,#8b949e);font-size:10px;margin-top:2px">${when} · ${h.model_name} · ${words} words</div>
+      </div>
+      <button class="row-del" title="Delete" style="position:absolute;top:6px;right:6px;width:22px;height:22px;padding:0;background:transparent;border:0;color:var(--text-muted,#8b949e);cursor:pointer;font-size:14px;line-height:1;opacity:0;transition:opacity 120ms ease">🗑</button>
     `;
-    row.onclick = () => onClick(h.id);
+    row.onmouseenter = () => { row.querySelector('.row-del').style.opacity = '0.75'; };
+    row.onmouseleave = () => { row.querySelector('.row-del').style.opacity = '0'; };
+    row.querySelector('.row-del').onclick = async (e) => {
+      e.stopPropagation();
+      try {
+        await whisperApi.deleteHistory(h.id);
+        await reloadHistory();
+      } catch (err) {
+        toast(`Delete failed: ${err}`, { kind: 'error' });
+      }
+    };
+    row.onclick = (e) => {
+      if (e.target.closest('.row-del')) return;
+      onClick(h.id);
+    };
     return row;
   }
 

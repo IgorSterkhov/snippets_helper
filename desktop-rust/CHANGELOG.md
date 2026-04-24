@@ -9,6 +9,21 @@
   transcribing / unloading to avoid killing an in-flight action. Stays in
   sync with the Settings modal via the shared `whisper:settings-changed`
   event.
+- **f-20260424-2** — Whisper UX trio:
+  - **Overlay was click-dead** on Windows: the body had
+    `-webkit-app-region:drag`, which Tauri 2 / WebView2 treats as a
+    drag-region that swallows mouse clicks on nested elements. Stop and
+    ✕ buttons never received the click. Replaced with
+    `data-tauri-drag-region` on the title row only (Tauri 2 recommended
+    pattern); the rest of the overlay is now clickable.
+  - **Cancel button** in the main-window header next to Record. Appears
+    while the service is warming / recording / transcribing / unloading;
+    clicking drops the in-flight audio (no transcript saved). Esc works
+    as a shortcut for Cancel when the tab is focused.
+  - **Inline delete per history row** — 🗑 button on hover in the left
+    list. Empty / `[BLANK_AUDIO]` results are shown italic-grey with
+    `(empty / no speech)` placeholder so they're easy to spot and
+    delete.
 
 ## v1.3.18 (2026-04-24)
 
