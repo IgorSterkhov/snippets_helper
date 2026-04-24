@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.3.12 (2026-04-24)
+
+**Fix: Whisper readiness detection via TCP probe (was stdout-parsing).**
+
+- Root cause of `timeout waiting for whisper-server`: whisper-server
+  v1.7.x prints its "listening" banner via `printf` to stdout. On
+  Windows, stdout piped to a parent process is **full-buffered** (not
+  line-buffered), so the banner sits in the C runtime buffer forever —
+  our parent never sees it even though the server is healthy and
+  already accepting connections. Manual run from a terminal "works"
+  only because tty makes stdout line-buffered.
+- Replaced stdout/stderr string-match with an async TCP probe: try
+  `TcpStream::connect(127.0.0.1:<port>)` every 200ms; succeeds the
+  moment server.cpp's `svr.listen_after_bind()` returns, which is right
+  after the `printf`. Independent of stdio buffering.
+- `stderr`/`stdout` are still drained into `eprintln!` for logs, but no
+  longer drive readiness.
+
 ## v1.3.11 (2026-04-24)
 
 **Whisper spawn timeout + readable error toasts.**

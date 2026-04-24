@@ -2,12 +2,11 @@
 
 use crate::whisper::bin_manager::BinVariant;
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::AppHandle;
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tokio::sync::mpsc;
-use tokio::time::timeout;
 
 pub struct WhisperServer {
     child: CommandChild,
@@ -45,41 +44,29 @@ impl WhisperServer {
 
         let (mut rx, child) = cmd.spawn().map_err(|e| format!("spawn: {e}"))?;
 
-        let (ready_tx, mut ready_rx) = mpsc::channel::<Result<(), String>>(1);
+        // Readiness detection by TCP probe, NOT by stdout parsing:
+        // whisper-server v1.7.x prints "whisper server listening at ..."
+        // via printf to stdout. On Windows, stdout piped to a parent process
+        // is full-buffered (not line-buffered), so the banner stays in the
+        // C runtime buffer until the buffer fills or the process exits —
+        // our parent never sees it even when the server is perfectly healthy.
+        // Connecting to 127.0.0.1:<port> succeeds the moment server.cpp calls
+        // `svr.listen_after_bind()`, which happens *right after* the banner
+        // printf, so the probe is a reliable readiness signal independent
+        // of stdio buffering.
+        let (term_tx, mut term_rx) = mpsc::channel::<String>(1);
         let rx_task = tokio::spawn(async move {
-            let mut ready_sent = false;
-            // Note: whisper-server v1.7.x prints the "listening" banner to
-            // STDOUT via printf (examples/server/server.cpp:1030), not stderr.
-            // Watch both streams so we don't time out on a perfectly-healthy
-            // server.
-            let check_ready = |line: &str| -> bool {
-                line.contains("listening") || line.contains("Listening")
-            };
             while let Some(event) = rx.recv().await {
                 match event {
-                    CommandEvent::Stderr(bytes) => {
+                    CommandEvent::Stderr(bytes) | CommandEvent::Stdout(bytes) => {
                         let line = String::from_utf8_lossy(&bytes);
-                        if !ready_sent && check_ready(&line) {
-                            let _ = ready_tx.send(Ok(())).await;
-                            ready_sent = true;
-                        }
-                        eprintln!("[whisper-server] {}", line.trim_end());
-                    }
-                    CommandEvent::Stdout(bytes) => {
-                        let line = String::from_utf8_lossy(&bytes);
-                        if !ready_sent && check_ready(&line) {
-                            let _ = ready_tx.send(Ok(())).await;
-                            ready_sent = true;
-                        }
                         eprintln!("[whisper-server] {}", line.trim_end());
                     }
                     CommandEvent::Terminated(payload) => {
-                        if !ready_sent {
-                            let _ = ready_tx.send(Err(format!(
-                                "whisper-server exited before ready (code {:?})",
-                                payload.code
-                            ))).await;
-                        }
+                        let _ = term_tx.send(format!(
+                            "whisper-server exited (code {:?})",
+                            payload.code
+                        )).await;
                         return;
                     }
                     _ => {}
@@ -87,14 +74,25 @@ impl WhisperServer {
             }
         });
 
-        // 120s — large models on CPU (no CUDA) can take 30-60s to load +
-        // init before the "listening" banner. Previous 30s timeout was too
-        // tight for ggml-large-v3-q5_0 on Ryzen-class CPUs.
-        match timeout(Duration::from_secs(120), ready_rx.recv()).await {
-            Ok(Some(Ok(()))) => Ok(Self { child, port, _rx_task: rx_task }),
-            Ok(Some(Err(e))) => Err(e),
-            Ok(None) => Err("server channel closed".into()),
-            Err(_) => Err("timeout waiting for whisper-server to become ready".into()),
+        let deadline = Instant::now() + Duration::from_secs(120);
+        loop {
+            // 1) If the child already terminated, stop probing immediately.
+            if let Ok(msg) = term_rx.try_recv() {
+                return Err(msg);
+            }
+            // 2) Try to open a TCP connection to the port.
+            let probe = tokio::time::timeout(
+                Duration::from_millis(500),
+                tokio::net::TcpStream::connect(("127.0.0.1", port)),
+            ).await;
+            if let Ok(Ok(sock)) = probe {
+                drop(sock);
+                return Ok(Self { child, port, _rx_task: rx_task });
+            }
+            if Instant::now() > deadline {
+                return Err("timeout waiting for whisper-server TCP port".into());
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
         }
     }
 
