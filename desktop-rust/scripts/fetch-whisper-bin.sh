@@ -22,7 +22,8 @@ build_from_source() {
     trap 'rm -rf "$tmp"' RETURN
     git clone --depth 1 --branch "${VERSION}" https://github.com/ggml-org/whisper.cpp "$tmp/wcpp"
     cd "$tmp/wcpp"
-    eval "cmake -B build -DWHISPER_BUILD_SERVER=ON -DWHISPER_SDL2=OFF $cmake_flags"
+    # BUILD_SHARED_LIBS=OFF → one static exe (no companion .dll/.dylib).
+    eval "cmake -B build -DWHISPER_BUILD_SERVER=ON -DWHISPER_SDL2=OFF -DBUILD_SHARED_LIBS=OFF $cmake_flags"
     cmake --build build -j --target server
     cp "build/bin/server" "$OUT/$out_name"
     chmod +x "$OUT/$out_name"

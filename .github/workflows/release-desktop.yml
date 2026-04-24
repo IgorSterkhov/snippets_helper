@@ -58,13 +58,19 @@ jobs:
           # `whisper-server`) — see examples/server/CMakeLists.txt which sets
           # TARGET = server. We rename the binary on copy for Tauri's
           # externalBin triple convention.
+          # BUILD_SHARED_LIBS=OFF: statically link ggml + whisper into
+          # server.exe. Without this on Windows the exe fails to start with
+          # "не обнаружена whisper.dll" because only server.exe is copied
+          # into Tauri's externalBin (the companion .dll files stay in the
+          # cmake build dir). macOS same flag for consistency + to avoid
+          # needing to ship .dylib companions.
           if [ "${{ runner.os }}" = "macOS" ]; then
-            cmake -B build -DWHISPER_BUILD_SERVER=ON -DGGML_METAL=ON -DWHISPER_SDL2=OFF
+            cmake -B build -DWHISPER_BUILD_SERVER=ON -DGGML_METAL=ON -DWHISPER_SDL2=OFF -DBUILD_SHARED_LIBS=OFF
             cmake --build build -j --target server
             BIN_SRC=build/bin/server
             BIN_DST="$GITHUB_WORKSPACE/desktop-rust/src-tauri/binaries/whisper-server-aarch64-apple-darwin"
           else
-            cmake -B build -DWHISPER_BUILD_SERVER=ON -DWHISPER_SDL2=OFF
+            cmake -B build -DWHISPER_BUILD_SERVER=ON -DWHISPER_SDL2=OFF -DBUILD_SHARED_LIBS=OFF
             cmake --build build --config Release -j --target server
             BIN_SRC=build/bin/Release/server.exe
             BIN_DST="$GITHUB_WORKSPACE/desktop-rust/src-tauri/binaries/whisper-server-x86_64-pc-windows-msvc.exe"

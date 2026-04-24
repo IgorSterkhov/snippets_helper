@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.3.7 (2026-04-24)
+
+**Hotfix: statically link whisper-server so it runs on Windows.**
+
+- whisper.cpp CMake on Windows defaults `BUILD_SHARED_LIBS=ON`: `server.exe`
+  was linked against `whisper.dll` + `ggml.dll` + `ggml-cpu.dll` sitting next
+  to it in the cmake build dir. Tauri's `externalBin` copies only the
+  renamed `server.exe` into resources, so at runtime Windows showed
+  "не обнаружена whisper.dll" and the server never started.
+- Added `-DBUILD_SHARED_LIBS=OFF` to the CI cmake invocation (and the
+  local `scripts/fetch-whisper-bin.sh` build) on both macOS and Windows,
+  producing a single self-contained binary.
+
 ## v1.3.6 (2026-04-24)
 
 **Hotfix: real SHA256 hashes for all 6 Whisper models.**
