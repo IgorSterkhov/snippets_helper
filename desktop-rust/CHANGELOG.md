@@ -2,6 +2,14 @@
 
 ## 1.3.22 OTA patches
 
+- **f-20260424-4** — Tasks DnD "snap-back" fix: on drop, the card sometimes
+  reverted to its original position even though the insertion line showed
+  the right target. Cause: the commit path read the new id order from the
+  DOM immediately before `reloadTasks()` wiped and rebuilt the list —
+  timing-sensitive. Fixed by deriving the new id order purely from
+  `state.tasks` + the dragged-id + the target-before-id (no DOM read).
+  `commitCardReorder` signature changed accordingly.
+
 - **f-20260424-3** — Tasks module — four fixes:
   - **DnD rewritten.** Old ghost-only mode gave no spatial feedback and
     the commit handler silently no-op'd in some cases. New model: source

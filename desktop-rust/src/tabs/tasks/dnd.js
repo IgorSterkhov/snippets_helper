@@ -248,16 +248,15 @@ async function onPointerUp(e, {
       return;
     }
     if (active.mode === 'reorder') {
-      // Commit: the insertion line shows where the source would land;
-      // physically move the DOM + compute the new id order.
-      const listEl = active.listEl;
-      if (listEl && active.source) {
-        listEl.insertBefore(active.source, active.insertBefore || null);
-      }
-      const orderedIds = Array.from(listEl.querySelectorAll(':scope > .task-card[data-task-id]'))
-        .map(el => Number(el.dataset.taskId));
+      // Pass the source-id + the insertion-target id. Index.js computes
+      // the final order purely from `state.tasks` — no dependency on DOM
+      // state, which avoids the "snap back" we hit when the commit read
+      // orderedIds from DOM while reloadTasks concurrently wiped it.
       const sourceId = Number(active.source.dataset.taskId);
-      await onTaskReorderCommit(sourceId, orderedIds);
+      const beforeId = active.insertBefore
+        ? Number(active.insertBefore.dataset.taskId)
+        : null;
+      await onTaskReorderCommit(sourceId, beforeId);
       return;
     }
   } else {
@@ -319,10 +318,26 @@ export async function commitCardMetaChange(state, taskId, kind, newId) {
   }
 }
 
-export async function commitCardReorder(_state, _draggedId, orderedIds) {
-  if (!orderedIds || orderedIds.length < 2) return;
+export async function commitCardReorder(state, draggedId, beforeId) {
+  // Derive the full new id order from the current `state.tasks` list —
+  // move `draggedId` to be immediately before `beforeId` (or to the end
+  // if beforeId is null).
+  if (!state || !Array.isArray(state.tasks)) return;
+  const ids = state.tasks.map(t => t.id);
+  const from = ids.indexOf(draggedId);
+  if (from === -1) return;
+  ids.splice(from, 1);
+  let to;
+  if (beforeId == null) {
+    to = ids.length;
+  } else {
+    to = ids.indexOf(beforeId);
+    if (to === -1) to = ids.length;
+  }
+  ids.splice(to, 0, draggedId);
+  if (ids.length < 2) return;
   try {
-    await call('reorder_tasks', { ids: orderedIds });
+    await call('reorder_tasks', { ids });
   } catch (e) {
     showToast('Reorder failed: ' + e, 'error');
   }
