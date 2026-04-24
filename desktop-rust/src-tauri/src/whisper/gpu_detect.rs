@@ -34,9 +34,14 @@ pub fn detect() -> HardwareInfo {
 fn detect_cuda() -> (bool, u64, Option<String>) {
     #[cfg(target_os = "windows")]
     {
+        use std::os::windows::process::CommandExt;
         use std::process::Command;
+        // CREATE_NO_WINDOW — prevents cmd-window flicker, same as
+        // commands/repo_search.rs pattern.
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         let out = Command::new("nvidia-smi")
             .args(["--query-gpu=name,memory.total", "--format=csv,noheader,nounits"])
+            .creation_flags(CREATE_NO_WINDOW)
             .output();
         if let Ok(o) = out {
             if o.status.success() {

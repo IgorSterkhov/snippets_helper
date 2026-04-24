@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.3.17 (2026-04-24)
+
+**Fix: cmd window flicker during transcribe on Windows.**
+
+- `metrics.rs` polls `nvidia-smi` every 200ms while transcribing; each
+  invocation opened (and immediately closed) a cmd window, producing a
+  visible flicker throughout the transcribe phase. Added the
+  `CREATE_NO_WINDOW` (0x08000000) flag via `CommandExt::creation_flags`
+  on both `metrics.rs` and the one-shot call in `gpu_detect.rs`. Same
+  pattern `commands/repo_search.rs:22` already uses for git/ripgrep
+  spawns.
+
 ## v1.3.16 (2026-04-24)
 
 **Per-transcription performance metrics.**

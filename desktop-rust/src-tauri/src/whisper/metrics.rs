@@ -65,9 +65,14 @@ impl Sampler {
 fn sample_nvidia_smi() -> (f64, i64) {
     #[cfg(target_os = "windows")]
     {
+        use std::os::windows::process::CommandExt;
         use std::process::Command;
+        // CREATE_NO_WINDOW — otherwise cmd flashes on every 200ms poll while
+        // transcribing, causing user-visible window flicker.
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         let out = Command::new("nvidia-smi")
             .args(["--query-gpu=utilization.gpu,memory.used", "--format=csv,noheader,nounits"])
+            .creation_flags(CREATE_NO_WINDOW)
             .output();
         if let Ok(o) = out {
             if o.status.success() {
