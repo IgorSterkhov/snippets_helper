@@ -130,6 +130,15 @@ export async function initTab(container) {
   });
   state.cleanup.push(offTranscribed);
 
+  const offError = await onWhisperEvent('error', (p) => {
+    // Surface whisper-server spawn failures, inference errors, mic-permission
+    // refusals etc. Previously these went nowhere — users saw only the state
+    // bounce back to idle with no diagnostic.
+    toast(`Whisper: ${p.message || p.code || 'unknown error'}`);
+    console.error('[whisper error]', p);
+  });
+  state.cleanup.push(offError);
+
   const models = await whisperApi.listModels();
   const def = models.find(m => m.is_default);
   if (def) modelLabel.textContent = def.display_name;

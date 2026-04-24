@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.3.9 (2026-04-24)
+
+**Fix: Whisper warm-up stuck at 30s, state bounces back to idle.**
+
+- Root cause: whisper-server v1.7.x prints its "listening" banner to
+  **stdout** (`printf` at `examples/server/server.cpp:1030`), while our
+  `server.rs` only scanned **stderr** for that marker. Server was fine,
+  we just missed the signal → 30-s timeout → we killed the (healthy)
+  server → state snapped back to Idle, silently.
+- Fix: check the "listening" marker in both stdout and stderr streams.
+- Also: the `whisper:error` event was unsubscribed on the UI, so backend
+  spawn failures were invisible to the user. Added a toast subscriber
+  (with error code + message) and a `console.error` fallback.
+
 ## v1.3.8 (2026-04-24)
 
 **Fix: "Whisper error: cannot start from state Warming".**

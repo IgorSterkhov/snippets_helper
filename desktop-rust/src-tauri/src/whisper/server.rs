@@ -48,11 +48,18 @@ impl WhisperServer {
         let (ready_tx, mut ready_rx) = mpsc::channel::<Result<(), String>>(1);
         let rx_task = tokio::spawn(async move {
             let mut ready_sent = false;
+            // Note: whisper-server v1.7.x prints the "listening" banner to
+            // STDOUT via printf (examples/server/server.cpp:1030), not stderr.
+            // Watch both streams so we don't time out on a perfectly-healthy
+            // server.
+            let check_ready = |line: &str| -> bool {
+                line.contains("listening") || line.contains("Listening")
+            };
             while let Some(event) = rx.recv().await {
                 match event {
                     CommandEvent::Stderr(bytes) => {
                         let line = String::from_utf8_lossy(&bytes);
-                        if !ready_sent && (line.contains("listening") || line.contains("Listening")) {
+                        if !ready_sent && check_ready(&line) {
                             let _ = ready_tx.send(Ok(())).await;
                             ready_sent = true;
                         }
@@ -60,6 +67,10 @@ impl WhisperServer {
                     }
                     CommandEvent::Stdout(bytes) => {
                         let line = String::from_utf8_lossy(&bytes);
+                        if !ready_sent && check_ready(&line) {
+                            let _ = ready_tx.send(Ok(())).await;
+                            ready_sent = true;
+                        }
                         eprintln!("[whisper-server] {}", line.trim_end());
                     }
                     CommandEvent::Terminated(payload) => {
