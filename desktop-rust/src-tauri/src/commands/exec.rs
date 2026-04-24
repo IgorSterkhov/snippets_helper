@@ -134,23 +134,24 @@ pub fn list_wsl_distros() -> Result<Vec<String>, String> {
 
 // ── Run / Stop Command ─────────────────────────────────────
 
-/// Escape a command for safe embedding inside `bash -lc '<cmd>'`.
-/// Only single-quotes need protection; we close the quoted chunk, insert
-/// an escaped quote, and reopen.
-fn bash_single_quote_escape(cmd: &str) -> String {
-    cmd.replace('\'', "'\\''")
-}
-
 #[derive(Debug)]
 enum RunDispatch<'a> {
     /// Host shell: cmd /c on Windows, sh -c elsewhere.
     Host { cmd: &'a str },
-    /// WSL wrapper: wsl.exe [-d distro] -- bash -lc '<cmd>'.
+    /// WSL wrapper: wsl.exe [-d distro] -- bash -lc <cmd>.
     /// Windows-only — other platforms error out before reaching here.
     Wsl { cmd: &'a str, distro: Option<&'a str> },
 }
 
 /// Build the argv for `tokio::process::Command`. Returns (program, args).
+///
+/// Note on escaping: the user-supplied `cmd` is passed as a **single argv
+/// element** to `bash -lc` (or `sh -c`), NOT embedded into a shell string.
+/// Shells read the -c argument verbatim as source, so no quoting is
+/// required on our end — bash sees exactly what the user typed. The
+/// earlier `bash_single_quote_escape` broke any command containing `'`
+/// because we were mangling it into `'\''` as if we were interpolating
+/// into `bash -lc '<cmd>'`, which is NOT what Rust's Command::args does.
 fn build_argv<'a>(dispatch: &'a RunDispatch<'a>) -> (&'a str, Vec<String>) {
     match dispatch {
         RunDispatch::Host { cmd } => {
@@ -169,7 +170,7 @@ fn build_argv<'a>(dispatch: &'a RunDispatch<'a>) -> (&'a str, Vec<String>) {
             args.push("--".into());
             args.push("bash".into());
             args.push("-lc".into());
-            args.push(bash_single_quote_escape(cmd));
+            args.push((*cmd).to_string());
             ("wsl.exe", args)
         }
     }
@@ -254,21 +255,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn escape_noop_on_plain_text() {
-        assert_eq!(bash_single_quote_escape("echo hello"), "echo hello");
-    }
-
-    #[test]
-    fn escape_quotes_for_bash_lc() {
-        // Embedding `echo 'hi'` inside bash -lc '<...>' becomes
-        // bash -lc 'echo '\''hi'\'''
-        assert_eq!(
-            bash_single_quote_escape("echo 'hi'"),
-            "echo '\\''hi'\\''"
-        );
-    }
-
-    #[test]
     fn host_argv_is_platform_specific() {
         let (prog, args) = build_argv(&RunDispatch::Host { cmd: "echo 1" });
         if cfg!(target_os = "windows") {
@@ -300,11 +286,14 @@ mod tests {
     }
 
     #[test]
-    fn wsl_argv_escapes_single_quotes_in_cmd() {
-        let (_, args) = build_argv(&RunDispatch::Wsl {
-            cmd: "echo 'привет'", distro: None,
-        });
-        // the last arg is the escaped command
-        assert_eq!(args.last().unwrap(), "echo '\\''привет'\\''");
+    fn wsl_argv_passes_user_command_verbatim() {
+        // Command is passed as a single argv element to `bash -lc`, so
+        // bash reads it as -c source. Quotes, spaces, UTF-8 all fine —
+        // no pre-processing. This test guards against regressions of the
+        // v1.3.20 `bash_single_quote_escape` bug that mangled commands
+        // containing `'` into `'\''` and broke rsync / ssh one-liners.
+        let raw = "rsync -av 'some file' user@host:/dest";
+        let (_, args) = build_argv(&RunDispatch::Wsl { cmd: raw, distro: None });
+        assert_eq!(args.last().unwrap(), raw);
     }
 }

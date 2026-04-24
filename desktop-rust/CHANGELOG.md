@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.3.21 (2026-04-24)
+
+**Hotfix: WSL `rsync`/`ssh` broken by over-eager quote escaping.**
+
+- `commands::exec::bash_single_quote_escape` mangled any command with `'`
+  into `'\''` because I was mentally modelling the call as if we
+  interpolate into `bash -lc '<cmd>'`. In reality we pass the command
+  as a **single argv element** to `bash -lc`, and bash reads argv[2]
+  as shell source verbatim — no wrapping quotes, no escape needed.
+- `rsync -av '…' user@host:/dst` → bash saw `rsync -av '\''…'\'' ...`
+  → `unexpected EOF while looking for matching '` → exit 2.
+- Fixed: push `cmd` verbatim as last argv element. Added regression
+  test `wsl_argv_passes_user_command_verbatim`.
+
 ## v1.3.20 (2026-04-24)
 
 **Exec: per-command Shell selector — run inside WSL natively.**
