@@ -14,16 +14,17 @@ pub struct ModelMeta {
     pub notes: &'static str,          // short UI hint
 }
 
-/// Catalog pinned at compile time. Update by regenerating hashes from the
-/// whisper.cpp manifest at:
-///   https://huggingface.co/ggerganov/whisper.cpp/raw/main/ggml-<name>.bin
-/// The SHA256 values below are placeholders — Task 2.2 refreshes them.
+/// Catalog pinned at compile time. Sizes and SHA256 taken from HuggingFace LFS
+/// metadata (`oid` is the content SHA256). Refresh with:
+///   curl -s 'https://huggingface.co/api/models/ggerganov/whisper.cpp/tree/main' | \
+///     jq -r '.[] | select(.path|startswith("ggml-")) | "\(.path) \(.size) \(.lfs.oid)"'
+/// Values current as of v1.3.6 (2026-04-24).
 pub const CATALOG: &[ModelMeta] = &[
     ModelMeta {
         name: "ggml-tiny",
         display_name: "tiny",
-        size_bytes: 77_691_712,
-        sha256: "bd577a113a864445d4c299885e0cb97d4ba92b5f",
+        size_bytes: 77_691_713,
+        sha256: "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21",
         download_url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
         ru_quality: 1,
         recommended: false,
@@ -32,8 +33,8 @@ pub const CATALOG: &[ModelMeta] = &[
     ModelMeta {
         name: "ggml-base",
         display_name: "base",
-        size_bytes: 147_951_616,
-        sha256: "60ed5bc3dd14eea856493d334349b405782ddcaf",
+        size_bytes: 147_951_465,
+        sha256: "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
         download_url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
         ru_quality: 2,
         recommended: false,
@@ -43,7 +44,7 @@ pub const CATALOG: &[ModelMeta] = &[
         name: "ggml-small",
         display_name: "small (multilingual)",
         size_bytes: 487_601_967,
-        sha256: "1be3a9b2063867b937e64e2ec7483364a79917e9",
+        sha256: "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
         download_url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
         ru_quality: 4,
         recommended: true,
@@ -62,8 +63,8 @@ pub const CATALOG: &[ModelMeta] = &[
     ModelMeta {
         name: "ggml-large-v3",
         display_name: "large-v3",
-        size_bytes: 3_095_018_317,
-        sha256: "ad82bf6a9043ceed055076d0fd39f5f186ff8062",
+        size_bytes: 3_095_033_483,
+        sha256: "64d182b440b98d5203c4f9bd541544d84c605196c4f7b845dfa11fb23594d1e2",
         download_url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin",
         ru_quality: 5,
         recommended: false,
@@ -72,8 +73,8 @@ pub const CATALOG: &[ModelMeta] = &[
     ModelMeta {
         name: "ggml-large-v3-q5_0",
         display_name: "large-v3 (Q5 quantized)",
-        size_bytes: 1_080_000_000,
-        sha256: "00000000000000000000000000000000",
+        size_bytes: 1_081_140_203,
+        sha256: "d75795ecff3f83b5faa89d1900604ad8c780abd5739fae406de19f23ecd98ad1",
         download_url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-q5_0.bin",
         ru_quality: 5,
         recommended: false,

@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.3.6 (2026-04-24)
+
+**Hotfix: real SHA256 hashes for all 6 Whisper models.**
+
+- `whisper/catalog.rs` shipped with placeholder SHA256 values from the
+  implementation plan (40-char SHA-1-looking stubs + one all-zero string).
+  Every model install failed at the verification step with
+  `Ошибка: sha256 mismatch` after a full multi-hundred-MB download.
+- Replaced all 6 with real values pulled from HuggingFace LFS metadata
+  (`lfs.oid` field on `/api/models/ggerganov/whisper.cpp/tree/main`).
+  Also corrected 4 of 6 `size_bytes` values that were off by 1–256 bytes
+  or rounded.
+- Refresh command documented inline in `catalog.rs` for future upgrades.
+
 ## v1.3.5 (2026-04-24)
 
 **Whisper onboarding: show discrete GPU name + VRAM.**
