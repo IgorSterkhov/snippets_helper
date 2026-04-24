@@ -9,6 +9,13 @@ let refreshTimers = {};    // envName -> { countdown, timer }
 let tabVisible = true;
 let contextMenu = null;    // current context menu element
 
+// Stats cache per server gIdx — populated on successful fetch so the
+// mini-bars on every tile stay visible between renders (re-renders
+// happen on expand/collapse, environment reload, DnD, etc.).
+const statsCache = new Map(); // gIdx → { stats, ts, error: string? }
+// Per-tile UI flag: true while the 🔄 button is mid-fetch.
+const fetchInFlight = new Set();
+
 export function init(container) {
   root = container;
   root.innerHTML = '';
@@ -19,6 +26,7 @@ export function init(container) {
 
   loadData().then(() => {
     root.appendChild(buildLayout());
+    installTileDnd(root);
   });
 
   document.addEventListener('visibilitychange', onVisibilityChange);
@@ -204,6 +212,8 @@ function buildEnvBlock(env, envServers) {
 function buildServerTile(srv, gIdx, envName, animIdx) {
   const isExpanded = expandedServer && expandedServer.serverIndex === gIdx;
   const tile = el('div', { class: 'vps-tile' + (isExpanded ? ' expanded' : '') });
+  tile.dataset.gIdx = String(gIdx);
+  tile.dataset.envName = envName;
   tile.style.animationDelay = `${animIdx * 40}ms`;
 
   // Color accent
@@ -211,17 +221,22 @@ function buildServerTile(srv, gIdx, envName, animIdx) {
   accent.style.background = srv.color;
   tile.appendChild(accent);
 
+  // Drag grip (left side) — pointer-based DnD to move between
+  // environments. Guarded against accidental click-to-expand by the
+  // DnD handler calling stopPropagation on its own events.
+  const grip = el('div', { class: 'vps-tile-grip', title: 'Drag to move between environments' });
+  grip.textContent = '⋮⋮';
+  grip.dataset.dragGrip = '1';
+  tile.appendChild(grip);
+
   // Content
   const content = el('div', { class: 'vps-tile-content' });
 
   const nameRow = el('div', { class: 'vps-tile-name-row' });
   const name = el('span', { text: srv.name, class: 'vps-tile-name' });
   nameRow.appendChild(name);
-
-  // Status indicator
   const statusDot = el('span', { class: 'vps-tile-status', id: `vps-status-${gIdx}` });
   nameRow.appendChild(statusDot);
-
   content.appendChild(nameRow);
 
   const hostLine = el('div', {
@@ -230,25 +245,154 @@ function buildServerTile(srv, gIdx, envName, animIdx) {
   });
   content.appendChild(hostLine);
 
+  // Inline stat rows (CPU/RAM/Disk) — always rendered; shows a
+  // placeholder until the first 🔄 fetch populates statsCache.
+  const statBlock = el('div', { class: 'vps-tile-statblock', id: `vps-statblock-${gIdx}` });
+  renderStatBlock(statBlock, gIdx);
+  content.appendChild(statBlock);
+
   tile.appendChild(content);
 
-  // Mini stats (if we have cached stats)
-  const miniStats = el('div', { class: 'vps-tile-mini-stats', id: `vps-mini-${gIdx}` });
-  tile.appendChild(miniStats);
+  // Right-side controls — refresh + context-menu
+  const controls = el('div', { class: 'vps-tile-controls' });
 
-  // Click to expand
+  const refreshBtn = el('button', {
+    class: 'vps-tile-ctrl-btn',
+    title: 'Refresh stats (connect via SSH)',
+  });
+  refreshBtn.textContent = '↻';
+  refreshBtn.dataset.refresh = '1';
+  refreshBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    fetchStatsForTile(gIdx, envName);
+  });
+  controls.appendChild(refreshBtn);
+
+  const menuBtn = el('button', {
+    class: 'vps-tile-ctrl-btn',
+    title: 'More actions',
+  });
+  menuBtn.textContent = '⋮';
+  menuBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const rect = menuBtn.getBoundingClientRect();
+    showTileContextMenu({ clientX: rect.right, clientY: rect.bottom }, srv, gIdx, envName);
+  });
+  controls.appendChild(menuBtn);
+
+  tile.appendChild(controls);
+
+  // Click on the tile body toggles expand — does NOT auto-fetch.
   tile.addEventListener('click', (e) => {
-    if (e.target.closest('.vps-tile-ctx-btn')) return;
+    if (e.target.closest('.vps-tile-ctrl-btn')) return;
+    if (e.target.closest('[data-drag-grip]')) return;
     toggleExpand(gIdx, envName);
   });
 
-  // Context menu trigger
+  // Right-click → context menu (Edit / Test / Move / Delete)
   tile.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     showTileContextMenu(e, srv, gIdx, envName);
   });
 
   return tile;
+}
+
+/** Fill the per-tile stat block from the stats cache. */
+function renderStatBlock(statBlock, gIdx) {
+  statBlock.innerHTML = '';
+  const entry = statsCache.get(gIdx);
+  if (fetchInFlight.has(gIdx)) {
+    statBlock.appendChild(el('div', { class: 'vps-tile-stat-placeholder', text: 'Refreshing…' }));
+    return;
+  }
+  if (!entry) {
+    statBlock.appendChild(el('div', {
+      class: 'vps-tile-stat-placeholder',
+      text: 'Stats not loaded — press ↻',
+    }));
+    return;
+  }
+  if (entry.error) {
+    statBlock.appendChild(el('div', {
+      class: 'vps-tile-stat-placeholder vps-tile-stat-error',
+      text: 'Error: ' + entry.error,
+    }));
+    return;
+  }
+  const s = entry.stats;
+  statBlock.appendChild(buildInlineBar('CPU', s.cpu_usage_pct, `${s.cpu_usage_pct.toFixed(0)}%`));
+  statBlock.appendChild(buildInlineBar('RAM', s.ram_pct, `${s.ram_pct.toFixed(0)}% · ${s.ram_used}/${s.ram_total}`));
+  statBlock.appendChild(buildInlineBar('Disk', s.disk_pct, `${s.disk_pct.toFixed(0)}% · ${s.disk_used}/${s.disk_total}`));
+
+  if (entry.ts) {
+    const ago = relativeTime(entry.ts);
+    statBlock.appendChild(el('div', { class: 'vps-tile-stat-ts', text: ago }));
+  }
+}
+
+function buildInlineBar(label, pct, valueText) {
+  const row = el('div', { class: 'vps-tile-stat-row' });
+  row.appendChild(el('span', { class: 'vps-tile-stat-label', text: label }));
+  const bar = el('div', { class: 'vps-tile-stat-bar' });
+  const fill = el('div', { class: 'vps-tile-stat-bar-fill' });
+  fill.style.width = Math.max(0, Math.min(100, pct)) + '%';
+  fill.style.background = getBarColor(pct);
+  bar.appendChild(fill);
+  row.appendChild(bar);
+  row.appendChild(el('span', { class: 'vps-tile-stat-value', text: valueText }));
+  return row;
+}
+
+function relativeTime(ts) {
+  const diff = Math.max(0, Date.now() - ts);
+  if (diff < 5000) return 'just now';
+  if (diff < 60_000) return `${Math.round(diff / 1000)}s ago`;
+  if (diff < 3_600_000) return `${Math.round(diff / 60_000)}m ago`;
+  return `${Math.round(diff / 3_600_000)}h ago`;
+}
+
+/** Explicit 🔄 per tile — fetches stats, updates cache, re-renders that
+ *  tile's stat block in-place (plus the detail panel if the server is
+ *  currently expanded). Click on tile body does NOT trigger this. */
+async function fetchStatsForTile(gIdx, envName) {
+  const srv = allServers[gIdx];
+  if (!srv) return;
+  if (fetchInFlight.has(gIdx)) return;
+  fetchInFlight.add(gIdx);
+
+  const block = root && root.querySelector(`#vps-statblock-${gIdx}`);
+  if (block) renderStatBlock(block, gIdx);
+
+  try {
+    const stats = await call('vps_get_stats', {
+      host: srv.host, user: srv.user, port: srv.port, keyFile: srv.key_file,
+    });
+    statsCache.set(gIdx, { stats, ts: Date.now(), error: null });
+    updateStatusDot(gIdx, 'online');
+    // Sync expanded panel if this is the open one.
+    if (expandedServer && expandedServer.serverIndex === gIdx) {
+      expandedServer.stats = stats;
+      expandedServer.loading = false;
+      expandedServer.error = null;
+    }
+  } catch (e) {
+    statsCache.set(gIdx, { stats: null, ts: Date.now(), error: String(e) });
+    updateStatusDot(gIdx, 'error');
+    if (expandedServer && expandedServer.serverIndex === gIdx) {
+      expandedServer.error = String(e);
+      expandedServer.loading = false;
+    }
+  } finally {
+    fetchInFlight.delete(gIdx);
+    const block2 = root && root.querySelector(`#vps-statblock-${gIdx}`);
+    if (block2) renderStatBlock(block2, gIdx);
+    // If expanded detail is open for this tile, rebuild it so the cards
+    // pick up the fresh stats (or the error).
+    if (expandedServer && expandedServer.serverIndex === gIdx) {
+      renderEnvironments();
+    }
+  }
 }
 
 function buildDetailPanel() {
@@ -351,50 +495,32 @@ function getBarColor(pct) {
 
 function toggleExpand(gIdx, envName) {
   if (expandedServer && expandedServer.serverIndex === gIdx) {
-    // Collapse
     expandedServer = null;
     renderEnvironments();
     return;
   }
-
-  expandedServer = { envName, serverIndex: gIdx, stats: null, loading: true, error: null };
+  // Open detail panel using whatever's already in the cache — no
+  // automatic SSH fetch. User clicks the ↻ button (on tile or inside
+  // the panel) to refresh. Avoids the "click = connect" surprise and
+  // the cmd-window flicker on Windows.
+  const cached = statsCache.get(gIdx);
+  expandedServer = {
+    envName,
+    serverIndex: gIdx,
+    stats: cached && !cached.error ? cached.stats : null,
+    loading: false,
+    error: cached && cached.error ? cached.error : null,
+  };
   renderEnvironments();
-  fetchStatsForExpanded();
 }
 
 async function fetchStatsForExpanded() {
   if (!expandedServer) return;
   const gIdx = expandedServer.serverIndex;
-  const srv = allServers[gIdx];
-  if (!srv) return;
-
-  expandedServer.loading = true;
-  expandedServer.error = null;
-  renderEnvironments();
-
-  try {
-    const stats = await call('vps_get_stats', {
-      host: srv.host,
-      user: srv.user,
-      port: srv.port,
-      keyFile: srv.key_file,
-    });
-    if (!expandedServer || expandedServer.serverIndex !== gIdx) return;
-    expandedServer.stats = stats;
-    expandedServer.loading = false;
-    expandedServer.error = null;
-    renderEnvironments();
-
-    // Update the mini stats dot to green
-    updateStatusDot(gIdx, 'online');
-  } catch (e) {
-    if (!expandedServer || expandedServer.serverIndex !== gIdx) return;
-    expandedServer.loading = false;
-    expandedServer.error = String(e);
-    expandedServer.stats = null;
-    renderEnvironments();
-    updateStatusDot(gIdx, 'error');
-  }
+  const envName = expandedServer.envName;
+  // Route through fetchStatsForTile so statsCache + the tile's inline
+  // bars stay in sync with the detail-panel state.
+  await fetchStatsForTile(gIdx, envName);
 }
 
 function updateStatusDot(gIdx, status) {
@@ -541,9 +667,13 @@ async function refreshEnvironment(envName) {
   const envServers = serversForEnv(envName);
   if (envServers.length === 0) return;
 
-  // Fetch all servers in parallel
+  // Fetch all servers in parallel — one SSH connection per server.
   const promises = envServers.map(async (srv, localIdx) => {
     const gIdx = globalIndex(envName, localIdx);
+    if (fetchInFlight.has(gIdx)) return { gIdx, skipped: true };
+    fetchInFlight.add(gIdx);
+    const block = root && root.querySelector(`#vps-statblock-${gIdx}`);
+    if (block) renderStatBlock(block, gIdx);
     try {
       const stats = await call('vps_get_stats', {
         host: srv.host,
@@ -551,9 +681,8 @@ async function refreshEnvironment(envName) {
         port: srv.port,
         keyFile: srv.key_file,
       });
+      statsCache.set(gIdx, { stats, ts: Date.now(), error: null });
       updateStatusDot(gIdx, 'online');
-      updateMiniStats(gIdx, stats);
-      // If this server is expanded, update its stats too
       if (expandedServer && expandedServer.serverIndex === gIdx) {
         expandedServer.stats = stats;
         expandedServer.loading = false;
@@ -561,12 +690,17 @@ async function refreshEnvironment(envName) {
       }
       return { gIdx, stats, ok: true };
     } catch (e) {
+      statsCache.set(gIdx, { stats: null, ts: Date.now(), error: String(e) });
       updateStatusDot(gIdx, 'error');
       if (expandedServer && expandedServer.serverIndex === gIdx) {
         expandedServer.loading = false;
         expandedServer.error = String(e);
       }
       return { gIdx, error: e, ok: false };
+    } finally {
+      fetchInFlight.delete(gIdx);
+      const block2 = root && root.querySelector(`#vps-statblock-${gIdx}`);
+      if (block2) renderStatBlock(block2, gIdx);
     }
   });
 
@@ -943,6 +1077,98 @@ function formatUptime(raw) {
   return match ? match[1].trim().replace(/,\s*$/, '') : raw;
 }
 
+// ── Tile DnD (move between environments) ──────────────────────
+//
+// Pointer-based (not HTML5 DnD) — same rationale as Tasks tab. User grabs
+// the ⋮⋮ grip on a tile, a floating semi-transparent clone follows the
+// cursor, env-blocks under the cursor get a dashed accent border as drop
+// target. On release: if the cursor is over a DIFFERENT env-block, call
+// move_vps_server + reload. Else cancel.
+
+let tileDragActive = null;
+
+function installTileDnd(rootEl) {
+  rootEl.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    const grip = e.target.closest('[data-drag-grip]');
+    if (!grip) return;
+    const tile = grip.closest('.vps-tile');
+    if (!tile) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const rect = tile.getBoundingClientRect();
+    const ghost = tile.cloneNode(true);
+    ghost.style.position = 'fixed';
+    ghost.style.left = rect.left + 'px';
+    ghost.style.top = rect.top + 'px';
+    ghost.style.width = rect.width + 'px';
+    ghost.style.pointerEvents = 'none';
+    ghost.style.zIndex = '10000';
+    ghost.style.opacity = '0.9';
+    ghost.style.transform = 'rotate(-1deg)';
+    ghost.style.boxShadow = '0 16px 32px rgba(0,0,0,0.55)';
+    ghost.classList.add('vps-tile-drag-clone');
+    document.body.appendChild(ghost);
+
+    tile.classList.add('vps-tile-drag-source');
+
+    tileDragActive = {
+      tile, ghost,
+      gIdx: Number(tile.dataset.gIdx),
+      fromEnv: tile.dataset.envName,
+      toEnv: null,
+      offsetX: e.clientX - rect.left,
+      offsetY: e.clientY - rect.top,
+    };
+
+    const onMove = (ev) => onTileDragMove(ev);
+    const onUp = async (ev) => {
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      await onTileDragUp(ev);
+    };
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+  });
+}
+
+function onTileDragMove(e) {
+  if (!tileDragActive) return;
+  const a = tileDragActive;
+  a.ghost.style.left = (e.clientX - a.offsetX) + 'px';
+  a.ghost.style.top = (e.clientY - a.offsetY) + 'px';
+
+  for (const b of document.querySelectorAll('.vps-env-block.drop-target')) {
+    b.classList.remove('drop-target');
+  }
+  const under = document.elementFromPoint(e.clientX, e.clientY);
+  if (!under) { a.toEnv = null; return; }
+  const envBlock = under.closest('.vps-env-block');
+  if (!envBlock) { a.toEnv = null; return; }
+  // Extract env name from the grid id (`vps-grid-<name>`).
+  const grid = envBlock.querySelector('[id^="vps-grid-"]');
+  const envName = grid ? grid.id.replace('vps-grid-', '') : null;
+  if (!envName || envName === a.fromEnv) { a.toEnv = null; return; }
+  envBlock.classList.add('drop-target');
+  a.toEnv = envName;
+}
+
+async function onTileDragUp() {
+  const a = tileDragActive;
+  tileDragActive = null;
+  if (!a) return;
+  // Cleanup visuals
+  if (a.ghost && a.ghost.parentNode) a.ghost.remove();
+  if (a.tile) a.tile.classList.remove('vps-tile-drag-source');
+  for (const b of document.querySelectorAll('.vps-env-block.drop-target')) {
+    b.classList.remove('drop-target');
+  }
+  if (a.toEnv && a.toEnv !== a.fromEnv) {
+    await moveServer(a.gIdx, a.toEnv);
+  }
+}
+
 function randomColor() {
   const colors = ['#f0883e', '#3fb950', '#58a6ff', '#d2a8ff', '#f778ba', '#79c0ff', '#ffa657', '#7ee787'];
   return colors[Math.floor(Math.random() * colors.length)];
@@ -1056,14 +1282,14 @@ function css() {
 /* Tile */
 .vps-tile {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   gap: 0;
-  height: 48px;
+  min-height: 92px;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: 6px;
   cursor: pointer;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  transition: border-color 0.15s, box-shadow 0.15s, opacity 0.15s;
   overflow: hidden;
   animation: vps-tile-in 0.25s ease both;
   position: relative;
@@ -1075,6 +1301,20 @@ function css() {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent);
 }
+.vps-tile-drag-source {
+  opacity: 0.35;
+  pointer-events: none;
+}
+.vps-tile-drag-clone {
+  cursor: grabbing !important;
+  user-select: none;
+}
+.vps-env-block.drop-target {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+  border-radius: 6px;
+  background: rgba(56, 139, 253, 0.05);
+}
 @keyframes vps-tile-in {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
@@ -1082,14 +1322,113 @@ function css() {
 
 .vps-tile-accent {
   width: 4px;
-  height: 100%;
   flex-shrink: 0;
   border-radius: 6px 0 0 6px;
 }
+.vps-tile-grip {
+  display: flex;
+  align-items: center;
+  padding: 0 6px 0 4px;
+  color: var(--text-muted);
+  font-size: 13px;
+  letter-spacing: -2px;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  opacity: 0.5;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+}
+.vps-tile:hover .vps-tile-grip { opacity: 1; }
+.vps-tile-grip:active { cursor: grabbing; }
 .vps-tile-content {
   flex: 1;
   min-width: 0;
   padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.vps-tile-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 6px;
+  flex-shrink: 0;
+}
+.vps-tile-ctrl-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  width: 24px;
+  height: 24px;
+  border-radius: 3px;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.vps-tile-ctrl-btn:hover {
+  background: var(--bg-tertiary);
+  color: var(--text);
+  border-color: var(--border);
+}
+.vps-tile-statblock {
+  margin-top: 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.vps-tile-stat-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+  font-family: 'SF Mono', 'Cascadia Code', monospace;
+  white-space: nowrap;
+}
+.vps-tile-stat-label {
+  width: 28px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.vps-tile-stat-bar {
+  flex: 1;
+  height: 4px;
+  background: var(--bg-tertiary);
+  border-radius: 2px;
+  overflow: hidden;
+  min-width: 40px;
+}
+.vps-tile-stat-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.25s ease;
+}
+.vps-tile-stat-value {
+  color: var(--text);
+  font-size: 10.5px;
+  flex-shrink: 0;
+}
+.vps-tile-stat-placeholder {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-style: italic;
+  padding: 4px 0;
+}
+.vps-tile-stat-error {
+  color: var(--danger);
+  font-style: normal;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vps-tile-stat-ts {
+  color: var(--text-muted);
+  font-size: 10px;
+  margin-top: 2px;
+  text-align: right;
 }
 .vps-tile-name-row {
   display: flex;

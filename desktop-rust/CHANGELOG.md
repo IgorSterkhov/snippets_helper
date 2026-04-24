@@ -1,5 +1,29 @@
 # Changelog
 
+## v1.3.23 (2026-04-24)
+
+**VPS tab — four fixes.**
+
+- **Stats inline on every card.** Tiles now render CPU / RAM / Disk
+  progress bars directly, no need to expand. Height bumped from 48 px
+  to ≈ 92 px. A per-tile stats cache (`statsCache` + `ts`) keeps the
+  numbers visible between re-renders, with a "3 min ago"-style
+  freshness marker.
+- **Drag a card between environments.** Pointer-based DnD via the new
+  ⋮⋮ grip on the left of each tile. A floating semi-transparent clone
+  follows the cursor; env-blocks under the cursor get a dashed-accent
+  drop indicator. On release to a different env → `move_vps_server`
+  + reload.
+- **Fix cmd-window flicker on Windows during SSH calls.** Added
+  `CREATE_NO_WINDOW` to `commands::vps::build_ssh_cmd` (every SSH
+  invocation was opening and immediately closing a black cmd window).
+  Same flag already on repo_search, whisper-server, nvidia-smi polls.
+- **Click no longer auto-fetches.** Clicking a tile just
+  expands / collapses the detail panel; it renders whatever's in the
+  stats cache (or "Stats not loaded — press ↻" placeholder).
+  Explicit ↻ button on every tile (and in the expanded detail) is
+  the only way to fetch. Per-env "Refresh all" button still works.
+
 ## 1.3.22 OTA patches
 
 - **f-20260424-4** — Tasks DnD "snap-back" fix: on drop, the card sometimes

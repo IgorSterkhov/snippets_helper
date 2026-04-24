@@ -94,6 +94,15 @@ fn expand_key_file(key_file: &str) -> String {
 
 fn build_ssh_cmd(user: &str, host: &str, port: u16, key_file: &str, remote_cmd: &str) -> std::process::Command {
     let mut cmd = std::process::Command::new("ssh");
+    // Suppress the console window on Windows — without CREATE_NO_WINDOW
+    // every stats poll / test-connection flashes a black cmd window for
+    // the duration of the SSH handshake. Same pattern as repo_search.rs.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
     cmd.args(["-o", "ConnectTimeout=5"]);
     cmd.args(["-o", "StrictHostKeyChecking=no"]);
     cmd.args(["-o", "BatchMode=yes"]);
