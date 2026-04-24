@@ -337,3 +337,37 @@ first and falls back to bundled assets via `app.asset_resolver()`.
 - A previous tag's CI is still running — don't stack releases; wait.
 - You're editing signing keys, tauri.conf endpoints, or CI secrets —
   stop and discuss with the user first.
+
+---
+
+## 11. Whisper voice input
+
+### 11.1 Updating whisper.cpp
+
+1. Check `github.com/ggml-org/whisper.cpp/releases` for the latest stable tag.
+2. Update `desktop-rust/WHISPER_CPP_VERSION` (e.g. `v1.7.4`).
+3. Locally run `./desktop-rust/scripts/fetch-whisper-bin.sh` to verify the build works and produces `whisper-server-<target-triple>` under `desktop-rust/src-tauri/binaries/`.
+4. Update model SHA256 values in `desktop-rust/src-tauri/src/whisper/catalog.rs` only if upstream re-uploaded the ggml models on HuggingFace (independent cadence from whisper.cpp releases).
+5. Commit both files, tag a new `v-*` release.
+
+### 11.2 Known gotchas
+
+- **macOS Accessibility permission** is required for Cmd+V simulation. On first auto-paste, macOS prompts the user; if denied, the app silently falls back to clipboard-only and shows a toast.
+- **Microphone permission (macOS TCC)** is requested on the first `whisper_start_recording` call. If the user denies, `cpal` reports "no input device" — handled with an error toast that deep-links to System Settings.
+- **whisper-server is built from source** in CI (cmake) because upstream prebuilt zips do not reliably include a `whisper-server` binary. Build time: ~4-6 min on GitHub runners.
+- **Models are NOT bundled.** On first Whisper-tab visit users install a model via onboarding (~500MB for `small`). Without a model, `whisper_start_recording` returns an error.
+- **Idle unload** happens 5 minutes (settings-configurable) after the last transcript — prevents long-running RAM/VRAM use. If the app is closed while the server is running, it's killed with the app.
+- **Sidecar macOS thread-affinity:** `cpal::Stream` is marked `!Send` conservatively. We wrap it in `SendRecorder(unsafe impl Send)` serialised through `tokio::sync::Mutex`. On macOS this could theoretically violate CoreAudio thread affinity — report any crashes at recording start as a critical bug.
+
+### 11.3 Manual integration checklist (run before every `v-*` tag)
+
+- [ ] macOS: fresh install → mic permission prompt on first Record
+- [ ] macOS: Accessibility permission prompt on first auto-paste
+- [ ] Cold launch → click Record → overlay shows "Loading model" then "Recording"
+- [ ] Speak, Stop → transcript pastes into the previously-focused window
+- [ ] Wait 5 min → `ps | grep whisper-server` shows no process
+- [ ] Hotkey (Ctrl+Alt+Space) from another window → overlay + inject
+- [ ] Click "Unload now" in settings → whisper-server SIGTERM'd immediately
+- [ ] Delete a model → file removed from `app_data/whisper-models/`
+- [ ] Postprocess rules on/off reflects in history `text_raw` column (populated only when rules change the text)
+- [ ] LLM-postprocess with a bogus endpoint → falls back to raw text silently

@@ -136,6 +136,23 @@
     return item;
   }
 
+  // ----- whisper mocks -----
+  const whisperMockState = {
+    installedModels: [],
+    history: [],
+    currentState: 'idle',
+    levelTimer: null,
+  };
+
+  const whisperCatalog = [
+    { name: 'ggml-tiny',          display_name: 'tiny',                 size_bytes: 77691712,   sha256: 'x', download_url: '', ru_quality: 1, recommended: false, notes: 'Fast but poor for Russian' },
+    { name: 'ggml-base',          display_name: 'base',                 size_bytes: 147951616,  sha256: 'x', download_url: '', ru_quality: 2, recommended: false, notes: 'Weak for Russian' },
+    { name: 'ggml-small',         display_name: 'small (multilingual)', size_bytes: 487601967,  sha256: 'x', download_url: '', ru_quality: 4, recommended: true,  notes: 'Best tradeoff for RU+EN' },
+    { name: 'ggml-medium',        display_name: 'medium',               size_bytes: 1533763059, sha256: 'x', download_url: '', ru_quality: 5, recommended: false, notes: 'Top quality if RAM allows' },
+    { name: 'ggml-large-v3',      display_name: 'large-v3',             size_bytes: 3095018317, sha256: 'x', download_url: '', ru_quality: 5, recommended: false, notes: 'Best quality, GPU recommended' },
+    { name: 'ggml-large-v3-q5_0', display_name: 'large-v3 (Q5)',        size_bytes: 1080000000, sha256: 'x', download_url: '', ru_quality: 5, recommended: false, notes: 'Quantized: large-quality at ~1GB' },
+  ];
+
   const handlers = {
     // ── Settings ────────────────────────────────────────
     async get_setting({ key }) {
@@ -478,6 +495,103 @@
     // ── Autostart ───────────────────────────────────────
     async get_autostart() { return false; },
     async set_autostart() { },
+
+    // ── Whisper ─────────────────────────────────────────
+    whisper_list_catalog() { return whisperCatalog; },
+    whisper_list_models() { return whisperMockState.installedModels.slice(); },
+    async whisper_install_model({ name }) {
+      const meta = whisperCatalog.find(m => m.name === name);
+      if (!meta) throw new Error('unknown model');
+      let done = 0;
+      const total = meta.size_bytes;
+      const tick = 50;
+      const stepBytes = Math.max(1, Math.floor(total / 40));
+      return new Promise((resolve) => {
+        const iv = setInterval(() => {
+          done = Math.min(total, done + stepBytes);
+          window.dispatchEvent(new CustomEvent('whisper:model-download', {
+            detail: { model: name, bytes_done: done, bytes_total: total, speed_bps: stepBytes * (1000 / tick), finished: done === total, error: null }
+          }));
+          if (done >= total) {
+            clearInterval(iv);
+            const installed = {
+              id: whisperMockState.installedModels.length + 1,
+              name: meta.name, display_name: meta.display_name,
+              file_path: `/mock/${meta.name}.bin`, size_bytes: meta.size_bytes,
+              sha256: meta.sha256, is_default: whisperMockState.installedModels.length === 0,
+              installed_at: Math.floor(Date.now() / 1000),
+            };
+            whisperMockState.installedModels.push(installed);
+            resolve(installed);
+          }
+        }, tick);
+      });
+    },
+    whisper_delete_model({ name }) {
+      whisperMockState.installedModels = whisperMockState.installedModels.filter(m => m.name !== name);
+      return null;
+    },
+    whisper_set_default_model({ name }) {
+      whisperMockState.installedModels = whisperMockState.installedModels.map(m => ({ ...m, is_default: m.name === name }));
+      return null;
+    },
+    whisper_start_recording() {
+      whisperMockState.currentState = 'recording';
+      window.dispatchEvent(new CustomEvent('whisper:state-changed', { detail: { state: 'recording', model: 'ggml-small' } }));
+      whisperMockState.levelTimer = setInterval(() => {
+        const rms = 0.2 + 0.5 * Math.abs(Math.sin(Date.now() / 120));
+        window.dispatchEvent(new CustomEvent('whisper:level', { detail: { rms } }));
+      }, 50);
+      return null;
+    },
+    async whisper_stop_recording() {
+      if (whisperMockState.levelTimer) clearInterval(whisperMockState.levelTimer);
+      whisperMockState.levelTimer = null;
+      whisperMockState.currentState = 'transcribing';
+      window.dispatchEvent(new CustomEvent('whisper:state-changed', { detail: { state: 'transcribing', model: 'ggml-small' } }));
+      await new Promise(r => setTimeout(r, 400));
+      const text = 'Mocked transcript: это тестовая запись, привет мир.';
+      whisperMockState.history.unshift({
+        id: Date.now(), text, text_raw: null, model_name: 'ggml-small',
+        duration_ms: 3000, transcribe_ms: 400, language: 'ru', injected_to: 'paste',
+        created_at: Math.floor(Date.now() / 1000),
+      });
+      whisperMockState.currentState = 'ready';
+      window.dispatchEvent(new CustomEvent('whisper:state-changed', { detail: { state: 'ready', model: 'ggml-small' } }));
+      window.dispatchEvent(new CustomEvent('whisper:transcribed', { detail: { text, duration_ms: 3000, transcribe_ms: 400, model: 'ggml-small', language: 'ru' } }));
+      return text;
+    },
+    whisper_cancel_recording() {
+      if (whisperMockState.levelTimer) clearInterval(whisperMockState.levelTimer);
+      whisperMockState.levelTimer = null;
+      whisperMockState.currentState = 'idle';
+      window.dispatchEvent(new CustomEvent('whisper:state-changed', { detail: { state: 'idle', model: null } }));
+      return null;
+    },
+    whisper_unload_now() {
+      whisperMockState.currentState = 'idle';
+      window.dispatchEvent(new CustomEvent('whisper:state-changed', { detail: { state: 'idle', model: null } }));
+      return null;
+    },
+    whisper_inject_text({ text, method }) { return method || 'copy'; },
+    whisper_get_history({ limit }) { return whisperMockState.history.slice(0, limit || 200); },
+    whisper_delete_history({ id }) {
+      if (id === null || id === undefined) whisperMockState.history = [];
+      else whisperMockState.history = whisperMockState.history.filter(h => h.id !== id);
+      return null;
+    },
+    whisper_list_mics() {
+      return [
+        { name: 'MacBook Pro Microphone', is_default: true },
+        { name: 'External USB Mic', is_default: false },
+      ];
+    },
+    whisper_gpu_info() {
+      return { cpu_model: 'Apple M2 Pro', ram_mb: 16384, cuda: false, metal: true, vram_mb: 0 };
+    },
+    whisper_detect_whisper_bin() {
+      return { variant: 'metal', installed: true, path: null, dl_url: null, dl_size_bytes: null };
+    },
   };
 
   ensureFixtures();
@@ -499,7 +613,11 @@
   window.__TAURI__ = {
     core: { invoke },
     event: {
-      listen: async (_evt, _cb) => () => {},
+      listen: async (evt, cb) => {
+        const h = (e) => cb({ payload: e.detail });
+        window.addEventListener(evt, h);
+        return () => window.removeEventListener(evt, h);
+      },
       emit: async () => {},
     },
   };

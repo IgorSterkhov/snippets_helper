@@ -1,6 +1,6 @@
 {
   "identifier": "default",
-  "windows": ["main"],
+  "windows": ["main", "whisper-overlay"],
   "permissions": [
     "core:default",
     "core:window:allow-show",
@@ -12,6 +12,13 @@
     "core:window:allow-center",
     "global-shortcut:default",
     "updater:default",
-    "dialog:default"
+    "dialog:default",
+    "shell:default",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        { "name": "binaries/whisper-server", "sidecar": true, "args": true }
+      ]
+    }
   ]
 }

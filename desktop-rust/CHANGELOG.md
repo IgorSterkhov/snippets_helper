@@ -1,5 +1,44 @@
 # Changelog
 
+## v1.3.3 (2026-04-23)
+
+**Whisper Voice Input — new left-sidebar tab for local voice dictation.**
+
+- **Local transcription via whisper.cpp** — sidecar `whisper-server`
+  binary, CPU by default, GPU (CUDA / Metal) auto-detected and used via
+  downloaded variant when available. No network calls to third parties
+  for transcription.
+- **Onboarding installer** — first tab visit shows a 6-card model picker
+  (tiny → small → medium → large-v3 + Q5 quantized). Progress bar with
+  speed and ETA, SHA256 verify on download, atomic rename into place.
+- **Lazy server lifecycle** — 0 RAM at idle. First record spawns the
+  server (1-3s warm-up visible in overlay); subsequent transcripts
+  return in ~200ms. Auto-unloads 5 min after last activity
+  (configurable 1-30 min); **Unload now** button for instant SIGTERM.
+- **Global hotkey** — `Ctrl+Alt+Space` (configurable) toggles recording
+  from any focused window. Also `Ctrl+Space` inside the tab.
+- **Floating overlay** — always-on-top 260×90 window in the bottom-right
+  corner (configurable) shows mic-level bars, timer, state (warming →
+  recording → transcribing → inserted). Draggable. Cancel ✕ button.
+- **Three inject methods** (per setting): copy to clipboard only,
+  clipboard + auto Ctrl+V (with original-clipboard restore after
+  200 ms), or typed simulation (Unicode-safe via `enigo`).
+- **Optional post-processing** — rule-based (filler removal,
+  capitalize, whitespace) + external LLM API for grammar/cleanup
+  (OpenAI-compatible). Both off by default, both fail-soft to raw text.
+- **Two-pane history** — last 200 transcripts with copy/paste/type/
+  delete per row and in-place editing.
+- **Microphone selection** in settings. Language auto-detect with
+  RU / EN explicit override.
+- All new `#[tauri::command]` handlers use `DbState::lock_recover()`
+  per CLAUDE.md §11 — no poisoned-lock cascade risk.
+- Windows 10+ and macOS 12+ Apple Silicon (M2+). Intel Macs — post-MVP.
+
+Spans `desktop-rust/src-tauri/src/whisper/` (10 Rust submodules),
+`desktop-rust/src/tabs/whisper/` (6 JS/HTML files), 15 new Tauri
+commands, 2 new SQLite tables, and a CI step that builds
+`whisper-server` from source on `v-*` tags.
+
 ## v1.3.2 (2026-04-23)
 
 **Root cause of the poisoned-lock wedge in v1.3.0.**

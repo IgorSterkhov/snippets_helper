@@ -9,6 +9,7 @@ mod tray;
 mod hotkey;
 mod sync;
 mod autostart;
+mod whisper;
 
 fn write_log(msg: &str) {
     let log_path = dirs::data_dir()
@@ -65,6 +66,7 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_shell::init())
         .register_uri_scheme_protocol("khapp", |ctx, req| {
             let app = ctx.app_handle();
             let uri = req.uri().to_string();
@@ -254,8 +256,27 @@ pub fn run() {
             commands::tasks::update_task_link,
             commands::tasks::reorder_task_links,
             commands::tasks::delete_task_link,
+            // Whisper
+            commands::whisper::whisper_list_catalog,
+            commands::whisper::whisper_list_models,
+            commands::whisper::whisper_install_model,
+            commands::whisper::whisper_delete_model,
+            commands::whisper::whisper_set_default_model,
+            commands::whisper::whisper_start_recording,
+            commands::whisper::whisper_stop_recording,
+            commands::whisper::whisper_cancel_recording,
+            commands::whisper::whisper_unload_now,
+            commands::whisper::whisper_inject_text,
+            commands::whisper::whisper_get_history,
+            commands::whisper::whisper_delete_history,
+            commands::whisper::whisper_list_mics,
+            commands::whisper::whisper_gpu_info,
+            commands::whisper::whisper_detect_whisper_bin,
         ])
         .setup(|app| {
+            let svc = crate::whisper::service::WhisperService::new(app.handle().clone());
+            app.manage(svc);
+
             tray::create_tray(app)?;
 
             // Read hotkey mode from settings
