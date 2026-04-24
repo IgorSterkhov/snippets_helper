@@ -47,8 +47,22 @@ jobs:
         with:
           workspaces: './desktop-rust/src-tauri -> target'
 
-      - name: Build whisper-server from source
+      # Cache compiled sidecar binaries (whisper-server + llama-server)
+      # keyed on the pinned source versions. First v-release with a new
+      # version builds from scratch (~5 min whisper + ~25 min llama/Metal
+      # on macOS); subsequent v-releases restore in ~5 sec.
+      # Scope: v-tagged builds on Mac/Windows (Linux runner doesn't build
+      # sidecars, uses stubs).
+      - name: Cache sidecar binaries
+        id: sidecars-cache
         if: startsWith(github.ref, 'refs/tags/v') && (runner.os == 'macOS' || runner.os == 'Windows')
+        uses: actions/cache@v4
+        with:
+          path: desktop-rust/src-tauri/binaries
+          key: sidecars-${{ runner.os }}-whisper-${{ hashFiles('desktop-rust/WHISPER_CPP_VERSION') }}-llama-${{ hashFiles('desktop-rust/LLAMA_CPP_VERSION') }}-v1
+
+      - name: Build whisper-server from source
+        if: startsWith(github.ref, 'refs/tags/v') && (runner.os == 'macOS' || runner.os == 'Windows') && steps.sidecars-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           VERSION=$(cat desktop-rust/WHISPER_CPP_VERSION)
@@ -80,7 +94,7 @@ jobs:
           chmod +x "$BIN_DST" || true
 
       - name: Build llama-server from source (for Gemma post-processing)
-        if: startsWith(github.ref, 'refs/tags/v') && (runner.os == 'macOS' || runner.os == 'Windows')
+        if: startsWith(github.ref, 'refs/tags/v') && (runner.os == 'macOS' || runner.os == 'Windows') && steps.sidecars-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           VERSION=$(cat desktop-rust/LLAMA_CPP_VERSION)

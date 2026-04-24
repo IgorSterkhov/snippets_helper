@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.3.22 (2026-04-24)
+
+**CI: cache sidecar binaries between releases.**
+
+- `.github/workflows/release-desktop.yml` now has an `actions/cache` step
+  scoped to the pinned `WHISPER_CPP_VERSION` + `LLAMA_CPP_VERSION`.
+  First v-release with a given version still builds from scratch
+  (~5 min whisper + ~25 min llama+Metal on macOS); all subsequent
+  v-releases skip both build steps and restore the binaries in ~5 sec.
+- Cache key drop-in happens automatically when either pinned version
+  changes. No manual cache invalidation.
+- No runtime change — this is a CI-only optimisation. Payload (the
+  shipped .exe / .dmg / OTA zip) is byte-identical.
+
 ## v1.3.21 (2026-04-24)
 
 **Hotfix: WSL `rsync`/`ssh` broken by over-eager quote escaping.**
