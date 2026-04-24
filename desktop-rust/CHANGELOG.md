@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.3.18 OTA patches
+
+- **f-20260424-1** — Whisper tab header: the active-model label is now a
+  dropdown you can use to switch models without opening Settings.
+  Change flips `is_default` and unloads the warmed server (same two-step
+  as Settings save). Disabled while the service is warming / recording /
+  transcribing / unloading to avoid killing an in-flight action. Stays in
+  sync with the Settings modal via the shared `whisper:settings-changed`
+  event.
+
 ## v1.3.18 (2026-04-24)
 
 **Fix: "Model by default" selector in Settings actually switches the model.**

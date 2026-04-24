@@ -18,7 +18,7 @@ export async function initTab(container) {
   header.innerHTML = `
     <span style="font-weight:600;color:var(--text,#c9d1d9)">🎤 Whisper</span>
     <span id="state-chip" style="padding:2px 8px;background:var(--bg,#0d1117);border-radius:10px;font-size:11px;color:var(--text-muted,#8b949e)">○ idle</span>
-    <span id="default-model" style="margin-left:8px;font-size:11px;color:var(--text-muted,#8b949e)"></span>
+    <select id="model-select" title="Active model (switching unloads the warmed server)" style="margin-left:8px;padding:3px 6px;background:var(--bg,#0d1117);color:var(--text,#c9d1d9);border:1px solid var(--border,#30363d);border-radius:4px;font-size:11px;cursor:pointer;max-width:240px"></select>
     <span style="flex:1"></span>
     <button id="record-btn" style="padding:5px 14px;background:var(--accent,#388bfd);color:#fff;border:0;border-radius:4px;cursor:pointer;font-weight:600">🎤 Record</button>
     <button id="settings-btn" style="padding:5px 10px;background:transparent;color:var(--text-muted,#8b949e);border:1px solid var(--border,#30363d);border-radius:4px;cursor:pointer">⚙</button>
@@ -46,8 +46,15 @@ export async function initTab(container) {
   right.appendChild(actions);
 
   const chip = header.querySelector('#state-chip');
-  const modelLabel = header.querySelector('#default-model');
+  const modelSelect = header.querySelector('#model-select');
   const recordBtn = header.querySelector('#record-btn');
+
+  // Cached last-committed default name. Used to revert the dropdown if the
+  // backend rejects the change. We also use it to suppress the change
+  // handler when we repopulate the <select> programmatically (e.g. after
+  // a Settings-modal save).
+  let committedDefault = null;
+  let programmaticSelect = false;
 
   function setChip(st) {
     const stateMap = {
@@ -92,6 +99,15 @@ export async function initTab(container) {
       recordBtn.style.opacity = '1';
       recordBtn.style.cursor = 'pointer';
     }
+
+    // Lock the model switcher while the service is doing something —
+    // switching mid-record/transcribe would kill the warm server and
+    // throw away the in-flight work.
+    const lock = st === 'warming' || st === 'recording'
+              || st === 'transcribing' || st === 'unloading';
+    modelSelect.disabled = lock;
+    modelSelect.style.opacity = lock ? '0.55' : '1';
+    modelSelect.style.cursor = lock ? 'not-allowed' : 'pointer';
   }
 
   recordBtn.onclick = async () => {
@@ -121,24 +137,91 @@ export async function initTab(container) {
 
   const offState = await onWhisperEvent('stateChanged', (p) => {
     setChip(p.state);
+    // `p.model` is the name of the model currently active in the service
+    // (server warmed with it). If the header select hasn't caught up
+    // (user just switched), align it — but don't fire our change handler.
     if (p.model) {
-      modelLabel.textContent = p.model;
+      selectModelInDropdown(p.model);
     } else if (p.state === 'idle') {
-      // Clear stale model name when service is fully idle (post-unload).
-      refreshDefaultModelLabel();
+      // Post-unload: no model is active; show the configured default.
+      refreshModelSelect();
     }
   });
   state.cleanup.push(offState);
 
-  async function refreshDefaultModelLabel() {
+  async function refreshModelSelect() {
     try {
       const ms = await whisperApi.listModels();
-      const d = ms.find(m => m.is_default);
-      modelLabel.textContent = d ? d.display_name : '';
+      const def = ms.find(m => m.is_default);
+      const current = def ? def.name : (ms[0] ? ms[0].name : null);
+      committedDefault = current;
+      programmaticSelect = true;
+      modelSelect.innerHTML = '';
+      if (!ms.length) {
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = '(no models installed)';
+        modelSelect.appendChild(opt);
+        modelSelect.disabled = true;
+        modelSelect.style.opacity = '0.55';
+      } else {
+        for (const m of ms) {
+          const opt = document.createElement('option');
+          opt.value = m.name;
+          opt.textContent = m.display_name + (m.is_default ? '  · default' : '');
+          if (m.name === current) opt.selected = true;
+          modelSelect.appendChild(opt);
+        }
+      }
+      programmaticSelect = false;
     } catch (e) { /* ignore */ }
   }
 
-  const onSettingsChanged = () => { refreshDefaultModelLabel(); };
+  function selectModelInDropdown(name) {
+    if (!name) return;
+    const hasOption = Array.from(modelSelect.options).some(o => o.value === name);
+    if (!hasOption) {
+      // The model isn't in our cached list (someone installed a new one
+      // from Settings). Re-fetch the list in full.
+      refreshModelSelect();
+      return;
+    }
+    programmaticSelect = true;
+    modelSelect.value = name;
+    programmaticSelect = false;
+  }
+
+  modelSelect.onchange = async () => {
+    if (programmaticSelect) return;
+    const newName = modelSelect.value;
+    if (!newName || newName === committedDefault) return;
+    // Don't allow switching mid-action (also guarded by disabled).
+    if (state.currentState !== 'idle' && state.currentState !== 'ready') {
+      selectModelInDropdown(committedDefault);
+      return;
+    }
+    const prev = committedDefault;
+    modelSelect.disabled = true;
+    modelSelect.style.opacity = '0.55';
+    modelSelect.style.cursor = 'not-allowed';
+    try {
+      await whisperApi.setDefaultModel(newName);
+      // Drop the warmed server so the next record uses the newly-selected
+      // model. Same double-call the Settings modal does.
+      try { await whisperApi.unloadNow(); } catch (_) { /* non-fatal */ }
+      committedDefault = newName;
+      window.dispatchEvent(new CustomEvent('whisper:settings-changed'));
+      toast(`Model: ${newName}`);
+    } catch (e) {
+      toast(`Switch failed: ${e}`, { kind: 'error' });
+      selectModelInDropdown(prev);
+    } finally {
+      // Re-evaluate lock from current state.
+      setChip(state.currentState);
+    }
+  };
+
+  const onSettingsChanged = () => { refreshModelSelect(); };
   window.addEventListener('whisper:settings-changed', onSettingsChanged);
   state.cleanup.push(() => window.removeEventListener('whisper:settings-changed', onSettingsChanged));
 
@@ -156,9 +239,7 @@ export async function initTab(container) {
   });
   state.cleanup.push(offError);
 
-  const models = await whisperApi.listModels();
-  const def = models.find(m => m.is_default);
-  if (def) modelLabel.textContent = def.display_name;
+  await refreshModelSelect();
   setChip('idle');
 
   async function reloadHistory() {
