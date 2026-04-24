@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.3.13 (2026-04-24)
+
+**NSIS installer: taskkill on pre-install to free locked .exe files.**
+
+- When `whisper-server.exe` (or the main app) is still running during
+  auto-update, the installer fails with "cannot remove / file in use".
+- Added `src-tauri/installer-hooks.nsh` defining
+  `NSIS_HOOK_PREINSTALL` + `NSIS_HOOK_PREUNINSTALL` that run
+  `taskkill /F /T /IM whisper-server.exe` and
+  `taskkill /F /T /IM keyboard-helper.exe` before file ops, followed by
+  a 500 ms delay so Windows releases file locks.
+- Registered via `bundle.windows.nsis.installerHooks` in
+  `tauri.conf.json`. Combined with v1.3.10's RunEvent::Exit handler
+  this is belt + braces — graceful close kills the child directly, and
+  installer kills both if anything survives.
+
 ## v1.3.12 (2026-04-24)
 
 **Fix: Whisper readiness detection via TCP probe (was stdout-parsing).**
