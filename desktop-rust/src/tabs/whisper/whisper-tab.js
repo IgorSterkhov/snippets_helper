@@ -62,11 +62,40 @@ export async function initTab(container) {
     chip.textContent = m.label;
     chip.style.color = m.color;
     state.currentState = st;
-    recordBtn.textContent = st === 'recording' ? '⏹ Stop' : '🎤 Record';
-    recordBtn.dataset.mode = st === 'recording' ? 'stop' : 'start';
+    // Button behavior per state:
+    //   idle / ready     → "🎤 Record"  (start)
+    //   recording        → "⏹ Stop"    (stop — user decides when to end)
+    //   warming          → "⏳ Warming…" disabled (recorder is already running,
+    //                      stop-during-warm is allowed via Rust pending_stop,
+    //                      but UI hides it to avoid confusion)
+    //   transcribing     → "💭 …"       disabled
+    //   unloading        → "…"          disabled
+    if (st === 'recording') {
+      recordBtn.textContent = '⏹ Stop';
+      recordBtn.dataset.mode = 'stop';
+      recordBtn.disabled = false;
+      recordBtn.style.opacity = '1';
+      recordBtn.style.cursor = 'pointer';
+    } else if (st === 'warming' || st === 'transcribing' || st === 'unloading') {
+      const label = st === 'warming' ? '⏳ Warming…'
+                  : st === 'transcribing' ? '💭 Transcribing…'
+                  : '… Unloading';
+      recordBtn.textContent = label;
+      recordBtn.dataset.mode = 'noop';
+      recordBtn.disabled = true;
+      recordBtn.style.opacity = '0.55';
+      recordBtn.style.cursor = 'not-allowed';
+    } else { // idle, ready
+      recordBtn.textContent = '🎤 Record';
+      recordBtn.dataset.mode = 'start';
+      recordBtn.disabled = false;
+      recordBtn.style.opacity = '1';
+      recordBtn.style.cursor = 'pointer';
+    }
   }
 
   recordBtn.onclick = async () => {
+    if (recordBtn.disabled || recordBtn.dataset.mode === 'noop') return;
     try {
       if (recordBtn.dataset.mode === 'stop') {
         await whisperApi.stopRecording();

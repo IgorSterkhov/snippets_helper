@@ -101,8 +101,16 @@ impl WhisperService {
         device_name: Option<String>,
     ) -> Result<(), String> {
         let mut g = self.inner.lock().await;
-        if matches!(g.state, State::Recording | State::Transcribing) {
-            return Err("already recording".into());
+        // Idempotent: double-clicks / duplicate hotkey events while we're
+        // already warming, recording or transcribing are silently ignored
+        // instead of erroring. The UI also disables the button in those
+        // states, but race conditions between state-changed events and a
+        // stale button click can still get here.
+        if matches!(
+            g.state,
+            State::Warming | State::Recording | State::Transcribing | State::Unloading
+        ) {
+            return Ok(());
         }
         if let Some(t) = g.idle_timer.take() { t.abort(); }
 

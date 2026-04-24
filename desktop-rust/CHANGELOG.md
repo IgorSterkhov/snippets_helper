@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.3.8 (2026-04-24)
+
+**Fix: "Whisper error: cannot start from state Warming".**
+
+- Backend `start_recording` is now idempotent: duplicate calls while the
+  service is in `Warming` / `Recording` / `Transcribing` / `Unloading`
+  return `Ok(())` instead of erroring. Previously a stale button click or
+  a duplicate hotkey event that landed between a state-changed event and
+  the UI update surfaced as an alert.
+- Frontend Record button is now disabled (with a stateful label —
+  "⏳ Warming…", "💭 Transcribing…", "… Unloading") whenever a click would
+  be invalid. `idle` and `ready` show "🎤 Record"; `recording` shows
+  "⏹ Stop". Click handler short-circuits if `disabled`.
+
 ## v1.3.7 (2026-04-24)
 
 **Hotfix: statically link whisper-server so it runs on Windows.**
