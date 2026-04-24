@@ -1,5 +1,33 @@
 # Changelog
 
+## v1.3.20 (2026-04-24)
+
+**Exec: per-command Shell selector — run inside WSL natively.**
+
+- Each Exec command now has a **Shell** field (`host` / `wsl`) and an
+  optional **WSL distro** (defaults to the system's default distro).
+  Lets you run commands inside WSL using its own `~/.ssh/config`,
+  keys and binaries — no more invoking `ssh` from Windows with
+  copied keys.
+- **Host** mode: `cmd /c` on Windows (was `sh -c`, which required
+  git-bash on PATH and was broken out-of-the-box); `sh -c` on Mac/Linux.
+- **WSL** mode: `wsl.exe [-d <distro>] -- bash -lc '<cmd>'` — login
+  shell so `~/.bashrc` / `~/.profile` / ssh-agent are loaded. Bash
+  single-quote escaping protects user input from breaking the wrapper.
+- `CREATE_NO_WINDOW` flag on all `run_command` spawns — no flashing
+  cmd window on Windows (same pattern as `repo_search.rs`).
+- New command `list_wsl_distros()` — parses `wsl.exe -l -q` (which
+  outputs UTF-16 LE) into a clean distro list. Returns `[]` on
+  Mac/Linux or if WSL isn't installed.
+- UI: Shell dropdown + Distro dropdown in the command editor modal.
+  Card shows a small `WSL · <distro>` badge next to the command name
+  so you can tell at a glance where it runs. `WSL` option is marked
+  "not available on this machine" when `list_wsl_distros` returns
+  empty (so commands synced from a Windows machine still save but
+  the hint is visible).
+- Migration: `ALTER TABLE exec_commands ADD COLUMN shell DEFAULT 'host'`
+  + `ADD COLUMN wsl_distro`. Existing commands unaffected.
+
 ## v1.3.19 (2026-04-24)
 
 **New: Bundled local LLM post-processing for Whisper transcripts (Gemma).**

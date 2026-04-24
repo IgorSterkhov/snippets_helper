@@ -227,6 +227,13 @@ function renderCommands() {
     const header = el('div', { class: 'exec-cmd-header' });
     header.appendChild(el('strong', { text: cmd.name }));
 
+    if (cmd.shell === 'wsl') {
+      const label = cmd.wsl_distro ? `WSL · ${cmd.wsl_distro}` : 'WSL';
+      const badge = el('span', { text: label });
+      badge.style.cssText = 'margin-left:8px;padding:1px 7px;background:rgba(56,139,253,0.12);border:1px solid rgba(56,139,253,0.35);color:var(--accent);border-radius:10px;font-size:10px;font-weight:500';
+      header.appendChild(badge);
+    }
+
     const cardActions = el('div', { class: 'cmd-actions' });
     const runBtn = el('button', { text: 'Run', class: 'btn-small' });
     runBtn.addEventListener('click', () => onRunCommand(cmd));
@@ -272,6 +279,8 @@ async function onAddCommand() {
           description: vals.description,
           sortOrder: vals.sortOrder,
           hideAfterRun: vals.hideAfterRun,
+          shell: vals.shell,
+          wslDistro: vals.wslDistro,
         });
         showToast('Command created', 'success');
       },
@@ -296,6 +305,8 @@ async function onEditCommand(cmd) {
           description: vals.description,
           sortOrder: vals.sortOrder,
           hideAfterRun: vals.hideAfterRun,
+          shell: vals.shell,
+          wslDistro: vals.wslDistro,
         });
         showToast('Command updated', 'success');
       },
@@ -327,7 +338,22 @@ function buildCommandForm(cmd) {
       <label style="color:var(--text)">Command</label>
       <button type="button" id="cmd-tpl-btn" class="btn-secondary" style="padding:2px 8px;font-size:12px">Use template</button>
     </div>
-    <textarea id="cmd-command" style="width:100%;min-height:60px;font-family:monospace" placeholder="sh -c '...'"></textarea>
+    <textarea id="cmd-command" style="width:100%;min-height:60px;font-family:monospace" placeholder="echo hello"></textarea>
+    <div style="display:flex;gap:8px;margin-top:8px;align-items:flex-start">
+      <div style="flex:1">
+        <label style="display:block;margin-bottom:4px;color:var(--text)">Shell</label>
+        <select id="cmd-shell" style="width:100%">
+          <option value="host">Host (cmd / sh)</option>
+          <option value="wsl">WSL (Windows only)</option>
+        </select>
+      </div>
+      <div id="cmd-distro-wrap" style="flex:1;display:none">
+        <label style="display:block;margin-bottom:4px;color:var(--text)">WSL distro</label>
+        <select id="cmd-distro" style="width:100%">
+          <option value="">(default)</option>
+        </select>
+      </div>
+    </div>
     <label style="display:block;margin-top:8px;margin-bottom:4px;color:var(--text)">Description</label>
     <input id="cmd-desc" style="width:100%" placeholder="Optional description" />
     <label style="display:block;margin-top:8px;margin-bottom:4px;color:var(--text)">Sort order</label>
@@ -342,6 +368,39 @@ function buildCommandForm(cmd) {
   body.querySelector('#cmd-sort').value = cmd.sort_order ?? 0;
   body.querySelector('#cmd-hide').checked = !!cmd.hide_after_run;
 
+  const shellSel = body.querySelector('#cmd-shell');
+  const distroWrap = body.querySelector('#cmd-distro-wrap');
+  const distroSel = body.querySelector('#cmd-distro');
+  shellSel.value = cmd.shell || 'host';
+
+  // Lazy-populate the distro list from wsl.exe -l -q. On Mac/Linux the
+  // call returns [] and we disable the WSL option with a hint.
+  (async () => {
+    let distros = [];
+    try { distros = await call('list_wsl_distros'); } catch { distros = []; }
+    if (distros && distros.length) {
+      for (const d of distros) {
+        const opt = document.createElement('option');
+        opt.value = d;
+        opt.textContent = d;
+        distroSel.appendChild(opt);
+      }
+      if (cmd.wsl_distro) distroSel.value = cmd.wsl_distro;
+    } else {
+      // No distros found (either no WSL installed, or on non-Windows).
+      // Keep WSL selectable so sync'd commands from Windows still save
+      // — but show a hint in the option.
+      const wslOpt = shellSel.querySelector('option[value="wsl"]');
+      if (wslOpt) wslOpt.textContent = 'WSL (not available on this machine)';
+    }
+    updateDistroVisibility();
+  })();
+
+  function updateDistroVisibility() {
+    distroWrap.style.display = shellSel.value === 'wsl' ? '' : 'none';
+  }
+  shellSel.addEventListener('change', updateDistroVisibility);
+
   body.querySelector('#cmd-tpl-btn').addEventListener('click', async () => {
     const result = await openTemplatePicker();
     if (!result) return;
@@ -355,12 +414,17 @@ function buildCommandForm(cmd) {
 }
 
 function readCommandForm() {
+  const shell = document.getElementById('cmd-shell').value || 'host';
+  const distroVal = document.getElementById('cmd-distro').value || '';
   return {
     name: document.getElementById('cmd-name').value.trim(),
     command: document.getElementById('cmd-command').value.trim(),
     description: document.getElementById('cmd-desc').value.trim(),
     sortOrder: parseInt(document.getElementById('cmd-sort').value) || 0,
     hideAfterRun: document.getElementById('cmd-hide').checked,
+    shell,
+    // Empty string = use default distro; store as null in DB.
+    wslDistro: shell === 'wsl' && distroVal ? distroVal : null,
   };
 }
 
@@ -376,7 +440,11 @@ async function onRunCommand(cmd) {
   console_.textContent = `Running: ${cmd.command}\n...\n`;
 
   try {
-    const output = await call('run_command', { command: cmd.command });
+    const output = await call('run_command', {
+      command: cmd.command,
+      shell: cmd.shell || 'host',
+      wslDistro: cmd.wsl_distro || null,
+    });
     console_.textContent = output;
   } catch (e) {
     console_.textContent = `Error: ${e}`;

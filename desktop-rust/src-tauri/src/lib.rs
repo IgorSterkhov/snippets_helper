@@ -185,6 +185,7 @@ pub fn run() {
             commands::exec::delete_exec_command,
             commands::exec::run_command,
             commands::exec::stop_command,
+            commands::exec::list_wsl_distros,
             // Help
             commands::help::get_changelog,
             // Repo Search

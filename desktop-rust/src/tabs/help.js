@@ -29,7 +29,7 @@ const i18n = {
     commits_desc: 'Build structured commit messages with customizable tags. Maintain a history of past commit messages for quick reuse. Manage commit tags from Settings.',
 
     exec_name: 'Exec',
-    exec_desc: 'Run shell commands organized by categories. Create command groups, add frequently used commands, and execute them as subprocesses directly from the app. View real-time output and stop running processes.',
+    exec_desc: 'Run shell commands organized by categories. Create command groups, add frequently used commands, and execute them as subprocesses directly from the app. Per-command Shell selector: Host (cmd / sh) or WSL (Windows). WSL mode wraps the command in `wsl.exe [-d distro] -- bash -lc`, so SSH, rsync, git etc. use WSL\'s own ~/.ssh/config and keys. View output and stop running processes.',
 
     search_name: 'Repo Search',
     search_desc: 'Search across local git repositories by filename (glob patterns), file content (uses ripgrep if available), or git history (commits and code changes). Add named colored repos, toggle which ones to search. Results grouped by file with context preview on click. Tab auto-unloads after configurable timeout.',
@@ -78,7 +78,7 @@ const i18n = {
     commits_desc: 'Составляйте структурированные сообщения коммитов с настраиваемыми тегами. Ведите историю сообщений для быстрого повторного использования. Управляйте тегами коммитов в Настройках.',
 
     exec_name: 'Выполнение',
-    exec_desc: 'Запускайте shell-команды, организованные по категориям. Создавайте группы команд, добавляйте часто используемые команды и выполняйте их как подпроцессы прямо из приложения. Просмотр вывода в реальном времени и остановка запущенных процессов.',
+    exec_desc: 'Запускайте shell-команды, организованные по категориям. Создавайте группы команд, добавляйте часто используемые команды и выполняйте их как подпроцессы прямо из приложения. У каждой команды свой selector Shell: Host (cmd / sh) или WSL (на Windows). В режиме WSL команда оборачивается в `wsl.exe [-d distro] -- bash -lc`, так что SSH, rsync, git и пр. используют ssh-конфиг и ключи из WSL. Просмотр вывода и остановка запущенных процессов.',
 
     search_name: 'Поиск в репозиториях',
     search_desc: 'Поиск по локальным git-репозиториям: по имени файла (glob), по содержимому (ripgrep если установлен), по истории git (коммиты и изменения кода). Добавляйте именованные цветные репозитории, выбирайте в каких искать. Результаты группируются по файлу с превью контекста по клику. Вкладка выгружается из памяти при неиспользовании.',

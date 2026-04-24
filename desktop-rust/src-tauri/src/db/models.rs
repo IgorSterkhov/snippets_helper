@@ -226,7 +226,13 @@ pub struct ExecCommand {
     pub description: String,
     pub sort_order: i32,
     pub hide_after_run: bool,
+    #[serde(default = "default_shell")]
+    pub shell: String,              // "host" | "wsl"
+    #[serde(default)]
+    pub wsl_distro: Option<String>, // None => use WSL default distro
 }
+
+fn default_shell() -> String { "host".into() }
 
 // ── Tests ────────────────────────────────────────────────────
 
@@ -288,6 +294,8 @@ mod tests {
             description: "Deploy to prod".into(),
             sort_order: 1,
             hide_after_run: true,
+            shell: "host".into(),
+            wsl_distro: None,
         };
 
         let json = serde_json::to_string(&cmd).unwrap();

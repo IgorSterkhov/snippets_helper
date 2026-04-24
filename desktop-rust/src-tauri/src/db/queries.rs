@@ -803,7 +803,8 @@ pub fn delete_exec_category(conn: &Connection, id: i64) -> Result<()> {
 
 pub fn list_exec_commands(conn: &Connection, category_id: i64) -> Result<Vec<ExecCommand>> {
     let mut stmt = conn.prepare(
-        "SELECT id, category_id, name, command, description, sort_order, hide_after_run
+        "SELECT id, category_id, name, command, description, sort_order, hide_after_run,
+                shell, wsl_distro
          FROM exec_commands WHERE category_id = ?1 ORDER BY sort_order, name",
     )?;
     let rows = stmt.query_map(params![category_id], |row| {
@@ -815,11 +816,14 @@ pub fn list_exec_commands(conn: &Connection, category_id: i64) -> Result<Vec<Exe
             description: row.get(4)?,
             sort_order: row.get(5)?,
             hide_after_run: row.get(6)?,
+            shell: row.get::<_, Option<String>>(7)?.unwrap_or_else(|| "host".to_string()),
+            wsl_distro: row.get(8)?,
         })
     })?;
     rows.collect()
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn create_exec_command(
     conn: &Connection,
     category_id: i64,
@@ -828,11 +832,13 @@ pub fn create_exec_command(
     description: &str,
     sort_order: i32,
     hide_after_run: bool,
+    shell: &str,
+    wsl_distro: Option<&str>,
 ) -> Result<ExecCommand> {
     conn.execute(
-        "INSERT INTO exec_commands (category_id, name, command, description, sort_order, hide_after_run)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![category_id, name, command, description, sort_order, hide_after_run],
+        "INSERT INTO exec_commands (category_id, name, command, description, sort_order, hide_after_run, shell, wsl_distro)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![category_id, name, command, description, sort_order, hide_after_run, shell, wsl_distro],
     )?;
     let id = conn.last_insert_rowid();
     Ok(ExecCommand {
@@ -843,9 +849,12 @@ pub fn create_exec_command(
         description: description.to_string(),
         sort_order,
         hide_after_run,
+        shell: shell.to_string(),
+        wsl_distro: wsl_distro.map(|s| s.to_string()),
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn update_exec_command(
     conn: &Connection,
     id: i64,
@@ -854,12 +863,14 @@ pub fn update_exec_command(
     description: &str,
     sort_order: i32,
     hide_after_run: bool,
+    shell: &str,
+    wsl_distro: Option<&str>,
 ) -> Result<()> {
     conn.execute(
         "UPDATE exec_commands SET name = ?1, command = ?2, description = ?3,
-                sort_order = ?4, hide_after_run = ?5
-         WHERE id = ?6",
-        params![name, command, description, sort_order, hide_after_run, id],
+                sort_order = ?4, hide_after_run = ?5, shell = ?6, wsl_distro = ?7
+         WHERE id = ?8",
+        params![name, command, description, sort_order, hide_after_run, shell, wsl_distro, id],
     )?;
     Ok(())
 }
@@ -2002,17 +2013,19 @@ mod tests {
         let cat = create_exec_category(&conn, "Cat1", 0).unwrap();
         let cid = cat.id.unwrap();
 
-        let cmd = create_exec_command(&conn, cid, "Run", "make run", "Run the app", 0, false).unwrap();
+        let cmd = create_exec_command(&conn, cid, "Run", "make run", "Run the app", 0, false, "host", None).unwrap();
         assert!(cmd.id.is_some());
 
         let list = list_exec_commands(&conn, cid).unwrap();
         assert_eq!(list.len(), 1);
         assert!(!list[0].hide_after_run);
 
-        update_exec_command(&conn, cmd.id.unwrap(), "Run V2", "make run2", "Run v2", 1, true).unwrap();
+        update_exec_command(&conn, cmd.id.unwrap(), "Run V2", "make run2", "Run v2", 1, true, "wsl", Some("Ubuntu")).unwrap();
         let list = list_exec_commands(&conn, cid).unwrap();
         assert_eq!(list[0].name, "Run V2");
         assert!(list[0].hide_after_run);
+        assert_eq!(list[0].shell, "wsl");
+        assert_eq!(list[0].wsl_distro.as_deref(), Some("Ubuntu"));
 
         delete_exec_command(&conn, cmd.id.unwrap()).unwrap();
         let list = list_exec_commands(&conn, cid).unwrap();
