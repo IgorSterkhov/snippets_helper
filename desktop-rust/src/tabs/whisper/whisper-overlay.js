@@ -63,7 +63,12 @@ async function initEvents() {
     titleEl.textContent = 'Inserted';
     dot.classList.remove('rec');
     const words = (p.text || '').trim().split(/\s+/).filter(Boolean).length;
-    sub.textContent = `"${(p.text || '').slice(0, 40)}${p.text.length > 40 ? '…' : ''}" · ${words} words`;
+    const perf = [];
+    if (p.transcribe_ms) perf.push(`${p.transcribe_ms}ms`);
+    if (p.cpu_peak_percent > 0) perf.push(`CPU ${Math.round(p.cpu_peak_percent)}%`);
+    if (p.gpu_peak_percent > 0) perf.push(`GPU ${Math.round(p.gpu_peak_percent)}%`);
+    if (p.vram_peak_mb > 0) perf.push(`${p.vram_peak_mb} MB VRAM`);
+    sub.textContent = `${words} words${perf.length ? ' · ' + perf.join(' · ') : ''}`;
     // Rust side will hide the window ~1s later
   });
 }

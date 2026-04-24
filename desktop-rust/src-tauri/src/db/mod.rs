@@ -290,6 +290,11 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     // Migration: add parent_id column to note_folders (may already exist)
     conn.execute_batch("ALTER TABLE note_folders ADD COLUMN parent_id INTEGER DEFAULT NULL").ok();
 
+    // Migration (v1.3.16): per-transcription performance metrics.
+    conn.execute_batch("ALTER TABLE whisper_history ADD COLUMN cpu_peak_percent REAL NOT NULL DEFAULT 0").ok();
+    conn.execute_batch("ALTER TABLE whisper_history ADD COLUMN gpu_peak_percent REAL NOT NULL DEFAULT 0").ok();
+    conn.execute_batch("ALTER TABLE whisper_history ADD COLUMN vram_peak_mb    INTEGER NOT NULL DEFAULT 0").ok();
+
     // Seed Tasks module defaults on a fresh DB. Idempotent — only inserts
     // when tables are empty, so existing users' custom sets aren't clobbered.
     seed_task_defaults(conn).ok();

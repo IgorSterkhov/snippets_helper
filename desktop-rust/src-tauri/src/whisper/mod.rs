@@ -4,6 +4,7 @@ pub mod catalog;
 pub mod events;
 pub mod gpu_detect;
 pub mod inject;
+pub mod metrics;
 pub mod models;
 pub mod postprocess;
 pub mod server;

@@ -2321,6 +2321,9 @@ pub struct WhisperHistoryRow {
     pub language: Option<String>,
     pub injected_to: Option<String>,
     pub created_at: i64,
+    pub cpu_peak_percent: f64,
+    pub gpu_peak_percent: f64,
+    pub vram_peak_mb: i64,
 }
 
 pub fn whisper_insert_history(
@@ -2332,12 +2335,15 @@ pub fn whisper_insert_history(
     transcribe_ms: i64,
     language: Option<&str>,
     injected_to: Option<&str>,
+    cpu_peak_percent: f64,
+    gpu_peak_percent: f64,
+    vram_peak_mb: i64,
 ) -> Result<i64> {
     let now = chrono::Utc::now().timestamp();
     conn.execute(
-        "INSERT INTO whisper_history (text, text_raw, model_name, duration_ms, transcribe_ms, language, injected_to, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        params![text, text_raw, model_name, duration_ms, transcribe_ms, language, injected_to, now],
+        "INSERT INTO whisper_history (text, text_raw, model_name, duration_ms, transcribe_ms, language, injected_to, created_at, cpu_peak_percent, gpu_peak_percent, vram_peak_mb)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        params![text, text_raw, model_name, duration_ms, transcribe_ms, language, injected_to, now, cpu_peak_percent, gpu_peak_percent, vram_peak_mb],
     )?;
     // Trim to last 200 (by id — autoincrement ensures insertion order)
     conn.execute(
@@ -2350,7 +2356,8 @@ pub fn whisper_insert_history(
 
 pub fn whisper_list_history(conn: &Connection, limit: i64) -> Result<Vec<WhisperHistoryRow>> {
     let mut stmt = conn.prepare(
-        "SELECT id, text, text_raw, model_name, duration_ms, transcribe_ms, language, injected_to, created_at
+        "SELECT id, text, text_raw, model_name, duration_ms, transcribe_ms, language, injected_to, created_at,
+                cpu_peak_percent, gpu_peak_percent, vram_peak_mb
          FROM whisper_history ORDER BY created_at DESC, id DESC LIMIT ?1",
     )?;
     let rows = stmt.query_map(params![limit], |r| {
@@ -2364,6 +2371,9 @@ pub fn whisper_list_history(conn: &Connection, limit: i64) -> Result<Vec<Whisper
             language: r.get(6)?,
             injected_to: r.get(7)?,
             created_at: r.get(8)?,
+            cpu_peak_percent: r.get(9)?,
+            gpu_peak_percent: r.get(10)?,
+            vram_peak_mb: r.get(11)?,
         })
     })?;
     rows.collect::<Result<Vec<_>>>()
@@ -2415,7 +2425,7 @@ mod whisper_crud_tests {
     fn history_trim_keeps_last_200() {
         let conn = init_test_db();
         for i in 0..250 {
-            whisper_insert_history(&conn, &format!("t{}", i), None, "ggml-small", 100, 50, None, None).unwrap();
+            whisper_insert_history(&conn, &format!("t{}", i), None, "ggml-small", 100, 50, None, None, 0.0, 0.0, 0).unwrap();
         }
         let rows = whisper_list_history(&conn, 1000).unwrap();
         assert_eq!(rows.len(), 200);
@@ -2426,7 +2436,7 @@ mod whisper_crud_tests {
     #[test]
     fn delete_history_all() {
         let conn = init_test_db();
-        whisper_insert_history(&conn, "x", None, "m", 0, 0, None, None).unwrap();
+        whisper_insert_history(&conn, "x", None, "m", 0, 0, None, None, 0.0, 0.0, 0).unwrap();
         whisper_delete_history(&conn, None).unwrap();
         assert!(whisper_list_history(&conn, 100).unwrap().is_empty());
     }

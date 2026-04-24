@@ -11,6 +11,7 @@ use tokio::sync::mpsc;
 pub struct WhisperServer {
     child: CommandChild,
     pub port: u16,
+    pub pid: u32,
     _rx_task: tokio::task::JoinHandle<()>,
 }
 
@@ -43,6 +44,7 @@ impl WhisperServer {
         ]);
 
         let (mut rx, child) = cmd.spawn().map_err(|e| format!("spawn: {e}"))?;
+        let pid = child.pid();
 
         // Readiness detection by TCP probe, NOT by stdout parsing:
         // whisper-server v1.7.x prints "whisper server listening at ..."
@@ -87,7 +89,7 @@ impl WhisperServer {
             ).await;
             if let Ok(Ok(sock)) = probe {
                 drop(sock);
-                return Ok(Self { child, port, _rx_task: rx_task });
+                return Ok(Self { child, port, pid, _rx_task: rx_task });
             }
             if Instant::now() > deadline {
                 return Err("timeout waiting for whisper-server TCP port".into());

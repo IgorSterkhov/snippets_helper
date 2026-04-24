@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.3.16 (2026-04-24)
+
+**Per-transcription performance metrics.**
+
+- New `whisper/metrics.rs` — background sampler that polls sysinfo
+  (whisper-server process CPU%) and `nvidia-smi` (GPU% + memory used
+  MB) at ~5 Hz during the inference call, tracking peak values.
+- Extended schema: `whisper_history` gets `cpu_peak_percent`,
+  `gpu_peak_percent`, `vram_peak_mb` columns (idempotent ALTER on
+  existing DBs). `TranscribedPayload` + `StopOutcome` carry the same
+  three fields end-to-end.
+- UI: history detail pane shows `CPU N% · GPU N% · VRAM N MB` next to
+  the transcribe duration. Overlay "Inserted" sub-line includes the
+  performance summary so you see GPU load immediately after each take.
+
 ## v1.3.15 (2026-04-24)
 
 **Whisper global hotkey + install additional models in Settings.**

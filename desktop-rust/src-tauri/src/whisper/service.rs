@@ -43,6 +43,9 @@ pub struct StopOutcome {
     pub duration_ms: u64,
     pub transcribe_ms: u64,
     pub model_name: String,
+    pub cpu_peak_percent: f64,
+    pub gpu_peak_percent: f64,
+    pub vram_peak_mb: i64,
 }
 
 pub struct WhisperService {
@@ -245,15 +248,19 @@ impl WhisperService {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
 
-        // Inference — keep lock scope tight
-        let (result, transcribe_ms) = {
+        // Inference — keep lock scope tight. Sample CPU/GPU/VRAM peaks
+        // during the transcribe call via a background sampler.
+        let (result, transcribe_ms, peaks) = {
             let g = self.inner.lock().await;
             let server = g.server.as_ref().ok_or_else(|| "no server".to_string())?;
+            let pid = server.pid;
             let start = std::time::Instant::now();
+            let sampler = crate::whisper::metrics::Sampler::start(pid);
             let r = server.transcribe(wav, language.as_deref()).await?;
             let ms = start.elapsed().as_millis() as u64;
             drop(g);
-            (r, ms)
+            let peaks = sampler.stop().await;
+            (r, ms, peaks)
         };
 
         // Transition to Ready, arm idle timer inline
@@ -292,6 +299,9 @@ impl WhisperService {
             duration_ms,
             transcribe_ms,
             model_name,
+            cpu_peak_percent: peaks.cpu_percent,
+            gpu_peak_percent: peaks.gpu_percent,
+            vram_peak_mb: peaks.vram_mb,
         })
     }
 

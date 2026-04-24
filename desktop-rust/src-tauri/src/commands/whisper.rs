@@ -146,12 +146,15 @@ pub async fn stop_recording_impl(app: &AppHandle) -> Result<String, String> {
         (inj, delay, rules, llm_cfg, lang)
     };
 
-    // F4: run inference, get StopOutcome (durations included)
+    // F4: run inference, get StopOutcome (durations + metrics included)
     let outcome = svc.stop_recording(lang).await?;
     let result = outcome.result;
     let model_name = outcome.model_name;
     let duration_ms = outcome.duration_ms;
     let transcribe_ms = outcome.transcribe_ms;
+    let cpu_peak = outcome.cpu_peak_percent;
+    let gpu_peak = outcome.gpu_peak_percent;
+    let vram_peak = outcome.vram_peak_mb;
 
     // Postprocess
     let raw = result.text.clone();
@@ -166,13 +169,16 @@ pub async fn stop_recording_impl(app: &AppHandle) -> Result<String, String> {
             "copy"
         });
 
-    // F4: emit real durations
+    // F4: emit real durations + metrics
     let _ = app.emit(events::EVT_TRANSCRIBED, events::TranscribedPayload {
         text: text.clone(),
         duration_ms,
         transcribe_ms,
         model: model_name.clone(),
         language: result.language.clone(),
+        cpu_peak_percent: cpu_peak,
+        gpu_peak_percent: gpu_peak,
+        vram_peak_mb: vram_peak,
     });
 
     // F4: persist real durations
@@ -188,6 +194,9 @@ pub async fn stop_recording_impl(app: &AppHandle) -> Result<String, String> {
             transcribe_ms as i64,
             result.language.as_deref(),
             Some(injected),
+            cpu_peak,
+            gpu_peak,
+            vram_peak,
         ).map_err(|e| e.to_string());
     }
 

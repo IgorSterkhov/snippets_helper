@@ -36,6 +36,9 @@ pub struct TranscribedPayload {
     pub transcribe_ms: u64,
     pub model: String,
     pub language: Option<String>,
+    pub cpu_peak_percent: f64,
+    pub gpu_peak_percent: f64,
+    pub vram_peak_mb: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

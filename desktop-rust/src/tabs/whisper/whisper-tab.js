@@ -201,7 +201,12 @@ export async function initTab(container) {
 
     const meta = document.createElement('div');
     meta.style.cssText = 'font-size:11px;color:var(--text-muted,#8b949e)';
-    meta.textContent = `${formatRelativeTime(h.created_at)} · ${h.model_name} · ${h.language || 'auto'} · duration ${h.duration_ms}ms · transcribe ${h.transcribe_ms}ms${h.injected_to ? ' · ' + h.injected_to : ''}`;
+    const perfParts = [];
+    if (h.cpu_peak_percent > 0) perfParts.push(`CPU ${h.cpu_peak_percent.toFixed(0)}%`);
+    if (h.gpu_peak_percent > 0) perfParts.push(`GPU ${h.gpu_peak_percent.toFixed(0)}%`);
+    if (h.vram_peak_mb > 0)     perfParts.push(`VRAM ${h.vram_peak_mb} MB`);
+    const perfStr = perfParts.length ? `  ·  ${perfParts.join(' · ')}` : '';
+    meta.innerHTML = `${formatRelativeTime(h.created_at)} · ${escapeHtml(h.model_name)} · ${h.language || 'auto'} · duration ${h.duration_ms}ms · transcribe <b>${h.transcribe_ms}ms</b>${perfStr}${h.injected_to ? ' · ' + h.injected_to : ''}`;
     detail.appendChild(meta);
 
     actions.appendChild(btn('📋 Copy', async () => { await whisperApi.injectText(textarea.value, 'copy'); toast('Скопировано'); }));
