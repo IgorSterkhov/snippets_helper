@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.3.4 (2026-04-24)
+
+**Hotfix: CI whisper-server build target name.**
+
+- In whisper.cpp v1.7.x the CMake target is `server` (not `whisper-server`).
+  `.github/workflows/release-desktop.yml` and
+  `desktop-rust/scripts/fetch-whisper-bin.sh` invoked `--target whisper-server`,
+  causing v1.3.3 native release to fail with
+  `make: *** No rule to make target 'whisper-server'` (macOS) and
+  `MSBUILD error MSB1009: whisper-server.vcxproj` (Windows).
+  Fixed: build target is now `server`, binary copied from `build/bin/server`
+  (macOS) / `build/bin/Release/server.exe` (Windows) and renamed to
+  `whisper-server-<target-triple>` to match Tauri's externalBin convention.
+- No code changes, no behavior changes — this is purely a packaging fix
+  so v1.3.3's Whisper feature actually ships.
+
 ## v1.3.3 (2026-04-23)
 
 **Whisper Voice Input — new left-sidebar tab for local voice dictation.**

@@ -9,11 +9,13 @@ VERSION=$(cat "$REPO_ROOT/desktop-rust/WHISPER_CPP_VERSION")
 OUT="$REPO_ROOT/desktop-rust/src-tauri/binaries"
 mkdir -p "$OUT"
 
+# Note: in whisper.cpp v1.7.x the CMake target is `server` (see
+# examples/server/CMakeLists.txt which sets TARGET = server). We rename on
+# copy to match Tauri's externalBin triple convention.
 build_from_source() {
     local target_triple="$1"
     local cmake_flags="$2"
-    local bin_name="${3:-whisper-server}"
-    local out_name="$4"
+    local out_name="$3"
 
     local tmp
     tmp=$(mktemp -d)
@@ -21,8 +23,8 @@ build_from_source() {
     git clone --depth 1 --branch "${VERSION}" https://github.com/ggml-org/whisper.cpp "$tmp/wcpp"
     cd "$tmp/wcpp"
     eval "cmake -B build -DWHISPER_BUILD_SERVER=ON -DWHISPER_SDL2=OFF $cmake_flags"
-    cmake --build build -j --target whisper-server
-    cp "build/bin/$bin_name" "$OUT/$out_name"
+    cmake --build build -j --target server
+    cp "build/bin/server" "$OUT/$out_name"
     chmod +x "$OUT/$out_name"
     echo "Installed $OUT/$out_name"
 }
@@ -30,11 +32,11 @@ build_from_source() {
 case "$(uname -s)" in
     Darwin)
         TARGET=aarch64-apple-darwin
-        build_from_source "$TARGET" "-DGGML_METAL=ON" "whisper-server" "whisper-server-$TARGET"
+        build_from_source "$TARGET" "-DGGML_METAL=ON" "whisper-server-$TARGET"
         ;;
     Linux)
         TARGET=x86_64-unknown-linux-gnu
-        build_from_source "$TARGET" "" "whisper-server" "whisper-server-$TARGET"
+        build_from_source "$TARGET" "" "whisper-server-$TARGET"
         ;;
     *)
         echo "unsupported OS: $(uname -s)" >&2

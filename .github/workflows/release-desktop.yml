@@ -54,15 +54,19 @@ jobs:
           VERSION=$(cat desktop-rust/WHISPER_CPP_VERSION)
           git clone --depth 1 --branch "${VERSION}" https://github.com/ggml-org/whisper.cpp /tmp/wcpp
           cd /tmp/wcpp
+          # Note: in whisper.cpp v1.7.x the CMake target is `server` (not
+          # `whisper-server`) — see examples/server/CMakeLists.txt which sets
+          # TARGET = server. We rename the binary on copy for Tauri's
+          # externalBin triple convention.
           if [ "${{ runner.os }}" = "macOS" ]; then
             cmake -B build -DWHISPER_BUILD_SERVER=ON -DGGML_METAL=ON -DWHISPER_SDL2=OFF
-            cmake --build build -j --target whisper-server
-            BIN_SRC=build/bin/whisper-server
+            cmake --build build -j --target server
+            BIN_SRC=build/bin/server
             BIN_DST="$GITHUB_WORKSPACE/desktop-rust/src-tauri/binaries/whisper-server-aarch64-apple-darwin"
           else
             cmake -B build -DWHISPER_BUILD_SERVER=ON -DWHISPER_SDL2=OFF
-            cmake --build build --config Release -j --target whisper-server
-            BIN_SRC=build/bin/Release/whisper-server.exe
+            cmake --build build --config Release -j --target server
+            BIN_SRC=build/bin/Release/server.exe
             BIN_DST="$GITHUB_WORKSPACE/desktop-rust/src-tauri/binaries/whisper-server-x86_64-pc-windows-msvc.exe"
           fi
           mkdir -p "$(dirname "$BIN_DST")"
