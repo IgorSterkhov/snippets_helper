@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.3.15 (2026-04-24)
+
+**Whisper global hotkey + install additional models in Settings.**
+
+- **Global hotkey now actually works.** `tauri-plugin-global-shortcut`
+  was a dependency but never registered at startup — user's
+  `whisper.hotkey` setting was saved to DB and ignored. Added a
+  registration pass in `lib.rs::.setup()` that reads
+  `whisper.hotkey` (default `Ctrl+Alt+Space`) and binds a toggle
+  handler: keypress → start if idle/ready, stop if warming/recording.
+  Works when the main window is hidden. Hotkey-change still needs an
+  app restart (hot re-register is a follow-up).
+- **Install additional models from Settings.** Previously only the
+  onboarding screen (shown once when the model list is empty) could
+  install; after that there was no UI to add a second model. Settings
+  modal now shows an "Установленные модели" block with a list (with
+  per-row Delete) and a "+ Установить другую модель…" button that
+  opens a mini catalog picker showing only models not yet installed.
+  Progress bar inline per-install.
+
 ## v1.3.14 (2026-04-24)
 
 **Fix: "Whisper error: buffer still shared" on Stop.**

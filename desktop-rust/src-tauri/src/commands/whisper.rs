@@ -92,11 +92,12 @@ pub fn whisper_set_default_model(db: State<DbState>, name: String) -> Result<(),
 
 // --- recording & transcription -----------------------------------------------
 
-#[tauri::command]
-pub async fn whisper_start_recording(
-    db: State<'_, DbState>,
-    svc: State<'_, WhisperService>,
-) -> Result<(), String> {
+/// Core start logic, callable from both the Tauri command and the global
+/// hotkey handler. Resolves default model + mic + idle-timeout from
+/// app_settings and drives the WhisperService directly.
+pub async fn start_recording_impl(app: &AppHandle) -> Result<(), String> {
+    let db = app.state::<DbState>();
+    let svc = app.state::<WhisperService>();
     let (model_path, model_name, device_name, idle_timeout_sec) = {
         let conn = db.lock_recover();
         let def = queries::whisper_get_default_model(&conn).map_err(|e| e.to_string())?
@@ -112,11 +113,15 @@ pub async fn whisper_start_recording(
 }
 
 #[tauri::command]
-pub async fn whisper_stop_recording(
-    app: AppHandle,
-    db: State<'_, DbState>,
-    svc: State<'_, WhisperService>,
-) -> Result<String, String> {
+pub async fn whisper_start_recording(app: AppHandle) -> Result<(), String> {
+    start_recording_impl(&app).await
+}
+
+/// Core stop+transcribe+inject+persist logic, callable from both the
+/// Tauri command and the global hotkey handler.
+pub async fn stop_recording_impl(app: &AppHandle) -> Result<String, String> {
+    let db = app.state::<DbState>();
+    let svc = app.state::<WhisperService>();
     // Read settings
     let (inject_method_str, restore_delay_ms, rules_on, llm_cfg_opt, lang) = {
         let conn = db.lock_recover();
@@ -174,7 +179,7 @@ pub async fn whisper_stop_recording(
     {
         let conn = db.lock_recover();
         let text_raw_opt = if raw != text { Some(raw.as_str()) } else { None };
-        queries::whisper_insert_history(
+        let _ = queries::whisper_insert_history(
             &conn,
             &text,
             text_raw_opt,
@@ -183,10 +188,35 @@ pub async fn whisper_stop_recording(
             transcribe_ms as i64,
             result.language.as_deref(),
             Some(injected),
-        ).map_err(|e| e.to_string())?;
+        ).map_err(|e| e.to_string());
     }
 
     Ok(text)
+}
+
+#[tauri::command]
+pub async fn whisper_stop_recording(app: AppHandle) -> Result<String, String> {
+    stop_recording_impl(&app).await
+}
+
+/// Toggle entry used by the global hotkey: start if idle/ready, stop if
+/// warming/recording. Errors are emitted as `whisper:error` events rather
+/// than returned (the hotkey fires asynchronously, nothing awaits it).
+pub async fn hotkey_toggle(app: AppHandle) {
+    use crate::whisper::service::State as WState;
+    let svc = app.state::<WhisperService>();
+    let st = svc.current_state().await;
+    let res = match st {
+        WState::Idle | WState::Ready => start_recording_impl(&app).await.map(|_| ()),
+        WState::Warming | WState::Recording => stop_recording_impl(&app).await.map(|_| ()),
+        WState::Transcribing | WState::Unloading => Ok(()), // ignore
+    };
+    if let Err(e) = res {
+        let _ = app.emit(events::EVT_ERROR, events::ErrorPayload {
+            code: "hotkey_toggle_failed".into(),
+            message: e,
+        });
+    }
 }
 
 #[tauri::command]

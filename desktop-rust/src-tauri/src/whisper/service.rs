@@ -92,6 +92,12 @@ impl WhisperService {
         self.inner.lock().await.idle_timeout = dur;
     }
 
+    /// Current state — used by the global hotkey handler to decide whether
+    /// to start or stop recording on keypress.
+    pub async fn current_state(&self) -> State {
+        self.inner.lock().await.state
+    }
+
     /// Called by `whisper_start_recording` command.
     /// Starts cpal recorder immediately, lazy-starts whisper-server.
     pub async fn start_recording(

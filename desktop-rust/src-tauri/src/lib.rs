@@ -325,6 +325,40 @@ pub fn run() {
                 }
             }
 
+            // Whisper global hotkey — registered separately from the main-
+            // window toggle. User-configurable via `whisper.hotkey` setting
+            // (default Ctrl+Alt+Space). Fires on Pressed; handler toggles
+            // start/stop based on current service state.
+            {
+                use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+                let db_state = app.state::<db::DbState>();
+                let conn = db_state.lock_recover();
+                let whisper_hotkey = db::queries::get_setting(&conn, &computer_id, "whisper.hotkey")
+                    .ok().flatten()
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| "Ctrl+Alt+Space".to_string());
+                drop(conn);
+                let register_result = app.global_shortcut().on_shortcut(
+                    whisper_hotkey.as_str(),
+                    move |app, _shortcut, event| {
+                        if event.state() == ShortcutState::Pressed {
+                            let app_clone = app.clone();
+                            tauri::async_runtime::spawn(async move {
+                                commands::whisper::hotkey_toggle(app_clone).await;
+                            });
+                        }
+                    },
+                );
+                if let Err(e) = register_result {
+                    // Don't fail app startup — just log. User may have a
+                    // conflicting hotkey or an unparseable string.
+                    write_log(&format!(
+                        "whisper global hotkey '{}' registration failed: {}",
+                        whisper_hotkey, e
+                    ));
+                }
+            }
+
             Ok(())
         })
         .on_window_event(|window, event| {
