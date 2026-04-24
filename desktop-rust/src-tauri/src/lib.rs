@@ -336,8 +336,25 @@ pub fn run() {
                 }
             }
         })
-        .run(tauri::generate_context!())
-        .unwrap_or_else(|e| write_log(&format!("Tauri run error: {}", e)));
+        .build(tauri::generate_context!())
+        .unwrap_or_else(|e| {
+            write_log(&format!("Tauri build error: {}", e));
+            std::process::exit(1);
+        })
+        .run(|app_handle, event| {
+            // Kill the whisper-server sidecar on app exit. Without this the
+            // child process outlives the main exe — Windows installer then
+            // can't replace `whisper-server.exe` during auto-update because
+            // the file is held open. Fires on both normal quit and
+            // updater-triggered restart.
+            if let tauri::RunEvent::Exit = event {
+                if let Some(svc) = app_handle.try_state::<crate::whisper::service::WhisperService>() {
+                    tauri::async_runtime::block_on(async {
+                        svc.unload_now().await;
+                    });
+                }
+            }
+        });
 }
 
 fn mime_for(path: &str) -> &'static str {

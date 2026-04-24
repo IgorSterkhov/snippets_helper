@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.3.10 (2026-04-24)
+
+**Fix: whisper-server sidecar survived app exit → blocked installer on
+auto-update.**
+
+- Tauri's shell sidecar is a plain child process, not in the main exe's
+  process group. When the updater killed the main exe it left
+  `whisper-server.exe` running, and the installer then failed to replace
+  the file on Windows because it was held open.
+- Switched `.run(context)` → `.build(context)?.run(|handle, event| ...)`
+  and added a `RunEvent::Exit` handler that synchronously calls
+  `WhisperService::unload_now()` (SIGTERM on Unix, TerminateProcess on
+  Windows). Child is gone before the main exe's process actually exits,
+  so the installer sees a released file on the next startup.
+
 ## v1.3.9 (2026-04-24)
 
 **Fix: Whisper warm-up stuck at 30s, state bounces back to idle.**
