@@ -134,7 +134,7 @@ export async function initTab(container) {
     // Surface whisper-server spawn failures, inference errors, mic-permission
     // refusals etc. Previously these went nowhere — users saw only the state
     // bounce back to idle with no diagnostic.
-    toast(`Whisper: ${p.message || p.code || 'unknown error'}`);
+    toast(`Whisper: ${p.message || p.code || 'unknown error'}`, { kind: 'error' });
     console.error('[whisper error]', p);
   });
   state.cleanup.push(offError);
@@ -222,12 +222,19 @@ export async function initTab(container) {
     return b;
   }
 
-  function toast(msg) {
+  function toast(msg, opts = {}) {
+    const { kind = 'info', durationMs } = opts;
+    const defaultDur = kind === 'error' ? 8000 : 1500;
+    const ms = durationMs !== undefined ? durationMs : defaultDur;
+    const borderColor = kind === 'error' ? 'var(--red,#f85149)'
+                      : kind === 'warn'  ? 'var(--warn,#f0883e)'
+                      : 'var(--border,#30363d)';
     const t = document.createElement('div');
-    t.textContent = msg;
-    t.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--bg-secondary,#161b22);border:1px solid var(--border,#30363d);color:var(--text,#c9d1d9);padding:8px 16px;border-radius:4px;z-index:2000;font-size:12px;box-shadow:0 4px 12px rgba(0,0,0,.3)';
+    t.textContent = msg + (kind === 'error' ? '  ·  click to dismiss' : '');
+    t.style.cssText = `position:fixed;bottom:20px;left:50%;transform:translateX(-50%);max-width:80vw;background:var(--bg-secondary,#161b22);border:1px solid ${borderColor};color:var(--text,#c9d1d9);padding:8px 16px;border-radius:4px;z-index:2000;font-size:12px;box-shadow:0 4px 12px rgba(0,0,0,.3);cursor:${kind === 'error' ? 'pointer' : 'default'};white-space:pre-wrap`;
+    t.onclick = () => t.remove();
     document.body.appendChild(t);
-    setTimeout(() => t.remove(), 1500);
+    if (ms > 0) setTimeout(() => t.remove(), ms);
   }
 
   await reloadHistory();

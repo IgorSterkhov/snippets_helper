@@ -87,7 +87,10 @@ impl WhisperServer {
             }
         });
 
-        match timeout(Duration::from_secs(30), ready_rx.recv()).await {
+        // 120s — large models on CPU (no CUDA) can take 30-60s to load +
+        // init before the "listening" banner. Previous 30s timeout was too
+        // tight for ggml-large-v3-q5_0 on Ryzen-class CPUs.
+        match timeout(Duration::from_secs(120), ready_rx.recv()).await {
             Ok(Some(Ok(()))) => Ok(Self { child, port, _rx_task: rx_task }),
             Ok(Some(Err(e))) => Err(e),
             Ok(None) => Err("server channel closed".into()),

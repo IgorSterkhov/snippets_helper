@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.3.11 (2026-04-24)
+
+**Whisper spawn timeout + readable error toasts.**
+
+- whisper-server spawn timeout: 30s → 120s. Large quantized models
+  (ggml-large-v3-q5_0 is ~1 GB) can take 30-60s to mmap + init on
+  CPU-only builds; previous 30s window killed perfectly healthy servers
+  mid-load and reported "timeout waiting for whisper-server to become
+  ready".
+- Error toasts now stay up **8 seconds** instead of 1.5, show a red
+  border, include "click to dismiss" hint, and are clickable. Info
+  toasts (Copy/Paste/etc) still fade in 1.5s.
+
 ## v1.3.10 (2026-04-24)
 
 **Fix: whisper-server sidecar survived app exit → blocked installer on
