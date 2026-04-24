@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.3.22 OTA patches
+
+- **f-20260424-3** — Tasks module — four fixes:
+  - **DnD rewritten.** Old ghost-only mode gave no spatial feedback and
+    the commit handler silently no-op'd in some cases. New model: source
+    stays in place dimmed, a floating semi-transparent clone follows
+    the cursor, a blue **insertion line** is inserted into the list at
+    the drop target position. On drop the DOM is reordered and the
+    backend `reorder_tasks` is called with the full new id order.
+    Same model for checkbox reorder inside a card (drag > 30 px
+    rightward nests under the row above; depth ≤ 3 enforced).
+  - **Checkbox text wraps in expanded mode.** Replaced `<input
+    type=text>` with a `contenteditable` div + `white-space: pre-wrap`.
+    Long labels now wrap instead of scrolling horizontally. Keyboard
+    shortcuts (Enter = new row, Tab = nest, Shift+Tab = outdent,
+    Backspace-on-empty = delete) preserved.
+  - **Collapsed cards are editable too.** `editable: false` removed on
+    the collapsed render path — you can now add / rename / reorder
+    checkboxes without first expanding the card. Hover shows the 🗑
+    and the + Add row is always present.
+  - **Checkbox font size** is now a setting. Settings → Tasks →
+    "Checkbox font size" (10-20 px). Takes effect immediately via a
+    CSS variable, no reload needed. Same block also exposes
+    "Max visible checkboxes per card" and Layout mode.
+
 ## v1.3.22 (2026-04-24)
 
 **CI: cache sidecar binaries between releases.**

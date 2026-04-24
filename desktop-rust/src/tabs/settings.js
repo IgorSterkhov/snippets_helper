@@ -9,6 +9,7 @@ let activeSubTab = 'general';
 const SUB_TABS = [
   { id: 'general',    label: 'General' },
   { id: 'shortcuts',  label: 'Shortcuts' },
+  { id: 'tasks',      label: 'Tasks' },
   { id: 'analyzer',   label: 'SQL Analyzer' },
   { id: 'commits',    label: 'Commits' },
   { id: 'formatter',  label: 'SQL Formatter' },
@@ -90,6 +91,7 @@ async function renderSubTab(container) {
     switch (activeSubTab) {
       case 'general':   await renderGeneral(container);   break;
       case 'shortcuts': await renderShortcuts(container);  break;
+      case 'tasks':     await renderTasks(container);       break;
       case 'analyzer':  await renderAnalyzer(container);   break;
       case 'commits':   await renderCommits(container);    break;
       case 'formatter': await renderFormatter(container);  break;
@@ -285,6 +287,60 @@ async function renderShortcuts(container) {
   expandInput.addEventListener('change', () => saveSetting('snippet_expand_multiplier', expandInput.value));
   expandRow.appendChild(expandInput);
   container.appendChild(expandRow);
+}
+
+// ── Tasks ─────────────────────────────────────────────────────
+
+async function renderTasks(container) {
+  container.innerHTML = '';
+
+  // Checkbox font size — applied via tasks-css.js var(--task-cb-font-size).
+  const cbFont = await getSetting('tasks_checkbox_font_size') || '13';
+  const maxItems = await getSetting('tasks_card_max_checkboxes') || '10';
+  const layoutMode = await getSetting('tasks_layout_mode') || 'one-col';
+
+  const fontRow = makeFormRow('Checkbox font size:');
+  const fontInput = document.createElement('input');
+  fontInput.type = 'number';
+  fontInput.className = 'settings-input';
+  fontInput.min = '10';
+  fontInput.max = '20';
+  fontInput.value = cbFont;
+  fontInput.style.width = '80px';
+  fontInput.addEventListener('change', () => {
+    saveSetting('tasks_checkbox_font_size', fontInput.value);
+    // Apply immediately to any currently rendered Tasks tab without a
+    // refresh: set a CSS variable on the document root that the scoped
+    // tasks CSS consumes.
+    document.documentElement.style.setProperty('--task-cb-font-size', fontInput.value + 'px');
+  });
+  fontRow.appendChild(fontInput);
+  container.appendChild(fontRow);
+
+  const maxRow = makeFormRow('Max visible checkboxes per card:');
+  const maxInput = document.createElement('input');
+  maxInput.type = 'number';
+  maxInput.className = 'settings-input';
+  maxInput.min = '3';
+  maxInput.max = '30';
+  maxInput.value = maxItems;
+  maxInput.style.width = '80px';
+  maxInput.addEventListener('change', () => saveSetting('tasks_card_max_checkboxes', maxInput.value));
+  maxRow.appendChild(maxInput);
+  container.appendChild(maxRow);
+
+  const layoutRow = makeFormRow('Layout:');
+  const layoutSel = document.createElement('select');
+  layoutSel.className = 'settings-input';
+  for (const [val, label] of [['one-col', '1 column'], ['two-col', '2 columns (zigzag)']]) {
+    const opt = document.createElement('option');
+    opt.value = val; opt.textContent = label;
+    if (layoutMode === val) opt.selected = true;
+    layoutSel.appendChild(opt);
+  }
+  layoutSel.addEventListener('change', () => saveSetting('tasks_layout_mode', layoutSel.value));
+  layoutRow.appendChild(layoutSel);
+  container.appendChild(layoutRow);
 }
 
 // ── SQL Table Analyzer ────────────────────────────────────────

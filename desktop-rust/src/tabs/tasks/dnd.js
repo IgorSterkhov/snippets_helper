@@ -2,27 +2,51 @@ import { call } from '../../tauri-api.js';
 import { showToast } from '../../components/toast.js';
 
 // Pointer-based drag-and-drop for the Tasks tab. Pointer (not HTML5 DnD)
-// because Tauri WebView2 has known HTML5 DnD issues (documented in
-// desktop-rust/RELEASES.md).
+// because Tauri WebView2 has known HTML5 DnD issues.
 //
-// Two drag modes, detected by the element's `data-drag-kind`:
-//   1. "card"      — whole task card; drop targets:
-//                       a) `.tasks-dropdown-item[data-drop-kind]` → change
-//                          task.category_id / status_id (filter unchanged);
-//                       b) another `.task-card` → reorder list.
-//                    During drag we hover over a `.tasks-dropdown` to
-//                    auto-open its menu after 250ms; opened menu items
-//                    become the drop targets.
-//   2. "checkbox"  — single checkbox row; drop target: another `.tcb-item`
-//                    in the SAME task; drop flips parent/sort_order; nest
-//                    if horizontal offset > threshold.
+// Visual model:
+//   • on pointerdown on a handle we CLONE the card/row into a floating
+//     ghost element that follows the cursor (position:fixed, z-index high);
+//   • the SOURCE element stays in place but dimmed (so the user can see
+//     where it came from);
+//   • a blue INSERTION-LINE element is inserted into the list at the
+//     would-be drop position; as the user moves the cursor, the line
+//     follows and passes "through" other cards, giving strong spatial
+//     feedback of where the drop will land;
+//   • on pointerup we compute the final index from where the line sits,
+//     and commit to the backend via `reorder_tasks` /
+//     `reorder_task_checkboxes` (computed from the resulting DOM).
+//
+// Drag kinds (detected via data-drag-kind on the grip handle):
+//   1. "card"      — source is `.task-card`; drop targets:
+//                       a) another card inside .tasks-cards-scroll → reorder;
+//                       b) a `.tasks-dropdown` (hover 300ms auto-opens menu,
+//                          drop on a menu item flips category/status;
+//                          the source position in the list is unchanged);
+//   2. "checkbox"  — source is `.tcb-item`; drop target: another row inside
+//                    the SAME task's cb list → reorder. Horizontal offset
+//                    > NEST_THRESHOLD_PX nests under the row above.
 
-const HOVER_OPEN_MS = 250;
-const GHOST_OFFSET = { x: 10, y: 10 };
+const HOVER_OPEN_MS = 300;
+const NEST_THRESHOLD_PX = 30;
 
-let active = null; // { kind, payload, ghost, startX, startY, hoverTimer, hoverDropdownEl, ... }
+let active = null;
+// Fields while active:
+//   kind, handle, source, sourceOriginalRect, offsetX, offsetY
+//   ghost: HTMLElement
+//   listEl: HTMLElement   // scroll container that owns this drag's list
+//   line:  HTMLElement    // blue insertion indicator (only for list reorder)
+//   dropdown-hover state: hoverDropdownEl, hoverTimer
+//   insertBefore: HTMLElement | null — the DOM node the line sits before
+//                 (null = line at end of list)
+//   mode: 'reorder' | 'dropdown' — current drop-target mode
+//   dropdownItem: HTMLElement | null — highlighted dropdown menu item
 
-export function installTaskDnd(rootEl, { onTaskMetaChange, onTaskReorder, onCheckboxChange }) {
+export function installTaskDnd(rootEl, {
+  onTaskReorderCommit,
+  onTaskMetaChange,
+  onCheckboxReorderCommit,
+}) {
   rootEl.addEventListener('pointerdown', (e) => {
     const handle = e.target.closest('[data-drag-kind]');
     if (!handle) return;
@@ -31,91 +55,96 @@ export function installTaskDnd(rootEl, { onTaskMetaChange, onTaskReorder, onChec
     if (kind !== 'card' && kind !== 'checkbox') return;
 
     e.preventDefault();
-    active = startDrag(handle, kind, e);
+    startDrag(handle, kind, e);
+    if (!active) return;
 
-    const onMove = (ev) => {
-      if (!active) return;
-      onPointerMove(ev, rootEl);
-    };
+    const onMove = (ev) => onPointerMove(ev);
     const onUp = async (ev) => {
-      if (!active) { cleanup(); return; }
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
       try {
-        await onPointerUp(ev, { onTaskMetaChange, onTaskReorder, onCheckboxChange });
+        await onPointerUp(ev, {
+          onTaskReorderCommit,
+          onTaskMetaChange,
+          onCheckboxReorderCommit,
+        });
       } finally {
         cleanup();
       }
-      document.removeEventListener('pointermove', onMove);
-      document.removeEventListener('pointerup', onUp);
     };
-
     document.addEventListener('pointermove', onMove);
     document.addEventListener('pointerup', onUp);
   });
 }
 
 function startDrag(handle, kind, e) {
-  const ghost = buildGhost(handle, kind);
-  const rect = handle.getBoundingClientRect();
-  ghost.style.left = (e.clientX + GHOST_OFFSET.x) + 'px';
-  ghost.style.top  = (e.clientY + GHOST_OFFSET.y) + 'px';
+  const source = handle.closest(kind === 'card' ? '.task-card' : '.tcb-item');
+  if (!source) return;
+
+  const rect = source.getBoundingClientRect();
+
+  const ghost = source.cloneNode(true);
+  ghost.classList.add('task-dnd-drag-clone');
+  ghost.style.position = 'fixed';
+  ghost.style.left = rect.left + 'px';
+  ghost.style.top = rect.top + 'px';
+  ghost.style.width = rect.width + 'px';
+  ghost.style.pointerEvents = 'none';
+  ghost.style.zIndex = '10000';
+  ghost.style.opacity = '0.92';
+  ghost.style.transform = 'rotate(-0.8deg)';
+  ghost.style.boxShadow = '0 16px 32px rgba(0,0,0,0.55)';
+  // Neutralise inputs/animations inside the clone
+  for (const el of ghost.querySelectorAll('input, button, textarea, select')) {
+    el.disabled = true;
+  }
   document.body.appendChild(ghost);
 
-  const payload = kind === 'card'
-    ? { taskId: Number(handle.dataset.taskId) }
-    : { cbId: Number(handle.dataset.cbId), taskId: Number(handle.dataset.taskId) };
+  source.classList.add('task-dnd-source');
 
-  // mark source card/row as dragging (visual cue)
-  const source = handle.closest(kind === 'card' ? '.task-card' : '.tcb-item');
-  if (source) source.classList.add('dragging');
+  // List container: for cards the scroll area; for checkbox the row's parent
+  const listEl = kind === 'card'
+    ? source.closest('.tasks-cards-scroll') || source.parentElement
+    : source.parentElement;
 
-  return {
-    kind,
-    payload,
+  active = {
+    kind, handle, source, listEl,
+    offsetX: e.clientX - rect.left,
+    offsetY: e.clientY - rect.top,
     ghost,
-    source,
-    startX: e.clientX,
-    startY: e.clientY,
-    hoverTimer: null,
+    line: null,
+    insertBefore: null,
     hoverDropdownEl: null,
-    currentDropTarget: null,
+    hoverTimer: null,
+    mode: 'reorder',
+    dropdownItem: null,
+    startX: e.clientX,
   };
 }
 
-function buildGhost(handle, kind) {
-  const g = document.createElement('div');
-  g.className = 'task-dnd-ghost';
-  if (kind === 'card') {
-    const card = handle.closest('.task-card');
-    const title = card && card.querySelector('.task-title');
-    g.textContent = title ? title.textContent : 'task';
-  } else {
-    const row = handle.closest('.tcb-item');
-    const textEl = row && row.querySelector('.tcb-text');
-    g.textContent = textEl ? (textEl.value != null ? textEl.value : textEl.textContent) : 'item';
-  }
-  return g;
-}
-
-function onPointerMove(e, rootEl) {
+function onPointerMove(e) {
   if (!active) return;
-  active.ghost.style.left = (e.clientX + GHOST_OFFSET.x) + 'px';
-  active.ghost.style.top  = (e.clientY + GHOST_OFFSET.y) + 'px';
+  // Float the ghost.
+  active.ghost.style.left = (e.clientX - active.offsetX) + 'px';
+  active.ghost.style.top = (e.clientY - active.offsetY) + 'px';
 
-  // Remove stale highlight
-  clearDropHighlights();
+  clearDropdownHighlight();
+  active.dropdownItem = null;
 
   const under = document.elementFromPoint(e.clientX, e.clientY);
-  if (!under) return;
 
-  if (active.kind === 'card') {
-    // 1) Dropdown-item drop target (menu already open).
+  // ── Card mode — check dropdown drop first ────────────────────
+  if (active.kind === 'card' && under) {
+    // 1) Drop target = already-open dropdown menu item
     const menuItem = under.closest('.tasks-dropdown-item[data-drop-kind]');
     if (menuItem) {
       menuItem.classList.add('drop-target');
-      active.currentDropTarget = { kind: 'menu-item', el: menuItem };
+      active.dropdownItem = menuItem;
+      active.mode = 'dropdown';
+      hideInsertionLine();
       return;
     }
-    // 2) Hovering over a dropdown that is not yet open → schedule auto-open.
+    // 2) Hover on a dropdown chip → auto-open after HOVER_OPEN_MS
     const dropdown = under.closest('.tasks-dropdown');
     if (dropdown) {
       dropdown.classList.add('drop-hover');
@@ -123,87 +152,150 @@ function onPointerMove(e, rootEl) {
         if (active.hoverTimer) clearTimeout(active.hoverTimer);
         active.hoverDropdownEl = dropdown;
         active.hoverTimer = setTimeout(() => {
-          // Simulate open by clicking (dropdown click handler ignores drag state).
           if (!dropdown.querySelector('.tasks-dropdown-menu')) {
             dropdown.click();
           }
         }, HOVER_OPEN_MS);
       }
-      active.currentDropTarget = { kind: 'dropdown', el: dropdown };
+      active.mode = 'dropdown';
+      hideInsertionLine();
       return;
     }
-    // 3) Another task card → reorder target.
-    const card = under.closest('.task-card');
-    if (card && card !== active.source) {
-      card.classList.add('drop-target');
-      active.currentDropTarget = { kind: 'card-target', el: card };
-      return;
-    }
-    active.currentDropTarget = null;
+    // Not over dropdown — cancel pending auto-open.
     if (active.hoverDropdownEl) {
       clearTimeout(active.hoverTimer);
       active.hoverTimer = null;
       active.hoverDropdownEl = null;
     }
-  } else {
-    // checkbox drag: target is another row in the same task.
-    const row = under.closest('.tcb-item');
-    if (row && row !== active.source) {
-      const sourceTaskId = active.payload.taskId;
-      const rowTaskCard = row.closest('.task-card');
-      const rowTaskId = rowTaskCard && Number(rowTaskCard.dataset.taskId);
-      if (rowTaskId === sourceTaskId) {
-        row.classList.add('drop-target');
-        // horizontal offset ≥ 30px → nest under target (if depth allows).
-        const nest = (e.clientX - active.startX) > 30;
-        active.currentDropTarget = { kind: 'cb-row', el: row, nest };
-        return;
-      }
-    }
-    active.currentDropTarget = null;
+  }
+
+  // ── Reorder mode ────────────────────────────────────────────
+  active.mode = 'reorder';
+  updateInsertionLine(e);
+}
+
+function updateInsertionLine(e) {
+  const listEl = active.listEl;
+  if (!listEl) return;
+  const peerSel = active.kind === 'card' ? '.task-card' : '.tcb-item';
+  // Skip the source itself from the layout calc.
+  const peers = Array.from(listEl.querySelectorAll(`:scope > ${peerSel}`))
+    .filter(el => el !== active.source);
+
+  if (peers.length === 0) {
+    // Empty list — line goes at top of listEl.
+    placeLine(listEl, null);
+    active.insertBefore = null;
+    return;
+  }
+
+  const cursorY = e.clientY;
+  let before = null;
+  for (const peer of peers) {
+    const r = peer.getBoundingClientRect();
+    const mid = r.top + r.height / 2;
+    if (cursorY < mid) { before = peer; break; }
+  }
+
+  placeLine(listEl, before);
+  active.insertBefore = before;
+}
+
+function placeLine(listEl, beforeEl) {
+  if (!active.line) {
+    const line = document.createElement('div');
+    line.className = 'task-dnd-insertion-line';
+    active.line = line;
+  }
+  const line = active.line;
+  if (line.parentElement !== listEl) {
+    listEl.insertBefore(line, beforeEl || null);
+  } else if (line.nextSibling !== beforeEl) {
+    // Only move if position differs.
+    listEl.insertBefore(line, beforeEl || null);
+  }
+  line.style.display = '';
+}
+
+function hideInsertionLine() {
+  if (active.line) active.line.style.display = 'none';
+  active.insertBefore = null;
+}
+
+function clearDropdownHighlight() {
+  for (const el of document.querySelectorAll('.tasks-dropdown-item.drop-target')) {
+    el.classList.remove('drop-target');
+  }
+  for (const el of document.querySelectorAll('.tasks-dropdown.drop-hover')) {
+    el.classList.remove('drop-hover');
   }
 }
 
-function clearDropHighlights() {
-  for (const el of document.querySelectorAll('.drop-target')) el.classList.remove('drop-target');
-  for (const el of document.querySelectorAll('.tasks-dropdown.drop-hover')) el.classList.remove('drop-hover');
-}
-
-async function onPointerUp(e, { onTaskMetaChange, onTaskReorder, onCheckboxChange }) {
+async function onPointerUp(e, {
+  onTaskReorderCommit,
+  onTaskMetaChange,
+  onCheckboxReorderCommit,
+}) {
   if (!active) return;
-  const target = active.currentDropTarget;
-  if (!target) return;
 
   if (active.kind === 'card') {
-    const taskId = active.payload.taskId;
-    if (target.kind === 'menu-item') {
-      const kind = target.el.dataset.dropKind;
-      const raw = target.el.dataset.dropId;
+    if (active.mode === 'dropdown' && active.dropdownItem) {
+      const kind = active.dropdownItem.dataset.dropKind;
+      const raw = active.dropdownItem.dataset.dropId;
       const newId = raw ? Number(raw) : null;
+      const taskId = Number(active.source.dataset.taskId);
       await onTaskMetaChange(taskId, kind, newId);
-    } else if (target.kind === 'card-target') {
-      const destId = Number(target.el.dataset.taskId);
-      await onTaskReorder(taskId, destId);
+      return;
+    }
+    if (active.mode === 'reorder') {
+      // Commit: the insertion line shows where the source would land;
+      // physically move the DOM + compute the new id order.
+      const listEl = active.listEl;
+      if (listEl && active.source) {
+        listEl.insertBefore(active.source, active.insertBefore || null);
+      }
+      const orderedIds = Array.from(listEl.querySelectorAll(':scope > .task-card[data-task-id]'))
+        .map(el => Number(el.dataset.taskId));
+      const sourceId = Number(active.source.dataset.taskId);
+      await onTaskReorderCommit(sourceId, orderedIds);
+      return;
     }
   } else {
-    const { cbId, taskId } = active.payload;
-    const destEl = target.el;
-    const destCbId = Number(destEl.dataset.cbId);
-    const nest = !!target.nest;
-    await onCheckboxChange(taskId, cbId, destCbId, nest);
+    // checkbox
+    if (active.mode !== 'reorder') return;
+    const taskCard = active.source.closest('.task-card');
+    const taskId = taskCard ? Number(taskCard.dataset.taskId) : null;
+    if (taskId == null) return;
+
+    const listEl = active.listEl;
+    if (listEl && active.source) {
+      listEl.insertBefore(active.source, active.insertBefore || null);
+    }
+    // Determine nest target: the row immediately above the dropped position.
+    const rowsInOrder = Array.from(listEl.querySelectorAll(':scope > .tcb-item'));
+    const myIdx = rowsInOrder.indexOf(active.source);
+    const prevRow = myIdx > 0 ? rowsInOrder[myIdx - 1] : null;
+    const deltaX = e.clientX - active.startX;
+    const nestUnder = prevRow && deltaX > NEST_THRESHOLD_PX
+      ? Number(prevRow.dataset.cbId)
+      : null;
+    const draggedId = Number(active.source.dataset.cbId);
+    const orderedIds = rowsInOrder.map(el => Number(el.dataset.cbId));
+    await onCheckboxReorderCommit(taskId, draggedId, orderedIds, nestUnder);
   }
 }
 
 function cleanup() {
   if (!active) return;
   if (active.ghost && active.ghost.parentNode) active.ghost.remove();
-  if (active.source) active.source.classList.remove('dragging');
+  if (active.line && active.line.parentNode) active.line.remove();
+  if (active.source) active.source.classList.remove('task-dnd-source');
   if (active.hoverTimer) clearTimeout(active.hoverTimer);
-  clearDropHighlights();
+  clearDropdownHighlight();
   active = null;
 }
 
-// ── High-level helpers used by index.js ──────────────────────
+// ── Commit helpers invoked by index.js ────────────────────────────
 
 export async function commitCardMetaChange(state, taskId, kind, newId) {
   const task = state.tasks.find(t => t.id === taskId) || state.pinned.find(t => t.id === taskId);
@@ -227,56 +319,61 @@ export async function commitCardMetaChange(state, taskId, kind, newId) {
   }
 }
 
-export async function commitCardReorder(state, draggedId, destId) {
-  // Reorder within the current visible list: insert dragged before dest.
-  const ids = state.tasks.map(t => t.id);
-  const from = ids.indexOf(draggedId);
-  const to = ids.indexOf(destId);
-  if (from === -1 || to === -1 || from === to) return;
-  ids.splice(from, 1);
-  const destAfter = ids.indexOf(destId);
-  ids.splice(destAfter, 0, draggedId);
+export async function commitCardReorder(_state, _draggedId, orderedIds) {
+  if (!orderedIds || orderedIds.length < 2) return;
   try {
-    await call('reorder_tasks', { ids });
+    await call('reorder_tasks', { ids: orderedIds });
   } catch (e) {
     showToast('Reorder failed: ' + e, 'error');
   }
 }
 
-export async function commitCheckboxChange(taskId, draggedId, destId, nest) {
+export async function commitCheckboxReorder(taskId, draggedId, orderedIds, nestUnder) {
   try {
-    // Load current list, rebuild ordering, send as reorder batch.
     const items = await call('list_task_checkboxes', { taskId });
     const byId = new Map(items.map(x => [x.id, { ...x }]));
+    // DOM gives us the flat visual order. We rebuild sort_order + parent
+    // from it: everything stays flat under the dragged item's new parent
+    // context (either nestUnder, its parent, or null for root).
     const dragged = byId.get(draggedId);
-    const dest = byId.get(destId);
-    if (!dragged || !dest) return;
+    if (!dragged) return;
 
-    if (nest) {
-      // Make dragged a child of dest (depth ≤ 3).
-      const destDepth = depthOf(dest.id, byId);
+    if (nestUnder) {
+      // Nest check: depth(nestUnder) + 1 ≤ 3
+      const destDepth = depthOf(nestUnder, byId);
       if (destDepth >= 2) {
         showToast('Max nesting depth is 3', 'info');
         return;
       }
-      dragged.parent_id = dest.id;
-      dragged.sort_order = 9999; // end
+      dragged.parent_id = nestUnder;
     } else {
-      // Insert dragged next to dest at the same level.
-      dragged.parent_id = dest.parent_id;
-      dragged.sort_order = dest.sort_order + 1; // just after dest
-      // Shift siblings after dest forward by 2 to leave room.
-      for (const it of byId.values()) {
-        if (it.id !== dragged.id
-            && it.parent_id === dest.parent_id
-            && it.sort_order > dest.sort_order) {
-          it.sort_order += 2;
-        }
+      // Find the row visually before the dragged one and inherit its parent,
+      // so dragging between siblings keeps them as siblings.
+      const idxInOrder = orderedIds.indexOf(draggedId);
+      if (idxInOrder > 0) {
+        const prevId = orderedIds[idxInOrder - 1];
+        const prev = byId.get(prevId);
+        dragged.parent_id = prev ? prev.parent_id : null;
+      } else {
+        dragged.parent_id = null;
       }
     }
 
+    // Assign sort_order from DOM order, per (parent_id) bucket.
+    const counterByParent = new Map();
+    for (const id of orderedIds) {
+      const node = byId.get(id);
+      if (!node) continue;
+      const key = node.parent_id == null ? 'root' : String(node.parent_id);
+      const n = counterByParent.get(key) || 0;
+      node.sort_order = n;
+      counterByParent.set(key, n + 1);
+    }
+
     const entries = Array.from(byId.values()).map(x => ({
-      id: x.id, parent_id: x.parent_id, sort_order: x.sort_order,
+      id: x.id,
+      parent_id: x.parent_id,
+      sort_order: x.sort_order,
     }));
     await call('reorder_task_checkboxes', { taskId, entries });
   } catch (e) {

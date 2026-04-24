@@ -5,7 +5,7 @@ import { renderCard } from './card.js';
 import { renderPinnedChips, renderFilterDropdown } from './dropdown.js';
 import { helpButton } from '../sql/sql-help.js';
 import { TASKS_HELP_HTML } from './help-content.js';
-import { installTaskDnd, commitCardMetaChange, commitCardReorder, commitCheckboxChange } from './dnd.js';
+import { installTaskDnd, commitCardMetaChange, commitCardReorder, commitCheckboxReorder } from './dnd.js';
 
 // ── Module-level state ──────────────────────────────────────
 
@@ -49,23 +49,37 @@ export async function init(container) {
   } catch { /* ignore */ }
   applyLayoutMode();
 
+  // Apply saved checkbox font size as a CSS root var — takes effect
+  // immediately without touching scoped styles.
+  try {
+    const cbFont = await call('get_setting', { key: 'tasks_checkbox_font_size' });
+    if (cbFont) {
+      const n = parseInt(cbFont, 10);
+      if (Number.isFinite(n) && n >= 10 && n <= 20) {
+        document.documentElement.style.setProperty('--task-cb-font-size', n + 'px');
+      }
+    }
+  } catch { /* default via CSS fallback */ }
+
   await Promise.all([loadCategories(), loadStatuses()]);
   await loadTasks();
   await loadPinned();
   renderAll();
 
   // Pointer-based DnD: card → dropdown item / card → card / checkbox → row.
+  // New model (v1.3.23): the DOM is reordered live during drag; on drop
+  // we pass the full ordered-ids list for the backend reorder_tasks call.
   installTaskDnd(container, {
     onTaskMetaChange: async (taskId, kind, newId) => {
       await commitCardMetaChange(state, taskId, kind, newId);
       await reloadTasks();
     },
-    onTaskReorder: async (draggedId, destId) => {
-      await commitCardReorder(state, draggedId, destId);
+    onTaskReorderCommit: async (_draggedId, orderedIds) => {
+      await commitCardReorder(state, _draggedId, orderedIds);
       await reloadTasks();
     },
-    onCheckboxChange: async (taskId, draggedId, destId, nest) => {
-      await commitCheckboxChange(taskId, draggedId, destId, nest);
+    onCheckboxReorderCommit: async (taskId, draggedId, orderedIds, nestUnder) => {
+      await commitCheckboxReorder(taskId, draggedId, orderedIds, nestUnder);
       renderTaskList();
     },
   });

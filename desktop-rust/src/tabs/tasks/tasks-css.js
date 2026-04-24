@@ -224,7 +224,9 @@ export function tasksCSS() {
 .tcb-item {
   display: flex; align-items: center; gap: 5px;
   padding: 3px 10px 3px 0;
-  font-size: 13px;
+  /* Font-size is a root-level CSS variable so changing it in Settings
+     immediately re-flows every checkbox row without re-render. */
+  font-size: var(--task-cb-font-size, 13px);
   line-height: 1.4;
 }
 .tcb-item.depth-1 { padding-left: 24px; }
@@ -245,8 +247,18 @@ export function tasksCSS() {
   flex: 1; color: var(--text);
   border: none; background: transparent; outline: none;
   font: inherit; padding: 0;
+  /* contenteditable div — wrap long text instead of overflowing right. */
+  white-space: pre-wrap;
+  word-break: break-word;
+  min-width: 0;
+  /* Font-size can be overridden by Settings → Tasks "Checkbox font size"
+     via the inline .tasks-cards-scroll[data-cb-font-size] attribute. */
 }
 .tcb-text.checked { color: var(--text-muted); text-decoration: line-through; }
+.tcb-text[contenteditable="true"]:focus { outline: 1px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+.tcb-item { flex-wrap: nowrap; align-items: flex-start; }
+.tcb-item input[type="checkbox"] { margin-top: 3px; flex-shrink: 0; }
+.tcb-handle { flex-shrink: 0; }
 .tcb-delete {
   color: var(--text-muted); opacity: 0; cursor: pointer;
   font-size: 12px; padding: 0 6px;
@@ -385,20 +397,31 @@ export function tasksCSS() {
 }
 .task-editor-btn.danger:hover { background: rgba(248, 81, 73, 0.1); }
 
-/* DnD ghost */
-.task-dnd-ghost {
-  position: fixed;
+/* DnD — floating clone follows the cursor; source stays in place dimmed; a
+   blue insertion line shows the drop target in the list. */
+.task-dnd-drag-clone {
+  /* Most layout set inline at spawn-time; here just a subtle cursor hint. */
+  cursor: grabbing !important;
+  user-select: none;
+}
+.task-dnd-source {
+  opacity: 0.35;
+  transition: opacity 80ms ease;
   pointer-events: none;
-  z-index: 9999;
-  opacity: 0.9;
-  transform: rotate(-1deg);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
-  background: var(--bg-secondary);
-  border: 1px dashed var(--accent);
-  border-radius: 8px;
-  padding: 8px 12px;
-  max-width: 320px;
-  font-size: 12px;
+}
+.task-dnd-insertion-line {
+  height: 3px;
+  background: var(--accent);
+  border-radius: 2px;
+  margin: 3px 0;
+  box-shadow: 0 0 0 1px rgba(56, 139, 253, 0.25);
+  pointer-events: none;
+  flex-shrink: 0;
+}
+/* In 2-col grid mode the insertion line needs to span both columns so it
+   visually reads as a horizontal rule between rows. */
+.tasks-cards-scroll.two-col .task-dnd-insertion-line {
+  grid-column: 1 / -1;
 }
 
 /* Manage modal */

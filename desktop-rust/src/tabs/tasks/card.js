@@ -143,7 +143,9 @@ function buildCollapsedBody(task, ctx) {
   // Load checkboxes (cached).
   loadCheckboxes(task.id).then((items) => {
     body.innerHTML = '';
-    renderCheckboxes(body, task, items, ctx, { editable: false });
+    // editable=true in collapsed mode too: inline-add + rename +
+    // Tab/Shift+Tab/Enter shortcuts all work without expanding the card.
+    renderCheckboxes(body, task, items, ctx, { editable: true });
   }).catch((e) => {
     body.innerHTML = '';
     body.appendChild(el('div', { text: 'Load error: ' + e, style: 'padding:8px 12px;color:var(--danger)' }));
@@ -241,18 +243,21 @@ function buildCheckboxRow(node, task, ctx, depth, { editable }) {
   });
   row.appendChild(cb);
 
-  // text — contenteditable when editable, plain span when collapsed.
+  // text — contenteditable <div> so long labels wrap instead of
+  // scrolling horizontally (an <input type=text> doesn't wrap).
   let textEl;
   if (editable) {
-    textEl = document.createElement('input');
-    textEl.type = 'text';
+    textEl = document.createElement('div');
     textEl.className = 'tcb-text';
-    textEl.value = node.text;
+    textEl.contentEditable = 'true';
+    textEl.spellcheck = false;
+    textEl.textContent = node.text;
     if (cb.checked) textEl.classList.add('checked');
 
     let committedText = node.text;
+    const readText = () => textEl.textContent.replace(/\r/g, '');
     const commit = async () => {
-      const newText = textEl.value;
+      const newText = readText();
       if (newText === committedText) return;
       committedText = newText;
       try {
@@ -267,7 +272,7 @@ function buildCheckboxRow(node, task, ctx, depth, { editable }) {
 
     // Keyboard: Enter = new item (same parent); Tab = indent; Shift+Tab = outdent.
     textEl.addEventListener('keydown', async (e) => {
-      if (e.key === 'Enter') {
+      if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         await commit();
         try {
@@ -280,8 +285,17 @@ function buildCheckboxRow(node, task, ctx, depth, { editable }) {
           ctx.onTaskReload && ctx.onTaskReload();
           // Focus new row after re-render.
           setTimeout(() => {
-            const inp = document.querySelector(`[data-cb-id="${created.id}"] input[type="text"]`);
-            if (inp) inp.focus();
+            const el = document.querySelector(`[data-cb-id="${created.id}"] .tcb-text[contenteditable="true"]`);
+            if (el) {
+              el.focus();
+              // Put caret at end
+              const range = document.createRange();
+              range.selectNodeContents(el);
+              range.collapse(false);
+              const sel = window.getSelection();
+              sel.removeAllRanges();
+              sel.addRange(range);
+            }
           }, 30);
         } catch (err) {
           showToast('New item failed: ' + err, 'error');
@@ -294,7 +308,7 @@ function buildCheckboxRow(node, task, ctx, depth, { editable }) {
         e.preventDefault();
         await commit();
         await outdent(task, node, ctx);
-      } else if (e.key === 'Backspace' && textEl.value === '' && textEl.selectionStart === 0) {
+      } else if (e.key === 'Backspace' && readText() === '') {
         e.preventDefault();
         try {
           await call('delete_task_checkbox', { id: node.id });
