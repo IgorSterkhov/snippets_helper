@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.3.5 (2026-04-24)
+
+**Whisper onboarding: show discrete GPU name + VRAM.**
+
+- `gpu_detect` on Windows now also queries `nvidia-smi` for the GPU name
+  (`--query-gpu=name,memory.total`) and surfaces it in the onboarding
+  "Система определила…" banner as a separate field. Previously only
+  `cpu_model` was shown, which on AMD APUs ("Ryzen 7 5800H with Radeon
+  Graphics") misleadingly implied the system had no NVIDIA card even when
+  CUDA was detected.
+- `HardwareInfo` gains an optional `gpu_name: Option<String>` field (e.g.
+  `"NVIDIA GeForce RTX 3060"`). Backward compatible: missing on older
+  backends — frontend handles absent gracefully.
+- Banner format: `CPU, N GB RAM, [GPU NAME (M GB VRAM), ]CUDA|Metal|CPU доступен`.
+
 ## v1.3.4 (2026-04-24)
 
 **Hotfix: CI whisper-server build target name.**

@@ -30,9 +30,17 @@ export async function initOnboarding(container, { onInstalled } = {}) {
 
   const hint = document.createElement('div');
   hint.style.cssText = 'padding:10px;background:var(--bg-secondary,#161b22);border:1px solid var(--border,#30363d);border-radius:4px;color:var(--text-muted,#8b949e);font-size:12px';
-  const gpuLabel = hw.cuda ? 'CUDA' : (hw.metal ? 'Metal' : 'CPU');
   const rec = recommended(hw);
-  hint.innerHTML = `💡 <b>Система определила:</b> ${escapeHtml(hw.cpu_model)}, ${Math.round(hw.ram_mb/1024)} GB RAM, ${gpuLabel} доступен. Лучший выбор — <b>${rec}</b>.`;
+  const parts = [
+    escapeHtml(hw.cpu_model),
+    `${Math.round(hw.ram_mb / 1024)} GB RAM`,
+  ];
+  if (hw.gpu_name) {
+    const vramGb = hw.vram_mb > 0 ? ` (${(hw.vram_mb / 1024).toFixed(vramGbPrecision(hw.vram_mb))} GB VRAM)` : '';
+    parts.push(`<b>${escapeHtml(hw.gpu_name)}</b>${vramGb}`);
+  }
+  parts.push(hw.cuda ? 'CUDA доступен' : (hw.metal ? 'Metal доступен' : 'только CPU'));
+  hint.innerHTML = `💡 <b>Система определила:</b> ${parts.join(', ')}. Лучший выбор — <b>${rec}</b>.`;
   container.appendChild(hint);
 }
 
@@ -130,6 +138,12 @@ function recommended(hw) {
   if (hw.ram_mb >= 8000 && (hw.metal || hw.cuda)) return 'small или large-v3-q5';
   if (hw.ram_mb >= 8000) return 'small';
   return 'tiny';
+}
+
+function vramGbPrecision(mb) {
+  // VRAM usually reported in MB; e.g. 12288 MB → 12 GB, 8192 MB → 8 GB.
+  // Use 0 decimals for round GB, 1 decimal for odd values like 6144→6 or 11264→11.
+  return (mb % 1024 === 0) ? 0 : 1;
 }
 
 function formatBytes(n) {

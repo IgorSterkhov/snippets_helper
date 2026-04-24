@@ -9,6 +9,11 @@ pub struct HardwareInfo {
     pub cuda: bool,
     pub metal: bool,
     pub vram_mb: u64,
+    /// Discrete GPU name if detectable (e.g. "NVIDIA GeForce RTX 3060"). None
+    /// if no discrete GPU or detection failed. Note: `cpu_model` may mention
+    /// integrated graphics (e.g. "Ryzen 7 5800H with Radeon Graphics") — that
+    /// is NOT this field.
+    pub gpu_name: Option<String>,
 }
 
 /// Cheap introspection intended to run once at onboarding time.
@@ -21,29 +26,35 @@ pub fn detect() -> HardwareInfo {
     let ram_mb = sys.total_memory() / 1024 / 1024;
 
     let metal = cfg!(all(target_os = "macos", target_arch = "aarch64"));
-    let (cuda, vram_mb) = detect_cuda();
+    let (cuda, vram_mb, gpu_name) = detect_cuda();
 
-    HardwareInfo { cpu_model, ram_mb, cuda, metal, vram_mb }
+    HardwareInfo { cpu_model, ram_mb, cuda, metal, vram_mb, gpu_name }
 }
 
-fn detect_cuda() -> (bool, u64) {
+fn detect_cuda() -> (bool, u64, Option<String>) {
     #[cfg(target_os = "windows")]
     {
         use std::process::Command;
         let out = Command::new("nvidia-smi")
-            .args(["--query-gpu=memory.total", "--format=csv,noheader,nounits"])
+            .args(["--query-gpu=name,memory.total", "--format=csv,noheader,nounits"])
             .output();
         if let Ok(o) = out {
             if o.status.success() {
                 let s = String::from_utf8_lossy(&o.stdout);
-                let first = s.lines().next().unwrap_or("").trim();
-                if let Ok(mb) = first.parse::<u64>() {
-                    return (true, mb);
+                // nvidia-smi csv line: "NVIDIA GeForce RTX 3060, 12288"
+                if let Some(first) = s.lines().next() {
+                    let parts: Vec<&str> = first.splitn(2, ',').map(|p| p.trim()).collect();
+                    if parts.len() == 2 {
+                        let name = parts[0].to_string();
+                        if let Ok(mb) = parts[1].parse::<u64>() {
+                            return (true, mb, Some(name));
+                        }
+                    }
                 }
             }
         }
     }
-    (false, 0)
+    (false, 0, None)
 }
 
 #[cfg(test)]
