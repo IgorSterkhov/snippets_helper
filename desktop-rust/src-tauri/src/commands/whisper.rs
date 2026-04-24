@@ -52,27 +52,21 @@ pub async fn whisper_install_model(
     let meta = catalog::find(&name).ok_or_else(|| format!("unknown model: {name}"))?;
     let app_data_dir = app_data(&app);
     let path = models::download_and_install(&app, &app_data_dir, meta).await?;
-    let should_set_default;
-    {
-        let conn = db.lock_recover();
-        queries::whisper_insert_or_upgrade_model(
-            &conn,
-            meta.name,
-            meta.display_name,
-            &path.to_string_lossy(),
-            meta.size_bytes as i64,
-            meta.sha256,
-        ).map_err(|e| e.to_string())?;
-        let all = queries::whisper_list_models(&conn).map_err(|e| e.to_string())?;
-        should_set_default = all.len() == 1;
+    let mut conn = db.lock_recover();
+    queries::whisper_insert_or_upgrade_model(
+        &conn,
+        meta.name,
+        meta.display_name,
+        &path.to_string_lossy(),
+        meta.size_bytes as i64,
+        meta.sha256,
+    ).map_err(|e| e.to_string())?;
+    let all = queries::whisper_list_models(&conn).map_err(|e| e.to_string())?;
+    if all.len() == 1 {
+        queries::whisper_set_default_model(&mut conn, meta.name).map_err(|e| e.to_string())?;
     }
-    if should_set_default {
-        let mut conn2 = db.lock_recover();
-        queries::whisper_set_default_model(&mut conn2, meta.name).map_err(|e| e.to_string())?;
-    }
-    let conn = db.lock_recover();
-    let rows = queries::whisper_list_models(&conn).map_err(|e| e.to_string())?;
-    rows.into_iter()
+    queries::whisper_list_models(&conn).map_err(|e| e.to_string())?
+        .into_iter()
         .find(|m| m.name == meta.name)
         .ok_or_else(|| "install succeeded but model not found".into())
 }

@@ -34,7 +34,7 @@
   per CLAUDE.md §11 — no poisoned-lock cascade risk.
 - Windows 10+ and macOS 12+ Apple Silicon (M2+). Intel Macs — post-MVP.
 
-Spans `desktop-rust/src-tauri/src/whisper/` (11 Rust modules),
+Spans `desktop-rust/src-tauri/src/whisper/` (10 Rust submodules),
 `desktop-rust/src/tabs/whisper/` (6 JS/HTML files), 15 new Tauri
 commands, 2 new SQLite tables, and a CI step that builds
 `whisper-server` from source on `v-*` tags.

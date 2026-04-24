@@ -88,10 +88,6 @@ impl WhisperService {
         }
     }
 
-    pub async fn state(&self) -> State {
-        self.inner.lock().await.state
-    }
-
     pub async fn set_idle_timeout(&self, dur: Duration) {
         self.inner.lock().await.idle_timeout = dur;
     }
