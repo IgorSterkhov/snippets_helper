@@ -295,6 +295,10 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     conn.execute_batch("ALTER TABLE whisper_history ADD COLUMN gpu_peak_percent REAL NOT NULL DEFAULT 0").ok();
     conn.execute_batch("ALTER TABLE whisper_history ADD COLUMN vram_peak_mb    INTEGER NOT NULL DEFAULT 0").ok();
 
+    // Migration (v1.3.24): Whisper post-processed text persisted alongside raw transcript.
+    // Nullable — old rows stay NULL until user runs ✨ Post-process on them.
+    conn.execute_batch("ALTER TABLE whisper_history ADD COLUMN postprocessed_text TEXT").ok();
+
     // Migration (v1.3.20): per-command shell selector for Exec tab.
     // 'host'  → cmd /c (Win) or sh -c (mac/linux)
     // 'wsl'   → wsl.exe [-d distro] -- bash -lc <cmd>  (Windows only)

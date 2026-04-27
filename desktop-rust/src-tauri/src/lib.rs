@@ -271,6 +271,7 @@ pub fn run() {
             commands::whisper::whisper_inject_text,
             commands::whisper::whisper_get_history,
             commands::whisper::whisper_delete_history,
+            commands::whisper::whisper_set_postprocessed,
             commands::whisper::whisper_list_mics,
             commands::whisper::whisper_gpu_info,
             commands::whisper::whisper_detect_whisper_bin,

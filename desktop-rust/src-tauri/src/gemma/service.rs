@@ -15,6 +15,7 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
 pub const EVT_STATE: &str = "gemma:state-changed";
+pub const EVT_PP_PROGRESS: &str = "gemma:postprocess-progress";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum State { Idle, Warming, Ready, Busy, Unloading }
@@ -61,7 +62,8 @@ impl GemmaService {
 
     /// Post-process a Whisper transcript with the currently-active Gemma
     /// model. Warms the server on first call; subsequent calls reuse it
-    /// until the idle timer fires.
+    /// until the idle timer fires. Emits `gemma:postprocess-progress`
+    /// events during streaming so the UI can render a progress bar.
     pub async fn postprocess(&self, text: &str) -> Result<String, String> {
         if text.trim().is_empty() {
             return Ok(String::new());
@@ -70,6 +72,7 @@ impl GemmaService {
         self.ensure_ready().await?;
 
         self.transition(State::Busy, None).await;
+        let app = self.app.clone();
         let result = {
             let inner = self.inner.lock().await;
             let server = inner.server.as_ref().ok_or("server not ready")?;
@@ -78,8 +81,25 @@ impl GemmaService {
             // early on our `stop` markers anyway. Input is voice-length so
             // usually short.
             let budget = (text.chars().count() as i32 * 2 + 128).min(1024);
-            server.complete(&prompt, budget).await
+            let app_for_cb = app.clone();
+            server.complete(&prompt, budget, move |tokens_done, n_predict, elapsed_ms| {
+                let _ = app_for_cb.emit(EVT_PP_PROGRESS, serde_json::json!({
+                    "tokens_done": tokens_done,
+                    "n_predict": n_predict,
+                    "elapsed_ms": elapsed_ms,
+                    "done": false,
+                }));
+            }).await
         };
+
+        // Always emit a final `done:true` so the frontend can dismiss the
+        // progress strip even on error paths.
+        let _ = app.emit(EVT_PP_PROGRESS, serde_json::json!({
+            "tokens_done": 0,
+            "n_predict": 0,
+            "elapsed_ms": 0,
+            "done": true,
+        }));
 
         let cleaned = match result {
             Ok(raw) => Ok(postprocess::sanitize_output(&raw)),

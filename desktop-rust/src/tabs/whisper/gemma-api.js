@@ -18,6 +18,7 @@ export const gemmaApi = {
 const EVENTS = {
   stateChanged: 'gemma:state-changed',
   modelDownload: 'gemma:model-download',
+  postprocessProgress: 'gemma:postprocess-progress',
 };
 
 export async function onGemmaEvent(name, handler) {

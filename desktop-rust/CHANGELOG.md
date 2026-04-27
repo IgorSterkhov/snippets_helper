@@ -1,5 +1,28 @@
 # Changelog
 
+## v1.3.24 (2026-04-26)
+
+**Whisper post-process UX + Exec card redesign.**
+
+- **Whisper:** new Gemma-model combobox in the tab header (right of the
+  Whisper-model one). Empty state — single `(no models — open Settings)`
+  entry that opens the settings modal scrolled to the Gemma block.
+- **Whisper:** right-pane split into two tabs — `Whisper output` (raw
+  transcript, as before) and `Post-processed` (Gemma-cleaned text).
+  History rows now persist `postprocessed_text` in the DB and render a
+  small green dot when post-processing has been done.
+- **Whisper:** unified status strip between meta and action buttons —
+  shows `💭 Transcribing… X.Xs` (elapsed timer) for whisper inference
+  and `✨ N% · K/M tok · X.Xs` with a fill bar for Gemma post-processing.
+  Gemma backend now streams completions via SSE and emits incremental
+  progress events.
+- **Exec:** card redesign. Big octagonal Run-button with a green ▶ on
+  the left, the command name is now click-to-edit (the standalone
+  ✎-button is gone), Delete (✕) stays on the right. Layout flows
+  Run | name + WSL badge / description / command-code | delete.
+- **DB:** migration adds `whisper_history.postprocessed_text` column
+  (nullable, idempotent ALTER).
+
 ## v1.3.23 (2026-04-24)
 
 **VPS tab — four fixes.**

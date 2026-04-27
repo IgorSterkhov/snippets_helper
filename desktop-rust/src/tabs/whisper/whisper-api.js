@@ -20,6 +20,7 @@ export const whisperApi = {
   // history
   getHistory: (limit = 200) => call('whisper_get_history', { limit }),
   deleteHistory: (id = null) => call('whisper_delete_history', { id }),
+  setPostprocessed: (id, text) => call('whisper_set_postprocessed', { id, text }),
 
   // diagnostics
   listMics: () => call('whisper_list_mics'),

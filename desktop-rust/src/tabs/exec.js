@@ -211,6 +211,8 @@ function renderCommandsEmpty() {
   list.innerHTML = '<p style="padding:12px;color:var(--text-muted)">Select a category</p>';
 }
 
+const RUN_ICON_SVG = '<svg viewBox="0 0 12 12" aria-hidden="true"><polygon points="3,2 10,6 3,10"/></svg>';
+
 function renderCommands() {
   const list = root.querySelector('#exec-cmd-list');
   if (!list) return;
@@ -224,36 +226,46 @@ function renderCommands() {
   for (const cmd of commands) {
     const card = el('div', { class: 'exec-cmd-card' });
 
+    // Run-button (left): octagon clip-path, green play triangle.
+    const runBtn = el('button', { class: 'exec-cmd-run', title: `Run ${cmd.name}` });
+    runBtn.setAttribute('aria-label', `Run ${cmd.name}`);
+    runBtn.innerHTML = RUN_ICON_SVG;
+    runBtn.addEventListener('click', () => onRunCommand(cmd));
+    card.appendChild(runBtn);
+
+    // Body (centre): clickable name + WSL badge -> description -> command code.
+    const body = el('div', { class: 'exec-cmd-body' });
     const header = el('div', { class: 'exec-cmd-header' });
-    header.appendChild(el('strong', { text: cmd.name }));
+    const nameEl = el('span', { text: cmd.name, class: 'exec-cmd-name' });
+    nameEl.setAttribute('role', 'button');
+    nameEl.setAttribute('tabindex', '0');
+    nameEl.title = 'Click to edit';
+    nameEl.addEventListener('click', () => onEditCommand(cmd));
+    nameEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onEditCommand(cmd); }
+    });
+    header.appendChild(nameEl);
 
     if (cmd.shell === 'wsl') {
       const label = cmd.wsl_distro ? `WSL · ${cmd.wsl_distro}` : 'WSL';
       const badge = el('span', { text: label });
-      badge.style.cssText = 'margin-left:8px;padding:1px 7px;background:rgba(56,139,253,0.12);border:1px solid rgba(56,139,253,0.35);color:var(--accent);border-radius:10px;font-size:10px;font-weight:500';
+      badge.style.cssText = 'padding:1px 7px;background:rgba(56,139,253,0.12);border:1px solid rgba(56,139,253,0.35);color:var(--accent);border-radius:10px;font-size:10px;font-weight:500';
       header.appendChild(badge);
     }
+    body.appendChild(header);
 
+    if (cmd.description) {
+      body.appendChild(el('div', { text: cmd.description, class: 'exec-cmd-desc' }));
+    }
+    body.appendChild(el('code', { text: cmd.command, class: 'exec-cmd-code' }));
+    card.appendChild(body);
+
+    // Right: delete only. Edit lives behind the clickable name.
     const cardActions = el('div', { class: 'cmd-actions' });
-    const runBtn = el('button', { text: 'Run', class: 'btn-small' });
-    runBtn.addEventListener('click', () => onRunCommand(cmd));
-    cardActions.appendChild(runBtn);
-
-    const editBtn = el('button', { text: '\u270E', class: 'btn-icon', title: 'Edit' });
-    editBtn.addEventListener('click', () => onEditCommand(cmd));
-    cardActions.appendChild(editBtn);
-
     const delBtn = el('button', { text: '\u2715', class: 'btn-icon btn-icon-danger', title: 'Delete' });
     delBtn.addEventListener('click', () => onDeleteCommand(cmd));
     cardActions.appendChild(delBtn);
-
-    header.appendChild(cardActions);
-    card.appendChild(header);
-
-    if (cmd.description) {
-      card.appendChild(el('div', { text: cmd.description, class: 'exec-cmd-desc' }));
-    }
-    card.appendChild(el('code', { text: cmd.command, class: 'exec-cmd-code' }));
+    card.appendChild(cardActions);
 
     list.appendChild(card);
   }
@@ -557,25 +569,61 @@ function css() {
   gap: 6px;
 }
 .exec-cmd-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
   background: var(--bg-secondary);
   border-radius: 6px;
-  padding: 10px 14px;
+  padding: 10px 12px;
   border-left: 3px solid transparent;
   transition: border-color 0.15s;
 }
 .exec-cmd-card:hover {
   border-left-color: var(--accent);
 }
+.exec-cmd-run {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  background: rgba(63, 185, 80, 0.10);
+  border: 1px solid var(--green, #3fb950);
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  clip-path: polygon(20% 0%, 80% 0%, 100% 20%, 100% 80%, 80% 100%, 20% 100%, 0% 80%, 0% 20%);
+  transition: background 0.15s, transform 0.1s;
+}
+.exec-cmd-run:hover { background: rgba(63, 185, 80, 0.22); }
+.exec-cmd-run:active { transform: scale(0.94); }
+.exec-cmd-run svg { width: 14px; height: 14px; fill: var(--green, #3fb950); }
+.exec-cmd-run:disabled { opacity: 0.4; cursor: not-allowed; }
+.exec-cmd-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
 .exec-cmd-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 4px;
+  gap: 8px;
 }
+.exec-cmd-name {
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--text);
+  transition: color 0.12s;
+}
+.exec-cmd-name:hover { color: var(--accent); text-decoration: underline; }
+.exec-cmd-name:focus { outline: 1px solid var(--accent); outline-offset: 2px; }
 .cmd-actions {
   display: flex;
   gap: 4px;
   align-items: center;
+  flex-shrink: 0;
 }
 .exec-cmd-desc {
   font-size: 12px;

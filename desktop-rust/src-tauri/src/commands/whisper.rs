@@ -269,6 +269,16 @@ pub fn whisper_delete_history(db: State<DbState>, id: Option<i64>) -> Result<(),
     queries::whisper_delete_history(&conn, id).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+pub fn whisper_set_postprocessed(
+    db: State<DbState>,
+    id: i64,
+    text: String,
+) -> Result<(), String> {
+    let conn = db.lock_recover();
+    queries::whisper_set_postprocessed(&conn, id, &text).map_err(|e| e.to_string())
+}
+
 // --- mics & GPU --------------------------------------------------------------
 
 #[tauri::command]

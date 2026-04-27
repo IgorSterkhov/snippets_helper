@@ -2337,6 +2337,7 @@ pub struct WhisperHistoryRow {
     pub cpu_peak_percent: f64,
     pub gpu_peak_percent: f64,
     pub vram_peak_mb: i64,
+    pub postprocessed_text: Option<String>,
 }
 
 pub fn whisper_insert_history(
@@ -2370,7 +2371,7 @@ pub fn whisper_insert_history(
 pub fn whisper_list_history(conn: &Connection, limit: i64) -> Result<Vec<WhisperHistoryRow>> {
     let mut stmt = conn.prepare(
         "SELECT id, text, text_raw, model_name, duration_ms, transcribe_ms, language, injected_to, created_at,
-                cpu_peak_percent, gpu_peak_percent, vram_peak_mb
+                cpu_peak_percent, gpu_peak_percent, vram_peak_mb, postprocessed_text
          FROM whisper_history ORDER BY created_at DESC, id DESC LIMIT ?1",
     )?;
     let rows = stmt.query_map(params![limit], |r| {
@@ -2387,9 +2388,18 @@ pub fn whisper_list_history(conn: &Connection, limit: i64) -> Result<Vec<Whisper
             cpu_peak_percent: r.get(9)?,
             gpu_peak_percent: r.get(10)?,
             vram_peak_mb: r.get(11)?,
+            postprocessed_text: r.get(12)?,
         })
     })?;
     rows.collect::<Result<Vec<_>>>()
+}
+
+pub fn whisper_set_postprocessed(conn: &Connection, id: i64, text: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE whisper_history SET postprocessed_text = ?1 WHERE id = ?2",
+        params![text, id],
+    )?;
+    Ok(())
 }
 
 pub fn whisper_delete_history(conn: &Connection, id: Option<i64>) -> Result<()> {

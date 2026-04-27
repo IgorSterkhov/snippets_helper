@@ -1,7 +1,7 @@
 import { whisperApi } from './whisper-api.js';
 import { gemmaApi, onGemmaEvent } from './gemma-api.js';
 
-export async function openSettingsModal() {
+export async function openSettingsModal(opts = {}) {
   const backdrop = document.createElement('div');
   backdrop.className = 'modal-overlay';
   backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:999;display:flex;align-items:center;justify-content:center';
@@ -49,17 +49,39 @@ export async function openSettingsModal() {
   content.appendChild(section('Метод вставки', injectRadio(s['whisper.inject_method'] || 'paste')));
   content.appendChild(section('Idle timeout (сек)', numInput('idle_timeout_sec', s['whisper.idle_timeout_sec'] || '300', 60, 1800, 30)));
   content.appendChild(section('Постобработка', checkbox('postprocess_rules', (s['whisper.postprocess_rules'] || 'true') === 'true', 'Лёгкие правила (убрать «эээ», заглавная буква)')));
-  content.appendChild(await gemmaBlock(() => {
+  const gemmaSection = await gemmaBlock(() => {
     // Reload settings modal to reflect the new installed Gemma model list.
     backdrop.remove();
-    openSettingsModal();
-  }));
+    openSettingsModal({ scrollTo: 'gemma' });
+  });
+  gemmaSection.dataset.anchor = 'gemma';
+  content.appendChild(gemmaSection);
   content.appendChild(llmBlock(s));
   content.appendChild(section('Overlay', overlayBlock(s)));
 
   const prevDefault = (models.find(m => m.is_default) || {}).name || null;
 
   modal.querySelector('#close-btn').onclick = () => backdrop.remove();
+
+  // Optional deep-link: scroll a named section into view + temporary
+  // outline highlight. Used by whisper-tab.js when the user clicks the
+  // "(no models — open Settings)" entry in the Gemma combobox.
+  if (opts && opts.scrollTo) {
+    requestAnimationFrame(() => {
+      const target = modal.querySelector(`[data-anchor="${opts.scrollTo}"]`);
+      if (!target) return;
+      target.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      const prevOutline = target.style.outline;
+      target.style.outline = '2px solid var(--accent,#388bfd)';
+      target.style.outlineOffset = '2px';
+      target.style.transition = 'outline-color 800ms ease';
+      setTimeout(() => {
+        target.style.outline = prevOutline || '';
+        target.style.outlineOffset = '';
+      }, 1200);
+    });
+  }
+
   modal.querySelector('#save-btn').onclick = async () => {
     const formValues = collect(modal);
     for (const [key, value] of Object.entries(formValues)) {
