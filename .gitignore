@@ -76,3 +76,4 @@ mobile/android/app/build/
 # Whisper.cpp sidecar binaries — injected by CI (or locally by scripts/fetch-whisper-bin.sh)
 desktop-rust/src-tauri/binaries/*
 !desktop-rust/src-tauri/binaries/.gitkeep
+.worktrees/
