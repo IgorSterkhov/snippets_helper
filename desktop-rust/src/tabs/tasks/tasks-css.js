@@ -152,6 +152,9 @@ export function tasksCSS() {
   overflow: hidden;
   transition: border-color 0.15s;
   position: relative;
+  min-height: 0;
+  contain: layout style;
+  height: auto;
 }
 .task-card:hover { border-color: var(--text-muted); }
 .task-card.expanded { border-color: var(--accent); }
