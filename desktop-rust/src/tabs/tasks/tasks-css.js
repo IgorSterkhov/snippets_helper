@@ -281,6 +281,47 @@ export function tasksCSS() {
 }
 .tcb-add:hover { opacity: 1; color: var(--accent); }
 
+/* Collapse arrow */
+.tcb-arrow {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  user-select: none;
+  transition: transform 0.12s;
+}
+.tcb-arrow:hover { color: var(--text); }
+
+/* Collapsed parent — subtle background pill */
+.tcb-item.collapsed-parent {
+  background: rgba(56, 139, 253, 0.08);
+  border-radius: 4px;
+}
+
+/* Counter badge: "3/10" */
+.tcb-collapse-counter {
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  border-radius: 8px;
+  padding: 1px 7px;
+  font-size: 11px;
+  margin-left: auto;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Collapse/expand child transition */
+.tcb-item.depth-1,
+.tcb-item.depth-2,
+.tcb-item.depth-3 {
+  transition: opacity 150ms ease, transform 150ms ease;
+}
+
 /* Expanded editor */
 .task-editor-body {
   padding: 12px;

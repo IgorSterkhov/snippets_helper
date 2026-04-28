@@ -8,6 +8,13 @@ import { CARD_BG_PALETTE } from './tasks-css.js';
 // render. Populated lazily as cards render.
 const checkboxCache = new Map();
 
+// Collapse state for checkbox rows. In-memory only; reset on tab re-entry
+// via resetCollapseState() called from index.js:init().
+const collapsedNodes = new Map();
+export function resetCollapseState() {
+  collapsedNodes.clear();
+}
+
 export function invalidateCheckboxCache(taskId) {
   checkboxCache.delete(taskId);
 }
@@ -191,8 +198,29 @@ export function renderCheckboxes(target, task, items, ctx, opts = {}) {
   for (const node of byId.values()) node.children.sort(sortFn);
 
   function renderNode(node, depth) {
-    target.appendChild(buildCheckboxRow(node, task, ctx, depth, { editable }));
-    for (const c of node.children) renderNode(c, depth + 1);
+    const row = buildCheckboxRow(node, task, ctx, depth, { editable });
+
+    // Update arrow based on collapse state
+    const arrow = row.querySelector('.tcb-arrow');
+    const collapsed = isCollapsed(node.id);
+    if (arrow) {
+      arrow.textContent = collapsed ? '▶' : '▼';
+    }
+    // Highlight collapsed parents
+    if (collapsed && node.children.length > 0) {
+      row.classList.add('collapsed-parent');
+      // Counter badge
+      const { checked, total } = countDescendants(node.id, items);
+      const badge = el('span', { class: 'tcb-collapse-counter' });
+      badge.textContent = `${checked}/${total}`;
+      row.appendChild(badge);
+    }
+
+    target.appendChild(row);
+
+    if (!collapsed) {
+      for (const c of node.children) renderNode(c, depth + 1);
+    }
   }
   for (const r of roots) renderNode(r, 0);
 
@@ -224,6 +252,23 @@ function buildCheckboxRow(node, task, ctx, depth, { editable }) {
   handle.dataset.cbId = String(node.id);
   handle.dataset.taskId = String(task.id);
   row.appendChild(handle);
+
+  // Collapse/expand arrow — only for nodes that have children
+  if (node.children && node.children.length > 0) {
+    const arrow = el('span', { class: 'tcb-arrow' });
+    arrow.textContent = '▶';  // default; updated in renderNode
+    arrow.title = 'Click to collapse/expand children. Ctrl+Click text for recursive.';
+    arrow.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleCollapse(node.id);
+      ctx.onTaskReload && ctx.onTaskReload();
+    });
+    row.appendChild(arrow);
+  } else {
+    // Spacer so text aligns for leaf nodes
+    const spacer = el('span', { class: 'tcb-arrow', style: 'visibility:hidden' });
+    row.appendChild(spacer);
+  }
 
   // checkbox
   const cb = document.createElement('input');
@@ -269,6 +314,17 @@ function buildCheckboxRow(node, task, ctx, depth, { editable }) {
       }
     };
     textEl.addEventListener('blur', commit);
+
+    // Ctrl+Click on text = recursive collapse/expand all descendants
+    textEl.addEventListener('click', async (e) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        const items = await loadCheckboxes(task.id);
+        const collapsed = !isCollapsed(node.id);
+        collapseRecursive(node.id, collapsed, items);
+        ctx.onTaskReload && ctx.onTaskReload();
+      }
+    });
 
     // Keyboard: Enter = new item (same parent); Tab = indent; Shift+Tab = outdent.
     textEl.addEventListener('keydown', async (e) => {
@@ -477,4 +533,48 @@ async function loadCheckboxes(taskId, force = false) {
   return items;
 }
 
-export { loadCheckboxes };
+export function isCollapsed(id) {
+  return collapsedNodes.get(id) === true;
+}
+
+function toggleCollapse(id) {
+  if (collapsedNodes.get(id)) {
+    collapsedNodes.delete(id);
+  } else {
+    collapsedNodes.set(id, true);
+  }
+}
+
+function collapseRecursive(id, collapsed, items) {
+  const children = items.filter(x => x.parent_id === id);
+  collapsedNodes.set(id, collapsed);
+  for (const child of children) {
+    collapseRecursive(child.id, collapsed, items);
+  }
+}
+
+function countDescendants(id, items) {
+  // Returns { checked: number, total: number } for all recursive descendants
+  const byParent = new Map();
+  for (const it of items) {
+    const pid = it.parent_id;
+    if (pid == null) continue;
+    if (!byParent.has(pid)) byParent.set(pid, []);
+    byParent.get(pid).push(it);
+  }
+  let checked = 0, total = 0;
+  const stack = [id];
+  while (stack.length) {
+    const cur = stack.pop();
+    const kids = byParent.get(cur);
+    if (!kids) continue;
+    for (const k of kids) {
+      total++;
+      if (k.is_checked) checked++;
+      stack.push(k.id);
+    }
+  }
+  return { checked, total };
+}
+
+export { loadCheckboxes, isCollapsed, resetCollapseState };

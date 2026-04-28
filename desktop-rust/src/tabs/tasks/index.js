@@ -2,7 +2,7 @@ import { call } from '../../tauri-api.js';
 import { showToast } from '../../components/toast.js';
 import { showModal } from '../../components/modal.js';
 import { tasksCSS } from './tasks-css.js';
-import { renderCard } from './card.js';
+import { renderCard, resetCollapseState } from './card.js';
 import { renderPinnedChips, renderFilterDropdown } from './dropdown.js';
 import { helpButton } from '../sql/sql-help.js';
 import { TASKS_HELP_HTML } from './help-content.js';
@@ -65,6 +65,7 @@ export async function init(container) {
   await Promise.all([loadCategories(), loadStatuses()]);
   await loadTasks();
   await loadPinned();
+  resetCollapseState();
   renderAll();
 
   // Pointer-based DnD: card → dropdown item / card → card / checkbox → row.
