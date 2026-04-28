@@ -1,9 +1,15 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use tauri::State;
 use crate::db::{DbState, queries, models::{ExecCategory, ExecCommand}};
 
 /// Global flag to signal subprocess cancellation.
 static STOP_FLAG: AtomicBool = AtomicBool::new(false);
+/// PID of the currently-running subprocess (0 = none). `stop_command`
+/// uses it to send a real kill signal — without this, Stop only flipped
+/// the flag, and `wait_with_output().await` blocked until the child
+/// exited naturally. With Run-all bound to Stop, that became a hang trap
+/// on any long-running command.
+static CURRENT_PID: AtomicU32 = AtomicU32::new(0);
 
 // ── Exec Categories ────────────────────────────────────────
 
@@ -85,6 +91,35 @@ pub fn update_exec_command(
 pub fn delete_exec_command(state: State<DbState>, id: i64) -> Result<(), String> {
     let conn = state.lock_recover();
     queries::delete_exec_command(&conn, id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn move_exec_command(
+    state: State<DbState>,
+    id: i64,
+    target_category_id: i64,
+    sort_order: Option<i32>,
+) -> Result<(), String> {
+    let conn = state.lock_recover();
+    queries::move_exec_command(&conn, id, target_category_id, sort_order.unwrap_or(0))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn reorder_exec_commands(
+    state: State<DbState>,
+    ids_in_order: Vec<i64>,
+) -> Result<(), String> {
+    let conn = state.lock_recover();
+    queries::reorder_exec_commands(&conn, &ids_in_order).map_err(|e| e.to_string())
+}
+
+/// Returns a flat list of (category_id, command_count) — frontend can
+/// turn it into a Map for O(1) per-group lookup. Single SQL round-trip.
+#[tauri::command]
+pub fn list_exec_command_counts(state: State<DbState>) -> Result<Vec<(i64, i64)>, String> {
+    let conn = state.lock_recover();
+    queries::list_exec_command_counts(&conn).map_err(|e| e.to_string())
 }
 
 // ── WSL distro discovery ───────────────────────────────────
@@ -214,10 +249,16 @@ pub async fn run_command(
 
     let child = builder.spawn().map_err(|e| format!("Failed to spawn {program}: {e}"))?;
 
-    let output = child
-        .wait_with_output()
-        .await
-        .map_err(|e| format!("Process error: {e}"))?;
+    // Stash the OS pid so stop_command can kill the live child while we
+    // await its output. Cleared in all exit paths below.
+    let pid = child.id().unwrap_or(0);
+    CURRENT_PID.store(pid, Ordering::SeqCst);
+
+    let result = child.wait_with_output().await;
+
+    CURRENT_PID.store(0, Ordering::SeqCst);
+
+    let output = result.map_err(|e| format!("Process error: {e}"))?;
 
     if STOP_FLAG.load(Ordering::SeqCst) {
         return Err("Command stopped by user".to_string());
@@ -247,6 +288,33 @@ pub async fn run_command(
 #[tauri::command]
 pub fn stop_command() -> Result<(), String> {
     STOP_FLAG.store(true, Ordering::SeqCst);
+    let pid = CURRENT_PID.load(Ordering::SeqCst);
+    if pid == 0 {
+        return Ok(());
+    }
+    // Actually kill the child. Pre-1.3.25 this was just a flag flip and
+    // long-running commands ignored Stop entirely. Run-all needs a real
+    // kill so it can abort hangs.
+    #[cfg(unix)]
+    {
+        // SIGTERM = 15, fits in i32. Letting the shell handle the signal
+        // gives a chance to clean up vs. SIGKILL.
+        unsafe {
+            libc::kill(pid as i32, libc::SIGTERM);
+        }
+    }
+    #[cfg(windows)]
+    {
+        // taskkill /T (tree) /F (force) — closes child + grandchildren.
+        // Necessary because we spawn `cmd /c <user-cmd>` which forks; a
+        // PID-only kill would leave the user's actual process running.
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let _ = std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output();
+    }
     Ok(())
 }
 

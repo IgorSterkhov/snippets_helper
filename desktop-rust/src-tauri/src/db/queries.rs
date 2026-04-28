@@ -880,6 +880,62 @@ pub fn delete_exec_command(conn: &Connection, id: i64) -> Result<()> {
     Ok(())
 }
 
+/// Move a command into another group (= category) and set its sort_order
+/// at the destination. Returns Err if the target group does not exist —
+/// SQLite would otherwise let the orphan FK slip through (we don't have
+/// FK constraints declared on this table) and the command would
+/// disappear from the UI.
+pub fn move_exec_command(
+    conn: &Connection,
+    id: i64,
+    target_category_id: i64,
+    sort_order: i32,
+) -> Result<()> {
+    let exists: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM exec_categories WHERE id = ?1",
+        params![target_category_id],
+        |r| r.get(0),
+    )?;
+    if exists == 0 {
+        return Err(rusqlite::Error::QueryReturnedNoRows);
+    }
+    conn.execute(
+        "UPDATE exec_commands SET category_id = ?1, sort_order = ?2 WHERE id = ?3",
+        params![target_category_id, sort_order, id],
+    )?;
+    Ok(())
+}
+
+/// One-shot query: how many commands does each group hold? Returns
+/// `(category_id, count)` pairs for every group, including those with zero
+/// commands (LEFT JOIN). Used by the left-panel UI to render the count
+/// chip next to each group name without N round-trips to list_exec_commands.
+pub fn list_exec_command_counts(conn: &Connection) -> Result<Vec<(i64, i64)>> {
+    let mut stmt = conn.prepare(
+        "SELECT c.id, COUNT(x.id)
+         FROM exec_categories c
+         LEFT JOIN exec_commands x ON x.category_id = c.id
+         GROUP BY c.id",
+    )?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))?;
+    rows.collect::<Result<Vec<_>>>()
+}
+
+/// Reassign sort_order for a list of command ids — used after DnD reorder
+/// inside one group. Wrapped in a transaction so a partial failure rolls
+/// back the whole order rather than leaving the list half-shuffled.
+pub fn reorder_exec_commands(conn: &Connection, ids_in_order: &[i64]) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    for (idx, id) in ids_in_order.iter().enumerate() {
+        tx.execute(
+            "UPDATE exec_commands SET sort_order = ?1 WHERE id = ?2",
+            params![idx as i64, id],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
 // ── Sync Helpers ────────────────────────────────────────────
 
 fn validate_table(table: &str) -> Result<()> {
@@ -2030,6 +2086,43 @@ mod tests {
         delete_exec_command(&conn, cmd.id.unwrap()).unwrap();
         let list = list_exec_commands(&conn, cid).unwrap();
         assert_eq!(list.len(), 0);
+    }
+
+    #[test]
+    fn test_move_exec_command_changes_category_and_sort_order() {
+        let conn = init_test_db();
+        let cat_a = create_exec_category(&conn, "A", 0).unwrap();
+        let cat_b = create_exec_category(&conn, "B", 0).unwrap();
+        let cmd = create_exec_command(&conn, cat_a.id.unwrap(), "c1", "echo hi", "", 0, false, "host", None).unwrap();
+        move_exec_command(&conn, cmd.id.unwrap(), cat_b.id.unwrap(), 5).unwrap();
+        let in_b = list_exec_commands(&conn, cat_b.id.unwrap()).unwrap();
+        assert_eq!(in_b.len(), 1);
+        assert_eq!(in_b[0].sort_order, 5);
+        let in_a = list_exec_commands(&conn, cat_a.id.unwrap()).unwrap();
+        assert!(in_a.is_empty());
+    }
+
+    #[test]
+    fn test_move_exec_command_invalid_target_returns_err() {
+        let conn = init_test_db();
+        let cat = create_exec_category(&conn, "A", 0).unwrap();
+        let cmd = create_exec_command(&conn, cat.id.unwrap(), "c1", "x", "", 0, false, "host", None).unwrap();
+        let r = move_exec_command(&conn, cmd.id.unwrap(), 9999, 0);
+        assert!(r.is_err(), "expected Err on missing target group");
+    }
+
+    #[test]
+    fn test_reorder_exec_commands_updates_sort_order() {
+        let conn = init_test_db();
+        let cat = create_exec_category(&conn, "A", 0).unwrap();
+        let cid = cat.id.unwrap();
+        let id1 = create_exec_command(&conn, cid, "c1", "x", "", 0, false, "host", None).unwrap().id.unwrap();
+        let id2 = create_exec_command(&conn, cid, "c2", "x", "", 1, false, "host", None).unwrap().id.unwrap();
+        let id3 = create_exec_command(&conn, cid, "c3", "x", "", 2, false, "host", None).unwrap().id.unwrap();
+        reorder_exec_commands(&conn, &[id3, id1, id2]).unwrap();
+        let l = list_exec_commands(&conn, cid).unwrap();
+        let order: Vec<i64> = l.iter().map(|c| c.id.unwrap()).collect();
+        assert_eq!(order, vec![id3, id1, id2]);
     }
 
     // ── Task Categories / Statuses ───────────────────────────

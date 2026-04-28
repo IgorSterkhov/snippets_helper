@@ -1,5 +1,45 @@
 # Changelog
 
+## v1.3.25 (2026-04-28)
+
+**Exec → Command Groups: redesign + DnD + Run-all.**
+
+- **Rename UI**: "Categories" → "Groups". DB tables and columns
+  unchanged.
+- **Auto-letter Slack-style icon** on each group (deterministic colour
+  from name hash; consistent across sessions). Group rows now also
+  show a count of commands.
+- **DnD**: drag the ⋮⋮ grip on a command card to another group (drop
+  on the left panel) or reorder within the same group (drop on
+  another card). Click the grip without dragging opens a "Move to…"
+  popover for accessibility / touchpad use.
+- **Run-all**: new ▶ Run all button on the group header. Runs every
+  command in the group sequentially with a progress bar and
+  per-command collapsible sections in the bottom console; fail-fast
+  on the first error, single Stop button aborts the whole sequence.
+- **Edit modal**: new "Group" dropdown lets you change a command's
+  group from the form (alternative to DnD).
+- **Visual**: tab now uses a distinct terminal/brutalist look
+  (JetBrains Mono throughout, phosphor-green accent on near-black,
+  breadcrumb header `exec › <selected group>`, dim "01"-style row
+  numbers, sharp 1px borders, spacious per-row borders with 6px
+  gaps). Other tabs are unchanged.
+- **Backend**: new `move_exec_command`, `reorder_exec_commands`, and
+  `list_exec_command_counts` Tauri commands.
+- **Bug fix**: `stop_command` now actually kills the running child
+  process — previously it only flipped a flag while
+  `wait_with_output().await` blocked until the child exited naturally,
+  so Stop on a long-running command (e.g. `rsync`, `sleep 60`) was a
+  no-op. Run-all's Stop button depends on a real kill, so this bug
+  blocked the new feature; pre-1.3.25 single-command Stop was also
+  broken in the same way. Uses `SIGTERM` on Unix, `taskkill /T /F`
+  on Windows.
+- **Bug fix**: Run-all loop now snapshots the command queue at start
+  so switching groups (or any other code path that mutates the
+  module-level `commands` array) mid-run can't corrupt iteration —
+  previously this could TypeError out of the loop and leave the tab
+  permanently locked until restart.
+
 ## v1.3.24 (2026-04-26)
 
 **Whisper post-process UX + Exec card redesign.**
