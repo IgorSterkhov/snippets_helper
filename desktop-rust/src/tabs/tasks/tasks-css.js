@@ -427,6 +427,17 @@ export function tasksCSS() {
   grid-column: 1 / -1;
 }
 
+/* Checkbox DnD placeholder — dashed slot showing where the dragged row will land.
+   Height set inline to match source row. */
+.task-dnd-placeholder {
+  border: 2px dashed var(--accent);
+  border-radius: 4px;
+  opacity: 0.5;
+  pointer-events: none;
+  flex-shrink: 0;
+  background: rgba(56, 139, 253, 0.04);
+}
+
 /* Manage modal */
 .tasks-manage-row {
   display: flex; align-items: center; gap: 8px;

@@ -41,6 +41,8 @@ let active = null;
 //                 (null = line at end of list)
 //   mode: 'reorder' | 'dropdown' — current drop-target mode
 //   dropdownItem: HTMLElement | null — highlighted dropdown menu item
+//   placeholder      — real DOM element holding source's slot during drag (checkbox only)
+//   sourceHidden     — whether source has display:none applied
 
 export function installTaskDnd(rootEl, {
   onTaskReorderCommit,
@@ -107,6 +109,31 @@ function startDrag(handle, kind, e) {
     ? source.closest('.tasks-cards-scroll') || source.parentElement
     : source.parentElement;
 
+  // Checkbox mode: build placeholder, hide source, early return
+  if (kind === 'checkbox') {
+    const placeholder = document.createElement('div');
+    placeholder.className = 'task-dnd-placeholder';
+    placeholder.style.height = rect.height + 'px';
+    source.parentElement.insertBefore(placeholder, source);
+    source.style.display = 'none';
+    active = {
+      kind, handle, source, listEl,
+      offsetX: e.clientX - rect.left,
+      offsetY: e.clientY - rect.top,
+      ghost,
+      line: null,
+      placeholder,
+      sourceHidden: true,
+      insertBefore: null,
+      hoverDropdownEl: null,
+      hoverTimer: null,
+      mode: 'reorder',
+      dropdownItem: null,
+      startX: e.clientX,
+    };
+    return;
+  }
+
   active = {
     kind, handle, source, listEl,
     offsetX: e.clientX - rect.left,
@@ -169,6 +196,24 @@ function onPointerMove(e) {
     }
   }
 
+  // ── Checkbox mode — relaxed drop zone ─────────────────────────
+  if (active.kind === 'checkbox') {
+    const listEl = active.listEl;
+    if (!listEl) return;
+    const lr = listEl.getBoundingClientRect();
+    const insideList = e.clientX >= lr.left && e.clientX <= lr.right
+                    && e.clientY >= lr.top  && e.clientY <= lr.bottom;
+    if (insideList) {
+      active.mode = 'reorder';
+      if (active.placeholder) active.placeholder.style.display = '';
+      updateCheckboxPlaceholder(e);
+    } else {
+      active.mode = null;
+      if (active.placeholder) active.placeholder.style.display = 'none';
+    }
+    return;
+  }
+
   // ── Reorder mode ────────────────────────────────────────────
   active.mode = 'reorder';
   updateInsertionLine(e);
@@ -199,6 +244,50 @@ function updateInsertionLine(e) {
 
   placeLine(listEl, before);
   active.insertBefore = before;
+}
+
+function updateCheckboxPlaceholder(e) {
+  const listEl = active.listEl;
+  const ph = active.placeholder;
+  if (!listEl || !ph) return;
+
+  const peers = Array.from(listEl.querySelectorAll(':scope > .tcb-item'))
+    .filter(el => el !== active.source);
+
+  const cursorY = e.clientY;
+  let beforeEl = null;
+  for (const peer of peers) {
+    const r = peer.getBoundingClientRect();
+    const mid = r.top + r.height / 2;
+    if (cursorY < mid) { beforeEl = peer; break; }
+  }
+
+  // Already in the right slot?
+  if (beforeEl === ph.nextElementSibling) return;
+  if (beforeEl === null && ph === listEl.lastElementChild) return;
+
+  // FLIP step 1: capture old positions
+  const tracked = [...peers, ph];
+  const oldTops = new Map();
+  for (const el of tracked) {
+    oldTops.set(el, el.getBoundingClientRect().top);
+  }
+
+  // Reorder placeholder
+  listEl.insertBefore(ph, beforeEl);
+
+  // FLIP step 2: animate to new positions
+  for (const el of tracked) {
+    const oldTop = oldTops.get(el);
+    const newTop = el.getBoundingClientRect().top;
+    const delta = oldTop - newTop;
+    if (delta === 0) continue;
+    el.style.transition = 'none';
+    el.style.transform = `translateY(${delta}px)`;
+    void el.offsetHeight;  // force reflow
+    el.style.transition = `transform 180ms ease`;
+    el.style.transform = '';
+  }
 }
 
 function placeLine(listEl, beforeEl) {
@@ -260,24 +349,35 @@ async function onPointerUp(e, {
       return;
     }
   } else {
-    // checkbox
+    // checkbox — derive order from placeholder position
     if (active.mode !== 'reorder') return;
     const taskCard = active.source.closest('.task-card');
     const taskId = taskCard ? Number(taskCard.dataset.taskId) : null;
     if (taskId == null) return;
 
     const listEl = active.listEl;
-    if (listEl && active.source) {
-      listEl.insertBefore(active.source, active.insertBefore || null);
-    }
+    if (!listEl || !active.source || !active.placeholder) return;
+
+    // Restore source where placeholder sits; remove placeholder
+    listEl.insertBefore(active.source, active.placeholder);
+    active.placeholder.remove();
+    active.placeholder = null;
+
     // Determine nest target: the row immediately above the dropped position.
+    // Do NOT nest into collapsed parents (spec: user must expand first).
     const rowsInOrder = Array.from(listEl.querySelectorAll(':scope > .tcb-item'));
     const myIdx = rowsInOrder.indexOf(active.source);
     const prevRow = myIdx > 0 ? rowsInOrder[myIdx - 1] : null;
     const deltaX = e.clientX - active.startX;
-    const nestUnder = prevRow && deltaX > NEST_THRESHOLD_PX
-      ? Number(prevRow.dataset.cbId)
-      : null;
+    let nestUnder = null;
+    if (prevRow && deltaX > NEST_THRESHOLD_PX) {
+      const prevId = Number(prevRow.dataset.cbId);
+      // Only nest if target parent is NOT collapsed
+      const prevCollapsed = prevRow.classList.contains('collapsed-parent');
+      if (!prevCollapsed) {
+        nestUnder = prevId;
+      }
+    }
     const draggedId = Number(active.source.dataset.cbId);
     const orderedIds = rowsInOrder.map(el => Number(el.dataset.cbId));
     await onCheckboxReorderCommit(taskId, draggedId, orderedIds, nestUnder);
@@ -287,8 +387,27 @@ async function onPointerUp(e, {
 function cleanup() {
   if (!active) return;
   if (active.ghost && active.ghost.parentNode) active.ghost.remove();
+  if (active.placeholder && active.placeholder.parentNode) {
+    // If source is still hidden, restore it before removing placeholder
+    if (active.sourceHidden && active.source) {
+      active.placeholder.parentNode.insertBefore(active.source, active.placeholder);
+    }
+    active.placeholder.remove();
+  }
   if (active.line && active.line.parentNode) active.line.remove();
-  if (active.source) active.source.classList.remove('task-dnd-source');
+  if (active.source) {
+    active.source.classList.remove('task-dnd-source');
+    if (active.sourceHidden) {
+      active.source.style.display = '';
+    }
+  }
+  // Wipe FLIP transforms on checkbox peers
+  if (active.listEl && active.kind === 'checkbox') {
+    for (const el of active.listEl.querySelectorAll(':scope > .tcb-item')) {
+      el.style.transition = '';
+      el.style.transform = '';
+    }
+  }
   if (active.hoverTimer) clearTimeout(active.hoverTimer);
   clearDropdownHighlight();
   active = null;
