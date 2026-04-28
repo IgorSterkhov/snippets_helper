@@ -1,5 +1,6 @@
 import { call } from '../../tauri-api.js';
 import { showToast } from '../../components/toast.js';
+import { showModal } from '../../components/modal.js';
 import { tasksCSS } from './tasks-css.js';
 import { renderCard } from './card.js';
 import { renderPinnedChips, renderFilterDropdown } from './dropdown.js';
@@ -94,6 +95,18 @@ function buildLayout() {
   const header = el('div', { class: 'tasks-header' });
   header.appendChild(el('h2', { text: 'Tasks' }));
   header.appendChild(helpButton('Tasks — справка', TASKS_HELP_HTML));
+
+  // Settings gear button
+  const gearBtn = document.createElement('button');
+  gearBtn.className = 'task-icon-btn';
+  gearBtn.title = 'Display settings';
+  gearBtn.textContent = '⚙';
+  gearBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openTasksSettings();
+  });
+  header.appendChild(gearBtn);
+
   wrap.appendChild(header);
 
   // Pinned chip strip
@@ -343,6 +356,85 @@ async function onToggleLayout() {
   try {
     await call('set_setting', { key: 'tasks_layout_mode', value: state.layoutMode });
   } catch { /* non-fatal */ }
+}
+
+async function openTasksSettings() {
+  // Read current values
+  const root = document.documentElement;
+  const currentCbFont = parseInt(
+    getComputedStyle(root).getPropertyValue('--task-cb-font-size')
+  ) || 13;
+
+  let currentMaxItems = 10;
+  try {
+    const s = await call('get_setting', { key: 'tasks_card_max_checkboxes' });
+    if (s) currentMaxItems = Math.max(3, parseInt(s, 10) || 10);
+  } catch { /* default */ }
+
+  const body = document.createElement('div');
+  body.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div>
+        <label style="display:flex;justify-content:space-between;align-items:baseline;color:var(--text)">
+          <span>Checkbox font size</span>
+          <span id="tasks-set-cb-val" style="font-family:'JetBrains Mono',monospace;color:var(--text-muted)">${currentCbFont}px</span>
+        </label>
+        <input id="tasks-set-cb" type="range" min="10" max="20" value="${currentCbFont}" style="width:100%;margin-top:4px" />
+      </div>
+      <div>
+        <label style="display:flex;justify-content:space-between;align-items:baseline;color:var(--text)">
+          <span>Max visible checkboxes (collapsed card)</span>
+          <span id="tasks-set-max-val" style="font-family:'JetBrains Mono',monospace;color:var(--text-muted)">${currentMaxItems}</span>
+        </label>
+        <input id="tasks-set-max" type="range" min="3" max="20" value="${currentMaxItems}" style="width:100%;margin-top:4px" />
+      </div>
+      <div style="font-size:11px;color:var(--text-muted);font-style:italic">
+        Changes apply immediately and persist across sessions.
+      </div>
+    </div>
+  `;
+
+  const cbSlider = body.querySelector('#tasks-set-cb');
+  const cbVal = body.querySelector('#tasks-set-cb-val');
+  const maxSlider = body.querySelector('#tasks-set-max');
+  const maxVal = body.querySelector('#tasks-set-max-val');
+  const initialCb = currentCbFont;
+  const initialMax = currentMaxItems;
+
+  cbSlider.addEventListener('input', () => {
+    cbVal.textContent = cbSlider.value + 'px';
+    root.style.setProperty('--task-cb-font-size', cbSlider.value + 'px');
+  });
+  maxSlider.addEventListener('input', () => {
+    maxVal.textContent = maxSlider.value;
+    // Live-update max-height on visible collapsed card bodies
+    for (const bodyEl of document.querySelectorAll('.task-card-body')) {
+      bodyEl.style.maxHeight = (parseInt(maxSlider.value) * 26 + 12) + 'px';
+    }
+  });
+
+  showModal({
+    title: 'Tasks — display settings',
+    body,
+    onConfirm: async () => {
+      const cb = parseInt(cbSlider.value);
+      const mx = parseInt(maxSlider.value);
+      try {
+        await call('set_setting', { key: 'tasks_checkbox_font_size', value: String(cb) });
+        await call('set_setting', { key: 'tasks_card_max_checkboxes', value: String(mx) });
+        root.style.setProperty('--task-cb-font-size', cb + 'px');
+        showToast('Saved', 'success');
+      } catch (e) {
+        showToast('Failed to save: ' + e, 'error');
+      }
+    },
+    onCancel: () => {
+      root.style.setProperty('--task-cb-font-size', initialCb + 'px');
+      for (const bodyEl of document.querySelectorAll('.task-card-body')) {
+        bodyEl.style.maxHeight = (initialMax * 26 + 12) + 'px';
+      }
+    },
+  });
 }
 
 // ── DOM helper ──────────────────────────────────────────────
