@@ -303,17 +303,79 @@ function buildCheckboxRow(node, task, ctx, depth, { editable }) {
       } else if (e.key === 'Tab' && !e.shiftKey) {
         e.preventDefault();
         await commit();
+        const savedId = node.id;
         await nestUnderPrev(task, node, ctx);
+        // nestUnderPrev triggers ctx.onTaskReload → DOM rebuild; restore focus
+        setTimeout(() => {
+          const el = document.querySelector(`[data-cb-id="${savedId}"] .tcb-text[contenteditable="true"]`);
+          if (el) {
+            el.focus();
+            const range = document.createRange();
+            range.selectNodeContents(el);
+            range.collapse(false);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+          }
+        }, 30);
       } else if (e.key === 'Tab' && e.shiftKey) {
         e.preventDefault();
         await commit();
+        const savedId = node.id;
         await outdent(task, node, ctx);
+        setTimeout(() => {
+          const el = document.querySelector(`[data-cb-id="${savedId}"] .tcb-text[contenteditable="true"]`);
+          if (el) {
+            el.focus();
+            const range = document.createRange();
+            range.selectNodeContents(el);
+            range.collapse(false);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+          }
+        }, 30);
       } else if (e.key === 'Backspace' && readText() === '') {
         e.preventDefault();
+        // Find fallback focus target before deletion
+        const row = textEl.closest('.tcb-item');
+        const container = row ? row.parentElement : null;
+        let fallbackId = null;
+        if (container) {
+          const rows = Array.from(container.querySelectorAll(':scope > .tcb-item'));
+          const idx = rows.indexOf(row);
+          if (idx > 0) {
+            fallbackId = Number(rows[idx - 1].dataset.cbId);
+          } else if (node.parent_id != null) {
+            fallbackId = node.parent_id;
+          } else if (idx < rows.length - 1) {
+            fallbackId = Number(rows[idx + 1].dataset.cbId);
+          }
+        }
         try {
           await call('delete_task_checkbox', { id: node.id });
           invalidateCheckboxCache(task.id);
           ctx.onTaskReload && ctx.onTaskReload();
+          // Restore focus after DOM rebuild
+          if (fallbackId != null) {
+            setTimeout(() => {
+              const el = document.querySelector(`[data-cb-id="${fallbackId}"] .tcb-text[contenteditable="true"]`)
+                      || document.querySelector(`[data-cb-id="${fallbackId}"]`);
+              if (el) {
+                if (el.contentEditable === 'true') {
+                  el.focus();
+                  const range = document.createRange();
+                  range.selectNodeContents(el);
+                  range.collapse(false);
+                  const sel = window.getSelection();
+                  sel.removeAllRanges();
+                  sel.addRange(range);
+                } else {
+                  el.scrollIntoView({ block: 'center' });
+                }
+              }
+            }, 30);
+          }
         } catch (err) {
           showToast('Delete failed: ' + err, 'error');
         }
