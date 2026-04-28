@@ -163,7 +163,13 @@ jobs:
     # for f-* the native job is skipped and the if: always() branch
     # still lets us run.
     needs: release
-    if: (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/f-')) && (needs.release.result == 'success' || needs.release.result == 'skipped')
+    # `always()` is required: without it, GitHub Actions transitively skips
+    # this job whenever the upstream `release` job is skipped — which
+    # happens on every f-* tag (release skips because its own `if:` excludes
+    # f-*). The earlier wording mentioned `always()` in the comment but the
+    # expression was dropped in commit 683bac4 alongside the cache-seed
+    # work, breaking f-* releases. Restored.
+    if: always() && (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/f-')) && (needs.release.result == 'success' || needs.release.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
       contents: write
