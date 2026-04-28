@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.3.25 OTA patches
+
+- **f-20260428-1** — Exec DnD UX polish:
+  - **Sliding placeholder** instead of a 2px insertion line: a real
+    dashed-card slot of the source's height takes its place during
+    drag, so the user can see exactly where the card will land. As the
+    placeholder moves through the list, peer cards animate to their
+    new positions via FLIP (capture old top → DOM reorder → translateY
+    → animate to identity over 180ms), giving the "cards politely
+    scoot out of the way" feel rather than instant snap.
+  - **Relaxed drop zone**: with V1E's 6px row gaps it was too easy to
+    miss the drop target by releasing in the gap. Now any pixel inside
+    the command-list bounding box counts as reorder mode — drop
+    anywhere over a card's upper half places the slot above it; lower
+    half places below; gaps and empty space at the end work too.
+  - **New ⚙ Exec settings** in the right panel header: two sliders
+    for "Command name size" and "Group name size" (10–20px, persisted
+    via `set_setting`). V1E's 12px felt cramped on bigger displays;
+    the new default is 13px and the user can tune per machine.
+
 ## v1.3.25 (2026-04-28)
 
 **Exec → Command Groups: redesign + DnD + Run-all.**

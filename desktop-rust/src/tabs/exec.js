@@ -25,6 +25,7 @@ export function init(container) {
   root.appendChild(style);
 
   root.appendChild(buildLayout());
+  loadFontSizeSettings();
   loadCategories();
 
   installExecDnd(root, {
@@ -88,6 +89,9 @@ function buildLayout() {
   const addCmdBtn = el('button', { text: '+', class: 'btn-small', id: 'add-cmd-btn' });
   addCmdBtn.addEventListener('click', onAddCommand);
   headerActions.appendChild(addCmdBtn);
+  const settingsBtn = el('button', { text: '⚙', class: 'btn-small', id: 'exec-settings-btn', title: 'Exec tab settings' });
+  settingsBtn.addEventListener('click', openExecSettings);
+  headerActions.appendChild(settingsBtn);
   rightHeader.appendChild(headerActions);
   right.appendChild(rightHeader);
 
@@ -220,6 +224,99 @@ function selectCategory(id) {
   renderCategories();
   updateCrumb();
   loadCommands();
+}
+
+// ── Font-size settings ─────────────────────────────────────
+//
+// Two CSS vars on the .exec-tab root drive type sizes for cards and
+// groups: --exec-cmd-name-size, --exec-group-name-size. Defaults match
+// the original v1.3.24 look (13px) — V1E shrank things to 12px which
+// felt cramped on bigger displays.
+const FONT_SIZE_DEFAULTS = { cmd: 13, group: 13 };
+const FONT_SIZE_RANGE = { min: 10, max: 20 };
+
+async function loadFontSizeSettings() {
+  const cmd = await readFontPref('exec.cmd_name_font_size',  FONT_SIZE_DEFAULTS.cmd);
+  const grp = await readFontPref('exec.group_name_font_size', FONT_SIZE_DEFAULTS.group);
+  applyFontSizes(cmd, grp);
+}
+
+async function readFontPref(key, fallback) {
+  try {
+    const raw = await call('get_setting', { key });
+    const n = parseInt(raw, 10);
+    if (Number.isFinite(n) && n >= FONT_SIZE_RANGE.min && n <= FONT_SIZE_RANGE.max) return n;
+  } catch (_) { /* fall through */ }
+  return fallback;
+}
+
+function applyFontSizes(cmd, group) {
+  if (!root) return;
+  root.style.setProperty('--exec-cmd-name-size', cmd + 'px');
+  root.style.setProperty('--exec-group-name-size', group + 'px');
+}
+
+function openExecSettings() {
+  const currentCmd = parseInt(getComputedStyle(root).getPropertyValue('--exec-cmd-name-size')) || FONT_SIZE_DEFAULTS.cmd;
+  const currentGroup = parseInt(getComputedStyle(root).getPropertyValue('--exec-group-name-size')) || FONT_SIZE_DEFAULTS.group;
+
+  const body = document.createElement('div');
+  body.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div>
+        <label style="display:flex;justify-content:space-between;align-items:baseline;color:var(--text)">
+          <span>Command name size</span>
+          <span id="exec-set-cmd-val" style="font-family:'JetBrains Mono',monospace;color:var(--text-muted)">${currentCmd}px</span>
+        </label>
+        <input id="exec-set-cmd" type="range" min="${FONT_SIZE_RANGE.min}" max="${FONT_SIZE_RANGE.max}" value="${currentCmd}" style="width:100%;margin-top:4px" />
+      </div>
+      <div>
+        <label style="display:flex;justify-content:space-between;align-items:baseline;color:var(--text)">
+          <span>Group name size</span>
+          <span id="exec-set-group-val" style="font-family:'JetBrains Mono',monospace;color:var(--text-muted)">${currentGroup}px</span>
+        </label>
+        <input id="exec-set-group" type="range" min="${FONT_SIZE_RANGE.min}" max="${FONT_SIZE_RANGE.max}" value="${currentGroup}" style="width:100%;margin-top:4px" />
+      </div>
+      <div style="font-size:11px;color:var(--text-muted);font-style:italic">
+        Changes apply immediately and persist across sessions.
+      </div>
+    </div>
+  `;
+
+  const cmdInput = body.querySelector('#exec-set-cmd');
+  const cmdVal = body.querySelector('#exec-set-cmd-val');
+  const grpInput = body.querySelector('#exec-set-group');
+  const grpVal = body.querySelector('#exec-set-group-val');
+  const initialCmd = currentCmd;
+  const initialGroup = currentGroup;
+  cmdInput.addEventListener('input', () => {
+    cmdVal.textContent = cmdInput.value + 'px';
+    applyFontSizes(parseInt(cmdInput.value), parseInt(grpInput.value));
+  });
+  grpInput.addEventListener('input', () => {
+    grpVal.textContent = grpInput.value + 'px';
+    applyFontSizes(parseInt(cmdInput.value), parseInt(grpInput.value));
+  });
+
+  showModal({
+    title: 'Exec — display settings',
+    body,
+    onConfirm: async () => {
+      const cmd = parseInt(cmdInput.value);
+      const grp = parseInt(grpInput.value);
+      try {
+        await call('set_setting', { key: 'exec.cmd_name_font_size',   value: String(cmd) });
+        await call('set_setting', { key: 'exec.group_name_font_size', value: String(grp) });
+        applyFontSizes(cmd, grp);
+        showToast('Saved', 'success');
+      } catch (e) {
+        showToast('Failed to save: ' + e, 'error');
+      }
+    },
+    onCancel: () => {
+      applyFontSizes(initialCmd, initialGroup);
+    },
+  });
 }
 
 async function onAddCategory() {
@@ -1018,12 +1115,12 @@ function css() {
 .exec-dnd-source-dimmed {
   opacity: 0.4;
 }
-.exec-dnd-insertion-line {
-  height: 2px;
-  background: var(--accent);
-  border-radius: 1px;
-  margin: 1px 0;
+.exec-dnd-placeholder {
+  border: 1px dashed rgba(255,255,255,0.18);
+  background: rgba(255,255,255,0.025);
+  border-radius: 6px;
   pointer-events: none;
+  box-sizing: border-box;
 }
 .exec-cmd-run {
   width: 32px;
@@ -1294,7 +1391,7 @@ function css() {
   flex-shrink: 0;
 }
 .exec-tab .cat-name {
-  font-size: 12px;
+  font-size: var(--exec-group-name-size, 13px);
   color: var(--v1-fg);
   font-family: 'JetBrains Mono', monospace;
   overflow: hidden;
@@ -1417,7 +1514,7 @@ function css() {
 .exec-tab .exec-cmd-name {
   font-family: 'JetBrains Mono', monospace;
   font-weight: 500;
-  font-size: 12px;
+  font-size: var(--exec-cmd-name-size, 13px);
   color: var(--v1-fg);
 }
 .exec-tab .exec-cmd-name:hover {
@@ -1468,10 +1565,11 @@ function css() {
   background: rgba(0,255,136,0.05);
 }
 .exec-tab .exec-dnd-source-dimmed { opacity: 0.35; }
-.exec-tab .exec-dnd-insertion-line {
-  height: 2px;
-  background: var(--v1-accent);
-  margin: 1px 0;
+.exec-tab .exec-dnd-placeholder {
+  border: 1px dashed var(--v1-accent);
+  background: rgba(0,255,136,0.05);
+  border-radius: 0;
+  box-sizing: border-box;
   pointer-events: none;
 }
 .exec-tab .exec-dnd-drag-clone {
