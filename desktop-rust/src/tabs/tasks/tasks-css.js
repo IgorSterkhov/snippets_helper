@@ -152,8 +152,7 @@ export function tasksCSS() {
   overflow: hidden;
   transition: border-color 0.15s;
   position: relative;
-  flex-shrink: 0;
-  min-height: 0;
+  flex-shrink: 0;            /* prevent shrinking in flex column */
   height: auto;
   margin-bottom: 10px;       /* gap fallback — more reliable across WebView versions */
 }
