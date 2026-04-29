@@ -230,7 +230,7 @@ export async function reloadAll() {
 export async function reloadTasks() {
   await loadTasks();
   await loadPinned();
-  renderTaskList();
+  await renderTaskList();
   renderPinnedStrip();
   // Dropdowns may need to show/hide the "None" item as orphan counts change.
   renderDropdowns();
@@ -238,11 +238,11 @@ export async function reloadTasks() {
 
 // ── Render ──────────────────────────────────────────────────
 
-function renderAll() {
+async function renderAll() {
   renderPinnedStrip();
   renderDropdowns();
   renderLayoutToggle();
-  renderTaskList();
+  await renderTaskList();
 }
 
 function renderPinnedStrip() {
@@ -335,14 +335,14 @@ async function renderTaskList() {
 
 // ── Expand / collapse ───────────────────────────────────────
 
-function toggleExpanded(id) {
+async function toggleExpanded(id) {
   state.expandedTaskId = state.expandedTaskId === id ? null : id;
-  renderTaskList();
+  await renderTaskList();
 }
 
-export function openExpanded(id) {
+export async function openExpanded(id) {
   state.expandedTaskId = id;
-  renderTaskList();
+  await renderTaskList();
   // Ensure card is scrolled into view.
   setTimeout(() => {
     const card = state.root.querySelector(`[data-task-id="${id}"]`);
