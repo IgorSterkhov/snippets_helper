@@ -11,7 +11,7 @@ const checkboxCache = new Map();
 // Collapse state for checkbox rows. In-memory only; reset on tab re-entry
 // via resetCollapseState() called from index.js:init().
 const collapsedNodes = new Map();
-export function resetCollapseState() {
+function resetCollapseState() {
   collapsedNodes.clear();
 }
 
@@ -533,7 +533,7 @@ async function loadCheckboxes(taskId, force = false) {
   return items;
 }
 
-export function isCollapsed(id) {
+function isCollapsed(id) {
   return collapsedNodes.get(id) === true;
 }
 
