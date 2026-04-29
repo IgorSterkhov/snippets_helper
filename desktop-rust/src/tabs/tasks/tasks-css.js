@@ -149,12 +149,14 @@ export function tasksCSS() {
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: 8px;
-  overflow: hidden;
+  /* clip-path instead of overflow:hidden — overflow creates a new BFC that
+     can break grid row height calculation in WebView2 (two-col overlap) */
+  clip-path: inset(0 round 8px);
   transition: border-color 0.15s;
   position: relative;
-  flex-shrink: 0;            /* prevent shrinking in flex column */
+  flex-shrink: 0;
   height: auto;
-  margin-bottom: 10px;       /* gap fallback — more reliable across WebView versions */
+  margin-bottom: 10px;
 }
 .task-card:last-child { margin-bottom: 0; }
 .task-card:hover { border-color: var(--text-muted); }
