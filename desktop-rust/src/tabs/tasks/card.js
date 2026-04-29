@@ -497,11 +497,30 @@ async function outdent(task, node, ctx) {
   const items = await loadCheckboxes(task.id, true);
   const parent = items.find(x => x.id === node.parent_id);
   const newParent = parent ? parent.parent_id : null;
+
+  // Place the outdented item right after its former parent among the
+  // new parent's children.  Shift siblings at or past the target up
+  // by one so sort_order never collides.
+  const siblings = items
+    .filter(x => x.parent_id === newParent)
+    .sort((a, b) => a.sort_order - b.sort_order);
+  let targetOrder;
+  const parentIdx = siblings.findIndex(x => x.id === node.parent_id);
+  if (parentIdx >= 0) {
+    targetOrder = siblings[parentIdx].sort_order + 1;
+  } else {
+    targetOrder = siblings.length > 0 ? siblings[siblings.length - 1].sort_order + 1 : 0;
+  }
+
+  const entries = [{ id: node.id, parent_id: newParent, sort_order: targetOrder }];
+  for (const sib of siblings) {
+    if (sib.sort_order >= targetOrder && sib.id !== node.id) {
+      entries.push({ id: sib.id, parent_id: newParent, sort_order: sib.sort_order + 1 });
+    }
+  }
+
   try {
-    await call('reorder_task_checkboxes', {
-      taskId: task.id,
-      entries: [{ id: node.id, parent_id: newParent, sort_order: 9999 }],
-    });
+    await call('reorder_task_checkboxes', { taskId: task.id, entries });
     invalidateCheckboxCache(task.id);
     ctx.onTaskReload && ctx.onTaskReload();
   } catch (err) {

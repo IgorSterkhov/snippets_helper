@@ -84,6 +84,19 @@ export async function init(container) {
       await commitCheckboxReorder(taskId, draggedId, orderedIds, nestUnder);
       invalidateCheckboxCache(taskId);
       renderTaskList();
+      // Restore focus to the dragged checkbox after DOM rebuild
+      setTimeout(() => {
+        const el = document.querySelector(`[data-cb-id="${draggedId}"] .tcb-text[contenteditable="true"]`);
+        if (el) {
+          el.focus();
+          const range = document.createRange();
+          range.selectNodeContents(el);
+          range.collapse(false);
+          const sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+      }, 30);
     },
   });
 }
