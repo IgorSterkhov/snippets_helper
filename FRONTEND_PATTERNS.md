@@ -70,3 +70,54 @@ the relevant section after implementation.
      clear all FLIP transforms.
 
 **Z-index:** ghost at 10000, placeholder inherits normal flow.
+
+---
+
+## §3 Frontend testing
+
+**Before committing any frontend change**, run these checks. All three must pass.
+
+### 3a. `node --check` — syntax validation
+
+Catches syntax errors (missing brackets, stray commas, etc.) instantly without executing code.
+
+```bash
+node --check path/to/file.js && echo "OK"
+```
+
+Run on every changed JS file. No runtime required, no imports resolved — pure parse check.
+
+### 3b. Duplicate export detection
+
+ES modules reject duplicate exports of the same name, but `node --check` does NOT catch this (it only parses). The symptom: tab loader catches the error and shows "Failed to load tab", which masks the real cause.
+
+**Check:** after adding a new `export function` or `export const`, verify no other export of that name exists:
+
+```bash
+grep -n "export.*\<NAME\>" file.js
+```
+
+If both a standalone `export function NAME()` and a list `export { ..., NAME, ... }` exist → remove one. Prefer the list export; keep function declarations plain (no `export` keyword on the declaration).
+
+**Example — wrong (duplicate):**
+```js
+export function resetCollapseState() { ... }   // line 14
+export { loadCheckboxes, isCollapsed, resetCollapseState };  // line 580 — DUPLICATE
+```
+
+**Example — correct:**
+```js
+function resetCollapseState() { ... }           // line 14 — plain function
+export { loadCheckboxes, isCollapsed, resetCollapseState };  // line 580 — only export
+```
+
+### 3c. `dev-test.py` — integration test suite
+
+Runs the app through a headless browser mock (Chromium via CDP) with mocked Tauri backend. Covers tab loading, modal interactions, and core user flows.
+
+```bash
+cd desktop-rust/src && python3 dev-test.py
+# Expected: === N/N passed ===
+```
+
+If any test fails — debug before committing. The test uses `desktop-rust/src/dev-mock.js` which registers all Tauri command stubs; new commands need a corresponding mock entry there.
