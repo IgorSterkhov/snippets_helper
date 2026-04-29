@@ -144,19 +144,23 @@ function buildCollapsedBody(task, ctx) {
   // Dynamic max-height based on setting (default 10 items × 26px).
   applyMaxHeight(body);
 
-  const ph = el('div', { text: '…', style: 'padding:8px 12px;color:var(--text-muted);font-style:italic' });
-  body.appendChild(ph);
-
-  // Load checkboxes (cached).
-  loadCheckboxes(task.id).then((items) => {
-    body.innerHTML = '';
-    // editable=true in collapsed mode too: inline-add + rename +
-    // Tab/Shift+Tab/Enter shortcuts all work without expanding the card.
-    renderCheckboxes(body, task, items, ctx, { editable: true });
-  }).catch((e) => {
-    body.innerHTML = '';
-    body.appendChild(el('div', { text: 'Load error: ' + e, style: 'padding:8px 12px;color:var(--danger)' }));
-  });
+  // Render synchronously if data is cached (preloaded by renderTaskList),
+  // otherwise show placeholder and load asynchronously.  Synchronous render
+  // is critical for grid layout — WebView2 does not reflow grid rows when
+  // card content changes after first paint.
+  if (checkboxCache.has(task.id)) {
+    renderCheckboxes(body, task, checkboxCache.get(task.id), ctx, { editable: true });
+  } else {
+    const ph = el('div', { text: '…', style: 'padding:8px 12px;color:var(--text-muted);font-style:italic' });
+    body.appendChild(ph);
+    loadCheckboxes(task.id).then((items) => {
+      body.innerHTML = '';
+      renderCheckboxes(body, task, items, ctx, { editable: true });
+    }).catch((e) => {
+      body.innerHTML = '';
+      body.appendChild(el('div', { text: 'Load error: ' + e, style: 'padding:8px 12px;color:var(--danger)' }));
+    });
+  }
 
   return body;
 }
