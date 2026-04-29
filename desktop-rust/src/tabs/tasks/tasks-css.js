@@ -152,8 +152,8 @@ export function tasksCSS() {
   overflow: hidden;
   transition: border-color 0.15s;
   position: relative;
-  min-height: 0;
-  contain: layout style;
+  flex-shrink: 0;            /* never shrink in flex column — prevents overlap */
+  min-height: 0;             /* grid safety in two-col mode */
   height: auto;
 }
 .task-card:hover { border-color: var(--text-muted); }
