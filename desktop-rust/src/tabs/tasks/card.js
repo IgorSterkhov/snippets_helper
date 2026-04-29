@@ -18,11 +18,29 @@ function resetCollapseState() {
 
 // Per-task "hide completed checkboxes" toggle.  In-memory, resets on tab re-entry.
 const hiddenCompleted = new Map();
+// Timestamps for delayed hide: when a checkbox is checked while hiding mode
+// is on, it lingers for HIDE_DELAY_MS before disappearing.  If unchecked
+// before the delay expires, the timer is cancelled.
+const HIDE_DELAY_MS = 8000;  // 8 seconds — enough to undo an accidental check
+const checkedTimestamps = new Map();  // checkbox id → Date.now()
+
 export function toggleHideCompleted(taskId) {
-  hiddenCompleted.set(taskId, !hiddenCompleted.get(taskId));
+  const wasHiding = hiddenCompleted.get(taskId);
+  hiddenCompleted.set(taskId, !wasHiding);
+  if (!wasHiding) {
+    // Just turned hiding ON — clear stale timestamps so old completed
+    // items disappear immediately, but new checks get the delay.
+    checkedTimestamps.clear();
+  }
 }
 export function isHidingCompleted(taskId) {
   return hiddenCompleted.get(taskId) === true;
+}
+export function recordCheckTimestamp(cbId) {
+  checkedTimestamps.set(cbId, Date.now());
+}
+export function clearCheckTimestamp(cbId) {
+  checkedTimestamps.delete(cbId);
 }
 
 export function invalidateCheckboxCache(taskId) {
@@ -227,15 +245,20 @@ export function renderCheckboxes(target, task, items, ctx, opts = {}) {
   roots.sort(sortFn);
   for (const node of byId.values()) node.children.sort(sortFn);
 
-  // When "hide completed" is on, prune fully-completed subtrees.
-  // A subtree is fully completed when the node itself is checked AND
-  // all recursive descendants are also checked.
+  // When "hide completed" is on, prune fully-completed subtrees that
+  // have been checked longer than HIDE_DELAY_MS.  Recently-checked items
+  // linger so the user can undo an accidental check.
   let visibleRoots = roots;
   if (isHidingCompleted(task.id)) {
-    const isFullyDone = (node) => {
+    const now = Date.now();
+    const canHide = (node) => {
       if (!node.is_checked) return false;
+      const ts = checkedTimestamps.get(node.id);
+      // Hide if no timestamp (was already checked before hiding was
+      // turned on) or the delay has elapsed.
+      if (ts && now - ts < HIDE_DELAY_MS) return false;
       for (const c of node.children) {
-        if (!isFullyDone(c)) return false;
+        if (!canHide(c)) return false;
       }
       return true;
     };
@@ -243,7 +266,7 @@ export function renderCheckboxes(target, task, items, ctx, opts = {}) {
     const filterChildren = (nodes) => {
       const out = [];
       for (const n of nodes) {
-        if (isFullyDone(n)) continue;
+        if (canHide(n)) continue;
         n.children = filterChildren(n.children);
         out.push(n);
       }
@@ -336,6 +359,20 @@ function buildCheckboxRow(node, task, ctx, depth, { editable }) {
       // visual flip without full reload
       textEl.classList.toggle('checked', cb.checked);
       node.is_checked = cb.checked;
+      // Delayed hide: if hiding mode is on and item was just checked,
+      // schedule a reload after HIDE_DELAY_MS so it lingers briefly.
+      if (cb.checked && isHidingCompleted(task.id)) {
+        recordCheckTimestamp(node.id);
+        setTimeout(() => {
+          // Only reload if still hiding and item hasn't been unchecked
+          // in the meantime (timestamp still present).
+          if (isHidingCompleted(task.id) && checkedTimestamps.has(node.id)) {
+            ctx.onTaskReload && ctx.onTaskReload();
+          }
+        }, HIDE_DELAY_MS);
+      } else {
+        clearCheckTimestamp(node.id);
+      }
     } catch (err) {
       showToast('Update failed: ' + err, 'error');
       cb.checked = !cb.checked;
