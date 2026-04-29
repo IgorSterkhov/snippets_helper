@@ -129,12 +129,12 @@ export function tasksCSS() {
 .tasks-cards-scroll.one-col {
   display: flex;
   flex-direction: column;
-  gap: 0;                    /* cards use margin-bottom for spacing */
+  gap: 10px;
 }
 .tasks-cards-scroll.two-col {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 0;                    /* margin-bottom on cards instead */
+  gap: 10px;
   align-items: start;
 }
 .tasks-empty {
