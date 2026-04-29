@@ -138,3 +138,26 @@ curl -sL https://github.com/IgorSterkhov/snippets_helper/releases/download/<TAG>
 ```
 
 For `f-*` releases: 3 assets expected (frontend zip, `frontend-version.json`, `latest.json`). For `v*` releases: 5–7 assets. If CI fails or assets are missing — investigate before reporting success to the user.
+
+---
+
+## §4 Two-column layout — avoid CSS Grid in Tauri WebView2
+
+**Used in:** Tasks tab (two-col card layout)
+
+**Problem:** CSS Grid with `grid-template-columns: 1fr 1fr` causes card overlap in Tauri WebView2. Three root causes were found:
+
+1. **`overflow: hidden` on grid items creates a new Block Formatting Context** — WebView2 miscalculates grid row heights when items have BFCs. **Fix:** use `clip-path: inset(0 round 8px)` instead of `overflow: hidden` + `border-radius`.
+
+2. **Asynchronous content loading (`.then()`)** — cards enter the DOM with placeholder `…` (short), grid calculates row height, then `.then()` fires and card grows, but grid already locked the row height. **Fix:** render synchronously when data is in cache; preload data before DOM insertion.
+
+3. **`min-height: 0` on grid items** — removes the default `min-height: auto` protection, allowing items to shrink below content height. **Fix:** remove `min-height: 0` (use `flex-shrink: 0` for flex context instead).
+
+4. **`gap` in grid can be unreliable in WebView2** — use `margin-bottom` on items as a fallback.
+
+**Recommended approach for two-column layouts in this app:**
+
+- Use two side-by-side flex columns (`.tasks-col`), distribute items to the shorter column by comparing `getBoundingClientRect().height`. This gives tight packing without grid's row-height issues.
+- CSS: `display: flex; gap: 10px; align-items: flex-start` on the container, each column is `flex: 1; display: flex; flex-direction: column`.
+- JS: after appending each card, append the next one to the column with lower height.
+- Preload async data to cache before DOM insertion so cards render synchronously at their final height.
