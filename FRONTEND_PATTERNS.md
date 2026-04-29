@@ -121,3 +121,20 @@ cd desktop-rust/src && python3 dev-test.py
 ```
 
 If any test fails — debug before committing. The test uses `desktop-rust/src/dev-mock.js` which registers all Tauri command stubs; new commands need a corresponding mock entry there.
+
+### 3d. CI monitoring after release tag
+
+After pushing a release tag (`f-*` or `v*`), the CI workflow triggers automatically. Monitor it and report the result — do NOT assume it succeeded.
+
+```bash
+# Find the run for the new tag
+gh run list --limit=3 --json status,databaseId,headBranch,conclusion
+
+# Watch it to completion
+gh run watch <run_id> --exit-status &
+
+# When done: verify assets on the tag page
+curl -sL https://github.com/IgorSterkhov/snippets_helper/releases/download/<TAG>/frontend-version.json
+```
+
+For `f-*` releases: 3 assets expected (frontend zip, `frontend-version.json`, `latest.json`). For `v*` releases: 5–7 assets. If CI fails or assets are missing — investigate before reporting success to the user.
