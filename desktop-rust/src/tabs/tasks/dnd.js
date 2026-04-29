@@ -104,9 +104,10 @@ function startDrag(handle, kind, e) {
 
   source.classList.add('task-dnd-source');
 
-  // List container: for cards the scroll area; for checkbox the row's parent
+  // List container: for cards the nearest .tasks-col (two-col) or
+  // .tasks-cards-scroll (one-col); for checkbox the row's parent.
   const listEl = kind === 'card'
-    ? source.closest('.tasks-cards-scroll') || source.parentElement
+    ? (source.closest('.tasks-col') || source.closest('.tasks-cards-scroll') || source.parentElement)
     : source.parentElement;
 
   // Checkbox mode: build placeholder, hide source, early return

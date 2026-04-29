@@ -66,7 +66,7 @@ export async function init(container) {
   await loadTasks();
   await loadPinned();
   resetCollapseState();
-  renderAll();
+  await renderAll();
 
   // Pointer-based DnD: card → dropdown item / card → card / checkbox → row.
   // New model (v1.3.23): the DOM is reordered live during drag; on drop
@@ -224,7 +224,7 @@ export async function reloadAll() {
   await Promise.all([loadCategories(), loadStatuses()]);
   await loadTasks();
   await loadPinned();
-  renderAll();
+  await renderAll();
 }
 
 export async function reloadTasks() {
@@ -314,22 +314,43 @@ async function renderTaskList() {
     scroll.appendChild(el('div', { class: 'tasks-empty', text: 'No tasks yet. Click "+ New task" to add one.' }));
     return;
   }
-  // Preload checkboxes for collapsed cards so grid/flex sees final height
-  // before first paint — prevents overlap in two-col grid mode (WebView2
-  // does not re-layout grid rows when card height changes asynchronously).
+  // Preload checkboxes for collapsed cards so the layout sees final
+  // card heights before first paint.
   for (const task of state.tasks) {
     if (state.expandedTaskId !== task.id) {
       try { await loadCheckboxes(task.id); } catch { /* renderCard will retry */ }
     }
   }
-  for (const task of state.tasks) {
-    const card = renderCard(task, {
-      expanded: state.expandedTaskId === task.id,
-      state,
-      onExpandToggle: () => toggleExpanded(task.id),
-      onTaskReload: () => reloadTasks(),
-    });
-    scroll.appendChild(card);
+
+  if (state.layoutMode === 'two-col') {
+    // Two flex columns: distribute cards to the shorter column for
+    // tight packing (no large gaps under short cards like CSS grid).
+    const left = el('div', { class: 'tasks-col' });
+    const right = el('div', { class: 'tasks-col' });
+    scroll.appendChild(left);
+    scroll.appendChild(right);
+
+    for (const task of state.tasks) {
+      const card = renderCard(task, {
+        expanded: state.expandedTaskId === task.id,
+        state,
+        onExpandToggle: () => toggleExpanded(task.id),
+        onTaskReload: () => reloadTasks(),
+      });
+      // Append to the shorter column
+      (left.getBoundingClientRect().height <= right.getBoundingClientRect().height
+        ? left : right).appendChild(card);
+    }
+  } else {
+    for (const task of state.tasks) {
+      const card = renderCard(task, {
+        expanded: state.expandedTaskId === task.id,
+        state,
+        onExpandToggle: () => toggleExpanded(task.id),
+        onTaskReload: () => reloadTasks(),
+      });
+      scroll.appendChild(card);
+    }
   }
 }
 

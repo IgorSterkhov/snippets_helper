@@ -132,10 +132,15 @@ export function tasksCSS() {
   gap: 10px;
 }
 .tasks-cards-scroll.two-col {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+  display: flex;
   gap: 10px;
-  align-items: start;
+  align-items: flex-start;
+}
+.tasks-cards-scroll.two-col .tasks-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 .tasks-empty {
   padding: 24px;
@@ -464,11 +469,6 @@ export function tasksCSS() {
   box-shadow: 0 0 0 1px rgba(56, 139, 253, 0.25);
   pointer-events: none;
   flex-shrink: 0;
-}
-/* In 2-col grid mode the insertion line needs to span both columns so it
-   visually reads as a horizontal rule between rows. */
-.tasks-cards-scroll.two-col .task-dnd-insertion-line {
-  grid-column: 1 / -1;
 }
 
 /* Checkbox DnD placeholder — dashed slot showing where the dragged row will land.
