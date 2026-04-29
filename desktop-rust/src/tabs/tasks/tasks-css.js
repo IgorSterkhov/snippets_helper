@@ -213,6 +213,7 @@ export function tasksCSS() {
   font-size: 12px; line-height: 1;
 }
 .task-icon-btn:hover { color: var(--text); background: var(--bg-tertiary); }
+.task-hide-done-btn.active { color: var(--accent); }
 
 .task-tracker-btn {
   color: var(--accent);

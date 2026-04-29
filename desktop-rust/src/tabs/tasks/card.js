@@ -13,6 +13,16 @@ const checkboxCache = new Map();
 const collapsedNodes = new Map();
 function resetCollapseState() {
   collapsedNodes.clear();
+  hiddenCompleted.clear();
+}
+
+// Per-task "hide completed checkboxes" toggle.  In-memory, resets on tab re-entry.
+const hiddenCompleted = new Map();
+export function toggleHideCompleted(taskId) {
+  hiddenCompleted.set(taskId, !hiddenCompleted.get(taskId));
+}
+export function isHidingCompleted(taskId) {
+  return hiddenCompleted.get(taskId) === true;
 }
 
 export function invalidateCheckboxCache(taskId) {
@@ -113,6 +123,22 @@ function buildHead(task, ctx) {
     head.appendChild(el('span', { text: '📌', style: 'font-size:12px' }));
   }
 
+  // Hide-completed toggle (eye icon).  Shows in both collapsed and expanded.
+  (() => {
+    const hiding = isHidingCompleted(task.id);
+    const eye = document.createElement('button');
+    eye.className = 'task-icon-btn task-hide-done-btn';
+    eye.title = hiding ? 'Show completed items' : 'Hide completed items';
+    eye.textContent = hiding ? '👁‍🗨' : '👁';
+    if (hiding) eye.classList.add('active');
+    eye.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleHideCompleted(task.id);
+      ctx.onTaskReload && ctx.onTaskReload();
+    });
+    head.appendChild(eye);
+  })();
+
   // Expand / collapse button
   const expandBtn = document.createElement('button');
   expandBtn.className = 'task-icon-btn';
@@ -201,6 +227,31 @@ export function renderCheckboxes(target, task, items, ctx, opts = {}) {
   roots.sort(sortFn);
   for (const node of byId.values()) node.children.sort(sortFn);
 
+  // When "hide completed" is on, prune fully-completed subtrees.
+  // A subtree is fully completed when the node itself is checked AND
+  // all recursive descendants are also checked.
+  let visibleRoots = roots;
+  if (isHidingCompleted(task.id)) {
+    const isFullyDone = (node) => {
+      if (!node.is_checked) return false;
+      for (const c of node.children) {
+        if (!isFullyDone(c)) return false;
+      }
+      return true;
+    };
+    // Recursively filter children
+    const filterChildren = (nodes) => {
+      const out = [];
+      for (const n of nodes) {
+        if (isFullyDone(n)) continue;
+        n.children = filterChildren(n.children);
+        out.push(n);
+      }
+      return out;
+    };
+    visibleRoots = filterChildren(roots);
+  }
+
   function renderNode(node, depth) {
     const row = buildCheckboxRow(node, task, ctx, depth, { editable });
 
@@ -226,7 +277,7 @@ export function renderCheckboxes(target, task, items, ctx, opts = {}) {
       for (const c of node.children) renderNode(c, depth + 1);
     }
   }
-  for (const r of roots) renderNode(r, 0);
+  for (const r of visibleRoots) renderNode(r, 0);
 
   // "+ Add item…" as last row
   const add = el('div', { class: 'tcb-add' });
