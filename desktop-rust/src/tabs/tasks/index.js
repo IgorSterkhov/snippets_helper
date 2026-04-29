@@ -2,7 +2,7 @@ import { call } from '../../tauri-api.js';
 import { showToast } from '../../components/toast.js';
 import { showModal } from '../../components/modal.js';
 import { tasksCSS } from './tasks-css.js';
-import { renderCard, resetCollapseState, invalidateCheckboxCache } from './card.js';
+import { renderCard, resetCollapseState, invalidateCheckboxCache, loadCheckboxes } from './card.js';
 import { renderPinnedChips, renderFilterDropdown } from './dropdown.js';
 import { helpButton } from '../sql/sql-help.js';
 import { TASKS_HELP_HTML } from './help-content.js';
@@ -83,7 +83,7 @@ export async function init(container) {
     onCheckboxReorderCommit: async (taskId, draggedId, orderedIds, nestUnder) => {
       await commitCheckboxReorder(taskId, draggedId, orderedIds, nestUnder);
       invalidateCheckboxCache(taskId);
-      renderTaskList();
+      await renderTaskList();
       // Restore focus to the dragged checkbox after DOM rebuild
       setTimeout(() => {
         const el = document.querySelector(`[data-cb-id="${draggedId}"] .tcb-text[contenteditable="true"]`);
@@ -306,13 +306,21 @@ function applyLayoutMode() {
   scroll.classList.add(state.layoutMode);
 }
 
-function renderTaskList() {
+async function renderTaskList() {
   const scroll = state.root.querySelector('#tasks-cards-scroll');
   if (!scroll) return;
   scroll.innerHTML = '';
   if (!state.tasks.length) {
     scroll.appendChild(el('div', { class: 'tasks-empty', text: 'No tasks yet. Click "+ New task" to add one.' }));
     return;
+  }
+  // Preload checkboxes for collapsed cards so grid/flex sees final height
+  // before first paint — prevents overlap in two-col grid mode (WebView2
+  // does not re-layout grid rows when card height changes asynchronously).
+  for (const task of state.tasks) {
+    if (state.expandedTaskId !== task.id) {
+      try { await loadCheckboxes(task.id); } catch { /* renderCard will retry */ }
+    }
   }
   for (const task of state.tasks) {
     const card = renderCard(task, {
