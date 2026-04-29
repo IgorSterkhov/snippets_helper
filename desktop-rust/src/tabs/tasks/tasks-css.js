@@ -129,7 +129,7 @@ export function tasksCSS() {
 .tasks-cards-scroll.one-col {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 0;                    /* cards use margin-bottom for spacing */
 }
 .tasks-cards-scroll.two-col {
   display: grid;
@@ -137,6 +137,7 @@ export function tasksCSS() {
   gap: 10px;
   align-items: start;
 }
+.tasks-cards-scroll.two-col .task-card { margin-bottom: 0; }
 .tasks-empty {
   padding: 24px;
   color: var(--text-muted);
@@ -152,10 +153,12 @@ export function tasksCSS() {
   overflow: hidden;
   transition: border-color 0.15s;
   position: relative;
-  flex-shrink: 0;            /* never shrink in flex column — prevents overlap */
-  min-height: 0;             /* grid safety in two-col mode */
+  flex-shrink: 0;
+  min-height: 0;
   height: auto;
+  margin-bottom: 10px;       /* gap fallback — more reliable across WebView versions */
 }
+.task-card:last-child { margin-bottom: 0; }
 .task-card:hover { border-color: var(--text-muted); }
 .task-card.expanded { border-color: var(--accent); }
 .task-card.dragging { opacity: 0.45; }
