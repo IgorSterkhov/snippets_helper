@@ -180,6 +180,35 @@ function buildBadge(item) {
   return b;
 }
 
+// Poll for a focus target after async DOM rebuild.  reloadTasks()
+// is async (preloads checkboxes) but callers don't await it, so a
+// single setTimeout may fire before the new DOM is ready.
+export function focusAfterReload(selector, fallbackSelector) {
+  const start = Date.now();
+  const poll = () => {
+    const el = document.querySelector(selector)
+            || (fallbackSelector ? document.querySelector(fallbackSelector) : null);
+    if (el) {
+      if (el.contentEditable === 'true') {
+        el.focus();
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        range.collapse(false);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      } else if (el.scrollIntoView) {
+        el.scrollIntoView({ block: 'center' });
+      }
+      return;
+    }
+    if (Date.now() - start < 3000) {
+      setTimeout(poll, 40);
+    }
+  };
+  setTimeout(poll, 30);
+}
+
 // ── Collapsed body (checkbox list only) ──────────────────────
 
 function buildCollapsedBody(task, ctx) {
@@ -431,20 +460,8 @@ function buildCheckboxRow(node, task, ctx, depth, { editable }) {
           });
           invalidateCheckboxCache(task.id);
           ctx.onTaskReload && ctx.onTaskReload();
-          // Focus new row after re-render.
-          setTimeout(() => {
-            const el = document.querySelector(`[data-cb-id="${created.id}"] .tcb-text[contenteditable="true"]`);
-            if (el) {
-              el.focus();
-              // Put caret at end
-              const range = document.createRange();
-              range.selectNodeContents(el);
-              range.collapse(false);
-              const sel = window.getSelection();
-              sel.removeAllRanges();
-              sel.addRange(range);
-            }
-          }, 30);
+          // Focus new row after async re-render.
+          focusAfterReload(`[data-cb-id="${created.id}"] .tcb-text[contenteditable="true"]`);
         } catch (err) {
           showToast('New item failed: ' + err, 'error');
         }
@@ -453,36 +470,13 @@ function buildCheckboxRow(node, task, ctx, depth, { editable }) {
         await commit();
         const savedId = node.id;
         await nestUnderPrev(task, node, ctx);
-        // nestUnderPrev triggers ctx.onTaskReload → DOM rebuild; restore focus
-        setTimeout(() => {
-          const el = document.querySelector(`[data-cb-id="${savedId}"] .tcb-text[contenteditable="true"]`);
-          if (el) {
-            el.focus();
-            const range = document.createRange();
-            range.selectNodeContents(el);
-            range.collapse(false);
-            const sel = window.getSelection();
-            sel.removeAllRanges();
-            sel.addRange(range);
-          }
-        }, 30);
+        focusAfterReload(`[data-cb-id="${savedId}"] .tcb-text[contenteditable="true"]`);
       } else if (e.key === 'Tab' && e.shiftKey) {
         e.preventDefault();
         await commit();
         const savedId = node.id;
         await outdent(task, node, ctx);
-        setTimeout(() => {
-          const el = document.querySelector(`[data-cb-id="${savedId}"] .tcb-text[contenteditable="true"]`);
-          if (el) {
-            el.focus();
-            const range = document.createRange();
-            range.selectNodeContents(el);
-            range.collapse(false);
-            const sel = window.getSelection();
-            sel.removeAllRanges();
-            sel.addRange(range);
-          }
-        }, 30);
+        focusAfterReload(`[data-cb-id="${savedId}"] .tcb-text[contenteditable="true"]`);
       } else if (e.key === 'Backspace' && readText() === '') {
         e.preventDefault();
         // Find fallback focus target before deletion
@@ -504,25 +498,12 @@ function buildCheckboxRow(node, task, ctx, depth, { editable }) {
           await call('delete_task_checkbox', { id: node.id });
           invalidateCheckboxCache(task.id);
           ctx.onTaskReload && ctx.onTaskReload();
-          // Restore focus after DOM rebuild
+          // Restore focus after async DOM rebuild
           if (fallbackId != null) {
-            setTimeout(() => {
-              const el = document.querySelector(`[data-cb-id="${fallbackId}"] .tcb-text[contenteditable="true"]`)
-                      || document.querySelector(`[data-cb-id="${fallbackId}"]`);
-              if (el) {
-                if (el.contentEditable === 'true') {
-                  el.focus();
-                  const range = document.createRange();
-                  range.selectNodeContents(el);
-                  range.collapse(false);
-                  const sel = window.getSelection();
-                  sel.removeAllRanges();
-                  sel.addRange(range);
-                } else {
-                  el.scrollIntoView({ block: 'center' });
-                }
-              }
-            }, 30);
+            focusAfterReload(
+              `[data-cb-id="${fallbackId}"] .tcb-text[contenteditable="true"]`,
+              `[data-cb-id="${fallbackId}"]`
+            );
           }
         } catch (err) {
           showToast('Delete failed: ' + err, 'error');

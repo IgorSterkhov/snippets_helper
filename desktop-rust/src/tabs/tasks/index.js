@@ -2,7 +2,7 @@ import { call } from '../../tauri-api.js';
 import { showToast } from '../../components/toast.js';
 import { showModal } from '../../components/modal.js';
 import { tasksCSS } from './tasks-css.js';
-import { renderCard, resetCollapseState, invalidateCheckboxCache, loadCheckboxes } from './card.js';
+import { renderCard, resetCollapseState, invalidateCheckboxCache, loadCheckboxes, focusAfterReload } from './card.js';
 import { renderPinnedChips, renderFilterDropdown } from './dropdown.js';
 import { helpButton } from '../sql/sql-help.js';
 import { TASKS_HELP_HTML } from './help-content.js';
@@ -84,19 +84,7 @@ export async function init(container) {
       await commitCheckboxReorder(taskId, draggedId, orderedIds, nestUnder);
       invalidateCheckboxCache(taskId);
       await renderTaskList();
-      // Restore focus to the dragged checkbox after DOM rebuild
-      setTimeout(() => {
-        const el = document.querySelector(`[data-cb-id="${draggedId}"] .tcb-text[contenteditable="true"]`);
-        if (el) {
-          el.focus();
-          const range = document.createRange();
-          range.selectNodeContents(el);
-          range.collapse(false);
-          const sel = window.getSelection();
-          sel.removeAllRanges();
-          sel.addRange(range);
-        }
-      }, 30);
+      focusAfterReload(`[data-cb-id="${draggedId}"] .tcb-text[contenteditable="true"]`);
     },
   });
 }
