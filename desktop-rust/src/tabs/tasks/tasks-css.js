@@ -134,10 +134,9 @@ export function tasksCSS() {
 .tasks-cards-scroll.two-col {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  gap: 0;                    /* margin-bottom on cards instead */
   align-items: start;
 }
-.tasks-cards-scroll.two-col .task-card { margin-bottom: 0; }
 .tasks-empty {
   padding: 24px;
   color: var(--text-muted);
