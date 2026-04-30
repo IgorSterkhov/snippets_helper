@@ -6,6 +6,15 @@ import { el } from './index.js';
 import { CARD_BG_PALETTE } from './tasks-css.js';
 import { renderCheckboxes, loadCheckboxes, invalidateCheckboxCache } from './card.js';
 
+// Per-session last-used copy mode: 'all' | 'unchecked' | 'checked'
+let copyMode = 'all';
+
+const COPY_MODES = [
+  { id: 'all',       label: 'all',       icon: '📋', descr: 'Copy all' },
+  { id: 'unchecked', label: '☐ undone',  icon: '☐',  descr: 'Copy unchecked' },
+  { id: 'checked',   label: '☑ done',    icon: '☑',  descr: 'Copy checked' },
+];
+
 /**
  * Render the expanded editor body into `card` (after its head). All fields
  * save on blur / change; Delete button destroys the task; expand toggle
@@ -115,8 +124,14 @@ export function renderExpandedEditor(card, task, ctx) {
   body.appendChild(colorRow);
 
   // Checkboxes (editable)
-  const cbLabel = el('div', { class: 'task-editor-label', text: 'Checkboxes', style: 'margin-bottom:4px' });
-  body.appendChild(cbLabel);
+  const cbHeader = el('div', { style: 'display:flex;align-items:center;gap:8px;margin-bottom:4px' });
+  const cbLabel = el('div', { class: 'task-editor-label', text: 'Checkboxes' });
+  cbHeader.appendChild(cbLabel);
+
+  // Copy-to-markdown split button
+  cbHeader.appendChild(buildCopyMdButton(task));
+
+  body.appendChild(cbHeader);
   const cbArea = el('div', { class: 'task-editor-cb-area' });
   body.appendChild(cbArea);
 
@@ -338,6 +353,130 @@ function buildLinkRow(link, task, onReload) {
 }
 
 // ── Task-field update helper ─────────────────────────────────
+
+function buildCopyMdButton(task) {
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'display:flex;border:1px solid var(--border);border-radius:4px;overflow:hidden';
+
+  // Main copy button
+  const btn = document.createElement('button');
+  btn.className = 'task-editor-btn';
+  btn.style.cssText = 'border:none;border-right:1px solid var(--border);border-radius:0;padding:2px 8px;font-size:11px;white-space:nowrap';
+  btn.textContent = '📋 Copy';
+  btn.title = `Copy checkboxes as markdown (${copyMode})`;
+  btn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    await copyCheckboxesAsMd(task);
+  });
+  wrap.appendChild(btn);
+
+  // Mode display + dropdown toggle
+  const mode = COPY_MODES.find(m => m.id === copyMode) || COPY_MODES[0];
+  const modeBtn = document.createElement('button');
+  modeBtn.className = 'task-editor-btn';
+  modeBtn.style.cssText = 'border:none;border-radius:0;padding:2px 6px;font-size:10px;color:var(--accent);display:flex;align-items:center;gap:2px;white-space:nowrap';
+  modeBtn.innerHTML = `<span class="copy-mode-label">${mode.label}</span><span style="font-size:8px">▾</span>`;
+  modeBtn.title = 'Select copy mode';
+  modeBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    // Close any existing popover
+    for (const p of document.querySelectorAll('.copy-mode-popover')) p.remove();
+    if (modeBtn.querySelector('.copy-mode-popover')) return;
+
+    const menu = document.createElement('div');
+    menu.className = 'copy-mode-popover';
+    menu.style.cssText = 'position:absolute;background:var(--bg-primary);border:1px solid var(--border);border-radius:6px;padding:4px;box-shadow:0 8px 24px rgba(0,0,0,0.5);z-index:200;min-width:180px';
+    const rect = modeBtn.getBoundingClientRect();
+    menu.style.top = (rect.bottom + 4) + 'px';
+    menu.style.left = (rect.right - 180) + 'px';
+
+    for (const m of COPY_MODES) {
+      const item = document.createElement('div');
+      item.style.cssText = 'display:flex;align-items:center;gap:8px;padding:5px 10px;border-radius:3px;cursor:pointer;font-size:11px;white-space:nowrap';
+      if (m.id === copyMode) {
+        item.style.color = 'var(--accent)';
+        item.innerHTML = `<span style="font-size:10px">●</span> ${m.icon} ${m.descr}`;
+      } else {
+        item.style.color = 'var(--text)';
+        item.innerHTML = `<span style="visibility:hidden;font-size:10px">●</span> ${m.icon} ${m.descr}`;
+      }
+      item.addEventListener('click', async () => {
+        copyMode = m.id;
+        modeBtn.querySelector('.copy-mode-label').textContent = m.label;
+        btn.title = `Copy checkboxes as markdown (${copyMode})`;
+        menu.remove();
+      });
+      menu.appendChild(item);
+    }
+    modeBtn.appendChild(menu);
+    // Close on outside click
+    setTimeout(() => {
+      const close = (ev) => {
+        if (!menu.contains(ev.target) && ev.target !== modeBtn) {
+          menu.remove();
+          document.removeEventListener('click', close);
+        }
+      };
+      document.addEventListener('click', close);
+    }, 0);
+  });
+  wrap.appendChild(modeBtn);
+
+  return wrap;
+}
+
+async function copyCheckboxesAsMd(task) {
+  try {
+    const items = await loadCheckboxes(task.id, true);
+    // Build tree, flatten in order, filter by mode
+    const byId = new Map();
+    items.forEach(it => byId.set(it.id, { ...it, children: [] }));
+    const roots = [];
+    for (const it of byId.values()) {
+      if (it.parent_id != null && byId.has(it.parent_id)) {
+        byId.get(it.parent_id).children.push(it);
+      } else {
+        roots.push(it);
+      }
+    }
+    const sortFn = (a, b) => a.sort_order - b.sort_order;
+    roots.sort(sortFn);
+    for (const node of byId.values()) node.children.sort(sortFn);
+
+    const flat = [];
+    (function walk(nodes, depth) {
+      for (const n of nodes) {
+        flat.push({ text: n.text, checked: n.is_checked, depth });
+        walk(n.children, depth + 1);
+      }
+    })(roots, 0);
+
+    let filtered;
+    if (copyMode === 'checked') {
+      filtered = flat.filter(x => x.checked);
+    } else if (copyMode === 'unchecked') {
+      filtered = flat.filter(x => !x.checked);
+    } else {
+      filtered = flat;
+    }
+
+    if (filtered.length === 0) {
+      showToast('Nothing to copy', 'info');
+      return;
+    }
+
+    const md = filtered.map(x => {
+      const indent = '  '.repeat(Math.min(3, x.depth));
+      const mark = x.checked ? '[x]' : '[ ]';
+      return `${indent}- ${mark} ${x.text}`;
+    }).join('\n');
+
+    await navigator.clipboard.writeText(md);
+    showToast(`Copied ${filtered.length} item(s)`, 'success');
+  } catch (err) {
+    showToast('Copy failed: ' + err, 'error');
+  }
+}
 
 async function saveField(field, value, task, ctx) {
   task[field] = value;
