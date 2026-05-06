@@ -425,6 +425,50 @@ pub async fn vps_get_stats(host: String, user: String, port: u16, key_file: Stri
     parse_stats(&stdout)
 }
 
+#[tauri::command]
+pub async fn vps_get_detailed_analysis(
+    host: String,
+    user: String,
+    port: u16,
+    key_file: String,
+) -> Result<Value, String> {
+    let remote_cmd = "echo '===DF==='; df -Ph /; echo '===DU==='; du -xhd 3 / | sort -hr | head -40; echo '===PS==='; ps -eo pid,comm,args,rss,%mem --sort=-rss | head -40; echo '===UPTIME==='; uptime; echo '===HOSTNAME==='; hostname; echo '===STDERR==='";
+    let mut cmd = build_ssh_cmd(&user, &host, port, &key_file, remote_cmd);
+
+    let output = tokio::task::spawn_blocking(move || {
+        cmd.stdout(std::process::Stdio::piped())
+           .stderr(std::process::Stdio::piped());
+        let child = cmd.spawn().map_err(|e| format!("Failed to spawn ssh: {}", e))?;
+        let output = wait_with_timeout(child, Duration::from_secs(20))?;
+        Ok::<std::process::Output, String>(output)
+    })
+    .await
+    .map_err(|e| format!("Task error: {}", e))??;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            "SSH command failed".to_string()
+        } else {
+            stderr
+        });
+    }
+
+    let mut stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    if let Some(pos) = stdout.find("===STDERR===") {
+        stdout.truncate(pos + "===STDERR===".len());
+        stdout.push('\n');
+        stdout.push_str(&stderr);
+    } else {
+        stdout.push_str("\n===STDERR===\n");
+        stdout.push_str(&stderr);
+    }
+
+    let parsed = parse_detailed_analysis(&stdout)?;
+    serde_json::to_value(parsed).map_err(|e| e.to_string())
+}
+
 fn wait_with_timeout(child: std::process::Child, timeout: Duration) -> Result<std::process::Output, String> {
     use std::thread;
     use std::sync::mpsc;
