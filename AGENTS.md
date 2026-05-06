@@ -24,9 +24,12 @@ Before planning or editing, read the relevant existing guidance:
    options when asking questions.
 2. Do not implement until the user confirms the direction.
 3. Put new requirement specs in `.workflow/specs`.
-4. Put implementation plans in `.workflow/plans`.
-5. Preserve existing user and Claude changes. Do not revert unrelated files.
-6. Keep commits short and one-line when commits are requested or required.
+4. After writing a spec, present it in the browser visual companion for review
+   when a local web review session is available. Use port `8765` when the user
+   asks for a stable review URL.
+5. Put implementation plans in `.workflow/plans`.
+6. Preserve existing user and Claude changes. Do not revert unrelated files.
+7. Keep commits short and one-line when commits are requested or required.
 
 ## Desktop App Notes
 
