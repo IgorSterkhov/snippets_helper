@@ -682,4 +682,51 @@ mod tests {
         assert_eq!(parsed.name, "Production");
         assert_eq!(parsed.sort_order, 0);
     }
+
+    #[test]
+    fn test_parse_detailed_df_root() {
+        let df = "Filesystem      Size  Used Avail Use% Mounted on\n/dev/sda1        50G   34G   16G  67% /\n";
+        let mount = parse_detailed_df(df).unwrap();
+        assert_eq!(mount.path, "/");
+        assert_eq!(mount.total, "50G");
+        assert_eq!(mount.used, "34G");
+        assert_eq!(mount.free, "16G");
+        assert!((mount.pct - 67.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_parse_detailed_du_nested_long_paths() {
+        let du = "18G\t/var\n14G\t/var/lib\n12G\t/var/lib/docker/overlay2/6d9c1f4e9a-long-layer-cache\n2.1G\t/var/log\n7.2G\t/home\n";
+        let entries = parse_detailed_du(du, 34_000_000_000);
+        assert_eq!(entries.len(), 5);
+        let docker = entries.iter().find(|e| e.path.contains("overlay2")).unwrap();
+        assert_eq!(docker.name, "6d9c1f4e9a-long-layer-cache");
+        assert_eq!(docker.parent, "/var/lib/docker/overlay2");
+        assert!(docker.depth >= 4);
+        assert!(docker.bytes > 0);
+        assert!(docker.pct_of_used > 0.0);
+    }
+
+    #[test]
+    fn test_parse_detailed_ps_top_processes() {
+        let ps = "PID COMMAND         COMMAND                         RSS %MEM\n421 postgres        postgres                       1887436 23.1\n819 node            node /srv/app/server.js         655360 8.0\n";
+        let processes = parse_detailed_ps(ps);
+        assert_eq!(processes.len(), 2);
+        assert_eq!(processes[0].pid, 421);
+        assert_eq!(processes[0].command, "postgres");
+        assert_eq!(processes[0].rss_kb, 1_887_436);
+        assert_eq!(processes[0].memory, "1.8G");
+        assert!((processes[0].mem_pct - 23.1).abs() < 0.1);
+        assert!(processes[1].args.contains("/srv/app/server.js"));
+    }
+
+    #[test]
+    fn test_parse_detailed_analysis_keeps_partial_success_with_stderr() {
+        let output = "===DF===\nFilesystem      Size  Used Avail Use% Mounted on\n/dev/sda1        50G   34G   16G  67% /\n===DU===\n18G\t/var\n===PS===\nPID COMMAND COMMAND RSS %MEM\n421 postgres postgres 1887436 23.1\n===UPTIME===\nup 3 days\n===HOSTNAME===\napi-prod\n===STDERR===\ndu: cannot read directory '/root': Permission denied\n";
+        let parsed = parse_detailed_analysis(output).unwrap();
+        assert_eq!(parsed.hostname, "api-prod");
+        assert_eq!(parsed.disk.entries.len(), 1);
+        assert_eq!(parsed.processes.len(), 1);
+        assert!(parsed.raw.stderr.contains("Permission denied"));
+    }
 }
