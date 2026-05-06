@@ -654,17 +654,34 @@ fn section_after(output: &str, marker: &str) -> String {
 }
 
 fn parse_detailed_df(df_output: &str) -> Result<VpsDiskMount, String> {
-    let (total, used, free, pct) = parse_df(df_output);
-    if total == "?" {
-        return Err("Failed to parse df output".to_string());
+    for line in df_output.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with("Filesystem") {
+            continue;
+        }
+
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() < 6 {
+            continue;
+        }
+
+        let columns = &parts[parts.len() - 5..];
+        let pct = columns[3]
+            .trim_end_matches('%')
+            .replace(',', ".")
+            .parse::<f64>()
+            .unwrap_or(0.0);
+
+        return Ok(VpsDiskMount {
+            path: columns[4].to_string(),
+            total: columns[0].to_string(),
+            used: columns[1].to_string(),
+            free: columns[2].to_string(),
+            pct,
+        });
     }
-    Ok(VpsDiskMount {
-        path: "/".to_string(),
-        total,
-        used,
-        free,
-        pct,
-    })
+
+    Err("Failed to parse df output".to_string())
 }
 
 fn parse_detailed_du(du_output: &str, used_bytes: u64) -> Vec<VpsDiskEntry> {
@@ -675,13 +692,16 @@ fn parse_detailed_du(du_output: &str, used_bytes: u64) -> Vec<VpsDiskEntry> {
             continue;
         }
 
-        let mut parts = line.split_whitespace();
+        let mut parts = line.splitn(2, char::is_whitespace);
         let Some(size) = parts.next() else {
             continue;
         };
-        let Some(path) = parts.next() else {
+        let Some(path) = parts.next().map(str::trim_start) else {
             continue;
         };
+        if path.is_empty() {
+            continue;
+        }
         let bytes = parse_size_to_bytes(size).unwrap_or(0);
         let pct_of_used = if used_bytes > 0 {
             ((bytes as f64 / used_bytes as f64) * 100.0 * 10.0).round() / 10.0
@@ -902,6 +922,17 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_detailed_df_handles_posix_single_line_output() {
+        let df = "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/disk/by-id/very-long-filesystem-name 51200000 34816000 16384000 67% /\n";
+        let mount = parse_detailed_df(df).unwrap();
+        assert_eq!(mount.path, "/");
+        assert_eq!(mount.total, "51200000");
+        assert_eq!(mount.used, "34816000");
+        assert_eq!(mount.free, "16384000");
+        assert!((mount.pct - 67.0).abs() < 0.1);
+    }
+
+    #[test]
     fn test_parse_detailed_du_nested_long_paths() {
         let du = "18G\t/var\n14G\t/var/lib\n12G\t/var/lib/docker/overlay2/6d9c1f4e9a-long-layer-cache\n2.1G\t/var/log\n7.2G\t/home\n";
         let entries = parse_detailed_du(du, 34_000_000_000);
@@ -912,6 +943,16 @@ mod tests {
         assert!(docker.depth >= 4);
         assert!(docker.bytes > 0);
         assert!(docker.pct_of_used > 0.0);
+    }
+
+    #[test]
+    fn test_parse_detailed_du_preserves_paths_with_spaces() {
+        let du = "12G\t/var/lib/My App/cache dir\n";
+        let entries = parse_detailed_du(du, 34_000_000_000);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].path, "/var/lib/My App/cache dir");
+        assert_eq!(entries[0].name, "cache dir");
+        assert_eq!(entries[0].parent, "/var/lib/My App");
     }
 
     #[test]
