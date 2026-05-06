@@ -24,6 +24,59 @@ pub struct VpsEnvironment {
     pub sort_order: u32,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct VpsDetailedAnalysis {
+    pub hostname: String,
+    pub uptime: String,
+    pub disk: VpsDetailedDisk,
+    pub processes: Vec<VpsProcessUsage>,
+    pub raw: VpsDetailedRaw,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct VpsDetailedDisk {
+    pub mount: VpsDiskMount,
+    pub entries: Vec<VpsDiskEntry>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct VpsDiskMount {
+    pub path: String,
+    pub total: String,
+    pub used: String,
+    pub free: String,
+    pub pct: f64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct VpsDiskEntry {
+    pub path: String,
+    pub name: String,
+    pub parent: String,
+    pub depth: u32,
+    pub size: String,
+    pub bytes: u64,
+    pub pct_of_used: f64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct VpsProcessUsage {
+    pub pid: u32,
+    pub command: String,
+    pub args: String,
+    pub rss_kb: u64,
+    pub memory: String,
+    pub mem_pct: f64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct VpsDetailedRaw {
+    pub df: String,
+    pub du: String,
+    pub ps: String,
+    pub stderr: String,
+}
+
 fn get_computer_id() -> String {
     hostname::get()
         .unwrap_or_default()
@@ -557,6 +610,160 @@ fn parse_df(df_output: &str) -> (String, String, String, f64) {
         }
     }
     ("?".into(), "?".into(), "?".into(), 0.0)
+}
+
+fn parse_detailed_analysis(output: &str) -> Result<VpsDetailedAnalysis, String> {
+    let df = section_between(output, "===DF===", "===DU===");
+    let du = section_between(output, "===DU===", "===PS===");
+    let ps = section_between(output, "===PS===", "===UPTIME===");
+    let uptime = section_between(output, "===UPTIME===", "===HOSTNAME===")
+        .trim()
+        .to_string();
+    let hostname = section_between(output, "===HOSTNAME===", "===STDERR===")
+        .trim()
+        .to_string();
+    let stderr = section_after(output, "===STDERR===").trim().to_string();
+
+    let mount = parse_detailed_df(&df)?;
+    let used_bytes = parse_size_to_bytes(&mount.used).unwrap_or(0);
+    let entries = parse_detailed_du(&du, used_bytes);
+    let processes = parse_detailed_ps(&ps);
+
+    Ok(VpsDetailedAnalysis {
+        hostname,
+        uptime,
+        disk: VpsDetailedDisk { mount, entries },
+        processes,
+        raw: VpsDetailedRaw { df, du, ps, stderr },
+    })
+}
+
+fn section_between(output: &str, start: &str, end: &str) -> String {
+    let after = section_after(output, start);
+    match after.find(end) {
+        Some(pos) => after[..pos].to_string(),
+        None => after,
+    }
+}
+
+fn section_after(output: &str, marker: &str) -> String {
+    match output.find(marker) {
+        Some(pos) => output[pos + marker.len()..].to_string(),
+        None => String::new(),
+    }
+}
+
+fn parse_detailed_df(df_output: &str) -> Result<VpsDiskMount, String> {
+    let (total, used, free, pct) = parse_df(df_output);
+    if total == "?" {
+        return Err("Failed to parse df output".to_string());
+    }
+    Ok(VpsDiskMount {
+        path: "/".to_string(),
+        total,
+        used,
+        free,
+        pct,
+    })
+}
+
+fn parse_detailed_du(du_output: &str, used_bytes: u64) -> Vec<VpsDiskEntry> {
+    let mut entries = Vec::new();
+    for line in du_output.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with("du:") {
+            continue;
+        }
+
+        let mut parts = line.split_whitespace();
+        let Some(size) = parts.next() else {
+            continue;
+        };
+        let Some(path) = parts.next() else {
+            continue;
+        };
+        let bytes = parse_size_to_bytes(size).unwrap_or(0);
+        let pct_of_used = if used_bytes > 0 {
+            ((bytes as f64 / used_bytes as f64) * 100.0 * 10.0).round() / 10.0
+        } else {
+            0.0
+        };
+        let parent = parent_path(path);
+        let name = path
+            .rsplit('/')
+            .find(|s| !s.is_empty())
+            .unwrap_or(path)
+            .to_string();
+        let depth = path.split('/').filter(|part| !part.is_empty()).count() as u32;
+
+        entries.push(VpsDiskEntry {
+            path: path.to_string(),
+            name,
+            parent,
+            depth,
+            size: size.to_string(),
+            bytes,
+            pct_of_used,
+        });
+    }
+    entries
+}
+
+fn parent_path(path: &str) -> String {
+    if path == "/" {
+        return String::new();
+    }
+    let trimmed = path.trim_end_matches('/');
+    match trimmed.rfind('/') {
+        Some(0) => "/".to_string(),
+        Some(pos) => trimmed[..pos].to_string(),
+        None => String::new(),
+    }
+}
+
+fn parse_detailed_ps(ps_output: &str) -> Vec<VpsProcessUsage> {
+    let mut processes = Vec::new();
+    for line in ps_output.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with("PID ") {
+            continue;
+        }
+
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() < 5 {
+            continue;
+        }
+        let rss_idx = parts.len() - 2;
+        let pct_idx = parts.len() - 1;
+        let pid = parts[0].parse::<u32>().unwrap_or(0);
+        let command = parts[1].to_string();
+        let args = parts[2..rss_idx].join(" ");
+        let rss_kb = parts[rss_idx].parse::<u64>().unwrap_or(0);
+        let mem_pct = parts[pct_idx].replace(',', ".").parse::<f64>().unwrap_or(0.0);
+
+        processes.push(VpsProcessUsage {
+            pid,
+            command,
+            args,
+            rss_kb,
+            memory: format_kb_human(rss_kb),
+            mem_pct,
+        });
+    }
+    processes
+}
+
+fn format_kb_human(kb: u64) -> String {
+    let bytes = kb as f64 * 1024.0;
+    let gib = bytes / 1024.0 / 1024.0 / 1024.0;
+    if gib >= 1.0 {
+        return format!("{:.1}G", gib);
+    }
+    let mib = bytes / 1024.0 / 1024.0;
+    if mib >= 1.0 {
+        return format!("{:.0}M", mib);
+    }
+    format!("{}K", kb)
 }
 
 #[cfg(test)]
