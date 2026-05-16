@@ -2181,6 +2181,264 @@ function css() {
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* Detailed analysis modal */
+.vps-analysis-modal {
+  width: 520px;
+  min-width: 520px;
+  max-width: 90vw;
+  max-height: 82vh;
+  resize: horizontal;
+  overflow: auto;
+}
+.vps-analysis-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.vps-analysis-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+.vps-analysis-subtitle {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font: 10px 'SF Mono', 'Cascadia Code', monospace;
+}
+.vps-analysis-head-actions {
+  display: flex;
+  gap: 5px;
+}
+.vps-analysis-icon-btn {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+}
+.vps-analysis-tabs {
+  display: flex;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+}
+.vps-analysis-tab {
+  position: relative;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 8px 10px 7px;
+  cursor: pointer;
+}
+.vps-analysis-tab.active {
+  color: var(--text);
+}
+.vps-analysis-tab.active::after {
+  content: '';
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--accent);
+}
+.vps-analysis-body {
+  padding: 10px 12px 12px;
+  overflow-y: auto;
+}
+.vps-analysis-summary {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.vps-analysis-metric,
+.vps-analysis-tree,
+.vps-analysis-detail,
+.vps-analysis-process-row,
+.vps-analysis-raw-box {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+}
+.vps-analysis-metric {
+  padding: 7px 8px;
+}
+.vps-analysis-metric-top {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-muted);
+  font-size: 11px;
+  margin-bottom: 5px;
+}
+.vps-analysis-bar {
+  height: 5px;
+  background: var(--bg-tertiary);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.vps-analysis-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+}
+.vps-analysis-tree-toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  background: var(--bg-primary);
+  padding: 6px 8px;
+}
+.vps-analysis-crumbs {
+  color: var(--text-muted);
+  font: 10px 'SF Mono', 'Cascadia Code', monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vps-analysis-small-btn {
+  font-size: 11px;
+  padding: 3px 8px;
+  white-space: nowrap;
+}
+.vps-analysis-tree {
+  border-radius: 0 0 6px 6px;
+  padding: 5px 7px;
+  max-height: 310px;
+  overflow-y: auto;
+}
+.vps-analysis-tree-row {
+  display: grid;
+  grid-template-columns: 20px 1fr 22px 58px 38px;
+  gap: 5px;
+  align-items: center;
+  min-height: 24px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  font: 11px 'SF Mono', 'Cascadia Code', monospace;
+}
+.vps-analysis-tree-row:last-child {
+  border-bottom: 0;
+}
+.vps-analysis-twisty,
+.vps-analysis-drill-btn {
+  width: 17px;
+  height: 17px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 0;
+  cursor: pointer;
+}
+.vps-analysis-twisty:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+.vps-analysis-drill-btn:hover,
+.vps-analysis-twisty:not(:disabled):hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+.vps-analysis-path {
+  min-width: 0;
+  padding-left: calc(var(--depth, 0) * 11px);
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.vps-analysis-path:hover {
+  color: var(--accent);
+}
+.vps-analysis-size {
+  text-align: right;
+  font-weight: 700;
+}
+.vps-analysis-tree-row.hot .vps-analysis-size {
+  color: var(--danger);
+}
+.vps-analysis-pct {
+  text-align: right;
+  color: var(--text-muted);
+}
+.vps-analysis-details-strip {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 8px;
+}
+.vps-analysis-detail {
+  padding: 7px 8px;
+}
+.vps-analysis-detail-label {
+  color: var(--text-muted);
+  font-size: 9px;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.vps-analysis-detail-value {
+  font: 11px 'SF Mono', 'Cascadia Code', monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vps-analysis-process-head,
+.vps-analysis-process-row {
+  display: grid;
+  grid-template-columns: 1fr 54px 44px;
+  gap: 6px;
+  align-items: center;
+}
+.vps-analysis-process-head {
+  color: var(--text-muted);
+  font: 10px 'SF Mono', 'Cascadia Code', monospace;
+  padding: 0 8px 5px;
+}
+.vps-analysis-process-row {
+  padding: 7px 8px;
+  margin-bottom: 5px;
+  font: 11px 'SF Mono', 'Cascadia Code', monospace;
+}
+.vps-analysis-proc-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vps-analysis-raw {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.vps-analysis-raw-box {
+  padding: 9px;
+  min-height: 270px;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow: auto;
+  font: 10.5px 'SF Mono', 'Cascadia Code', monospace;
+}
+.vps-analysis-placeholder {
+  color: var(--text-muted);
+  text-align: center;
+  padding: 24px;
+}
+@media (max-width: 620px) {
+  .vps-analysis-modal {
+    min-width: 95vw;
+    width: 95vw;
+    resize: none;
+  }
+  .vps-analysis-details-strip {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* Modal */
 .vps-modal {
   width: 460px;
