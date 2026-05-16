@@ -954,9 +954,164 @@ function renderDetailedAnalysisModal() {
     err.appendChild(retry);
     body.appendChild(err);
   } else if (analysisModal.data) {
-    body.appendChild(el('div', { text: 'Detailed analysis loaded', class: 'vps-analysis-placeholder' }));
+    if (analysisModal.activeTab === 'disk') {
+      body.appendChild(buildAnalysisDiskTab());
+    } else if (analysisModal.activeTab === 'processes') {
+      body.appendChild(buildAnalysisProcessesTab());
+    } else {
+      body.appendChild(buildAnalysisRawTab());
+    }
   }
   modal.appendChild(body);
+}
+
+function buildAnalysisDiskTab() {
+  const data = analysisModal && analysisModal.data ? analysisModal.data : {};
+  const disk = data.disk || {};
+  const entries = Array.isArray(disk.entries) ? disk.entries : [];
+  const mount = disk.mount || null;
+  const wrap = el('div', { class: 'vps-analysis-disk' });
+
+  if (mount) {
+    const summary = el('div', { class: 'vps-analysis-summary' });
+    const mountPath = mount.path || '/';
+    summary.appendChild(buildAnalysisMetric(mountPath, mount.pct, `${mount.used || '?'} / ${mount.total || '?'}`));
+    wrap.appendChild(summary);
+  }
+
+  const toolbar = el('div', { class: 'vps-analysis-tree-toolbar' });
+  toolbar.appendChild(el('div', {
+    class: 'vps-analysis-crumbs',
+    text: analysisModal.drillRoot || '/',
+    title: analysisModal.drillRoot || '/',
+  }));
+  const collapseAll = el('button', { text: 'Collapse all', class: 'btn-secondary vps-analysis-small-btn' });
+  collapseAll.addEventListener('click', () => {
+    const parentPaths = new Set(entries.map(entry => entry.parent).filter(Boolean));
+    analysisModal.collapsed = new Set(entries.filter(entry => parentPaths.has(entry.path)).map(entry => entry.path));
+    renderDetailedAnalysisModal();
+  });
+  toolbar.appendChild(collapseAll);
+  wrap.appendChild(toolbar);
+
+  const tree = el('div', { class: 'vps-analysis-tree' });
+  const visibleEntries = visibleDiskEntries(entries);
+  if (visibleEntries.length === 0) {
+    tree.appendChild(el('div', { text: 'No disk entries available', class: 'vps-analysis-placeholder' }));
+  } else {
+    for (const entry of visibleEntries) {
+      tree.appendChild(buildDiskTreeRow(entry, entries));
+    }
+  }
+  wrap.appendChild(tree);
+  wrap.appendChild(buildSelectedDiskDetails(entries));
+  return wrap;
+}
+
+function buildAnalysisMetric(label, pct, valueText) {
+  const pctNumber = Number(pct || 0);
+  const pctValue = Number.isFinite(pctNumber) ? pctNumber : 0;
+  const metric = el('div', { class: 'vps-analysis-metric' });
+  const top = el('div', { class: 'vps-analysis-metric-top' });
+  top.appendChild(el('span', { text: label || '' }));
+  top.appendChild(el('b', { text: `${pctValue.toFixed(0)}% · ${valueText || '?'}` }));
+  metric.appendChild(top);
+  const bar = el('div', { class: 'vps-analysis-bar' });
+  const fill = el('div', { class: 'vps-analysis-bar-fill' });
+  fill.style.width = Math.max(0, Math.min(100, pctValue)) + '%';
+  fill.style.background = getBarColor(pctValue);
+  bar.appendChild(fill);
+  metric.appendChild(bar);
+  return metric;
+}
+
+function visibleDiskEntries(entries) {
+  if (!Array.isArray(entries) || !analysisModal) return [];
+  const rootPath = analysisModal.drillRoot || '/';
+  const entryByPath = new Map(entries.map(entry => [entry.path, entry]));
+  return entries.filter(entry => {
+    if (!entry || !entry.path) return false;
+    if (rootPath !== '/' && entry.path !== rootPath && !entry.path.startsWith(rootPath + '/')) return false;
+
+    let parent = entry.parent;
+    while (parent && parent !== '/') {
+      if (analysisModal.collapsed.has(parent)) return false;
+      const parentEntry = entryByPath.get(parent);
+      parent = parentEntry ? parentEntry.parent : '';
+    }
+    return true;
+  });
+}
+
+function buildDiskTreeRow(entry, entries) {
+  const hasChildren = entries.some(e => e.parent === entry.path);
+  const collapsed = analysisModal.collapsed.has(entry.path);
+  const pctNumber = Number(entry.pct_of_used || 0);
+  const pct = Number.isFinite(pctNumber) ? pctNumber : 0;
+  const depth = Number(entry.depth || 0);
+  const row = el('div', { class: 'vps-analysis-tree-row' + (pct > 30 ? ' hot' : '') });
+  row.style.setProperty('--depth', String(Math.max(0, Math.min(4, depth - 1))));
+
+  const twisty = el('button', {
+    text: hasChildren ? (collapsed ? '\u25B8' : '\u25BE') : '\u00B7',
+    class: 'vps-analysis-twisty',
+  });
+  twisty.disabled = !hasChildren;
+  twisty.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (collapsed) analysisModal.collapsed.delete(entry.path);
+    else analysisModal.collapsed.add(entry.path);
+    renderDetailedAnalysisModal();
+  });
+  row.appendChild(twisty);
+
+  const name = el('button', { text: entry.path || entry.name || '/', class: 'vps-analysis-path', title: entry.path || '' });
+  name.addEventListener('click', () => {
+    analysisModal.selectedPath = entry.path;
+    renderDetailedAnalysisModal();
+  });
+  name.addEventListener('dblclick', () => {
+    analysisModal.drillRoot = entry.path;
+    analysisModal.selectedPath = entry.path;
+    renderDetailedAnalysisModal();
+  });
+  row.appendChild(name);
+  row.appendChild(el('span', { text: entry.size || '?', class: 'vps-analysis-size' }));
+  row.appendChild(el('span', { text: `${pct.toFixed(0)}%`, class: 'vps-analysis-pct' }));
+  return row;
+}
+
+function buildSelectedDiskDetails(entries) {
+  const data = analysisModal && analysisModal.data ? analysisModal.data : {};
+  const mount = data.disk && data.disk.mount ? data.disk.mount : null;
+  const selected = entries.find(e => e.path === analysisModal.selectedPath) || null;
+  const selectedPath = selected ? selected.path : (analysisModal.selectedPath || (mount && mount.path) || '/');
+  const selectedSize = selected ? selected.size : (mount ? `${mount.used || '?'} / ${mount.total || '?'}` : '?');
+  const children = selected ? entries.filter(e => e.parent === selected.path) : entries.filter(e => e.parent === selectedPath);
+  const largest = children.slice().sort((a, b) => (b.bytes || 0) - (a.bytes || 0))[0] || null;
+  const strip = el('div', { class: 'vps-analysis-details-strip' });
+  strip.appendChild(buildAnalysisDetail('Selected', selectedPath));
+  strip.appendChild(buildAnalysisDetail('Total', selectedSize));
+  strip.appendChild(buildAnalysisDetail('Largest', largest ? `${largest.name || largest.path} · ${largest.size || '?'}` : 'none'));
+  strip.appendChild(buildAnalysisDetail('Scan', 'depth 3 · top 40'));
+  return strip;
+}
+
+function buildAnalysisDetail(label, value) {
+  const item = el('div', { class: 'vps-analysis-detail' });
+  item.appendChild(el('div', { class: 'vps-analysis-detail-label', text: label }));
+  const valueEl = el('div', { class: 'vps-analysis-detail-value', text: value || '' });
+  valueEl.title = value || '';
+  item.appendChild(valueEl);
+  return item;
+}
+
+function buildAnalysisProcessesTab() {
+  return el('div', { text: 'Processes tab pending', class: 'vps-analysis-placeholder' });
+}
+
+function buildAnalysisRawTab() {
+  return el('div', { text: 'Raw tab pending', class: 'vps-analysis-placeholder' });
 }
 
 function showServerModal(editIndex) {
