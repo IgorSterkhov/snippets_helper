@@ -51,3 +51,9 @@ surface change. Follow `CLAUDE.md` and `desktop-rust/RELEASES.md`.
 Do not modify the legacy Python application unless the user explicitly asks for
 it. Default product work is in `desktop-rust/`, including the Tauri/Rust backend
 and its desktop frontend.
+
+## Tooling Notes
+
+If Codex subagents or MCP-backed app tools hang on this repository, continue
+with direct shell commands and local file inspection. Do not make subagent
+review a hard dependency while `codex_apps` is unstable.

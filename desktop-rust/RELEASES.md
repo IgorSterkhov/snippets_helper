@@ -123,6 +123,21 @@ Key steps in `release-frontend`:
 
 ## 4. Local development & testing
 
+### 4.0 Linux host prerequisites
+On Debian-like hosts, `cargo check` for Tauri/WebKit needs native system
+headers in addition to the Rust toolchain:
+
+```bash
+sudo apt-get install -y pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev \
+  libayatana-appindicator3-dev librsvg2-dev patchelf libxdo-dev libasound2-dev
+```
+
+If `cargo` is not on `PATH` on the shared host, use the rustup-installed binary:
+
+```bash
+/home/aster/.cargo/bin/cargo check
+```
+
 ### 4.1 Browser mock (fast UI iteration, no Rust)
 ```bash
 cd desktop-rust/src && python3 -m http.server 8000
@@ -138,9 +153,18 @@ cd desktop-rust/src && python3 -m http.server 8000
 ```bash
 cd desktop-rust/src && python3 dev-test.py
 ```
-Launches headless Chrome against the browser mock and runs 7 tests covering
-the modal fix, Exec tab, and SCP template flow. Must stay green before any
-tag.
+Launches headless Chrome against the browser mock and runs the CDP smoke
+suite. Must stay green before any tag.
+
+Requires `google-chrome` and Python `websockets`. On Debian:
+
+```bash
+sudo apt-get install -y python3-websockets
+```
+
+If `pip` is unavailable and system install is not possible, a temporary
+workaround is to download/extract the Debian package and run with `PYTHONPATH`
+pointing at its `usr/lib/python3/dist-packages`.
 
 ### 4.3 Docker (real Tauri / WebKit build)
 ```bash
@@ -239,6 +263,27 @@ first and falls back to bundled assets via `app.asset_resolver()`.
   at a specific SHA; amending detaches it.
 - **Matching `v` and `src-tauri/tauri.conf.json version`** — both must be
   the same string as the tag suffix. Mismatch breaks tauri-action.
+- **`cargo fmt --check` is not currently a clean release gate.** The existing
+  Rust tree has broad formatting drift from current `rustfmt`. Until a
+  dedicated formatting-only cleanup lands, use `cargo check`, focused Rust
+  tests, and JS/CDP smoke tests as the practical release gates. Do not
+  reformat all Rust files as part of an unrelated feature.
+- **Mass executable-bit noise can appear in the worktree.** If hundreds of
+  files show as modified but `git diff --numstat` is mostly `0 0` and
+  `git diff --summary` says `mode change 100644 => 100755`, it is permission
+  noise rather than content changes. Diagnose with:
+
+  ```bash
+  git diff --summary
+  git diff --numstat
+  ```
+
+  Clear the noise for tracked modified files with:
+
+  ```bash
+  git ls-files -m -z | xargs -0 chmod -x
+  ```
+
 - **Windows: always spawn subprocesses with `CREATE_NO_WINDOW`.** Any
   `std::process::Command::new("git"|"rg"|"grep"|"cmd"|"node"|…)` spawned
   from the Tauri GUI on Windows pops a black console window for the
