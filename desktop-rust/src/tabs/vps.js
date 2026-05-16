@@ -10,7 +10,6 @@ let tabVisible = true;
 let contextMenu = null;    // current context menu element
 let analysisModal = null; // { overlay, serverIndex, server, activeTab, loading, error, data, collapsed, drillRoot, selectedPath }
 let analysisModalSeq = 0;
-let analysisClickTimer = null;
 const ANALYSIS_WIDTH_SETTING = 'vps.analysis_modal_width';
 
 // Stats cache per server gIdx — populated on successful fetch so the
@@ -844,10 +843,6 @@ async function showDetailedAnalysisModal(gIdx) {
 }
 
 function closeDetailedAnalysisModal() {
-  if (analysisClickTimer) {
-    clearTimeout(analysisClickTimer);
-    analysisClickTimer = null;
-  }
   if (analysisModal && analysisModal.onKey) {
     document.removeEventListener('keydown', analysisModal.onKey, true);
   }
@@ -1045,8 +1040,9 @@ function visibleDiskEntries(entries) {
     if (entry.path === rootPath) return true;
 
     let parent = entry.parent;
-    while (parent && parent !== '/' && parent !== rootPath) {
+    while (parent && parent !== '/') {
       if (analysisModal.collapsed.has(parent)) return false;
+      if (parent === rootPath) break;
       const parentEntry = entryByPath.get(parent);
       parent = parentEntry ? parentEntry.parent : '';
     }
@@ -1078,24 +1074,23 @@ function buildDiskTreeRow(entry, entries) {
 
   const name = el('button', { text: entry.path || entry.name || '/', class: 'vps-analysis-path', title: entry.path || '' });
   name.addEventListener('click', () => {
-    if (analysisClickTimer) clearTimeout(analysisClickTimer);
-    analysisClickTimer = setTimeout(() => {
-      analysisClickTimer = null;
-      if (!analysisModal) return;
-      analysisModal.selectedPath = entry.path;
-      renderDetailedAnalysisModal();
-    }, 180);
-  });
-  name.addEventListener('dblclick', () => {
-    if (analysisClickTimer) {
-      clearTimeout(analysisClickTimer);
-      analysisClickTimer = null;
-    }
-    analysisModal.drillRoot = entry.path;
     analysisModal.selectedPath = entry.path;
     renderDetailedAnalysisModal();
   });
   row.appendChild(name);
+
+  const drill = el('button', {
+    text: '\u21B3',
+    class: 'vps-analysis-drill-btn',
+    title: `Open ${entry.path || entry.name || '/'}`,
+  });
+  drill.addEventListener('click', () => {
+    analysisModal.drillRoot = entry.path;
+    analysisModal.selectedPath = entry.path;
+    renderDetailedAnalysisModal();
+  });
+  row.appendChild(drill);
+
   row.appendChild(el('span', { text: entry.size || '?', class: 'vps-analysis-size' }));
   row.appendChild(el('span', { text: `${pct.toFixed(0)}%`, class: 'vps-analysis-pct' }));
   return row;
