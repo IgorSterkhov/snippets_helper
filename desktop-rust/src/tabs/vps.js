@@ -8,6 +8,8 @@ let expandedServer = null; // { envName, serverIndex, stats, loading, error }
 let refreshTimers = {};    // envName -> { countdown, timer }
 let tabVisible = true;
 let contextMenu = null;    // current context menu element
+let analysisModal = null; // { overlay, serverIndex, server, activeTab, loading, error, data, collapsed, drillRoot, selectedPath }
+const ANALYSIS_WIDTH_SETTING = 'vps.analysis_modal_width';
 
 // Stats cache per server gIdx — populated on successful fetch so the
 // mini-bars on every tile stay visible between renders (re-renders
@@ -36,6 +38,7 @@ export function init(container) {
 
 export function destroy() {
   stopAllRefreshTimers();
+  closeDetailedAnalysisModal();
   closeContextMenu();
   document.removeEventListener('visibilitychange', onVisibilityChange);
   document.removeEventListener('click', closeContextMenu);
@@ -452,6 +455,9 @@ function buildDetailPanel() {
   const refreshBtn = el('button', { text: 'Refresh', class: 'btn-secondary vps-action-btn' });
   refreshBtn.addEventListener('click', () => fetchStatsForExpanded());
   actionsBar.appendChild(refreshBtn);
+  const analysisBtn = el('button', { text: 'Detailed analysis', class: 'btn-secondary vps-action-btn' });
+  analysisBtn.addEventListener('click', () => showDetailedAnalysisModal(expandedServer.serverIndex));
+  actionsBar.appendChild(analysisBtn);
   panel.appendChild(actionsBar);
 
   return panel;
@@ -564,6 +570,14 @@ function showTileContextMenu(e, srv, gIdx, envName) {
     }
   });
   menu.appendChild(testItem);
+
+  // Detailed analysis
+  const analysisItem = el('div', { text: 'Detailed analysis', class: 'vps-ctx-item' });
+  analysisItem.addEventListener('click', () => {
+    closeContextMenu();
+    showDetailedAnalysisModal(gIdx);
+  });
+  menu.appendChild(analysisItem);
 
   // Move to... (nested flyout)
   if (environments.length > 1) {
@@ -769,6 +783,162 @@ async function moveServer(gIdx, targetEnv) {
   } catch (e) {
     showToast('Error: ' + e, 'error');
   }
+}
+
+async function showDetailedAnalysisModal(gIdx) {
+  const srv = allServers[gIdx];
+  if (!srv) return;
+  closeDetailedAnalysisModal();
+
+  const overlay = el('div', { class: 'modal-overlay vps-analysis-overlay' });
+  const modal = el('div', { class: 'modal vps-analysis-modal' });
+  const savedWidth = await loadAnalysisModalWidth();
+  if (savedWidth) modal.style.width = savedWidth;
+
+  function onKey(e) {
+    if (e.key === 'Escape') {
+      e.stopPropagation();
+      closeDetailedAnalysisModal();
+    }
+  }
+
+  analysisModal = {
+    overlay,
+    serverIndex: gIdx,
+    server: srv,
+    activeTab: 'disk',
+    loading: true,
+    error: null,
+    data: null,
+    collapsed: new Set(),
+    drillRoot: '/',
+    selectedPath: '/',
+    onKey,
+  };
+
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+  document.addEventListener('keydown', onKey, true);
+  renderDetailedAnalysisModal();
+
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) closeDetailedAnalysisModal();
+  });
+
+  await fetchDetailedAnalysis();
+}
+
+function closeDetailedAnalysisModal() {
+  if (analysisModal && analysisModal.onKey) {
+    document.removeEventListener('keydown', analysisModal.onKey, true);
+  }
+  if (analysisModal && analysisModal.overlay) {
+    analysisModal.overlay.remove();
+  }
+  analysisModal = null;
+}
+
+async function loadAnalysisModalWidth() {
+  try {
+    const v = await call('get_setting', { key: ANALYSIS_WIDTH_SETTING });
+    if (!v) return null;
+    const n = parseInt(v, 10);
+    if (!Number.isFinite(n)) return null;
+    return Math.max(520, Math.min(window.innerWidth * 0.9, n)) + 'px';
+  } catch {
+    return null;
+  }
+}
+
+async function persistAnalysisModalWidth(modal) {
+  const width = Math.round(modal.getBoundingClientRect().width);
+  if (!Number.isFinite(width)) return;
+  try {
+    await call('set_setting', { key: ANALYSIS_WIDTH_SETTING, value: String(width) });
+  } catch {
+    // Width persistence is non-critical.
+  }
+}
+
+async function fetchDetailedAnalysis() {
+  if (!analysisModal) return;
+  const currentModal = analysisModal;
+  const srv = analysisModal.server;
+  analysisModal.loading = true;
+  analysisModal.error = null;
+  renderDetailedAnalysisModal();
+  try {
+    const data = await call('vps_get_detailed_analysis', {
+      host: srv.host,
+      user: srv.user,
+      port: srv.port,
+      keyFile: srv.key_file,
+    });
+    if (analysisModal !== currentModal) return;
+    analysisModal.data = data;
+    analysisModal.loading = false;
+    analysisModal.error = null;
+    analysisModal.selectedPath = '/';
+    analysisModal.drillRoot = '/';
+    analysisModal.collapsed = new Set();
+  } catch (e) {
+    if (analysisModal !== currentModal) return;
+    analysisModal.loading = false;
+    analysisModal.error = String(e);
+  }
+  renderDetailedAnalysisModal();
+}
+
+function renderDetailedAnalysisModal() {
+  if (!analysisModal) return;
+  const modal = analysisModal.overlay.querySelector('.vps-analysis-modal');
+  if (!modal) return;
+  modal.innerHTML = '';
+
+  const header = el('div', { class: 'vps-analysis-header' });
+  const titleWrap = el('div');
+  titleWrap.appendChild(el('div', { class: 'vps-analysis-title', text: `${analysisModal.server.name} · Detailed analysis` }));
+  titleWrap.appendChild(el('div', { class: 'vps-analysis-subtitle', text: `${analysisModal.server.user}@${analysisModal.server.host}:${analysisModal.server.port}` }));
+  header.appendChild(titleWrap);
+
+  const headActions = el('div', { class: 'vps-analysis-head-actions' });
+  const refreshBtn = el('button', { text: '\u21BB', class: 'btn-secondary vps-analysis-icon-btn', title: 'Refresh analysis' });
+  refreshBtn.addEventListener('click', fetchDetailedAnalysis);
+  headActions.appendChild(refreshBtn);
+  const closeBtn = el('button', { text: '\u2715', class: 'btn-secondary vps-analysis-icon-btn', title: 'Close' });
+  closeBtn.addEventListener('click', closeDetailedAnalysisModal);
+  headActions.appendChild(closeBtn);
+  header.appendChild(headActions);
+  modal.appendChild(header);
+
+  const tabs = el('div', { class: 'vps-analysis-tabs' });
+  for (const [key, label] of [['disk', 'Disk'], ['processes', 'Processes'], ['raw', 'Raw']]) {
+    const tab = el('button', { text: label, class: 'vps-analysis-tab' + (analysisModal.activeTab === key ? ' active' : '') });
+    tab.addEventListener('click', () => {
+      analysisModal.activeTab = key;
+      renderDetailedAnalysisModal();
+    });
+    tabs.appendChild(tab);
+  }
+  modal.appendChild(tabs);
+
+  const body = el('div', { class: 'vps-analysis-body' });
+  if (analysisModal.loading) {
+    body.appendChild(el('div', { class: 'vps-detail-loading', text: 'Connecting and analyzing...' }));
+  } else if (analysisModal.error) {
+    const err = el('div', { class: 'vps-detail-error' });
+    err.appendChild(el('div', { class: 'vps-error-title', text: 'Analysis failed' }));
+    err.appendChild(el('div', { class: 'vps-error-msg', text: analysisModal.error }));
+    const retry = el('button', { text: 'Retry', class: 'btn-secondary vps-retry-btn' });
+    retry.addEventListener('click', fetchDetailedAnalysis);
+    err.appendChild(retry);
+    body.appendChild(err);
+  } else if (analysisModal.data) {
+    body.appendChild(el('div', { text: 'Detailed analysis loaded', class: 'vps-analysis-placeholder' }));
+  }
+  modal.appendChild(body);
+
+  modal.addEventListener('mouseup', () => persistAnalysisModalWidth(modal), { once: true });
 }
 
 function showServerModal(editIndex) {
