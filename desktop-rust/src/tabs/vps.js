@@ -1123,11 +1123,77 @@ function buildAnalysisDetail(label, value) {
 }
 
 function buildAnalysisProcessesTab() {
-  return el('div', { text: 'Processes tab pending', class: 'vps-analysis-placeholder' });
+  const data = analysisModal && analysisModal.data ? analysisModal.data : {};
+  const processes = Array.isArray(data.processes) ? data.processes : [];
+  const wrap = el('div', { class: 'vps-analysis-processes' });
+
+  const head = el('div', { class: 'vps-analysis-process-head' });
+  head.appendChild(el('span', { text: 'Process' }));
+  head.appendChild(el('span', { text: 'Memory' }));
+  head.appendChild(el('span', { text: '%' }));
+  wrap.appendChild(head);
+
+  if (processes.length === 0) {
+    wrap.appendChild(el('div', { text: 'No process data available', class: 'vps-analysis-placeholder' }));
+    return wrap;
+  }
+
+  for (const proc of processes) {
+    const row = el('div', { class: 'vps-analysis-process-row' });
+    const command = proc.command || '';
+    const args = proc.args || '';
+    const processText = `${command} ${args}`.trim() || '(unknown)';
+    const name = el('span', { text: processText, class: 'vps-analysis-proc-name' });
+    name.title = `${proc.pid || '?'} · ${args || command || '(unknown)'}`;
+    row.appendChild(name);
+    row.appendChild(el('b', { text: proc.memory || `${proc.rss_kb || 0}K` }));
+    row.appendChild(el('span', { text: `${Number(proc.mem_pct || 0).toFixed(1)}%` }));
+    wrap.appendChild(row);
+  }
+
+  return wrap;
 }
 
 function buildAnalysisRawTab() {
-  return el('div', { text: 'Raw tab pending', class: 'vps-analysis-placeholder' });
+  const data = analysisModal && analysisModal.data ? analysisModal.data : {};
+  const raw = data.raw || {};
+  const wrap = el('div', { class: 'vps-analysis-raw' });
+
+  const copyBtn = el('button', { text: 'Copy raw output', class: 'btn-secondary vps-analysis-small-btn' });
+  copyBtn.addEventListener('click', async () => {
+    const text = formatRawAnalysis(raw);
+    try {
+      await call('copy_to_clipboard', { text });
+      showToast('Raw output copied', 'success');
+    } catch (e) {
+      showToast('Copy failed: ' + e, 'error');
+    }
+  });
+  wrap.appendChild(copyBtn);
+
+  const pre = document.createElement('pre');
+  pre.className = 'vps-analysis-raw-box';
+  pre.textContent = formatRawAnalysis(raw);
+  wrap.appendChild(pre);
+
+  return wrap;
+}
+
+function formatRawAnalysis(raw) {
+  const safeRaw = raw || {};
+  return [
+    '$ df -Ph /',
+    safeRaw.df || '',
+    '',
+    '$ du -xhd 3 / | sort -hr | head -40',
+    safeRaw.du || '',
+    '',
+    '$ ps -eo pid,comm,args,rss,%mem --sort=-rss | head -40',
+    safeRaw.ps || '',
+    '',
+    '$ stderr',
+    safeRaw.stderr || '',
+  ].join('\n');
 }
 
 function showServerModal(editIndex) {
