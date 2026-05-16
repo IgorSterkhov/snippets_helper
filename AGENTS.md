@@ -45,3 +45,9 @@ For frontend changes, follow existing compact, utilitarian UI patterns. Run
 
 For new or changed Tauri commands, treat the change as a native release
 surface change. Follow `CLAUDE.md` and `desktop-rust/RELEASES.md`.
+
+## Current Scope
+
+Do not modify the legacy Python application unless the user explicitly asks for
+it. Default product work is in `desktop-rust/`, including the Tauri/Rust backend
+and its desktop frontend.
