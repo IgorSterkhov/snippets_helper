@@ -499,10 +499,11 @@
           entries: [
             { path: '/var', name: 'var', parent: '/', depth: 1, size: '18G', bytes: 18000000000, pct_of_used: 52.9 },
             { path: '/var/lib', name: 'lib', parent: '/var', depth: 2, size: '14G', bytes: 14000000000, pct_of_used: 41.2 },
-            { path: '/var/lib/docker/overlay2/6d9c1f4e9a-long-layer-cache', name: '6d9c1f4e9a-long-layer-cache', parent: '/var/lib/docker/overlay2', depth: 4, size: '12G', bytes: 12000000000, pct_of_used: 35.3 },
+            { path: '/var/lib/docker', name: 'docker', parent: '/var/lib', depth: 3, size: '12G', bytes: 12000000000, pct_of_used: 35.3 },
             { path: '/var/log', name: 'log', parent: '/var', depth: 2, size: '2.1G', bytes: 2100000000, pct_of_used: 6.2 },
             { path: '/home', name: 'home', parent: '/', depth: 1, size: '7.2G', bytes: 7200000000, pct_of_used: 21.2 },
             { path: '/opt', name: 'opt', parent: '/', depth: 1, size: '4.8G', bytes: 4800000000, pct_of_used: 14.1 },
+            { path: '/opt/app data', name: 'app data', parent: '/opt', depth: 2, size: '1.6G', bytes: 1600000000, pct_of_used: 4.7 },
           ],
         },
         processes: [
@@ -513,8 +514,8 @@
         ],
         raw: {
           df: 'Filesystem      Size  Used Avail Use% Mounted on\n/dev/sda1        50G   34G   16G  67% /',
-          du: '18G\t/var\n14G\t/var/lib\n12G\t/var/lib/docker/overlay2/6d9c1f4e9a-long-layer-cache\n2.1G\t/var/log\n7.2G\t/home',
-          ps: 'PID COMMAND COMMAND RSS %MEM\n421 postgres postgres 1887436 23.1\n819 node node /srv/app/server.js 655360 8.0',
+          du: '18G\t/var\n14G\t/var/lib\n12G\t/var/lib/docker\n2.1G\t/var/log\n7.2G\t/home\n4.8G\t/opt\n1.6G\t/opt/app data',
+          ps: 'PID COMMAND COMMAND RSS %MEM\n421 postgres postgres 1887436 23.1\n819 node node /srv/app/server.js 655360 8.0\n1044 redis-server redis-server *:6379 296960 4.0\n1205 nginx nginx: worker process 122880 2.0',
           stderr: "du: cannot read directory '/root': Permission denied",
         },
       };
