@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.3.26 (2026-05-16)
 
 - **VPS Management:** added a resizable detailed analysis modal with
   disk-usage drill-down, top memory processes, and raw SSH command
