@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **VPS Management:** added a resizable detailed analysis modal with
+  disk-usage drill-down, top memory processes, and raw SSH command
+  output for troubleshooting.
+
 ## 1.3.25 OTA patches
 
 - **f-20260428-1** — Exec DnD UX polish:
