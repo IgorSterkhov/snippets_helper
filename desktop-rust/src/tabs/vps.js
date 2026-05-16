@@ -1040,9 +1040,10 @@ function visibleDiskEntries(entries) {
     if (entry.path === rootPath) return true;
 
     let parent = entry.parent;
-    while (parent && parent !== '/') {
+    while (parent) {
       if (analysisModal.collapsed.has(parent)) return false;
       if (parent === rootPath) break;
+      if (parent === '/') break;
       const parentEntry = entryByPath.get(parent);
       parent = parentEntry ? parentEntry.parent : '';
     }
