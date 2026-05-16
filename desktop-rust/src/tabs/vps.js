@@ -10,6 +10,7 @@ let tabVisible = true;
 let contextMenu = null;    // current context menu element
 let analysisModal = null; // { overlay, serverIndex, server, activeTab, loading, error, data, collapsed, drillRoot, selectedPath }
 let analysisModalSeq = 0;
+let analysisClickTimer = null;
 const ANALYSIS_WIDTH_SETTING = 'vps.analysis_modal_width';
 
 // Stats cache per server gIdx — populated on successful fetch so the
@@ -843,6 +844,10 @@ async function showDetailedAnalysisModal(gIdx) {
 }
 
 function closeDetailedAnalysisModal() {
+  if (analysisClickTimer) {
+    clearTimeout(analysisClickTimer);
+    analysisClickTimer = null;
+  }
   if (analysisModal && analysisModal.onKey) {
     document.removeEventListener('keydown', analysisModal.onKey, true);
   }
@@ -987,8 +992,13 @@ function buildAnalysisDiskTab() {
   }));
   const collapseAll = el('button', { text: 'Collapse all', class: 'btn-secondary vps-analysis-small-btn' });
   collapseAll.addEventListener('click', () => {
-    const parentPaths = new Set(entries.map(entry => entry.parent).filter(Boolean));
-    analysisModal.collapsed = new Set(entries.filter(entry => parentPaths.has(entry.path)).map(entry => entry.path));
+    const rootPath = analysisModal.drillRoot || '/';
+    const subtreeEntries = entries.filter(entry => {
+      if (!entry || !entry.path) return false;
+      return rootPath === '/' || entry.path === rootPath || entry.path.startsWith(rootPath + '/');
+    });
+    const parentPaths = new Set(subtreeEntries.map(entry => entry.parent).filter(Boolean));
+    analysisModal.collapsed = new Set(subtreeEntries.filter(entry => parentPaths.has(entry.path)).map(entry => entry.path));
     renderDetailedAnalysisModal();
   });
   toolbar.appendChild(collapseAll);
@@ -1032,9 +1042,10 @@ function visibleDiskEntries(entries) {
   return entries.filter(entry => {
     if (!entry || !entry.path) return false;
     if (rootPath !== '/' && entry.path !== rootPath && !entry.path.startsWith(rootPath + '/')) return false;
+    if (entry.path === rootPath) return true;
 
     let parent = entry.parent;
-    while (parent && parent !== '/') {
+    while (parent && parent !== '/' && parent !== rootPath) {
       if (analysisModal.collapsed.has(parent)) return false;
       const parentEntry = entryByPath.get(parent);
       parent = parentEntry ? parentEntry.parent : '';
@@ -1067,10 +1078,19 @@ function buildDiskTreeRow(entry, entries) {
 
   const name = el('button', { text: entry.path || entry.name || '/', class: 'vps-analysis-path', title: entry.path || '' });
   name.addEventListener('click', () => {
-    analysisModal.selectedPath = entry.path;
-    renderDetailedAnalysisModal();
+    if (analysisClickTimer) clearTimeout(analysisClickTimer);
+    analysisClickTimer = setTimeout(() => {
+      analysisClickTimer = null;
+      if (!analysisModal) return;
+      analysisModal.selectedPath = entry.path;
+      renderDetailedAnalysisModal();
+    }, 180);
   });
   name.addEventListener('dblclick', () => {
+    if (analysisClickTimer) {
+      clearTimeout(analysisClickTimer);
+      analysisClickTimer = null;
+    }
     analysisModal.drillRoot = entry.path;
     analysisModal.selectedPath = entry.path;
     renderDetailedAnalysisModal();
