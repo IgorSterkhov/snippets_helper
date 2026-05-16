@@ -9,6 +9,7 @@ let refreshTimers = {};    // envName -> { countdown, timer }
 let tabVisible = true;
 let contextMenu = null;    // current context menu element
 let analysisModal = null; // { overlay, serverIndex, server, activeTab, loading, error, data, collapsed, drillRoot, selectedPath }
+let analysisModalSeq = 0;
 const ANALYSIS_WIDTH_SETTING = 'vps.analysis_modal_width';
 
 // Stats cache per server gIdx — populated on successful fetch so the
@@ -790,10 +791,9 @@ async function showDetailedAnalysisModal(gIdx) {
   if (!srv) return;
   closeDetailedAnalysisModal();
 
+  const seq = ++analysisModalSeq;
   const overlay = el('div', { class: 'modal-overlay vps-analysis-overlay' });
   const modal = el('div', { class: 'modal vps-analysis-modal' });
-  const savedWidth = await loadAnalysisModalWidth();
-  if (savedWidth) modal.style.width = savedWidth;
 
   function onKey(e) {
     if (e.key === 'Escape') {
@@ -802,8 +802,18 @@ async function showDetailedAnalysisModal(gIdx) {
     }
   }
 
+  function onPointerUp() {
+    persistAnalysisModalWidth(modal);
+  }
+
+  function onOverlayClick(e) {
+    if (e.target === overlay) closeDetailedAnalysisModal();
+  }
+
   analysisModal = {
+    seq,
     overlay,
+    modal,
     serverIndex: gIdx,
     server: srv,
     activeTab: 'disk',
@@ -814,16 +824,20 @@ async function showDetailedAnalysisModal(gIdx) {
     drillRoot: '/',
     selectedPath: '/',
     onKey,
+    onPointerUp,
+    onOverlayClick,
   };
 
   overlay.appendChild(modal);
   document.body.appendChild(overlay);
   document.addEventListener('keydown', onKey, true);
+  modal.addEventListener('pointerup', onPointerUp);
+  overlay.addEventListener('click', onOverlayClick);
   renderDetailedAnalysisModal();
 
-  overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) closeDetailedAnalysisModal();
-  });
+  const savedWidth = await loadAnalysisModalWidth();
+  if (!analysisModal || analysisModal.seq !== seq) return;
+  if (savedWidth) modal.style.width = savedWidth;
 
   await fetchDetailedAnalysis();
 }
@@ -831,6 +845,12 @@ async function showDetailedAnalysisModal(gIdx) {
 function closeDetailedAnalysisModal() {
   if (analysisModal && analysisModal.onKey) {
     document.removeEventListener('keydown', analysisModal.onKey, true);
+  }
+  if (analysisModal && analysisModal.modal && analysisModal.onPointerUp) {
+    analysisModal.modal.removeEventListener('pointerup', analysisModal.onPointerUp);
+  }
+  if (analysisModal && analysisModal.overlay && analysisModal.onOverlayClick) {
+    analysisModal.overlay.removeEventListener('click', analysisModal.onOverlayClick);
   }
   if (analysisModal && analysisModal.overlay) {
     analysisModal.overlay.remove();
@@ -937,8 +957,6 @@ function renderDetailedAnalysisModal() {
     body.appendChild(el('div', { text: 'Detailed analysis loaded', class: 'vps-analysis-placeholder' }));
   }
   modal.appendChild(body);
-
-  modal.addEventListener('mouseup', () => persistAnalysisModalWidth(modal), { once: true });
 }
 
 function showServerModal(editIndex) {
