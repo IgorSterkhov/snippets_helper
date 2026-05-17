@@ -52,6 +52,10 @@ Do not modify the legacy Python application unless the user explicitly asks for
 it. Default product work is in `desktop-rust/`, including the Tauri/Rust backend
 and its desktop frontend.
 
+This restriction applies to the legacy Python desktop application only. The
+Python server/API code in `api/`, `sync/`, and shared sync modules may be
+modified when the active task requires a server-side fix.
+
 ## Tooling Notes
 
 If Codex subagents or MCP-backed app tools hang on this repository, continue
