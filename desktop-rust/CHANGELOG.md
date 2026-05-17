@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.3.27 (2026-05-17)
+
+- **Snippets sync:** fixed deleted snippet tags coming back from the
+  server after sync. Server tombstones are now preserved locally, so
+  removing the duplicate `wiki` tag stays removed.
+
 ## v1.3.26 (2026-05-16)
 
 - **VPS Management:** added a resizable detailed analysis modal with

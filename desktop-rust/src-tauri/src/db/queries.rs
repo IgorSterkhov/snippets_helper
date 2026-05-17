@@ -1048,19 +1048,22 @@ pub fn upsert_from_server(conn: &Connection, table: &str, rows: &[Value]) -> Res
     // For notes, remove folder_uuid if present (it's not a real column)
     // folder_id is already in data_cols
 
-    let col_list = cols.join(", ");
-    let placeholders: Vec<String> = (1..=cols.len()).map(|i| format!("?{i}")).collect();
+    let col_list = format!("{}, sync_status", cols.join(", "));
+    let sync_status_param = cols.len() + 1;
+    let placeholders: Vec<String> = (1..=sync_status_param).map(|i| format!("?{i}")).collect();
     let update_clauses: Vec<String> = cols
         .iter()
         .enumerate()
         .map(|(i, c)| format!("{c} = ?{}", i + 1))
         .collect();
+    let mut update_clauses = update_clauses;
+    update_clauses.push("sync_status = excluded.sync_status".to_string());
 
     // LWW: only update if incoming updated_at >= local updated_at
     // This prevents pull from overwriting newer local changes (including deletes)
     let sql = format!(
-        "INSERT INTO {table} ({col_list}, sync_status) VALUES ({}, 'synced') \
-         ON CONFLICT(uuid) DO UPDATE SET {}, sync_status = 'synced' \
+        "INSERT INTO {table} ({col_list}) VALUES ({}) \
+         ON CONFLICT(uuid) DO UPDATE SET {} \
          WHERE excluded.updated_at >= {table}.updated_at",
         placeholders.join(", "),
         update_clauses.join(", ")
@@ -1074,7 +1077,7 @@ pub fn upsert_from_server(conn: &Connection, table: &str, rows: &[Value]) -> Res
             None => continue,
         };
 
-        let params: Vec<Box<dyn rusqlite::types::ToSql>> = cols
+        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = cols
             .iter()
             .map(|&col| -> Box<dyn rusqlite::types::ToSql> {
                 match obj.get(col) {
@@ -1094,6 +1097,16 @@ pub fn upsert_from_server(conn: &Connection, table: &str, rows: &[Value]) -> Res
                 }
             })
             .collect();
+        let sync_status = if obj
+            .get("is_deleted")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            "deleted"
+        } else {
+            "synced"
+        };
+        params.push(Box::new(sync_status.to_string()));
 
         let param_refs: Vec<&dyn rusqlite::types::ToSql> =
             params.iter().map(|p| p.as_ref()).collect();
@@ -2010,6 +2023,35 @@ mod tests {
         delete_snippet_tag(&conn, t.id.unwrap()).unwrap();
         let list = list_snippet_tags(&conn).unwrap();
         assert_eq!(list.len(), 0);
+    }
+
+    #[test]
+    fn test_upsert_deleted_snippet_tag_from_server_keeps_it_hidden() {
+        let conn = init_test_db();
+        let row = serde_json::json!({
+            "uuid": "11111111-1111-1111-1111-111111111111",
+            "name": "wiki",
+            "patterns": r#"["wiki"]"#,
+            "color": "#388bfd",
+            "sort_order": 0,
+            "updated_at": "2026-05-17T10:00:00",
+            "user_id": "user-1",
+            "is_deleted": true
+        });
+
+        upsert_from_server(&conn, "snippet_tags", &[row]).unwrap();
+
+        let visible_tags = list_snippet_tags(&conn).unwrap();
+        assert!(visible_tags.is_empty());
+
+        let sync_status: String = conn
+            .query_row(
+                "SELECT sync_status FROM snippet_tags WHERE uuid = ?1",
+                params!["11111111-1111-1111-1111-111111111111"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(sync_status, "deleted");
     }
 
     #[test]
