@@ -439,6 +439,60 @@ async def run_tests():
         await wait_until(cdp, "!document.getElementById('rs-fullscreen-overlay')", timeout=3)
     await check('T14 expand/collapse file card', t14_expand_collapse_file_card)
 
+    # ── T15: Tasks Pin updates pinned chip strip ─────────────
+    async def t15_tasks_pin_updates_strip():
+        await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"tasks\"]').click()")
+        await wait_until(cdp, "!!document.querySelector('#tasks-pinned')", timeout=5)
+        await wait_until(
+            cdp,
+            "[...document.querySelectorAll('#tasks-pinned .tasks-pinned-chip-label')]"
+            ".some(x => x.textContent.includes('Pinned mock task'))",
+            timeout=4,
+        )
+
+        await cdp.eval(
+            "[...document.querySelectorAll('.task-title')]"
+            ".find(x => x.textContent.includes('Pinned mock task')).click()"
+        )
+        await wait_until(
+            cdp,
+            "[...document.querySelectorAll('.task-editor-btn')]"
+            ".some(x => x.textContent.includes('Pinned'))",
+            timeout=3,
+        )
+        await cdp.eval(
+            "[...document.querySelectorAll('.task-editor-btn')]"
+            ".find(x => x.textContent.includes('Pinned')).click()"
+        )
+        await wait_until(
+            cdp,
+            "![...document.querySelectorAll('#tasks-pinned .tasks-pinned-chip-label')]"
+            ".some(x => x.textContent.includes('Pinned mock task'))",
+            timeout=3,
+        )
+
+        await cdp.eval(
+            "[...document.querySelectorAll('.task-title')]"
+            ".find(x => x.textContent.includes('Regular mock task')).click()"
+        )
+        await wait_until(
+            cdp,
+            "[...document.querySelectorAll('.task-editor-btn')]"
+            ".some(x => x.textContent.trim().endsWith('Pin'))",
+            timeout=3,
+        )
+        await cdp.eval(
+            "[...document.querySelectorAll('.task-editor-btn')]"
+            ".find(x => x.textContent.trim().endsWith('Pin')).click()"
+        )
+        await wait_until(
+            cdp,
+            "[...document.querySelectorAll('#tasks-pinned .tasks-pinned-chip-label')]"
+            ".some(x => x.textContent.includes('Regular mock task'))",
+            timeout=3,
+        )
+    await check('T15 Tasks Pin updates pinned strip', t15_tasks_pin_updates_strip)
+
     # Summary
     print()
     passed = sum(1 for _, ok, _ in results if ok)

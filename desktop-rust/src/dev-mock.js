@@ -111,6 +111,32 @@
       sync_api_key: 'mock-key',
     });
 
+    storeSet('task_categories', [
+      { id: 1, name: 'Work', color: '#3b82f6', sort_order: 0, created_at: now(), updated_at: now() },
+      { id: 2, name: 'Personal', color: '#10b981', sort_order: 1, created_at: now(), updated_at: now() },
+    ]);
+    storeSet('__seq.task_categories', 2);
+    storeSet('task_statuses', [
+      { id: 1, name: 'Todo', color: '#f59e0b', sort_order: 0, created_at: now(), updated_at: now() },
+      { id: 2, name: 'Done', color: '#10b981', sort_order: 1, created_at: now(), updated_at: now() },
+    ]);
+    storeSet('__seq.task_statuses', 2);
+    storeSet('tasks', [
+      {
+        id: 1, uuid: uuid(), title: 'Pinned mock task', category_id: 1, status_id: 1,
+        is_pinned: true, bg_color: null, tracker_url: null, notes_md: '',
+        sort_order: 0, created_at: now(), updated_at: now(), sync_status: 'synced', user_id: 'mock-user',
+      },
+      {
+        id: 2, uuid: uuid(), title: 'Regular mock task', category_id: 2, status_id: 1,
+        is_pinned: false, bg_color: null, tracker_url: null, notes_md: '',
+        sort_order: 1, created_at: now(), updated_at: now(), sync_status: 'synced', user_id: 'mock-user',
+      },
+    ]);
+    storeSet('__seq.tasks', 2);
+    storeSet('task_checkboxes', []);
+    storeSet('__seq.task_checkboxes', 0);
+
     storeSet('__init', true);
   }
 
@@ -247,6 +273,43 @@
     async create_note(args) { return createItem('notes', { uuid: uuid(), ...args }); },
     async update_note({ id, ...patch }) { return updateItem('notes', id, patch); },
     async delete_note({ id }) { deleteItem('notes', id); },
+
+    // ── Tasks ───────────────────────────────────────────
+    async list_task_categories() {
+      return storeGet('task_categories', []).sort((a, b) => a.sort_order - b.sort_order);
+    },
+    async list_task_statuses() {
+      return storeGet('task_statuses', []).sort((a, b) => a.sort_order - b.sort_order);
+    },
+    async list_tasks({ category, status }) {
+      let items = storeGet('tasks', []).filter(t => t.sync_status !== 'deleted');
+      if (category === 'none') items = items.filter(t => t.category_id == null);
+      else if (category != null) items = items.filter(t => String(t.category_id) === String(category));
+      if (status === 'none') items = items.filter(t => t.status_id == null);
+      else if (status != null) items = items.filter(t => String(t.status_id) === String(status));
+      return items.sort((a, b) =>
+        Number(b.is_pinned) - Number(a.is_pinned) || a.sort_order - b.sort_order || a.id - b.id
+      );
+    },
+    async list_pinned_tasks() {
+      return storeGet('tasks', [])
+        .filter(t => t.sync_status !== 'deleted' && t.is_pinned)
+        .sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
+    },
+    async update_task({ id, title, categoryId, statusId, isPinned, bgColor, trackerUrl, notesMd }) {
+      return updateItem('tasks', id, {
+        title,
+        category_id: categoryId ?? null,
+        status_id: statusId ?? null,
+        is_pinned: !!isPinned,
+        bg_color: bgColor ?? null,
+        tracker_url: trackerUrl ?? null,
+        notes_md: notesMd || '',
+      });
+    },
+    async list_task_checkboxes({ taskId }) {
+      return storeGet('task_checkboxes', []).filter(x => x.task_id === taskId && x.sync_status !== 'deleted');
+    },
 
     // ── SQL tools ───────────────────────────────────────
     async parse_sql_tables({ sql }) {

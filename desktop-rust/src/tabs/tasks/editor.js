@@ -491,6 +491,9 @@ async function saveField(field, value, task, ctx) {
       trackerUrl: task.tracker_url,
       notesMd: task.notes_md || '',
     });
+    if (field === 'is_pinned') {
+      await (ctx.onTaskReload && ctx.onTaskReload());
+    }
   } catch (e) {
     showToast('Save failed: ' + e, 'error');
   }
