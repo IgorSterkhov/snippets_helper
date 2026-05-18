@@ -411,6 +411,11 @@ button:hover, .btn:hover {
   cursor: pointer;
 }
 .snippet-detail-tab:first-child { border-left: 0; }
+.snippet-detail-tab:hover {
+  background: rgba(88, 166, 255, 0.18);
+  color: rgb(255, 255, 255);
+  border-bottom-color: rgb(121, 192, 255);
+}
 .snippet-detail-tab.active {
   color: var(--text);
   border-bottom-color: var(--accent);

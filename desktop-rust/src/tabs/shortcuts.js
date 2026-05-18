@@ -252,20 +252,22 @@ function renderDetail() {
   header.appendChild(actions);
   detailEl.appendChild(header);
 
-  const tabBar = document.createElement('div');
-  tabBar.className = 'snippet-detail-tabs';
-  tabs.forEach(tab => {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'snippet-detail-tab' + (detailTab === tab.id ? ' active' : '');
-    btn.textContent = tab.label;
-    btn.addEventListener('click', () => {
-      detailTab = tab.id;
-      renderDetail();
+  if (tabs.length > 1) {
+    const tabBar = document.createElement('div');
+    tabBar.className = 'snippet-detail-tabs';
+    tabs.forEach(tab => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'snippet-detail-tab' + (detailTab === tab.id ? ' active' : '');
+      btn.textContent = tab.label;
+      btn.addEventListener('click', () => {
+        detailTab = tab.id;
+        renderDetail();
+      });
+      tabBar.appendChild(btn);
     });
-    tabBar.appendChild(btn);
-  });
-  detailEl.appendChild(tabBar);
+    detailEl.appendChild(tabBar);
+  }
 
   if (detailTab === 'code') {
     renderCodeTab(shortcut, links, hasLinks);

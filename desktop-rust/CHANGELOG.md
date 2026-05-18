@@ -6,6 +6,8 @@
   added copy buttons to rendered Markdown code blocks, improved code-block
   insertion in the Markdown toolbar, collapsed the editor description by
   default, and moved links to explicit browser/app-window actions.
+- **Snippets polish:** hide the tab row when only `Code` is available and use
+  a readable strong-blue hover tint for snippet detail tabs.
 
 ## v1.3.27 (2026-05-17)
 

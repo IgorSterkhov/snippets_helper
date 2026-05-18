@@ -520,7 +520,7 @@ async def run_tests():
         tabs_min = await cdp.eval(
             "[...document.querySelectorAll('.snippet-detail-tab')].map(x => x.textContent.trim())"
         )
-        assert tabs_min == ['Code'], f'minimal tabs: {tabs_min!r}'
+        assert tabs_min == [], f'minimal tabs should be hidden when only Code exists: {tabs_min!r}'
 
         await cdp.eval(
             "[...document.querySelectorAll('#panel-shortcuts div')]"
@@ -612,6 +612,30 @@ async def run_tests():
         assert value == '```\n\n```', f'value: {value!r}'
         assert caret == 4, f'caret: {caret}'
     await check('T20 Snippets toolbar inserts fenced code block', t20_snippets_toolbar_code_block_insert)
+
+    # ── T21: Snippets tab hover uses readable tint ───────────
+    async def t21_snippets_tab_hover_css():
+        hover_rule = await cdp.eval("""(() => {
+          for (const sheet of document.styleSheets) {
+            let rules;
+            try { rules = sheet.cssRules; } catch { continue; }
+            for (const rule of rules) {
+              if (rule.selectorText === '.snippet-detail-tab:hover') {
+                return {
+                  background: rule.style.background,
+                  color: rule.style.color,
+                  border: rule.style.borderBottomColor,
+                };
+              }
+            }
+          }
+          return null;
+        })()""")
+        assert hover_rule, 'missing .snippet-detail-tab:hover rule'
+        assert hover_rule['background'] == 'rgba(88, 166, 255, 0.18)', hover_rule
+        assert hover_rule['color'] == 'rgb(255, 255, 255)', hover_rule
+        assert hover_rule['border'] == 'rgb(121, 192, 255)', hover_rule
+    await check('T21 Snippets tab hover uses readable tint', t21_snippets_tab_hover_css)
 
     # Summary
     print()
