@@ -119,6 +119,50 @@ Key steps in `release-frontend`:
 
 **Never edit the pubkey, endpoints, or sign command without reading §7.**
 
+### 3.1 Sidecar binary cache diagnostics
+
+The native release job builds `whisper-server` and `llama-server` sidecar
+binaries before Tauri packaging. The slow block is usually
+`Build llama-server from source (for Gemma post-processing)`, especially on
+macOS with Metal enabled.
+
+The `Cache sidecar binaries` step only skips those builds when
+`steps.sidecars-cache.outputs.cache-hit == 'true'`. If the later
+`Build whisper-server from source` or `Build llama-server from source` steps
+run, the cache was missed.
+
+Check the cache state via the Actions caches API, not release artifacts:
+
+```bash
+wget -qO- 'https://api.github.com/repos/IgorSterkhov/snippets_helper/actions/caches?per_page=100'
+```
+
+Look for keys like:
+
+```text
+sidecars-macOS-whisper-...-llama-...-v1
+sidecars-Windows-whisper-...-llama-...-v1
+```
+
+Important finding from the `v1.3.27` release investigation:
+
+- `WHISPER_CPP_VERSION` and `LLAMA_CPP_VERSION` were unchanged from
+  `v1.3.26`, but macOS still rebuilt `llama-server`.
+- The caches API showed sidecar caches under tag refs such as
+  `refs/heads/refs/tags/v1.3.26` and `refs/heads/refs/tags/v1.3.27`, not under
+  `main`.
+- A tag-scoped cache from `v1.3.26` is not enough to make `v1.3.27` fast.
+  The workflow comments expect a main-branch seed cache, but `on.push.paths`
+  only triggers that seed when `desktop-rust/WHISPER_CPP_VERSION`,
+  `desktop-rust/LLAMA_CPP_VERSION`, or the workflow file changes. A normal
+  release bump commit does not seed sidecar caches on `main`.
+
+If a future full release spends a long time on macOS `llama-server`, first
+verify whether a `main`-scoped sidecar cache exists. If not, expect the first
+tag for that sidecar key to be slow. Fixing this properly likely means adding
+`restore-keys` and/or a manual `workflow_dispatch` seed-cache path instead of
+assuming every main push primes the cache.
+
 ---
 
 ## 4. Local development & testing
