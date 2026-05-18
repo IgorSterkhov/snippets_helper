@@ -49,6 +49,27 @@ cd ../src && python3 dev-test.py        # expects 7/7 PASS
 ```
 If either fails, fix before tagging.
 
+### 2.1.1 Recommended Codex approval prefixes
+
+Desktop releases repeatedly need a small, predictable set of commands. Prefer
+these scoped approval prefixes over broad shell approvals:
+
+```text
+["wget"]
+["git", "commit"]
+["git", "tag"]
+["git", "add", "desktop-rust/CHANGELOG.md"]
+["git", "add", "desktop-rust/src-tauri/Cargo.toml"]
+["git", "add", "desktop-rust/src-tauri/Cargo.lock"]
+["git", "add", "desktop-rust/src-tauri/tauri.conf.json"]
+["git", "add", "desktop-rust/RELEASES.md"]
+["python3", "dev-test.py"]
+```
+
+Do not approve a general `/bin/bash -lc` prefix for release work. Pushes that
+embed `GIT_SSH_COMMAND=...` and tag names should remain explicit per command,
+especially `git push origin vX.Y.Z`.
+
 ### 2.2 For a `v*` release
 ```bash
 # 1. Bump version in BOTH files to the same value
