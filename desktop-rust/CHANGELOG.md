@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **Snippets:** replaced `Main / Web / Note` with compact content tabs,
+  added copy buttons to rendered Markdown code blocks, improved code-block
+  insertion in the Markdown toolbar, collapsed the editor description by
+  default, and moved links to explicit browser/app-window actions.
+
 ## v1.3.27 (2026-05-17)
 
 - **Snippets sync:** fixed deleted snippet tags coming back from the

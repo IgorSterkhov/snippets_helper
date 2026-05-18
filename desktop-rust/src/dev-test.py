@@ -139,6 +139,11 @@ async def run_tests():
 
     # Navigate to the test URL and wait for load
     await cdp.send('Page.enable')
+    await cdp.send(
+        'Browser.grantPermissions',
+        permissions=['clipboardReadWrite'],
+        origin=f'http://localhost:{HTTP_PORT}',
+    )
     await cdp.send('Page.navigate', url=TEST_URL)
     # Give page a beat to start loading
     await asyncio.sleep(0.8)
@@ -155,6 +160,17 @@ async def run_tests():
     # Wait for mock to initialize and app to render tabs
     await wait_until(cdp, "!!document.querySelector('.tab-btn')", timeout=8)
     await wait_until(cdp, "!!window.__TAURI__ && !!window.__TAURI__.core", timeout=5)
+
+    async def close_modals():
+        await cdp.eval("""(() => {
+          [...document.querySelectorAll('.modal-overlay')].forEach(x => x.remove());
+        })()""")
+
+    async def open_shortcuts_tab():
+        await close_modals()
+        await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"shortcuts\"]').click()")
+        await wait_until(cdp, "!!document.querySelector('#panel-shortcuts')", timeout=4)
+        await wait_until(cdp, "document.body.innerText.includes('SELECT all')", timeout=5)
 
     # ── T1: mock handler count ───────────────────────────────
     async def t1():
@@ -492,6 +508,110 @@ async def run_tests():
             timeout=3,
         )
     await check('T15 Tasks Pin updates pinned strip', t15_tasks_pin_updates_strip)
+
+    # ── T16: Snippets detail tabs are conditional ────────────
+    async def t16_snippets_tabs_conditional():
+        await open_shortcuts_tab()
+        await cdp.eval(
+            "[...document.querySelectorAll('#panel-shortcuts div')]"
+            ".find(x => x.textContent.trim() === 'Minimal plain snippet').click()"
+        )
+        await wait_until(cdp, "document.body.innerText.includes('plain text only')", timeout=3)
+        tabs_min = await cdp.eval(
+            "[...document.querySelectorAll('.snippet-detail-tab')].map(x => x.textContent.trim())"
+        )
+        assert tabs_min == ['Code'], f'minimal tabs: {tabs_min!r}'
+
+        await cdp.eval(
+            "[...document.querySelectorAll('#panel-shortcuts div')]"
+            ".find(x => x.textContent.trim() === 'Python markdown block').click()"
+        )
+        await wait_until(cdp, "document.body.innerText.includes('Python markdown block')", timeout=3)
+        tabs_full = await cdp.eval(
+            "[...document.querySelectorAll('.snippet-detail-tab')].map(x => x.textContent.trim())"
+        )
+        assert tabs_full == ['Code', 'Description', 'Links', 'Note'], f'full tabs: {tabs_full!r}'
+        iframe_count = await cdp.eval("document.querySelectorAll('#panel-shortcuts iframe').length")
+        assert iframe_count == 0, f'embedded iframe should not render, got {iframe_count}'
+    await check('T16 Snippets detail tabs are conditional', t16_snippets_tabs_conditional)
+
+    # ── T17: Snippets Links tab exposes explicit actions ─────
+    async def t17_snippets_links_tab_actions():
+        await open_shortcuts_tab()
+        await cdp.eval(
+            "[...document.querySelectorAll('#panel-shortcuts div')]"
+            ".find(x => x.textContent.trim() === 'Python markdown block').click()"
+        )
+        await cdp.eval(
+            "[...document.querySelectorAll('.snippet-detail-tab')]"
+            ".find(x => x.textContent.trim() === 'Links').click()"
+        )
+        await wait_until(cdp, "document.body.innerText.includes('Python docs')", timeout=3)
+        rows = await cdp.eval("document.querySelectorAll('.snippet-link-row').length")
+        assert rows == 2, f'link rows: {rows}'
+        actions = await cdp.eval(
+            "[...document.querySelectorAll('.snippet-link-row:first-child button')].map(x => x.title)"
+        )
+        assert actions == ['Open in browser', 'Open in app window'], f'actions: {actions!r}'
+    await check('T17 Snippets Links tab exposes explicit actions', t17_snippets_links_tab_actions)
+
+    # ── T18: Snippets Markdown code block copy ───────────────
+    async def t18_snippets_markdown_code_copy():
+        await open_shortcuts_tab()
+        await cdp.eval(
+            "[...document.querySelectorAll('#panel-shortcuts div')]"
+            ".find(x => x.textContent.trim() === 'Python markdown block').click()"
+        )
+        await wait_until(cdp, "!!document.querySelector('.markdown-code-copy')", timeout=3)
+        await cdp.eval(
+            "window.__copiedText='';"
+            "navigator.clipboard.writeText = async (text) => { window.__copiedText = text; };"
+        )
+        await cdp.eval("document.querySelector('.markdown-code-copy').click()")
+        copied = await wait_until(
+            cdp,
+            "window.__copiedText.includes('print(\"hello\")') && window.__copiedText",
+            timeout=3,
+        )
+        assert copied == 'print("hello")\nprint("world")', f'copied: {copied!r}'
+    await check('T18 Snippets Markdown code block copy', t18_snippets_markdown_code_copy)
+
+    # ── T19: New snippet editor focus + description collapse ─
+    async def t19_snippets_new_editor_focus_and_description_collapse():
+        await open_shortcuts_tab()
+        await cdp.eval("document.querySelector('#panel-shortcuts button[title=\"Add shortcut\"]').click()")
+        await wait_until(cdp, "!!document.querySelector('.modal-overlay input[placeholder=\"Name\"]')", timeout=3)
+        active = await cdp.eval(
+            "document.activeElement === document.querySelector('.modal-overlay input[placeholder=\"Name\"]')"
+        )
+        assert active, 'name input should be focused'
+        desc_visible = await cdp.eval(
+            "!![...document.querySelectorAll('.modal-overlay textarea')]"
+            ".find(x => x.placeholder.startsWith('Description') && x.offsetParent !== null)"
+        )
+        assert not desc_visible, 'description textarea should be collapsed by default'
+        badge = await cdp.eval(
+            "document.querySelector('.snippet-editor-desc-toggle .snippet-editor-desc-badge')?.textContent"
+        )
+        assert badge == 'empty', f'description badge: {badge!r}'
+    await check('T19 Snippets new editor focuses name and collapses description', t19_snippets_new_editor_focus_and_description_collapse)
+
+    # ── T20: Toolbar code button inserts fenced block ────────
+    async def t20_snippets_toolbar_code_block_insert():
+        await open_shortcuts_tab()
+        await cdp.eval("document.querySelector('#panel-shortcuts button[title=\"Add shortcut\"]').click()")
+        await wait_until(cdp, "!!document.querySelector('.modal-overlay textarea[placeholder^=\"Value\"]')", timeout=3)
+        await cdp.eval(
+            "const ta=document.querySelector('.modal-overlay textarea[placeholder^=\"Value\"]');"
+            "ta.focus(); ta.setSelectionRange(0,0);"
+            "[...document.querySelectorAll('.modal-overlay .md-toolbar button')]"
+            ".find(b => b.title === 'Code block').click();"
+        )
+        value = await cdp.eval("document.querySelector('.modal-overlay textarea[placeholder^=\"Value\"]').value")
+        caret = await cdp.eval("document.querySelector('.modal-overlay textarea[placeholder^=\"Value\"]').selectionStart")
+        assert value == '```\n\n```', f'value: {value!r}'
+        assert caret == 4, f'caret: {caret}'
+    await check('T20 Snippets toolbar inserts fenced code block', t20_snippets_toolbar_code_block_insert)
 
     # Summary
     print()

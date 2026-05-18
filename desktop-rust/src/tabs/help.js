@@ -11,7 +11,7 @@ const i18n = {
 
     // Features tab
     shortcuts_name: 'Shortcuts',
-    shortcuts_desc: 'Store and quickly access text snippets. Two-panel layout with searchable list and detail view. Filter by colored tags (glob patterns). Attach links with embedded Web viewer. Expandable card preview in the list. Markdown auto-rendering. Obsidian note integration. Copy values instantly with Enter.',
+    shortcuts_desc: 'Store and quickly access text snippets. Two-panel layout with searchable list and tabbed detail view for Code, Description, Links, and Note. Filter by colored tags (glob patterns). Rendered Markdown code blocks have copy buttons. Links open explicitly in the browser or a separate app window. Expandable card preview in the list. Markdown auto-rendering. Obsidian note integration. Copy values instantly with Enter.',
 
     notes_name: 'Notes',
     notes_desc: 'Organize notes in nested folders (tree view with arbitrary depth). Built-in Markdown editor with toolbar and live preview. Expandable card previews in the note list. Auto markdown rendering on open. Pin important notes to the top.',
@@ -60,7 +60,7 @@ const i18n = {
 
     // Features tab
     shortcuts_name: 'Сниппеты',
-    shortcuts_desc: 'Храните и быстро используйте текстовые сниппеты. Двухпанельный интерфейс с поиском и детальным просмотром. Фильтрация по цветным тегам (glob-паттерны). Ссылки со встроенным Web-просмотром. Раскрываемые карточки для быстрого предпросмотра. Авто-рендеринг Markdown. Интеграция с Obsidian. Копирование по Enter.',
+    shortcuts_desc: 'Храните и быстро используйте текстовые сниппеты. Двухпанельный интерфейс с поиском и детальным просмотром во вкладках Code, Description, Links и Note. Фильтрация по цветным тегам (glob-паттерны). В Markdown-блоках кода есть кнопка копирования. Ссылки открываются явно: в браузере или в отдельном окне приложения. Раскрываемые карточки для быстрого предпросмотра. Авто-рендеринг Markdown. Интеграция с Obsidian. Копирование по Enter.',
 
     notes_name: 'Заметки',
     notes_desc: 'Организуйте заметки во вложенных папках (древовидная структура). Встроенный Markdown-редактор с панелью инструментов и предпросмотром. Раскрываемые карточки в списке заметок. Авто-рендеринг Markdown при открытии. Закрепление важных заметок.',

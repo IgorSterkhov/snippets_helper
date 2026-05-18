@@ -48,12 +48,44 @@
     ]);
     storeSet('__seq.snippet_tags', 2);
     storeSet('shortcuts', [
-      { id: 1, uuid: uuid(), name: 'SELECT all', value: 'SELECT * FROM {{table}};', description: 'SQL sample',
-        links: [{ id: 1, title: 'docs', url: 'https://postgresql.org' }], obsidian_note: null, created_at: now(), updated_at: now() },
-      { id: 2, uuid: uuid(), name: 'Python hello', value: 'print("hello")', description: 'Simple script',
-        links: [], obsidian_note: null, created_at: now(), updated_at: now() },
+      {
+        id: 1,
+        uuid: uuid(),
+        name: 'SELECT all',
+        value: 'SELECT * FROM {{table}};',
+        description: 'SQL sample',
+        links: [{ id: 1, title: 'PostgreSQL docs', url: 'https://postgresql.org' }],
+        obsidian_note: null,
+        created_at: now(),
+        updated_at: now(),
+      },
+      {
+        id: 2,
+        uuid: uuid(),
+        name: 'Python markdown block',
+        value: 'Run this:\n\n```python\nprint("hello")\nprint("world")\n```',
+        description: '## Usage\n\nOpen the Links tab for docs.',
+        links: [
+          { id: 1, title: 'Python docs', url: 'https://docs.python.org/3/' },
+          { id: 2, title: 'Runbook', url: 'https://wiki.local/runbooks/python' },
+        ],
+        obsidian_note: 'MockVault/Snippets/python.md',
+        created_at: now(),
+        updated_at: now(),
+      },
+      {
+        id: 3,
+        uuid: uuid(),
+        name: 'Minimal plain snippet',
+        value: 'plain text only',
+        description: '',
+        links: [],
+        obsidian_note: null,
+        created_at: now(),
+        updated_at: now(),
+      },
     ]);
-    storeSet('__seq.shortcuts', 2);
+    storeSet('__seq.shortcuts', 3);
 
     storeSet('note_folders', [
       { id: 1, name: 'Inbox', sort_order: 0, parent_id: null },
@@ -227,7 +259,7 @@
     async list_obsidian_folders() { return []; },
     async list_obsidian_files() { return []; },
     async create_obsidian_note() { throw new Error('Obsidian not configured in mock'); },
-    async read_obsidian_note() { return '# Mock note\n\nContent not available in dev mock.'; },
+    async read_obsidian_note() { return '# Mock note\n\n```bash\necho note\n```'; },
     async link_obsidian_note({ snippetId, notePath }) {
       return updateItem('shortcuts', snippetId, { obsidian_note: notePath || null });
     },

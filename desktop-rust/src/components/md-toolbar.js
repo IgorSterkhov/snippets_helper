@@ -42,6 +42,55 @@ function insertAtCursor(textarea, text) {
   textarea.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
+function getLineBounds(textarea, start, end) {
+  const value = textarea.value;
+  const lineStart = value.lastIndexOf('\n', Math.max(0, start - 1)) + 1;
+  const nextNewline = value.indexOf('\n', end);
+  const lineEnd = nextNewline === -1 ? value.length : nextNewline;
+  return { lineStart, lineEnd };
+}
+
+function selectionCoversWholeLines(textarea, start, end) {
+  if (start === end) return false;
+  const value = textarea.value;
+  const selected = value.substring(start, end);
+  if (selected.includes('\n')) return true;
+  const { lineStart, lineEnd } = getLineBounds(textarea, start, end);
+  return start === lineStart && end === lineEnd;
+}
+
+function insertCodeBlock(textarea) {
+  const start = textarea.selectionStart;
+  const text = '```\n\n```';
+  textarea.setRangeText(text, start, start, 'end');
+  textarea.setSelectionRange(start + 4, start + 4);
+  textarea.focus();
+  textarea.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function toggleCodeFormatting(textarea) {
+  const start = textarea.selectionStart;
+  const end = textarea.selectionEnd;
+  if (start === end) {
+    insertCodeBlock(textarea);
+    return;
+  }
+
+  const selected = textarea.value.substring(start, end);
+  if (selectionCoversWholeLines(textarea, start, end)) {
+    const { lineStart, lineEnd } = getLineBounds(textarea, start, end);
+    const block = textarea.value.substring(lineStart, lineEnd);
+    textarea.setRangeText('```\n' + block + '\n```', lineStart, lineEnd, 'select');
+  } else if (selected.includes('\n')) {
+    textarea.setRangeText('```\n' + selected + '\n```', start, end, 'select');
+  } else {
+    textarea.setRangeText('`' + selected + '`', start, end, 'select');
+  }
+
+  textarea.focus();
+  textarea.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
 // Accepts http(s)://, ftp://, mailto:, www.* — rejects anything with
 // whitespace or newlines, so pasted prose never ends up inside (…).
 function looksLikeUrl(s) {
@@ -78,17 +127,8 @@ function getButtons(textarea) {
       action: () => wrapSelection(textarea, '~~', '~~'),
     },
     {
-      label: '</>', title: 'Code',
-      action: () => {
-        const start = textarea.selectionStart;
-        const end = textarea.selectionEnd;
-        const selected = textarea.value.substring(start, end);
-        if (selected.includes('\n')) {
-          wrapSelection(textarea, '```\n', '\n```');
-        } else {
-          wrapSelection(textarea, '`', '`');
-        }
-      },
+      label: '</>', title: 'Code block',
+      action: () => toggleCodeFormatting(textarea),
     },
     'sep',
     {

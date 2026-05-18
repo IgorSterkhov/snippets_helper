@@ -12,9 +12,7 @@ let detailEl = null;
 let currentQuery = '';
 let fontSize = 14;
 let listWidth = 260;
-let descOpen = false;
-let viewMode = 'main'; // 'main' | 'web' | 'note'
-let activeWebLink = null; // index of active link in web view
+let detailTab = 'code'; // 'code' | 'description' | 'links' | 'note'
 let expandedCard = null; // index of expanded card in list
 let expandHeight = 4; // multiplier for expanded height
 let obsidianConfigured = false;
@@ -165,9 +163,7 @@ function renderList() {
 
     item.addEventListener('click', () => {
       selectedIndex = index;
-      viewMode = 'main';
-      descOpen = false;
-      activeWebLink = null;
+      detailTab = 'code';
       renderList();
       renderDetail();
     });
@@ -178,9 +174,30 @@ function renderList() {
 
 function parseLinks(shortcut) {
   try {
+    if (Array.isArray(shortcut.links)) return shortcut.links;
     const parsed = JSON.parse(shortcut.links || '[]');
     return Array.isArray(parsed) ? parsed : [];
   } catch { return []; }
+}
+
+function hasText(value) {
+  return !!(value && String(value).trim());
+}
+
+function isMarkdownLike(text) {
+  return /(?:^#{1,6}\s|\*\*|__|\[.+\]\(.+\)|```|^\s*[-*]\s|\|.+\|)/m.test(text || '');
+}
+
+function getDetailTabs(shortcut, links) {
+  const tabs = [{ id: 'code', label: 'Code' }];
+  if (hasText(shortcut.description)) tabs.push({ id: 'description', label: 'Description' });
+  if (links.length > 0) tabs.push({ id: 'links', label: 'Links' });
+  if (hasText(shortcut.obsidian_note)) tabs.push({ id: 'note', label: 'Note' });
+  return tabs;
+}
+
+function ensureValidDetailTab(tabs) {
+  if (!tabs.some(tab => tab.id === detailTab)) detailTab = 'code';
 }
 
 function renderDetail() {
@@ -195,14 +212,13 @@ function renderDetail() {
   }
 
   const shortcut = shortcuts[selectedIndex];
-  const hasDesc = shortcut.description && shortcut.description.trim();
   const links = parseLinks(shortcut);
   const hasLinks = links.length > 0;
+  const hasNote = shortcut.obsidian_note && shortcut.obsidian_note.trim();
+  const tabs = getDetailTabs(shortcut, links);
+  ensureValidDetailTab(tabs);
 
-  // Auto-open description if filled
-  if (hasDesc && !descOpen) descOpen = true;
-
-  // Header: name + [Main|Web] + actions — dark bg zone
+  // Header: name + actions — dark bg zone
   const header = document.createElement('div');
   header.style.cssText = 'display:flex;align-items:center;padding:10px 18px;border-bottom:1px solid var(--border);flex-shrink:0;gap:10px;background:var(--bg-secondary)';
 
@@ -210,37 +226,6 @@ function renderDetail() {
   nameEl.style.cssText = `margin:0;font-size:${fontSize + 1}px;font-weight:700;color:#f0f6fc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;font-family:'SF Mono','Cascadia Code','Fira Code',monospace;letter-spacing:-0.3px`;
   nameEl.textContent = shortcut.name;
   header.appendChild(nameEl);
-
-  // Main/Web/Note toggle
-  const hasNote = shortcut.obsidian_note && shortcut.obsidian_note.trim();
-  const showToggle = hasLinks || hasNote || obsidianConfigured;
-  if (showToggle) {
-    const toggle = document.createElement('div');
-    toggle.style.cssText = 'display:flex;gap:0;flex-shrink:0';
-
-    const tabs = [{ id: 'main', label: 'Main', show: true }];
-    if (hasLinks) tabs.push({ id: 'web', label: 'Web', show: true });
-    if (hasNote || obsidianConfigured) tabs.push({ id: 'note', label: 'Note', show: true });
-
-    tabs.forEach((tab, i) => {
-      if (!tab.show) return;
-      const btn = document.createElement('button');
-      btn.textContent = tab.label;
-      const isActive = viewMode === tab.id;
-      const isFirst = i === 0;
-      const isLast = i === tabs.length - 1;
-      const radius = isFirst ? '6px 0 0 6px' : isLast ? '0 6px 6px 0' : '0';
-      btn.style.cssText = `padding:3px 12px;font-size:11px;font-weight:500;border:1px solid var(--border);${!isFirst ? 'border-left:none;' : ''}cursor:pointer;border-radius:${radius};transition:all 0.12s;background:${isActive ? 'var(--bg-tertiary)' : 'transparent'};color:${isActive ? 'var(--text)' : 'var(--text-muted)'};border-color:${isActive ? '#30363d' : 'var(--border)'}`;
-      btn.addEventListener('click', () => {
-        viewMode = tab.id;
-        if (tab.id === 'web' && activeWebLink === null && links.length > 0) activeWebLink = 0;
-        renderDetail();
-      });
-      toggle.appendChild(btn);
-    });
-
-    header.appendChild(toggle);
-  }
 
   // Action buttons
   const actions = document.createElement('div');
@@ -267,248 +252,125 @@ function renderDetail() {
   header.appendChild(actions);
   detailEl.appendChild(header);
 
-  // Accent gradient line
-  const accentLine = document.createElement('div');
-  accentLine.style.cssText = 'height:2px;flex-shrink:0;background:linear-gradient(90deg,var(--accent),transparent 70%);opacity:0.4';
-  detailEl.appendChild(accentLine);
+  const tabBar = document.createElement('div');
+  tabBar.className = 'snippet-detail-tabs';
+  tabs.forEach(tab => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'snippet-detail-tab' + (detailTab === tab.id ? ' active' : '');
+    btn.textContent = tab.label;
+    btn.addEventListener('click', () => {
+      detailTab = tab.id;
+      renderDetail();
+    });
+    tabBar.appendChild(btn);
+  });
+  detailEl.appendChild(tabBar);
 
-  if (viewMode === 'main') {
-    renderMainView(shortcut, hasDesc, links, hasLinks);
-  } else if (viewMode === 'note') {
+  if (detailTab === 'code') {
+    renderCodeTab(shortcut, links, hasLinks);
+  } else if (detailTab === 'description') {
+    renderDescriptionTab(shortcut);
+  } else if (detailTab === 'links') {
+    renderLinksTab(links);
+  } else if (detailTab === 'note' && hasNote) {
     renderNoteView(shortcut);
   } else {
-    renderWebView(links);
+    detailTab = 'code';
+    renderCodeTab(shortcut, links, hasLinks);
   }
 }
 
-function renderMainView(shortcut, hasDesc, links, hasLinks) {
+function renderCodeTab(shortcut) {
   const mainView = document.createElement('div');
   mainView.style.cssText = 'flex:1;display:flex;flex-direction:column;overflow-y:auto';
 
   // Snippet value — render as markdown if content has markdown markers, otherwise raw
-  const hasMarkdown = /(?:^#{1,6}\s|\*\*|__|\[.+\]\(.+\)|```|^\s*[-*]\s|\|.+\|)/m.test(shortcut.value);
+  const hasMarkdown = isMarkdownLike(shortcut.value);
 
   let valueEl;
   if (hasMarkdown) {
     valueEl = document.createElement('div');
-    valueEl.className = 'markdown-body';
+    valueEl.className = 'markdown-body snippet-tab-content';
     valueEl.style.cssText = `font-size:${fontSize}px;padding:16px 18px;line-height:1.6`;
     valueEl.innerHTML = marked(shortcut.value);
+    enhanceMarkdownCodeBlocks(valueEl);
   } else {
     valueEl = document.createElement('pre');
+    valueEl.className = 'snippet-tab-content';
     valueEl.style.cssText = `font-family:'SF Mono','Cascadia Code','Fira Code',monospace;font-size:${fontSize - 1}px;line-height:1.65;color:var(--text);padding:16px 18px;white-space:pre-wrap;word-break:break-word;margin:0`;
     valueEl.textContent = shortcut.value;
   }
   mainView.appendChild(valueEl);
 
-  // Link chips (inline, below snippet text)
-  if (hasLinks) {
-    const linksInline = document.createElement('div');
-    linksInline.style.cssText = 'padding:8px 18px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;border-top:1px solid rgba(255,255,255,0.04)';
-
-    links.forEach((link, i) => {
-      const chip = document.createElement('div');
-      chip.style.cssText = 'display:inline-flex;align-items:center;gap:6px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;transition:border-color 0.15s';
-      chip.addEventListener('mouseenter', () => { chip.style.borderColor = 'var(--accent)'; });
-      chip.addEventListener('mouseleave', () => { chip.style.borderColor = 'var(--border)'; });
-
-      const icon = document.createElement('span');
-      icon.textContent = '🔗';
-      icon.style.cssText = 'font-size:11px';
-      chip.appendChild(icon);
-
-      const title = document.createElement('span');
-      title.textContent = link.title || link.url;
-      title.style.cssText = 'color:var(--text)';
-      chip.appendChild(title);
-
-      // Click chip → switch to Web view on this link
-      chip.addEventListener('click', (e) => {
-        if (e.target.classList.contains('link-ext')) return;
-        viewMode = 'web';
-        activeWebLink = i;
-        renderDetail();
-      });
-
-      // ↗ open in browser
-      const ext = document.createElement('span');
-      ext.textContent = '↗';
-      ext.className = 'link-ext';
-      ext.title = 'Open in browser';
-      ext.style.cssText = 'color:var(--text-muted);font-size:11px;cursor:pointer;padding:2px;border-radius:3px;margin-left:2px';
-      ext.addEventListener('mouseenter', () => { ext.style.color = 'var(--text)'; ext.style.background = 'var(--bg-tertiary)'; });
-      ext.addEventListener('mouseleave', () => { ext.style.color = 'var(--text-muted)'; ext.style.background = ''; });
-      ext.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        try { await call('open_url', { url: link.url }); } catch (err) { showToast('Error: ' + err, 'error'); }
-      });
-      chip.appendChild(ext);
-
-      linksInline.appendChild(chip);
-    });
-
-    mainView.appendChild(linksInline);
-  }
-
-  // Description (collapsible)
-  const descSection = document.createElement('div');
-  descSection.style.cssText = 'border-top:1px solid var(--border);flex-shrink:0';
-
-  const toggle = document.createElement('div');
-  toggle.style.cssText = 'display:flex;align-items:center;gap:6px;padding:6px 18px;cursor:pointer;font-size:11px;color:var(--text-muted);user-select:none';
-  toggle.addEventListener('mouseenter', () => { toggle.style.background = 'var(--bg-secondary)'; });
-  toggle.addEventListener('mouseleave', () => { toggle.style.background = ''; });
-
-  const arrow = document.createElement('span');
-  arrow.textContent = '\u25B6';
-  arrow.style.cssText = `font-size:10px;display:inline-block;transition:transform 0.2s;${descOpen ? 'transform:rotate(90deg)' : ''}`;
-  toggle.appendChild(arrow);
-
-  const label = document.createElement('span');
-  label.textContent = 'Description';
-  toggle.appendChild(label);
-
-  const badge = document.createElement('span');
-  badge.style.cssText = 'background:var(--bg-tertiary);padding:1px 5px;border-radius:6px;font-size:9px;color:var(--text-muted)';
-  badge.textContent = hasDesc ? 'filled' : 'empty';
-  if (!hasDesc) badge.style.opacity = '0.5';
-  toggle.appendChild(badge);
-
-  const descContent = document.createElement('div');
-  descContent.style.cssText = `max-height:300px;overflow-y:auto;padding:4px 18px 10px 18px;font-size:${fontSize - 1}px;color:var(--text);line-height:1.5;display:${descOpen ? 'block' : 'none'}`;
-  if (hasDesc) {
-    const hasMarkdownInDesc = /(?:^#{1,6}\s|\*\*|__|\[.+\]\(.+\)|```|^\s*[-*]\s|\|.+\|)/m.test(shortcut.description);
-    if (hasMarkdownInDesc) {
-      descContent.className = 'markdown-body';
-      descContent.innerHTML = marked(shortcut.description);
-    } else {
-      descContent.style.whiteSpace = 'pre-wrap';
-      descContent.style.wordBreak = 'break-word';
-      descContent.textContent = shortcut.description;
-    }
-  } else {
-    descContent.innerHTML = '<span style="color:var(--text-muted);font-style:italic">No description. Click Edit to add one.</span>';
-  }
-
-  toggle.addEventListener('click', () => {
-    descOpen = !descOpen;
-    arrow.style.transform = descOpen ? 'rotate(90deg)' : '';
-    descContent.style.display = descOpen ? 'block' : 'none';
-  });
-
-  descSection.appendChild(toggle);
-  descSection.appendChild(descContent);
-  mainView.appendChild(descSection);
-
   detailEl.appendChild(mainView);
 }
 
-function renderWebView(links) {
-  const webView = document.createElement('div');
-  webView.style.cssText = 'flex:1;display:flex;flex-direction:column;overflow:hidden';
+function renderDescriptionTab(shortcut) {
+  const view = document.createElement('div');
+  view.className = 'snippet-tab-pane snippet-tab-content';
+  view.style.cssText = `flex:1;overflow-y:auto;padding:16px 18px;font-size:${fontSize - 1}px;color:var(--text);line-height:1.5`;
 
-  // Compact link tabs + ↗ browser buttons
-  const tabBar = document.createElement('div');
-  tabBar.style.cssText = 'display:flex;padding:8px 16px;flex-shrink:0;border-bottom:1px solid var(--border);gap:4px;flex-wrap:wrap;align-items:center';
-
-  links.forEach((link, i) => {
-    const tabWrapper = document.createElement('div');
-    tabWrapper.style.cssText = 'display:inline-flex;align-items:center;gap:2px';
-
-    const tab = document.createElement('button');
-    const isActive = activeWebLink === i;
-    tab.textContent = link.title || link.url;
-    tab.style.cssText = `padding:4px 10px;font-size:12px;border:1px solid var(--border);border-radius:4px 0 0 4px;cursor:pointer;transition:all 0.15s;background:${isActive ? 'var(--bg-tertiary)' : 'transparent'};color:${isActive ? 'var(--text)' : 'var(--text-muted)'};border-color:${isActive ? '#30363d' : 'var(--border)'}`;
-    tab.addEventListener('click', () => { activeWebLink = i; renderDetail(); });
-    tabWrapper.appendChild(tab);
-
-    const extBtn = document.createElement('button');
-    extBtn.textContent = '↗';
-    extBtn.title = 'Open in browser';
-    extBtn.style.cssText = `padding:4px 6px;font-size:11px;border:1px solid var(--border);border-left:none;border-radius:0 4px 4px 0;cursor:pointer;background:transparent;color:var(--text-muted);transition:all 0.15s`;
-    extBtn.addEventListener('mouseenter', () => { extBtn.style.color = 'var(--text)'; extBtn.style.background = 'var(--bg-tertiary)'; });
-    extBtn.addEventListener('mouseleave', () => { extBtn.style.color = 'var(--text-muted)'; extBtn.style.background = ''; });
-    extBtn.addEventListener('click', async () => {
-      try { await call('open_url', { url: link.url }); } catch (err) { showToast('Error: ' + err, 'error'); }
-    });
-    tabWrapper.appendChild(extBtn);
-
-    tabBar.appendChild(tabWrapper);
-  });
-
-  webView.appendChild(tabBar);
-
-  // iframe area
-  const frameArea = document.createElement('div');
-  frameArea.style.cssText = 'flex:1;background:var(--bg-secondary);display:flex;flex-direction:column;overflow:hidden';
-
-  if (activeWebLink !== null && activeWebLink < links.length) {
-    const url = links[activeWebLink].url;
-    const iframe = document.createElement('iframe');
-    iframe.src = url;
-    iframe.style.cssText = 'width:100%;flex:1;border:none;background:white';
-
-    // Detect iframe load failure
-    const fallback = document.createElement('div');
-    fallback.style.cssText = 'display:none;flex:1;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:var(--text-muted)';
-    fallback.innerHTML = `
-      <div style="font-size:14px">This site blocked embedded viewing</div>
-      <div style="display:flex;gap:8px">
-        <button id="fb-app" style="padding:6px 16px;font-size:13px;background:var(--accent,#388bfd);color:white;border:none;border-radius:6px;cursor:pointer">Open in app window</button>
-        <button id="fb-browser" class="btn-secondary" style="padding:6px 16px;font-size:13px;background:var(--bg-tertiary);color:var(--text);border:1px solid var(--border);border-radius:6px;cursor:pointer">Open in browser</button>
-      </div>
-    `;
-
-    // Try to detect blocked iframe (heuristic: if contentWindow is inaccessible after load)
-    iframe.addEventListener('load', () => {
-      try {
-        // If we can access contentDocument, it loaded (or it's about:blank for blocked)
-        const doc = iframe.contentDocument;
-        if (!doc || !doc.body || doc.body.innerHTML === '') {
-          iframe.style.display = 'none';
-          fallback.style.display = 'flex';
-        }
-      } catch {
-        // Cross-origin — iframe loaded but we can't access it (this is normal/OK)
-      }
-    });
-
-    iframe.addEventListener('error', () => {
-      iframe.style.display = 'none';
-      fallback.style.display = 'flex';
-    });
-
-    // Timeout fallback — if iframe shows nothing after 5s
-    setTimeout(() => {
-      try {
-        const doc = iframe.contentDocument;
-        if (doc && doc.body && doc.body.innerHTML === '') {
-          iframe.style.display = 'none';
-          fallback.style.display = 'flex';
-        }
-      } catch { /* cross-origin, iframe is working */ }
-    }, 5000);
-
-    frameArea.appendChild(iframe);
-    frameArea.appendChild(fallback);
-
-    // Wire fallback buttons after DOM insertion
-    setTimeout(() => {
-      const appBtn = fallback.querySelector('#fb-app');
-      const browserBtn = fallback.querySelector('#fb-browser');
-      if (appBtn) appBtn.addEventListener('click', async () => {
-        try { await call('open_link_window', { url, title: links[activeWebLink].title || url }); } catch (err) { showToast('Error: ' + err, 'error'); }
-      });
-      if (browserBtn) browserBtn.addEventListener('click', async () => {
-        try { await call('open_url', { url }); } catch (err) { showToast('Error: ' + err, 'error'); }
-      });
-    }, 0);
+  if (isMarkdownLike(shortcut.description)) {
+    view.classList.add('markdown-body');
+    view.innerHTML = marked(shortcut.description);
+    enhanceMarkdownCodeBlocks(view);
   } else {
-    frameArea.innerHTML = '<div style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:14px">Select a link to view</div>';
+    view.style.whiteSpace = 'pre-wrap';
+    view.style.wordBreak = 'break-word';
+    view.textContent = shortcut.description;
   }
 
-  webView.appendChild(frameArea);
-  detailEl.appendChild(webView);
+  detailEl.appendChild(view);
+}
+
+function renderLinksTab(links) {
+  const view = document.createElement('div');
+  view.className = 'snippet-tab-pane snippet-links-tab';
+  view.style.cssText = 'flex:1;overflow-y:auto;padding:14px 18px;display:flex;flex-direction:column;gap:8px';
+
+  links.forEach(link => {
+    const row = document.createElement('div');
+    row.className = 'snippet-link-row';
+
+    const meta = document.createElement('div');
+    meta.className = 'snippet-link-meta';
+
+    const title = document.createElement('div');
+    title.className = 'snippet-link-title';
+    title.textContent = link.title || link.url;
+    meta.appendChild(title);
+
+    const url = document.createElement('div');
+    url.className = 'snippet-link-url';
+    url.textContent = link.url;
+    meta.appendChild(url);
+    row.appendChild(meta);
+
+    const browserBtn = document.createElement('button');
+    browserBtn.type = 'button';
+    browserBtn.className = 'snippet-link-action';
+    browserBtn.textContent = '↗';
+    browserBtn.title = 'Open in browser';
+    browserBtn.addEventListener('click', async () => {
+      try { await call('open_url', { url: link.url }); } catch (err) { showToast('Error: ' + err, 'error'); }
+    });
+    row.appendChild(browserBtn);
+
+    const windowBtn = document.createElement('button');
+    windowBtn.type = 'button';
+    windowBtn.className = 'snippet-link-action';
+    windowBtn.textContent = '▣';
+    windowBtn.title = 'Open in app window';
+    windowBtn.addEventListener('click', async () => {
+      try { await call('open_link_window', { url: link.url, title: link.title || link.url }); } catch (err) { showToast('Error: ' + err, 'error'); }
+    });
+    row.appendChild(windowBtn);
+
+    view.appendChild(row);
+  });
+
+  detailEl.appendChild(view);
 }
 
 // ── Obsidian Note View ──────────────────────────────────────
@@ -551,6 +413,7 @@ async function renderNoteView(shortcut) {
       const md = await call('read_obsidian_note', { notePath: shortcut.obsidian_note });
       contentArea.classList.add('markdown-body');
       contentArea.innerHTML = marked(md);
+      enhanceMarkdownCodeBlocks(contentArea);
     } catch (err) {
       contentArea.innerHTML = `<div style="color:var(--text-muted);text-align:center;margin-top:32px">
         <p>Cannot read note: ${err}</p>
@@ -681,7 +544,7 @@ async function openCreateNoteModal(shortcut) {
       try {
         await call('create_obsidian_note', { snippetId: shortcut.id, vault, folder, filename });
         showToast('Note created', 'success');
-        viewMode = 'note';
+        detailTab = 'note';
         await loadShortcuts();
       } catch (err) { showToast('Error: ' + err, 'error'); }
     },
@@ -758,7 +621,7 @@ async function openLinkNoteModal(shortcut) {
       try {
         await call('link_obsidian_note', { snippetId: shortcut.id, notePath });
         showToast('Note linked', 'success');
-        viewMode = 'note';
+        detailTab = 'note';
         await loadShortcuts();
       } catch (err) { showToast('Error: ' + err, 'error'); }
     },
@@ -996,7 +859,7 @@ function onKeydown(e) {
     e.preventDefault();
     if (shortcuts.length === 0) return;
     selectedIndex = Math.min(selectedIndex + 1, shortcuts.length - 1);
-    viewMode = 'main'; descOpen = false; activeWebLink = null;
+    detailTab = 'code';
     renderList();
     renderDetail();
     scrollToSelected();
@@ -1004,7 +867,7 @@ function onKeydown(e) {
     e.preventDefault();
     if (shortcuts.length === 0) return;
     selectedIndex = Math.max(selectedIndex - 1, 0);
-    viewMode = 'main'; descOpen = false; activeWebLink = null;
+    detailTab = 'code';
     renderList();
     renderDetail();
     scrollToSelected();
@@ -1022,6 +885,30 @@ function scrollToSelected() {
   if (items[selectedIndex]) {
     items[selectedIndex].scrollIntoView({ block: 'nearest' });
   }
+}
+
+function enhanceMarkdownCodeBlocks(root) {
+  root.querySelectorAll('pre').forEach(pre => {
+    if (pre.querySelector('.markdown-code-copy')) return;
+    const code = pre.querySelector('code');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'markdown-code-copy';
+    btn.textContent = '⧉';
+    btn.title = 'Copy code block';
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const text = code ? code.textContent : pre.textContent;
+      try {
+        await navigator.clipboard.writeText(text);
+        showToast('Copied to clipboard', 'success');
+      } catch (err) {
+        showToast('Failed to copy: ' + err, 'error');
+      }
+    });
+    pre.appendChild(btn);
+  });
 }
 
 // Strip Markdown code fences before copying. Removes:
@@ -1063,6 +950,15 @@ async function copyAndHide(text) {
   }
 }
 
+function focusWhenVisible(el) {
+  setTimeout(() => {
+    try {
+      el.focus();
+      if (typeof el.select === 'function') el.select();
+    } catch {}
+  }, 0);
+}
+
 function openEditor(shortcut) {
   const isEdit = shortcut !== null;
 
@@ -1082,12 +978,62 @@ function openEditor(shortcut) {
   form.appendChild(valueInput);
   attachToolbar(valueInput);
 
+  let descExpanded = false;
+
+  const descSection = document.createElement('div');
+  descSection.className = 'snippet-editor-desc-section';
+  descSection.style.cssText = 'display:flex;flex-direction:column;gap:0';
+
+  const descToggle = document.createElement('button');
+  descToggle.type = 'button';
+  descToggle.className = 'snippet-editor-desc-toggle';
+  descToggle.style.cssText = 'display:flex;align-items:center;gap:6px;padding:6px 8px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);cursor:pointer;text-align:left';
+
+  const descArrow = document.createElement('span');
+  descArrow.textContent = '▶';
+  descArrow.style.cssText = 'font-size:10px;transition:transform 0.15s';
+  descToggle.appendChild(descArrow);
+
+  const descLabel = document.createElement('span');
+  descLabel.textContent = 'Description';
+  descLabel.style.cssText = 'font-size:13px;font-weight:600;color:var(--text)';
+  descToggle.appendChild(descLabel);
+
+  const descBadge = document.createElement('span');
+  descBadge.className = 'snippet-editor-desc-badge';
+  descBadge.textContent = isEdit && hasText(shortcut.description) ? 'filled' : 'empty';
+  descBadge.style.cssText = 'margin-left:auto;background:var(--bg-tertiary);padding:1px 6px;border-radius:8px;font-size:10px;color:var(--text-muted)';
+  descToggle.appendChild(descBadge);
+
+  const descBody = document.createElement('div');
+  descBody.style.cssText = 'display:none;flex-direction:column';
+
   const descInput = document.createElement('textarea');
   descInput.placeholder = 'Description (optional — documentation, notes, context)';
   descInput.rows = 3;
   descInput.value = isEdit ? shortcut.description : '';
-  form.appendChild(descInput);
+  descBody.appendChild(descInput);
   attachToolbar(descInput);
+
+  function renderDescCollapse() {
+    descArrow.style.transform = descExpanded ? 'rotate(90deg)' : '';
+    descBody.style.display = descExpanded ? 'flex' : 'none';
+  }
+
+  descToggle.addEventListener('click', () => {
+    descExpanded = !descExpanded;
+    renderDescCollapse();
+    if (descExpanded) focusWhenVisible(descInput);
+  });
+
+  descInput.addEventListener('input', () => {
+    descBadge.textContent = hasText(descInput.value) ? 'filled' : 'empty';
+  });
+
+  descSection.appendChild(descToggle);
+  descSection.appendChild(descBody);
+  form.appendChild(descSection);
+  renderDescCollapse();
 
   // Links section
   const linksLabel = document.createElement('div');
@@ -1149,7 +1095,7 @@ function openEditor(shortcut) {
   });
   form.appendChild(addLinkBtn);
 
-  // Obsidian note (read-only display)
+  // Obsidian note actions
   if (isEdit && shortcut.obsidian_note && shortcut.obsidian_note.trim()) {
     const noteLabel = document.createElement('div');
     noteLabel.textContent = 'Obsidian note:';
@@ -1177,6 +1123,37 @@ function openEditor(shortcut) {
       } catch (err) { showToast('Error: ' + err, 'error'); }
     });
     noteRow.appendChild(unlinkBtn);
+
+    form.appendChild(noteRow);
+  } else if (isEdit && obsidianConfigured) {
+    const noteLabel = document.createElement('div');
+    noteLabel.textContent = 'Obsidian note:';
+    noteLabel.style.cssText = 'font-size:13px;font-weight:600;color:var(--text);margin-top:4px';
+    form.appendChild(noteLabel);
+
+    const noteRow = document.createElement('div');
+    noteRow.style.cssText = 'display:flex;align-items:center;gap:8px';
+
+    const noteHint = document.createElement('span');
+    noteHint.textContent = 'No linked note';
+    noteHint.style.cssText = 'font-size:12px;color:var(--text-muted);flex:1';
+    noteRow.appendChild(noteHint);
+
+    const createNoteBtn = document.createElement('button');
+    createNoteBtn.type = 'button';
+    createNoteBtn.className = 'btn-secondary';
+    createNoteBtn.textContent = 'Create note';
+    createNoteBtn.style.cssText = 'padding:2px 10px;font-size:11px;flex-shrink:0';
+    createNoteBtn.addEventListener('click', () => openCreateNoteModal(shortcut));
+    noteRow.appendChild(createNoteBtn);
+
+    const linkNoteBtn = document.createElement('button');
+    linkNoteBtn.type = 'button';
+    linkNoteBtn.className = 'btn-secondary';
+    linkNoteBtn.textContent = 'Link existing';
+    linkNoteBtn.style.cssText = 'padding:2px 10px;font-size:11px;flex-shrink:0';
+    linkNoteBtn.addEventListener('click', () => openLinkNoteModal(shortcut));
+    noteRow.appendChild(linkNoteBtn);
 
     form.appendChild(noteRow);
   }
@@ -1208,6 +1185,7 @@ function openEditor(shortcut) {
       }
     },
   }).catch(() => {});
+  if (!isEdit) focusWhenVisible(nameInput);
 }
 
 function confirmDelete(shortcut) {
