@@ -509,8 +509,83 @@ async def run_tests():
         )
     await check('T15 Tasks Pin updates pinned strip', t15_tasks_pin_updates_strip)
 
-    # ── T16: Snippets detail tabs are conditional ────────────
-    async def t16_snippets_tabs_conditional():
+    # ── T16: Tasks Focus view layout/search/outside pinned ──
+    async def t16_tasks_focus_view_layout_search_and_outside_pin():
+        await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"tasks\"]').click()")
+        await wait_until(cdp, "!!document.querySelector('#tasks-layout-focus')", timeout=5)
+
+        await cdp.eval("document.querySelector('#tasks-layout-focus').click()")
+        await wait_until(cdp, "!!document.querySelector('#tasks-cards-scroll.focus')", timeout=3)
+
+        modes = await cdp.eval(
+            "[...document.querySelectorAll('.tasks-layout-mode')].map(x => x.title)"
+        )
+        assert modes == ['One column', 'Two columns', 'Focus view'], f'modes: {modes!r}'
+
+        await wait_until(cdp, "!!document.querySelector('.tasks-focus-search')", timeout=3)
+        row_titles = await cdp.eval(
+            "[...document.querySelectorAll('.tasks-focus-row-title')].map(x => x.textContent.trim())"
+        )
+        assert 'Pinned mock task' in row_titles, row_titles
+        assert 'Regular mock task' in row_titles, row_titles
+
+        await cdp.eval(
+            "(() => {"
+            "const input=document.querySelector('.tasks-focus-search');"
+            "input.value='regular';"
+            "input.dispatchEvent(new Event('input', { bubbles: true }));"
+            "})()"
+        )
+        searched = await cdp.eval(
+            "[...document.querySelectorAll('.tasks-focus-row-title')].map(x => x.textContent.trim())"
+        )
+        assert searched == ['Regular mock task'], f'searched: {searched!r}'
+
+        await cdp.eval(
+            "(() => {"
+            "const input=document.querySelector('.tasks-focus-search');"
+            "input.value='';"
+            "input.dispatchEvent(new Event('input', { bubbles: true }));"
+            "})()"
+        )
+        await cdp.eval("document.querySelector('#tasks-cat-dropdown').click()")
+        await wait_until(cdp, "!!document.querySelector('.tasks-dropdown-menu')", timeout=3)
+        await cdp.eval(
+            "[...document.querySelectorAll('.tasks-dropdown-item')]"
+            ".find(x => x.textContent.includes('Work')).click()"
+        )
+        await wait_until(
+            cdp,
+            "[...document.querySelectorAll('.tasks-focus-row-title')]"
+            ".every(x => !x.textContent.includes('Pinned personal task'))",
+            timeout=3,
+        )
+
+        await cdp.eval(
+            "[...document.querySelectorAll('#tasks-pinned .tasks-pinned-chip-label')]"
+            ".find(x => x.textContent.includes('Pinned personal task')).click()"
+        )
+        await wait_until(
+            cdp,
+            "document.querySelector('.tasks-focus-outside-banner')?.textContent.includes('outside current filters')",
+            timeout=3,
+        )
+        selected_title = await cdp.eval("document.querySelector('.tasks-focus-detail .task-editor-title')?.value")
+        assert selected_title == 'Pinned personal task', f'selected title: {selected_title!r}'
+
+        await cdp.eval("document.querySelector('.tasks-focus-show-in-list').click()")
+        await wait_until(
+            cdp,
+            "[...document.querySelectorAll('.tasks-focus-row-title')]"
+            ".some(x => x.textContent.includes('Pinned personal task'))",
+            timeout=3,
+        )
+        category_label = await cdp.eval("document.querySelector('#tasks-cat-dropdown')?.textContent")
+        assert 'Personal' in category_label, f'category label: {category_label!r}'
+    await check('T16 Tasks Focus view layout/search/outside pinned', t16_tasks_focus_view_layout_search_and_outside_pin)
+
+    # ── T17: Snippets detail tabs are conditional ────────────
+    async def t17_snippets_tabs_conditional():
         await open_shortcuts_tab()
         await cdp.eval(
             "[...document.querySelectorAll('#panel-shortcuts div')]"
@@ -533,10 +608,10 @@ async def run_tests():
         assert tabs_full == ['Code', 'Description', 'Links', 'Note'], f'full tabs: {tabs_full!r}'
         iframe_count = await cdp.eval("document.querySelectorAll('#panel-shortcuts iframe').length")
         assert iframe_count == 0, f'embedded iframe should not render, got {iframe_count}'
-    await check('T16 Snippets detail tabs are conditional', t16_snippets_tabs_conditional)
+    await check('T17 Snippets detail tabs are conditional', t17_snippets_tabs_conditional)
 
-    # ── T17: Snippets Links tab exposes explicit actions ─────
-    async def t17_snippets_links_tab_actions():
+    # ── T18: Snippets Links tab exposes explicit actions ─────
+    async def t18_snippets_links_tab_actions():
         await open_shortcuts_tab()
         await cdp.eval(
             "[...document.querySelectorAll('#panel-shortcuts div')]"
@@ -553,10 +628,10 @@ async def run_tests():
             "[...document.querySelectorAll('.snippet-link-row:first-child button')].map(x => x.title)"
         )
         assert actions == ['Open in browser', 'Open in app window'], f'actions: {actions!r}'
-    await check('T17 Snippets Links tab exposes explicit actions', t17_snippets_links_tab_actions)
+    await check('T18 Snippets Links tab exposes explicit actions', t18_snippets_links_tab_actions)
 
-    # ── T18: Snippets Markdown code block copy ───────────────
-    async def t18_snippets_markdown_code_copy():
+    # ── T19: Snippets Markdown code block copy ───────────────
+    async def t19_snippets_markdown_code_copy():
         await open_shortcuts_tab()
         await cdp.eval(
             "[...document.querySelectorAll('#panel-shortcuts div')]"
@@ -574,10 +649,10 @@ async def run_tests():
             timeout=3,
         )
         assert copied == 'print("hello")\nprint("world")', f'copied: {copied!r}'
-    await check('T18 Snippets Markdown code block copy', t18_snippets_markdown_code_copy)
+    await check('T19 Snippets Markdown code block copy', t19_snippets_markdown_code_copy)
 
-    # ── T19: New snippet editor focus + description collapse ─
-    async def t19_snippets_new_editor_focus_and_description_collapse():
+    # ── T20: New snippet editor focus + description collapse ─
+    async def t20_snippets_new_editor_focus_and_description_collapse():
         await open_shortcuts_tab()
         await cdp.eval("document.querySelector('#panel-shortcuts button[title=\"Add shortcut\"]').click()")
         await wait_until(cdp, "!!document.querySelector('.modal-overlay input[placeholder=\"Name\"]')", timeout=3)
@@ -594,10 +669,10 @@ async def run_tests():
             "document.querySelector('.snippet-editor-desc-toggle .snippet-editor-desc-badge')?.textContent"
         )
         assert badge == 'empty', f'description badge: {badge!r}'
-    await check('T19 Snippets new editor focuses name and collapses description', t19_snippets_new_editor_focus_and_description_collapse)
+    await check('T20 Snippets new editor focuses name and collapses description', t20_snippets_new_editor_focus_and_description_collapse)
 
-    # ── T20: Toolbar code button inserts fenced block ────────
-    async def t20_snippets_toolbar_code_block_insert():
+    # ── T21: Toolbar code button inserts fenced block ────────
+    async def t21_snippets_toolbar_code_block_insert():
         await open_shortcuts_tab()
         await cdp.eval("document.querySelector('#panel-shortcuts button[title=\"Add shortcut\"]').click()")
         await wait_until(cdp, "!!document.querySelector('.modal-overlay textarea[placeholder^=\"Value\"]')", timeout=3)
@@ -611,10 +686,10 @@ async def run_tests():
         caret = await cdp.eval("document.querySelector('.modal-overlay textarea[placeholder^=\"Value\"]').selectionStart")
         assert value == '```\n\n```', f'value: {value!r}'
         assert caret == 4, f'caret: {caret}'
-    await check('T20 Snippets toolbar inserts fenced code block', t20_snippets_toolbar_code_block_insert)
+    await check('T21 Snippets toolbar inserts fenced code block', t21_snippets_toolbar_code_block_insert)
 
-    # ── T21: Snippets tab hover uses readable tint ───────────
-    async def t21_snippets_tab_hover_css():
+    # ── T22: Snippets tab hover uses readable tint ───────────
+    async def t22_snippets_tab_hover_css():
         hover_rule = await cdp.eval("""(() => {
           for (const sheet of document.styleSheets) {
             let rules;
@@ -635,10 +710,10 @@ async def run_tests():
         assert hover_rule['background'] == 'rgba(88, 166, 255, 0.18)', hover_rule
         assert hover_rule['color'] == 'rgb(255, 255, 255)', hover_rule
         assert hover_rule['border'] == 'rgb(121, 192, 255)', hover_rule
-    await check('T21 Snippets tab hover uses readable tint', t21_snippets_tab_hover_css)
+    await check('T22 Snippets tab hover uses readable tint', t22_snippets_tab_hover_css)
 
-    # ── T22: Snippets code block headers and indented fences ─
-    async def t22_snippets_code_block_headers_and_indented_fences():
+    # ── T23: Snippets code block headers and indented fences ─
+    async def t23_snippets_code_block_headers_and_indented_fences():
         await open_shortcuts_tab()
         await cdp.eval(
             "[...document.querySelectorAll('#panel-shortcuts div')]"
@@ -659,7 +734,7 @@ async def run_tests():
         copied = await wait_until(cdp, "window.__copiedText", timeout=3)
         assert 'echo ok' in copied, f'copied: {copied!r}'
         assert 'bash' not in copied, f'copied includes header: {copied!r}'
-    await check('T22 Snippets code block headers and indented fences', t22_snippets_code_block_headers_and_indented_fences)
+    await check('T23 Snippets code block headers and indented fences', t23_snippets_code_block_headers_and_indented_fences)
 
     # Summary
     print()

@@ -20,8 +20,10 @@ const state = {
     category: 'all', // 'all' | 'none' | string-of-id
     status:   'all',
   },
-  layoutMode: 'one-col', // 'one-col' | 'two-col'
-  expandedTaskId: null,  // id of currently expanded card (at most one)
+  layoutMode: 'one-col', // 'one-col' | 'two-col' | 'focus'
+  expandedTaskId: null,  // selected/expanded task id
+  selectedTask: null,    // task snapshot for Focus view, including outside-filter tasks
+  focusSearch: '',
   // Count of tasks with category_id=NULL / status_id=NULL. Derived from
   // `tasks` (unfiltered). Used to show the "None" item in dropdowns only
   // when there is something to show.
@@ -44,7 +46,7 @@ export async function init(container) {
   // Restore layout mode from settings (best-effort).
   try {
     const saved = await call('get_setting', { key: 'tasks_layout_mode' });
-    if (saved === 'two-col' || saved === 'one-col') {
+    if (saved === 'two-col' || saved === 'one-col' || saved === 'focus') {
       state.layoutMode = saved;
     }
   } catch { /* ignore */ }
@@ -138,14 +140,22 @@ function buildLayout() {
   newBtn.addEventListener('click', onNewTask);
   filterRow.appendChild(newBtn);
 
-  // Layout toggle button (right corner). SVG icon flips based on mode.
-  const toggleBtn = document.createElement('button');
-  toggleBtn.id = 'tasks-layout-toggle';
-  toggleBtn.className = 'tasks-layout-toggle';
-  toggleBtn.title = 'Toggle 1/2 column layout';
-  toggleBtn.type = 'button';
-  toggleBtn.addEventListener('click', onToggleLayout);
-  filterRow.appendChild(toggleBtn);
+  const modes = el('div', { id: 'tasks-layout-toggle', class: 'tasks-layout-switch' });
+  [
+    { id: 'one-col', btnId: 'tasks-layout-one', title: 'One column', icon: oneColumnIcon() },
+    { id: 'two-col', btnId: 'tasks-layout-two', title: 'Two columns', icon: twoColumnIcon() },
+    { id: 'focus', btnId: 'tasks-layout-focus', title: 'Focus view', icon: focusViewIcon() },
+  ].forEach(mode => {
+    const btn = document.createElement('button');
+    btn.id = mode.btnId;
+    btn.className = 'tasks-layout-mode';
+    btn.type = 'button';
+    btn.title = mode.title;
+    btn.innerHTML = mode.icon;
+    btn.addEventListener('click', () => onSetLayoutMode(mode.id));
+    modes.appendChild(btn);
+  });
+  filterRow.appendChild(modes);
 
   wrap.appendChild(filterRow);
 
@@ -218,6 +228,10 @@ export async function reloadAll() {
 export async function reloadTasks() {
   await loadTasks();
   await loadPinned();
+  if (state.expandedTaskId != null) {
+    state.selectedTask = findTaskById(state.expandedTaskId)
+      || (state.selectedTask && state.selectedTask.id === state.expandedTaskId ? state.selectedTask : null);
+  }
   await renderTaskList();
   renderPinnedStrip();
   // Dropdowns may need to show/hide the "None" item as orphan counts change.
@@ -236,7 +250,7 @@ async function renderAll() {
 function renderPinnedStrip() {
   const el = state.root.querySelector('#tasks-pinned');
   if (!el) return;
-  renderPinnedChips(el, state.pinned, state.categories, (task) => openExpanded(task.id));
+  renderPinnedChips(el, state.pinned, state.categories, (task) => openExpanded(task.id, task));
 }
 
 function renderDropdowns() {
@@ -272,25 +286,46 @@ function renderDropdowns() {
 }
 
 function renderLayoutToggle() {
-  const btn = state.root.querySelector('#tasks-layout-toggle');
-  if (!btn) return;
-  const isTwoCol = state.layoutMode === 'two-col';
-  btn.classList.toggle('active', isTwoCol);
-  btn.title = isTwoCol ? 'Switch to 1 column' : 'Switch to 2 columns';
-  btn.innerHTML = isTwoCol
-    ? `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8">
-         <rect x="2" y="2" width="12" height="12" rx="1.5"/>
-         <line x1="8" y1="2" x2="8" y2="14"/>
-       </svg>`
-    : `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8">
-         <rect x="2" y="2" width="12" height="12" rx="1.5"/>
-       </svg>`;
+  for (const btn of state.root.querySelectorAll('.tasks-layout-mode')) {
+    const mode = btn.id === 'tasks-layout-one'
+      ? 'one-col'
+      : btn.id === 'tasks-layout-two'
+        ? 'two-col'
+        : 'focus';
+    btn.classList.toggle('active', state.layoutMode === mode);
+  }
+}
+
+function oneColumnIcon() {
+  return `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8">
+    <rect x="2" y="2" width="12" height="12" rx="1.5"/>
+  </svg>`;
+}
+
+function twoColumnIcon() {
+  return `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8">
+    <rect x="2" y="2" width="12" height="12" rx="1.5"/>
+    <line x1="8" y1="2" x2="8" y2="14"/>
+  </svg>`;
+}
+
+function focusViewIcon() {
+  return `<svg viewBox="0 0 18 16" fill="none" stroke="currentColor" stroke-width="1.7">
+    <rect x="1.8" y="2" width="14.4" height="12" rx="1.6"/>
+    <line x1="7" y1="2" x2="7" y2="14"/>
+    <line x1="3.5" y1="5" x2="5.4" y2="5"/>
+    <line x1="3.5" y1="8" x2="5.4" y2="8"/>
+    <line x1="3.5" y1="11" x2="5.4" y2="11"/>
+    <line x1="9.2" y1="5.2" x2="14" y2="5.2"/>
+    <line x1="9.2" y1="8" x2="14" y2="8"/>
+    <line x1="9.2" y1="10.8" x2="12.4" y2="10.8"/>
+  </svg>`;
 }
 
 function applyLayoutMode() {
   const scroll = state.root.querySelector('#tasks-cards-scroll');
   if (!scroll) return;
-  scroll.classList.remove('one-col', 'two-col');
+  scroll.classList.remove('one-col', 'two-col', 'focus');
   scroll.classList.add(state.layoutMode);
 }
 
@@ -298,6 +333,10 @@ async function renderTaskList() {
   const scroll = state.root.querySelector('#tasks-cards-scroll');
   if (!scroll) return;
   scroll.innerHTML = '';
+  if (state.layoutMode === 'focus') {
+    await renderFocusView(scroll);
+    return;
+  }
   if (!state.tasks.length) {
     scroll.appendChild(el('div', { class: 'tasks-empty', text: 'No tasks yet. Click "+ New task" to add one.' }));
     return;
@@ -342,6 +381,162 @@ async function renderTaskList() {
   }
 }
 
+async function renderFocusView(scroll) {
+  ensureFocusSelection();
+
+  const shell = el('div', { class: 'tasks-focus-shell' });
+  const left = el('div', { class: 'tasks-focus-list' });
+  const right = el('div', { class: 'tasks-focus-detail' });
+  shell.appendChild(left);
+  shell.appendChild(right);
+  scroll.appendChild(shell);
+
+  renderFocusLeftPane(left);
+  await renderFocusRightPane(right);
+}
+
+function findTaskById(id) {
+  if (id == null) return null;
+  return state.tasks.find(t => t.id === id)
+    || state.pinned.find(t => t.id === id)
+    || (state.selectedTask && state.selectedTask.id === id ? state.selectedTask : null);
+}
+
+function ensureFocusSelection() {
+  const current = findTaskById(state.expandedTaskId);
+  if (current) {
+    state.selectedTask = current;
+    return current;
+  }
+  const first = state.tasks[0] || null;
+  state.expandedTaskId = first ? first.id : null;
+  state.selectedTask = first;
+  return first;
+}
+
+function isSelectedOutsideTopFilters() {
+  return !!state.expandedTaskId && !state.tasks.some(t => t.id === state.expandedTaskId);
+}
+
+function getCategory(task) {
+  return state.categories.find(c => c.id === task.category_id) || null;
+}
+
+function getStatus(task) {
+  return state.statuses.find(s => s.id === task.status_id) || null;
+}
+
+function renderFocusLeftPane(left) {
+  const tools = el('div', { class: 'tasks-focus-tools' });
+  const input = document.createElement('input');
+  input.className = 'tasks-focus-search';
+  input.type = 'search';
+  input.placeholder = 'Search visible tasks...';
+  input.value = state.focusSearch;
+  input.addEventListener('input', () => {
+    state.focusSearch = input.value;
+    renderTaskList();
+  });
+  tools.appendChild(input);
+  tools.appendChild(el('span', { class: 'tasks-focus-count', text: String(getFocusVisibleTasks().length) }));
+  left.appendChild(tools);
+
+  const visible = getFocusVisibleTasks();
+  if (!state.tasks.length) {
+    left.appendChild(el('div', { class: 'tasks-focus-empty', text: 'No tasks match the current filters.' }));
+    return;
+  }
+  if (!visible.length) {
+    left.appendChild(el('div', { class: 'tasks-focus-empty', text: 'No visible tasks match search.' }));
+    return;
+  }
+
+  for (const task of visible) {
+    left.appendChild(renderFocusRow(task));
+  }
+}
+
+function getFocusVisibleTasks() {
+  const q = state.focusSearch.trim().toLowerCase();
+  if (!q) return state.tasks;
+  return state.tasks.filter(t => String(t.title || '').toLowerCase().includes(q));
+}
+
+function renderFocusRow(task) {
+  const row = el('button', { class: 'tasks-focus-row' });
+  row.type = 'button';
+  row.dataset.taskId = String(task.id);
+  row.classList.toggle('active', state.expandedTaskId === task.id);
+
+  const cat = getCategory(task);
+  const st = getStatus(task);
+
+  const bar = el('span', { class: 'tasks-focus-cat-bar' });
+  if (cat) bar.style.background = cat.color;
+  row.appendChild(bar);
+
+  const dot = el('span', { class: 'tasks-focus-status-dot' });
+  if (st) dot.style.background = st.color;
+  row.appendChild(dot);
+
+  row.appendChild(el('span', { class: 'tasks-focus-row-title', text: task.title || '(untitled)' }));
+  if (task.is_pinned) row.appendChild(el('span', { class: 'tasks-focus-pin', text: '📌' }));
+
+  row.addEventListener('click', async () => {
+    state.expandedTaskId = task.id;
+    state.selectedTask = task;
+    await renderTaskList();
+  });
+  return row;
+}
+
+async function renderFocusRightPane(right) {
+  const selected = findTaskById(state.expandedTaskId);
+  if (!selected) {
+    const text = state.tasks.length
+      ? 'Select a task from the list.'
+      : 'No tasks match the current filters.';
+    right.appendChild(el('div', { class: 'tasks-focus-detail-empty', text }));
+    return;
+  }
+
+  state.selectedTask = selected;
+
+  if (isSelectedOutsideTopFilters()) {
+    const banner = el('div', { class: 'tasks-focus-outside-banner' });
+    banner.appendChild(el('span', { text: 'Opened from pinned chips. This task is outside current filters.' }));
+    const showBtn = document.createElement('button');
+    showBtn.className = 'task-editor-btn tasks-focus-show-in-list';
+    showBtn.type = 'button';
+    showBtn.textContent = 'Show in list';
+    showBtn.addEventListener('click', async () => showSelectedTaskInList(selected));
+    banner.appendChild(showBtn);
+    right.appendChild(banner);
+  }
+
+  const card = renderCard(selected, {
+    expanded: true,
+    state,
+    onExpandToggle: async () => {
+      state.expandedTaskId = null;
+      state.selectedTask = null;
+      await renderTaskList();
+    },
+    onTaskReload: async () => reloadTasks(),
+  });
+  card.classList.add('tasks-focus-card');
+  right.appendChild(card);
+}
+
+async function showSelectedTaskInList(task) {
+  state.filter.category = task.category_id == null ? 'none' : String(task.category_id);
+  state.filter.status = task.status_id == null ? 'none' : String(task.status_id);
+  state.expandedTaskId = task.id;
+  state.selectedTask = task;
+  state.focusSearch = '';
+  await reloadTasks();
+}
+
 // ── Expand / collapse ───────────────────────────────────────
 
 async function toggleExpanded(id) {
@@ -349,8 +544,9 @@ async function toggleExpanded(id) {
   await renderTaskList();
 }
 
-export async function openExpanded(id) {
+export async function openExpanded(id, taskSnapshot = null) {
   state.expandedTaskId = id;
+  if (taskSnapshot) state.selectedTask = taskSnapshot;
   await renderTaskList();
   // Ensure card is scrolled into view.
   setTimeout(() => {
@@ -375,16 +571,20 @@ async function onNewTask() {
       statusId: stId,
     });
     state.expandedTaskId = t.id;
+    state.selectedTask = t;
     await reloadTasks();
   } catch (e) {
     showToast('Failed to create task: ' + e, 'error');
   }
 }
 
-async function onToggleLayout() {
-  state.layoutMode = state.layoutMode === 'two-col' ? 'one-col' : 'two-col';
+async function onSetLayoutMode(mode) {
+  if (!['one-col', 'two-col', 'focus'].includes(mode)) return;
+  state.layoutMode = mode;
+  if (mode === 'focus') ensureFocusSelection();
   applyLayoutMode();
   renderLayoutToggle();
+  await renderTaskList();
   try {
     await call('set_setting', { key: 'tasks_layout_mode', value: state.layoutMode });
   } catch { /* non-fatal */ }

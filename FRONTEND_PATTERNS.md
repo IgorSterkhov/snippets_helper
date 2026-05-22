@@ -186,3 +186,20 @@ For `f-*` releases: 3 assets expected (frontend zip, `frontend-version.json`, `l
 
 **Verification:** browser smoke tests should cover an indented fenced block,
 typed blocks such as `bash` and `sql`, an untyped `plain` block, and copy output.
+
+---
+
+## §6 Focus split view
+
+**Used in:** Tasks tab Focus view
+
+Use this pattern when an existing card/list module needs a focused single-item
+editor without removing global filters.
+
+- Keep global filters and pinned/shortcut chips above the split.
+- Left pane is a compact index of the currently filtered items.
+- Local search filters only the left pane's already-visible items.
+- Right pane may render an item outside current filters when opened from a
+  global chip; show a banner and an explicit action to adjust filters.
+- Do not mix compact-index rows with card drag-and-drop unless a separate
+  reorder design is approved.

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Tasks:** added Focus view with a searchable task index on the left,
+  selected task editor on the right, and an outside-filter banner for pinned
+  tasks opened from the top chip strip.
 - **Snippets:** rendered Markdown code blocks now tolerate leading spaces before
   triple-backtick fences and show compact language headers (`bash`, `sql`,
   `plain`, etc.) with the copy action in the header.

@@ -175,8 +175,13 @@
         is_pinned: false, bg_color: null, tracker_url: null, notes_md: '',
         sort_order: 1, created_at: now(), updated_at: now(), sync_status: 'synced', user_id: 'mock-user',
       },
+      {
+        id: 3, uuid: uuid(), title: 'Pinned personal task', category_id: 2, status_id: 1,
+        is_pinned: true, bg_color: null, tracker_url: null, notes_md: 'Outside Work filter',
+        sort_order: 2, created_at: now(), updated_at: now(), sync_status: 'synced', user_id: 'mock-user',
+      },
     ]);
-    storeSet('__seq.tasks', 2);
+    storeSet('__seq.tasks', 3);
     storeSet('task_checkboxes', []);
     storeSet('__seq.task_checkboxes', 0);
 

@@ -103,22 +103,35 @@ export function tasksCSS() {
   border: 1px dashed var(--text-muted);
 }
 
-/* Layout toggle */
-.tasks-layout-toggle {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 30px; height: 30px;
-  border: 1px solid var(--border); border-radius: 4px;
+/* Layout switch */
+.tasks-layout-switch {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 4px;
   background: var(--bg-secondary);
+  overflow: hidden;
+}
+.tasks-layout-mode {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-right: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
   cursor: pointer;
   padding: 0;
-  color: var(--text-muted);
 }
-.tasks-layout-toggle:hover { border-color: var(--text-muted); color: var(--text); }
-.tasks-layout-toggle.active {
-  border-color: var(--accent);
+.tasks-layout-mode:last-child { border-right: none; }
+.tasks-layout-mode:hover { color: var(--text); background: var(--bg-tertiary); }
+.tasks-layout-mode.active {
   color: var(--accent);
+  background: rgba(56, 139, 253, 0.12);
 }
-.tasks-layout-toggle svg { width: 16px; height: 16px; display: block; }
+.tasks-layout-mode svg { width: 16px; height: 16px; display: block; }
+#tasks-layout-focus svg { width: 18px; }
 
 /* Cards scroll */
 .tasks-cards-scroll {
@@ -141,6 +154,127 @@ export function tasksCSS() {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+.tasks-cards-scroll.focus {
+  padding: 0;
+  display: flex;
+  overflow: hidden;
+}
+.tasks-focus-shell {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+.tasks-focus-list {
+  width: 34%;
+  min-width: 260px;
+  max-width: 390px;
+  border-right: 1px solid var(--border);
+  background: var(--bg-primary);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+}
+.tasks-focus-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+.tasks-focus-search {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  color: var(--text);
+  padding: 6px 8px;
+  font-size: 12px;
+}
+.tasks-focus-count {
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+}
+.tasks-focus-row {
+  width: 100%;
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+.tasks-focus-row:hover { background: var(--bg-secondary); }
+.tasks-focus-row.active {
+  border-color: var(--accent);
+  background: rgba(56, 139, 253, 0.14);
+}
+.tasks-focus-cat-bar {
+  width: 3px;
+  height: 15px;
+  border-radius: 2px;
+  background: var(--text-muted);
+  flex-shrink: 0;
+}
+.tasks-focus-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex-shrink: 0;
+}
+.tasks-focus-row-title {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.tasks-focus-pin {
+  flex-shrink: 0;
+  font-size: 11px;
+}
+.tasks-focus-detail {
+  flex: 1;
+  min-width: 0;
+  padding: 12px;
+  overflow-y: auto;
+}
+.tasks-focus-card {
+  margin-bottom: 0;
+}
+.tasks-focus-empty,
+.tasks-focus-detail-empty {
+  padding: 24px;
+  color: var(--text-muted);
+  font-style: italic;
+  text-align: center;
+}
+.tasks-focus-outside-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  border-radius: 6px;
+  background: rgba(245, 158, 11, 0.10);
+  color: #fbbf24;
+  font-size: 12px;
+}
+.tasks-focus-show-in-list {
+  flex-shrink: 0;
 }
 .tasks-empty {
   padding: 24px;
