@@ -192,6 +192,14 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "is_frontend_only=$([[ "$GITHUB_REF_NAME" == f-* ]] && echo true || echo false)" >> $GITHUB_OUTPUT
 
+      - name: Verify release history mentions current tag
+        run: |
+          set -e
+          if ! grep -Fq "$GITHUB_REF_NAME" desktop-rust/src/release-history.md; then
+            echo "::error file=desktop-rust/src/release-history.md::Release history does not mention ${GITHUB_REF_NAME}"
+            exit 1
+          fi
+
       - name: Package frontend zip
         id: pack
         run: |

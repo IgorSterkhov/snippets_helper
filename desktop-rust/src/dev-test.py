@@ -199,7 +199,7 @@ async def run_tests():
         await cdp.eval("document.querySelector('.help-tab-btn[data-tab-id=\"changelog\"]').click()")
         await wait_until(
             cdp,
-            "document.querySelector('.help-changelog')?.textContent.includes('f-20260522-4')",
+            "document.querySelector('.help-changelog')?.textContent.includes('f-20260522-6')",
             timeout=3,
         )
         await cdp.eval("document.querySelector('.help-close-btn').click()")

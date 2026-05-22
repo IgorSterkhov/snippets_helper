@@ -46,8 +46,14 @@ Tag convention: `f-YYYYMMDD-N` where `N` is a sequence counter for the day
 cd desktop-rust/src-tauri && cargo check
 # Frontend tests pass?
 cd ../src && python3 dev-test.py        # expects all smoke tests to PASS
+# Help release history includes the tag you are about to publish?
+grep -F "<TAG>" release-history.md
 ```
 If either fails, fix before tagging.
+
+`desktop-rust/src/release-history.md` is the Help modal's release-history
+source for frontend OTA bundles. Update it before every `v*` or `f-*` tag; CI
+fails the release if the current tag is missing from that file.
 
 ### 2.1.1 Recommended Codex approval prefixes
 
@@ -96,6 +102,8 @@ No version bump needed. The bundled native `.dmg` stays pinned to whichever
 `v*` release is latest; the `f-*` release only produces a new frontend bundle.
 ```bash
 git add desktop-rust/src/<changed files>
+# Include this whenever the visible Help release history changes.
+git add desktop-rust/src/release-history.md desktop-rust/CHANGELOG.md
 git commit -m "<one-line subject>"
 TAG="f-$(date +%Y%m%d)-1"     # bump -1 → -2 if releasing multiple on the same day
 git tag "$TAG"
@@ -131,16 +139,19 @@ f-* tag:  release SKIPPED             ──► release-frontend ──► uploa
 Key steps in `release-frontend`:
 1. Compute version = `<NATIVE>-f<sha>`. For `f-*` tags, `<NATIVE>` is read
    from the most recent `v*` tag so the two stay in sync.
-2. Overwrite `desktop-rust/src/frontend-version.json` with that value, then
+2. Verify `desktop-rust/src/release-history.md` mentions the current tag. This
+   makes the Help modal history a release gate instead of an easy-to-forget
+   manual follow-up.
+3. Overwrite `desktop-rust/src/frontend-version.json` with that value, then
    zip the `src/` tree (minus dev-only files `dev.html`, `dev-mock.js`,
    `dev-test.py`, `__pycache__/`).
-3. Sign the zip with `rsign2` using `secrets.TAURI_SIGNING_PRIVATE_KEY`
+4. Sign the zip with `rsign2` using `secrets.TAURI_SIGNING_PRIVATE_KEY`
    (same key as native updater).
-4. Write `frontend-version.json` manifest with version / url / signature
+5. Write `frontend-version.json` manifest with version / url / signature
    (base64 of the `.sig` file contents) / sha256.
-5. For `f-*` tags, copy the most recent `v*` release's `latest.json` into
+6. For `f-*` tags, copy the most recent `v*` release's `latest.json` into
    this release so the native updater endpoint keeps resolving.
-6. Upload everything to the tag's GitHub release.
+7. Upload everything to the tag's GitHub release.
 
 **Never edit the pubkey, endpoints, or sign command without reading §7.**
 
