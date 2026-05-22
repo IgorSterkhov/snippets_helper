@@ -539,6 +539,12 @@ async def run_tests():
         cb_text = await cdp.eval("document.querySelector('.tasks-focus-detail')?.textContent || ''")
         assert 'Regular todo visible' in cb_text, cb_text
         assert 'Regular done hidden' not in cb_text, cb_text
+        focus_body_style = await cdp.eval("""(() => {
+          const body = document.querySelector('.tasks-focus-detail .task-card-body');
+          const st = getComputedStyle(body);
+          return { maxHeight: st.maxHeight, overflowY: st.overflowY };
+        })()""")
+        assert focus_body_style == {'maxHeight': 'none', 'overflowY': 'visible'}, focus_body_style
 
         await cdp.eval("document.querySelector('.tasks-focus-detail .task-icon-btn[title=\"Expand\"]').click()")
         await wait_until(cdp, "!!document.querySelector('.tasks-focus-detail .task-editor-title')", timeout=3)

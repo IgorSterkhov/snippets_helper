@@ -253,6 +253,10 @@ export function tasksCSS() {
 .tasks-focus-card {
   margin-bottom: 0;
 }
+.tasks-focus-card:not(.expanded) .task-card-body {
+  max-height: none !important;
+  overflow-y: visible;
+}
 .tasks-focus-empty,
 .tasks-focus-detail-empty {
   padding: 24px;

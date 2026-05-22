@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Tasks:** Focus view compact cards now grow to their checklist content
+  instead of using an inner card scroll area that left blank space below.
 - **Tasks:** polished Focus view so selected tasks open compact by default,
   Expand/Collapse works inside the right pane, completed checklist items are
   hidden by default, and pinned tasks open at the top of the detail pane.

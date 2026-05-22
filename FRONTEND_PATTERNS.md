@@ -201,5 +201,7 @@ editor without removing global filters.
 - Local search filters only the left pane's already-visible items.
 - Right pane may render an item outside current filters when opened from a
   global chip; show a banner and an explicit action to adjust filters.
+- In compact detail cards, remove inner card-body scrolling; let the right
+  pane scroll so there is no blank area under a short capped card.
 - Do not mix compact-index rows with card drag-and-drop unless a separate
   reorder design is approved.
