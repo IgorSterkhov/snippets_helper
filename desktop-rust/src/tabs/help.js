@@ -103,6 +103,22 @@ const i18n = {
   }
 };
 
+const FRONTEND_OTA_CHANGELOG_MD = `## 1.3.27 OTA patches (2026-05-22)
+
+- **f-20260522-4 — Tasks Focus view compact height:** compact detail cards now grow to their checklist content instead of using an inner card scroll area that left blank space below.
+- **f-20260522-3 — Tasks Focus view polish:** selected tasks open compact by default, Expand/Collapse works inside the right pane, completed checklist items are hidden by default, and pinned tasks open at the top of the detail pane.
+- **f-20260522-2 — Tasks Focus view:** added a third layout with a searchable task index on the left, selected task detail on the right, and an outside-filter banner for pinned tasks opened from the top chip strip.
+- **f-20260522-1 — Snippets code block rendering:** rendered Markdown code blocks now tolerate leading spaces before triple-backtick fences and show compact language headers (\`bash\`, \`sql\`, \`plain\`, etc.) with the copy action in the header.`;
+
+function withFrontendOtaChangelog(md) {
+  if (md.includes('f-20260522-4')) return md;
+  const marker = '# Changelog\n\n';
+  if (md.startsWith(marker)) {
+    return marker + FRONTEND_OTA_CHANGELOG_MD + '\n\n' + md.slice(marker.length);
+  }
+  return FRONTEND_OTA_CHANGELOG_MD + '\n\n' + md;
+}
+
 // ── Helpers ──────────────────────────────────────────────────
 
 function el(tag, opts = {}) {
@@ -303,7 +319,7 @@ async function renderChangelog(container, lang) {
   container.appendChild(el('div', { class: 'loading', text: t(lang, 'changelog_loading') }));
 
   try {
-    const md = await call('get_changelog');
+    const md = withFrontendOtaChangelog(await call('get_changelog'));
     container.innerHTML = '';
 
     // Simple markdown-to-HTML: headings, lists, bold, code

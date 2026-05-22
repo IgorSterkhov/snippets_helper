@@ -192,6 +192,20 @@ async def run_tests():
         assert 'v0.9.5-f1' in txt, f'got: {txt!r}'
     await check('T2 status bar shows v0.9.5-f1', t2)
 
+    # ── T2b: Help changelog shows frontend OTA notes ─────────
+    async def t2b_help_changelog_shows_frontend_ota_notes():
+        await cdp.eval("document.querySelector('.tab-btn[title=\"Help\"]').click()")
+        await wait_until(cdp, "!!document.querySelector('.help-overlay')", timeout=3)
+        await cdp.eval("document.querySelector('.help-tab-btn[data-tab-id=\"changelog\"]').click()")
+        await wait_until(
+            cdp,
+            "document.querySelector('.help-changelog')?.textContent.includes('f-20260522-4')",
+            timeout=3,
+        )
+        await cdp.eval("document.querySelector('.help-close-btn').click()")
+        await wait_until(cdp, "!document.querySelector('.help-overlay')", timeout=3)
+    await check('T2b Help changelog shows frontend OTA notes', t2b_help_changelog_shows_frontend_ota_notes)
+
     # ── T3: switch to Exec tab ────────────────────────────────
     async def t3():
         await cdp.eval(

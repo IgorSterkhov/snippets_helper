@@ -2,17 +2,22 @@
 
 ## Unreleased
 
-- **Tasks:** Focus view compact cards now grow to their checklist content
-  instead of using an inner card scroll area that left blank space below.
-- **Tasks:** polished Focus view so selected tasks open compact by default,
-  Expand/Collapse works inside the right pane, completed checklist items are
-  hidden by default, and pinned tasks open at the top of the detail pane.
-- **Tasks:** added Focus view with a searchable task index on the left,
-  selected task editor on the right, and an outside-filter banner for pinned
-  tasks opened from the top chip strip.
-- **Snippets:** rendered Markdown code blocks now tolerate leading spaces before
-  triple-backtick fences and show compact language headers (`bash`, `sql`,
-  `plain`, etc.) with the copy action in the header.
+## 1.3.27 OTA patches (2026-05-22)
+
+- **f-20260522-4 — Tasks Focus view compact height:** compact detail cards now
+  grow to their checklist content instead of using an inner card scroll area
+  that left blank space below.
+- **f-20260522-3 — Tasks Focus view polish:** selected tasks open compact by
+  default, Expand/Collapse works inside the right pane, completed checklist
+  items are hidden by default, and pinned tasks open at the top of the detail
+  pane.
+- **f-20260522-2 — Tasks Focus view:** added a third layout with a searchable
+  task index on the left, selected task detail on the right, and an
+  outside-filter banner for pinned tasks opened from the top chip strip.
+- **f-20260522-1 — Snippets code block rendering:** rendered Markdown code
+  blocks now tolerate leading spaces before triple-backtick fences and show
+  compact language headers (`bash`, `sql`, `plain`, etc.) with the copy action
+  in the header.
 
 ## 1.3.27 OTA patches (2026-05-18)
 
