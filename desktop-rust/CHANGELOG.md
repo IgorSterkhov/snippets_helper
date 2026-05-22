@@ -1,13 +1,14 @@
 # Changelog
 
-## Unreleased
+## 1.3.27 OTA patches (2026-05-18)
 
-- **Snippets:** replaced `Main / Web / Note` with compact content tabs,
-  added copy buttons to rendered Markdown code blocks, improved code-block
-  insertion in the Markdown toolbar, collapsed the editor description by
-  default, and moved links to explicit browser/app-window actions.
-- **Snippets polish:** hide the tab row when only `Code` is available and use
-  a readable strong-blue hover tint for snippet detail tabs.
+- **f-20260518-3 — Snippets polish:** hide the tab row when only `Code` is
+  available and use a readable strong-blue hover tint for snippet detail tabs.
+- **f-20260518-2 — Snippets markdown tabs:** replaced `Main / Web / Note`
+  with compact content tabs, added copy buttons to rendered Markdown code
+  blocks, improved code-block insertion in the Markdown toolbar, collapsed the
+  editor description by default, and moved links to explicit
+  browser/app-window actions.
 
 ## v1.3.27 (2026-05-17)
 

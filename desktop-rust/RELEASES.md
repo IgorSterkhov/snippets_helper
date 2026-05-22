@@ -45,7 +45,7 @@ Tag convention: `f-YYYYMMDD-N` where `N` is a sequence counter for the day
 # Rust compiles?
 cd desktop-rust/src-tauri && cargo check
 # Frontend tests pass?
-cd ../src && python3 dev-test.py        # expects 7/7 PASS
+cd ../src && python3 dev-test.py        # expects all smoke tests to PASS
 ```
 If either fails, fix before tagging.
 
@@ -109,11 +109,15 @@ git push origin "$TAG"
   zip, `frontend-version.json`, `latest.json`, etc.).
 - Frontend-only: three assets (`frontend-*.zip`, `frontend-version.json`,
   `latest.json`).
-- Quick smoke test from the shell:
+- Quick smoke test from the shell. Prefer the tag-specific URL you just
+  released, because `/releases/latest` may be easy to confuse with the carried
+  native `latest.json` on `f-*` releases:
   ```bash
-  curl -sL https://github.com/IgorSterkhov/snippets_helper/releases/latest/download/frontend-version.json | python3 -m json.tool
-  # must return JSON with a version matching the new tag
+  wget -qO- https://github.com/IgorSterkhov/snippets_helper/releases/download/<TAG>/frontend-version.json
+  # must return JSON whose version ends with the released frontend SHA
   ```
+- For `f-*` releases, `latest.json` is expected to stay on the most recent
+  native `v*` version; the frontend manifest is the file that must change.
 
 ---
 
