@@ -84,8 +84,19 @@
         created_at: now(),
         updated_at: now(),
       },
+      {
+        id: 4,
+        uuid: uuid(),
+        name: 'Indented fenced blocks',
+        value: 'Indented fences:\n\n   ```bash\n   echo ok\n   ```\n\n```sql\nselect 1;\n```\n\n```\nplain text\n```',
+        description: '',
+        links: [],
+        obsidian_note: null,
+        created_at: now(),
+        updated_at: now(),
+      },
     ]);
-    storeSet('__seq.shortcuts', 3);
+    storeSet('__seq.shortcuts', 4);
 
     storeSet('note_folders', [
       { id: 1, name: 'Inbox', sort_order: 0, parent_id: null },

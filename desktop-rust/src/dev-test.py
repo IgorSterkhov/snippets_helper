@@ -637,6 +637,30 @@ async def run_tests():
         assert hover_rule['border'] == 'rgb(121, 192, 255)', hover_rule
     await check('T21 Snippets tab hover uses readable tint', t21_snippets_tab_hover_css)
 
+    # ── T22: Snippets code block headers and indented fences ─
+    async def t22_snippets_code_block_headers_and_indented_fences():
+        await open_shortcuts_tab()
+        await cdp.eval(
+            "[...document.querySelectorAll('#panel-shortcuts div')]"
+            ".find(x => x.textContent.trim() === 'Indented fenced blocks').click()"
+        )
+        await wait_until(cdp, "document.querySelectorAll('.markdown-code-header').length === 3", timeout=3)
+        labels = await cdp.eval(
+            "[...document.querySelectorAll('.markdown-code-lang')].map(x => x.textContent.trim())"
+        )
+        assert labels == ['bash', 'sql', 'plain'], f'labels: {labels!r}'
+        copies = await cdp.eval("document.querySelectorAll('.markdown-code-copy').length")
+        assert copies == 3, f'copy buttons: {copies}'
+        await cdp.eval(
+            "window.__copiedText='';"
+            "navigator.clipboard.writeText = async (text) => { window.__copiedText = text; };"
+            "document.querySelector('.markdown-code-copy').click();"
+        )
+        copied = await wait_until(cdp, "window.__copiedText", timeout=3)
+        assert 'echo ok' in copied, f'copied: {copied!r}'
+        assert 'bash' not in copied, f'copied includes header: {copied!r}'
+    await check('T22 Snippets code block headers and indented fences', t22_snippets_code_block_headers_and_indented_fences)
+
     # Summary
     print()
     passed = sum(1 for _, ok, _ in results if ok)

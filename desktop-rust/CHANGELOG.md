@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **Snippets:** rendered Markdown code blocks now tolerate leading spaces before
+  triple-backtick fences and show compact language headers (`bash`, `sql`,
+  `plain`, etc.) with the copy action in the header.
+
 ## 1.3.27 OTA patches (2026-05-18)
 
 - **f-20260518-3 — Snippets polish:** hide the tab row when only `Code` is

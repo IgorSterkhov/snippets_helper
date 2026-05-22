@@ -362,11 +362,53 @@ button:hover, .btn:hover {
 .markdown-body code { background: var(--bg-secondary); padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
 .markdown-body pre { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 6px; padding: 12px; overflow-x: auto; margin: 8px 0; position: relative; }
 .markdown-body pre code { background: none; padding: 0; }
+.markdown-body pre.markdown-code-block {
+  padding: 0;
+  overflow: hidden;
+}
+.markdown-body pre.markdown-code-block code {
+  display: block;
+  padding: 12px;
+  overflow-x: auto;
+  white-space: pre;
+}
 .markdown-body blockquote { border-left: 3px solid var(--accent); padding-left: 12px; color: var(--text-muted); margin: 8px 0; }
+.markdown-code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 8px 7px 10px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(17, 24, 39, 0.72);
+  color: var(--text-muted);
+}
+.markdown-code-lang {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 10px;
+  line-height: 1;
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+.markdown-code-lang-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgb(148, 163, 184);
+}
+.markdown-code-lang-shell .markdown-code-lang-dot { background: rgb(52, 211, 153); }
+.markdown-code-lang-sql .markdown-code-lang-dot { background: rgb(245, 158, 11); }
+.markdown-code-lang-web .markdown-code-lang-dot { background: rgb(249, 115, 22); }
+.markdown-code-lang-js .markdown-code-lang-dot { background: rgb(234, 179, 8); }
+.markdown-code-lang-python .markdown-code-lang-dot { background: rgb(88, 166, 255); }
+.markdown-code-lang-rust .markdown-code-lang-dot { background: rgb(251, 146, 60); }
+.markdown-code-lang-backend .markdown-code-lang-dot { background: rgb(167, 139, 250); }
+.markdown-code-lang-config .markdown-code-lang-dot { background: rgb(148, 163, 184); }
+.markdown-code-lang-other .markdown-code-lang-dot { background: var(--accent); }
 .markdown-code-copy {
-  position: absolute;
-  top: 6px;
-  right: 6px;
   width: 26px;
   height: 24px;
   padding: 0;
@@ -377,12 +419,8 @@ button:hover, .btn:hover {
   border: 1px solid var(--border);
   color: var(--text-muted);
   border-radius: 4px;
-  opacity: 0;
-  transition: opacity 0.12s ease, color 0.12s ease, background 0.12s ease;
-}
-.markdown-body pre:hover .markdown-code-copy,
-.markdown-code-copy:focus {
   opacity: 1;
+  transition: opacity 0.12s ease, color 0.12s ease, background 0.12s ease;
 }
 .markdown-code-copy:hover {
   color: var(--text);

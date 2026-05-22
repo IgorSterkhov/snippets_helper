@@ -188,6 +188,15 @@ function isMarkdownLike(text) {
   return /(?:^#{1,6}\s|\*\*|__|\[.+\]\(.+\)|```|^\s*[-*]\s|\|.+\|)/m.test(text || '');
 }
 
+function normalizeMarkdownFences(text) {
+  if (typeof text !== 'string' || !text) return text;
+  return text.replace(/^[ \t]+(```[^\n\r]*)$/gm, '$1');
+}
+
+function renderMarkdownHtml(text) {
+  return marked(normalizeMarkdownFences(text || ''));
+}
+
 function getDetailTabs(shortcut, links) {
   const tabs = [{ id: 'code', label: 'Code' }];
   if (hasText(shortcut.description)) tabs.push({ id: 'description', label: 'Description' });
@@ -295,7 +304,7 @@ function renderCodeTab(shortcut) {
     valueEl = document.createElement('div');
     valueEl.className = 'markdown-body snippet-tab-content';
     valueEl.style.cssText = `font-size:${fontSize}px;padding:16px 18px;line-height:1.6`;
-    valueEl.innerHTML = marked(shortcut.value);
+    valueEl.innerHTML = renderMarkdownHtml(shortcut.value);
     enhanceMarkdownCodeBlocks(valueEl);
   } else {
     valueEl = document.createElement('pre');
@@ -315,7 +324,7 @@ function renderDescriptionTab(shortcut) {
 
   if (isMarkdownLike(shortcut.description)) {
     view.classList.add('markdown-body');
-    view.innerHTML = marked(shortcut.description);
+    view.innerHTML = renderMarkdownHtml(shortcut.description);
     enhanceMarkdownCodeBlocks(view);
   } else {
     view.style.whiteSpace = 'pre-wrap';
@@ -414,7 +423,7 @@ async function renderNoteView(shortcut) {
     try {
       const md = await call('read_obsidian_note', { notePath: shortcut.obsidian_note });
       contentArea.classList.add('markdown-body');
-      contentArea.innerHTML = marked(md);
+      contentArea.innerHTML = renderMarkdownHtml(md);
       enhanceMarkdownCodeBlocks(contentArea);
     } catch (err) {
       contentArea.innerHTML = `<div style="color:var(--text-muted);text-align:center;margin-top:32px">
@@ -891,8 +900,25 @@ function scrollToSelected() {
 
 function enhanceMarkdownCodeBlocks(root) {
   root.querySelectorAll('pre').forEach(pre => {
-    if (pre.querySelector('.markdown-code-copy')) return;
+    if (pre.querySelector('.markdown-code-header')) return;
     const code = pre.querySelector('code');
+    const lang = getCodeBlockLanguage(code);
+    const group = getCodeLanguageGroup(lang);
+
+    pre.classList.add('markdown-code-block', `markdown-code-lang-${group}`);
+
+    const header = document.createElement('span');
+    header.className = 'markdown-code-header';
+
+    const label = document.createElement('span');
+    label.className = 'markdown-code-lang';
+    const dot = document.createElement('span');
+    dot.className = 'markdown-code-lang-dot';
+    const text = document.createElement('span');
+    text.textContent = lang;
+    label.appendChild(dot);
+    label.appendChild(text);
+
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'markdown-code-copy';
@@ -909,8 +935,33 @@ function enhanceMarkdownCodeBlocks(root) {
         showToast('Failed to copy: ' + err, 'error');
       }
     });
-    pre.appendChild(btn);
+    header.appendChild(label);
+    header.appendChild(btn);
+    pre.insertBefore(header, pre.firstChild);
   });
+}
+
+function getCodeBlockLanguage(code) {
+  if (!code) return 'plain';
+  const match = String(code.className || '').match(/(?:^|\s)language-([^\s]+)/);
+  return match ? match[1].toLowerCase() : 'plain';
+}
+
+function getCodeLanguageGroup(lang) {
+  const groups = {
+    shell: ['bash', 'sh', 'zsh', 'shell'],
+    sql: ['sql', 'postgres', 'postgresql', 'mysql', 'sqlite'],
+    web: ['html', 'xml', 'css', 'scss'],
+    js: ['js', 'javascript', 'ts', 'typescript', 'json'],
+    python: ['python', 'py'],
+    rust: ['rust', 'rs'],
+    backend: ['go', 'java', 'kotlin', 'swift', 'php', 'ruby', 'rb', 'c', 'cpp', 'cs'],
+    config: ['yaml', 'yml', 'toml', 'ini', 'dockerfile', 'markdown', 'md', 'plain'],
+  };
+  for (const [group, aliases] of Object.entries(groups)) {
+    if (aliases.includes(lang)) return group;
+  }
+  return 'other';
 }
 
 // Strip Markdown code fences before copying. Removes:

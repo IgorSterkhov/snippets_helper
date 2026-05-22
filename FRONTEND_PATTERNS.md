@@ -161,3 +161,28 @@ For `f-*` releases: 3 assets expected (frontend zip, `frontend-version.json`, `l
 - CSS: `display: flex; gap: 10px; align-items: flex-start` on the container, each column is `flex: 1; display: flex; flex-direction: column`.
 - JS: after appending each card, append the next one to the column with lower height.
 - Preload async data to cache before DOM insertion so cards render synchronously at their final height.
+
+---
+
+## §5 Markdown code block rendering
+
+**Used in:** Snippets tab rendered Code, Description, and Obsidian Note views.
+
+**Pattern:**
+1. Before passing user Markdown to `marked(...)`, normalize only fence-marker
+   lines so pasted indented fences still render as code blocks:
+   ```js
+   text.replace(/^[ \t]+(```[^\n\r]*)$/gm, '$1')
+   ```
+   Do not trim code content inside the fence.
+2. After rendering, decorate every `<pre><code>` with a compact header:
+   - language label from `code.className` such as `language-bash`;
+   - `plain` when no language is present;
+   - copy button on the right side of the header.
+3. Copy from `code.textContent`, not from the whole `<pre>`, so the header label
+   is never copied.
+4. Use calm language groups rather than full syntax highlighting. Keep unknown
+   languages readable with a neutral/accent dot.
+
+**Verification:** browser smoke tests should cover an indented fenced block,
+typed blocks such as `bash` and `sql`, an untyped `plain` block, and copy output.
