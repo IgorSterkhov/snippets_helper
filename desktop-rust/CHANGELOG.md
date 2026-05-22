@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Tasks:** polished Focus view so selected tasks open compact by default,
+  Expand/Collapse works inside the right pane, completed checklist items are
+  hidden by default, and pinned tasks open at the top of the detail pane.
 - **Tasks:** added Focus view with a searchable task index on the left,
   selected task editor on the right, and an outside-filter banner for pinned
   tasks opened from the top chip strip.

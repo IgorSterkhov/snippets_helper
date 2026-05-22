@@ -25,15 +25,16 @@ const HIDE_DELAY_MS = 8000;  // 8 seconds — enough to undo an accidental check
 const checkedTimestamps = new Map();  // checkbox id → Date.now()
 
 export function toggleHideCompleted(taskId) {
-  const wasHiding = hiddenCompleted.get(taskId);
-  hiddenCompleted.set(taskId, !wasHiding);
-  if (!wasHiding) {
+  const willHide = !isHidingCompleted(taskId);
+  hiddenCompleted.set(taskId, willHide);
+  if (willHide) {
     // Just turned hiding ON — clear stale timestamps so old completed
     // items disappear immediately, but new checks get the delay.
     checkedTimestamps.clear();
   }
 }
 export function isHidingCompleted(taskId) {
+  if (!hiddenCompleted.has(taskId)) return true;
   return hiddenCompleted.get(taskId) === true;
 }
 export function recordCheckTimestamp(cbId) {

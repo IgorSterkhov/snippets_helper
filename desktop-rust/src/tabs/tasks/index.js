@@ -23,6 +23,7 @@ const state = {
   layoutMode: 'one-col', // 'one-col' | 'two-col' | 'focus'
   expandedTaskId: null,  // selected/expanded task id
   selectedTask: null,    // task snapshot for Focus view, including outside-filter tasks
+  focusCardExpanded: false,
   focusSearch: '',
   // Count of tasks with category_id=NULL / status_id=NULL. Derived from
   // `tasks` (unfiltered). Used to show the "None" item in dropdowns only
@@ -485,6 +486,7 @@ function renderFocusRow(task) {
   row.addEventListener('click', async () => {
     state.expandedTaskId = task.id;
     state.selectedTask = task;
+    state.focusCardExpanded = false;
     await renderTaskList();
   });
   return row;
@@ -515,11 +517,10 @@ async function renderFocusRightPane(right) {
   }
 
   const card = renderCard(selected, {
-    expanded: true,
+    expanded: state.focusCardExpanded,
     state,
     onExpandToggle: async () => {
-      state.expandedTaskId = null;
-      state.selectedTask = null;
+      state.focusCardExpanded = !state.focusCardExpanded;
       await renderTaskList();
     },
     onTaskReload: async () => reloadTasks(),
@@ -533,6 +534,7 @@ async function showSelectedTaskInList(task) {
   state.filter.status = task.status_id == null ? 'none' : String(task.status_id);
   state.expandedTaskId = task.id;
   state.selectedTask = task;
+  state.focusCardExpanded = false;
   state.focusSearch = '';
   await reloadTasks();
 }
@@ -547,6 +549,11 @@ async function toggleExpanded(id) {
 export async function openExpanded(id, taskSnapshot = null) {
   state.expandedTaskId = id;
   if (taskSnapshot) state.selectedTask = taskSnapshot;
+  if (state.layoutMode === 'focus') {
+    state.focusCardExpanded = false;
+    await renderTaskList();
+    return;
+  }
   await renderTaskList();
   // Ensure card is scrolled into view.
   setTimeout(() => {
@@ -572,6 +579,7 @@ async function onNewTask() {
     });
     state.expandedTaskId = t.id;
     state.selectedTask = t;
+    state.focusCardExpanded = state.layoutMode !== 'focus';
     await reloadTasks();
   } catch (e) {
     showToast('Failed to create task: ' + e, 'error');
@@ -580,8 +588,12 @@ async function onNewTask() {
 
 async function onSetLayoutMode(mode) {
   if (!['one-col', 'two-col', 'focus'].includes(mode)) return;
+  const wasFocus = state.layoutMode === 'focus';
   state.layoutMode = mode;
-  if (mode === 'focus') ensureFocusSelection();
+  if (mode === 'focus') {
+    ensureFocusSelection();
+    if (!wasFocus) state.focusCardExpanded = false;
+  }
   applyLayoutMode();
   renderLayoutToggle();
   await renderTaskList();

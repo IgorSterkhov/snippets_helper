@@ -523,6 +523,28 @@ async def run_tests():
         assert modes == ['One column', 'Two columns', 'Focus view'], f'modes: {modes!r}'
 
         await wait_until(cdp, "!!document.querySelector('.tasks-focus-search')", timeout=3)
+        await cdp.eval(
+            "[...document.querySelectorAll('.tasks-focus-row-title')]"
+            ".find(x => x.textContent.includes('Regular mock task')).click()"
+        )
+        await wait_until(
+            cdp,
+            "document.querySelector('.tasks-focus-detail .task-title')?.textContent.includes('Regular mock task')",
+            timeout=3,
+        )
+        compact_by_default = await cdp.eval("!document.querySelector('.tasks-focus-detail .task-editor-body')")
+        assert compact_by_default, 'Focus view should open selected task in compact mode by default'
+        eye_active = await cdp.eval("!!document.querySelector('.tasks-focus-detail .task-hide-done-btn.active')")
+        assert eye_active, 'Hide completed should be active by default'
+        cb_text = await cdp.eval("document.querySelector('.tasks-focus-detail')?.textContent || ''")
+        assert 'Regular todo visible' in cb_text, cb_text
+        assert 'Regular done hidden' not in cb_text, cb_text
+
+        await cdp.eval("document.querySelector('.tasks-focus-detail .task-icon-btn[title=\"Expand\"]').click()")
+        await wait_until(cdp, "!!document.querySelector('.tasks-focus-detail .task-editor-title')", timeout=3)
+        await cdp.eval("document.querySelector('.tasks-focus-detail .task-icon-btn[title=\"Collapse\"]').click()")
+        await wait_until(cdp, "!document.querySelector('.tasks-focus-detail .task-editor-body')", timeout=3)
+
         row_titles = await cdp.eval(
             "[...document.querySelectorAll('.tasks-focus-row-title')].map(x => x.textContent.trim())"
         )
@@ -570,8 +592,10 @@ async def run_tests():
             "document.querySelector('.tasks-focus-outside-banner')?.textContent.includes('outside current filters')",
             timeout=3,
         )
-        selected_title = await cdp.eval("document.querySelector('.tasks-focus-detail .task-editor-title')?.value")
+        selected_title = await cdp.eval("document.querySelector('.tasks-focus-detail .task-title')?.textContent")
         assert selected_title == 'Pinned personal task', f'selected title: {selected_title!r}'
+        detail_scroll = await cdp.eval("document.querySelector('.tasks-focus-detail')?.scrollTop")
+        assert detail_scroll == 0, f'Focus detail should open at top, got scrollTop={detail_scroll!r}'
 
         await cdp.eval("document.querySelector('.tasks-focus-show-in-list').click()")
         await wait_until(

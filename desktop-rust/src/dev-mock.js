@@ -182,8 +182,17 @@
       },
     ]);
     storeSet('__seq.tasks', 3);
-    storeSet('task_checkboxes', []);
-    storeSet('__seq.task_checkboxes', 0);
+    storeSet('task_checkboxes', [
+      {
+        id: 1, task_id: 2, parent_id: null, text: 'Regular todo visible', is_checked: false,
+        sort_order: 0, created_at: now(), updated_at: now(), sync_status: 'synced', user_id: 'mock-user',
+      },
+      {
+        id: 2, task_id: 2, parent_id: null, text: 'Regular done hidden', is_checked: true,
+        sort_order: 1, created_at: now(), updated_at: now(), sync_status: 'synced', user_id: 'mock-user',
+      },
+    ]);
+    storeSet('__seq.task_checkboxes', 2);
 
     storeSet('__init', true);
   }
