@@ -4,6 +4,9 @@
 
 ## 1.3.27 OTA patches (2026-05-22)
 
+- **f-20260522-7 — Snippets Key Cloud:** added a Key Cloud modal that derives
+  stable colored keys from underscore-separated snippet names, plus a Related
+  detail tab sorted by shared keys.
 - **f-20260522-6 — Help release history:** moved the Help changelog to a
   frontend-owned `release-history.md` asset that updates through frontend OTA
   releases, and added a CI guard so future release tags must be documented

@@ -780,6 +780,52 @@ async def run_tests():
         assert 'bash' not in copied, f'copied includes header: {copied!r}'
     await check('T23 Snippets code block headers and indented fences', t23_snippets_code_block_headers_and_indented_fences)
 
+    # ── T24: Snippets key cloud modal ───────────────────────
+    async def t24_snippets_key_cloud_modal():
+        await open_shortcuts_tab()
+        await cdp.eval("document.querySelector('#panel-shortcuts button[title=\"Key Cloud\"]').click()")
+        await wait_until(cdp, "!!document.querySelector('.snippet-key-cloud-modal')", timeout=3)
+        labels = await cdp.eval(
+            "[...document.querySelectorAll('.snippet-key-bubble')]"
+            ".map(x => ({ key: x.dataset.key, count: x.dataset.count }))"
+        )
+        counts = {item['key']: item['count'] for item in labels}
+        assert counts.get('bash') == '3', f'cloud counts: {counts!r}'
+        assert counts.get('guide') == '3', f'cloud counts: {counts!r}'
+        await cdp.eval("document.querySelector('.modal-overlay .modal-actions button:last-child').click()")
+        await wait_until(cdp, "!document.querySelector('.modal-overlay')", timeout=3)
+    await check('T24 Snippets key cloud modal', t24_snippets_key_cloud_modal)
+
+    # ── T25: Snippets related tab sorts by shared keys ──────
+    async def t25_snippets_related_tab_sorting():
+        await open_shortcuts_tab()
+        await cdp.eval(
+            "[...document.querySelectorAll('#panel-shortcuts div')]"
+            ".find(x => x.textContent.trim() === 'bash_cd_guide').click()"
+        )
+        await wait_until(cdp, "document.body.innerText.includes('bash_cd_guide')", timeout=3)
+        tabs = await cdp.eval(
+            "[...document.querySelectorAll('.snippet-detail-tab')].map(x => x.textContent.trim())"
+        )
+        assert 'Related' in tabs, f'tabs: {tabs!r}'
+        await cdp.eval(
+            "[...document.querySelectorAll('.snippet-detail-tab')]"
+            ".find(x => x.textContent.trim() === 'Related').click()"
+        )
+        await wait_until(cdp, "document.querySelectorAll('.snippet-related-row').length >= 3", timeout=3)
+        rows = await cdp.eval(
+            "[...document.querySelectorAll('.snippet-related-row')]"
+            ".slice(0, 3).map(row => ({"
+            "name: row.querySelector('.snippet-related-name')?.textContent.trim(),"
+            "keys: [...row.querySelectorAll('.snippet-key-pill')].map(x => x.textContent.trim())"
+            "}))"
+        )
+        assert [r['name'] for r in rows] == ['bash_cd_cheatsheet', 'bash_ssh_guide', 'sql_guide'], rows
+        assert rows[0]['keys'] == ['bash', 'cd'], rows
+        assert rows[1]['keys'] == ['bash', 'guide'], rows
+        assert rows[2]['keys'] == ['guide'], rows
+    await check('T25 Snippets related tab sorts by shared keys', t25_snippets_related_tab_sorting)
+
     # Summary
     print()
     passed = sum(1 for _, ok, _ in results if ok)

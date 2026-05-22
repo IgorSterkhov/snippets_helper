@@ -6,13 +6,14 @@ import { marked } from '../lib/marked.min.js';
 import { attachToolbar } from '../components/md-toolbar.js';
 
 let shortcuts = [];
+let allShortcuts = [];
 let selectedIndex = -1;
 let listEl = null;
 let detailEl = null;
 let currentQuery = '';
 let fontSize = 14;
 let listWidth = 260;
-let detailTab = 'code'; // 'code' | 'description' | 'links' | 'note'
+let detailTab = 'code'; // 'code' | 'description' | 'links' | 'note' | 'related'
 let expandedCard = null; // index of expanded card in list
 let expandHeight = 4; // multiplier for expanded height
 let obsidianConfigured = false;
@@ -43,6 +44,13 @@ export async function init(container) {
   searchBar.style.flex = '1';
   searchBar.style.marginBottom = '0';
   header.appendChild(searchBar);
+
+  const keyCloudBtn = document.createElement('button');
+  keyCloudBtn.textContent = 'Key Cloud';
+  keyCloudBtn.title = 'Key Cloud';
+  keyCloudBtn.style.cssText = 'height:32px;padding:0 12px;font-size:12px;white-space:nowrap';
+  keyCloudBtn.addEventListener('click', openKeyCloudModal);
+  header.appendChild(keyCloudBtn);
 
   const addBtn = document.createElement('button');
   addBtn.textContent = '+';
@@ -100,6 +108,8 @@ async function loadShortcuts() {
     } catch { tags = []; }
     renderTagPanel();
 
+    allShortcuts = await call('list_shortcuts');
+
     // Load shortcuts based on tag + search
     if (selectedTagId !== null) {
       const tag = tags.find(t => t.id === selectedTagId);
@@ -115,7 +125,7 @@ async function loadShortcuts() {
     } else if (currentQuery.trim()) {
       shortcuts = await call('search_shortcuts', { query: currentQuery });
     } else {
-      shortcuts = await call('list_shortcuts');
+      shortcuts = allShortcuts;
     }
     if (selectedIndex < 0 && shortcuts.length > 0) selectedIndex = 0;
     if (selectedIndex >= shortcuts.length) selectedIndex = shortcuts.length - 1;
@@ -197,11 +207,83 @@ function renderMarkdownHtml(text) {
   return marked(normalizeMarkdownFences(text || ''));
 }
 
-function getDetailTabs(shortcut, links) {
+const SNIPPET_KEY_COLORS = [
+  '#58a6ff', '#3fb950', '#d29922', '#a371f7', '#f778ba',
+  '#ff7b72', '#39c5cf', '#bc8cff', '#f0883e', '#8b949e',
+];
+
+function extractSnippetKeys(name) {
+  const seen = new Set();
+  const keys = [];
+  String(name || '')
+    .split('_')
+    .map(part => part.trim().toLowerCase())
+    .filter(part => part && !/\s/.test(part))
+    .forEach(part => {
+      if (!seen.has(part)) {
+        seen.add(part);
+        keys.push(part);
+      }
+    });
+  return keys;
+}
+
+function getSnippetKeys(shortcut) {
+  return extractSnippetKeys(shortcut?.name || '');
+}
+
+function getKeyColor(key) {
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) {
+    hash = ((hash << 5) - hash) + key.charCodeAt(i);
+    hash |= 0;
+  }
+  return SNIPPET_KEY_COLORS[Math.abs(hash) % SNIPPET_KEY_COLORS.length];
+}
+
+function getKeyCloudItems() {
+  const counts = new Map();
+  for (const shortcut of allShortcuts) {
+    for (const key of getSnippetKeys(shortcut)) {
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+  }
+  const maxCount = Math.max(1, ...counts.values());
+  return [...counts.entries()]
+    .map(([key, count]) => ({
+      key,
+      count,
+      color: getKeyColor(key),
+      size: Math.round(42 + (Math.sqrt(count) / Math.sqrt(maxCount)) * 46),
+    }))
+    .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
+}
+
+function getRelatedSnippets(shortcut) {
+  const sourceKeys = getSnippetKeys(shortcut);
+  if (sourceKeys.length === 0) return [];
+  const sourceSet = new Set(sourceKeys);
+
+  return allShortcuts
+    .filter(other => other.id !== shortcut.id)
+    .map(other => {
+      const otherKeys = getSnippetKeys(other);
+      const sharedKeys = sourceKeys.filter(key => sourceSet.has(key) && otherKeys.includes(key));
+      return { shortcut: other, sharedKeys };
+    })
+    .filter(item => item.sharedKeys.length > 0)
+    .sort((a, b) => (
+      b.sharedKeys.length - a.sharedKeys.length ||
+      a.shortcut.name.localeCompare(b.shortcut.name)
+    ));
+}
+
+function getDetailTabs(shortcut, links, related) {
   const tabs = [{ id: 'code', label: 'Code' }];
   if (hasText(shortcut.description)) tabs.push({ id: 'description', label: 'Description' });
   if (links.length > 0) tabs.push({ id: 'links', label: 'Links' });
   if (hasText(shortcut.obsidian_note)) tabs.push({ id: 'note', label: 'Note' });
+  if (related.length > 0) tabs.push({ id: 'related', label: 'Related' });
   return tabs;
 }
 
@@ -224,7 +306,8 @@ function renderDetail() {
   const links = parseLinks(shortcut);
   const hasLinks = links.length > 0;
   const hasNote = shortcut.obsidian_note && shortcut.obsidian_note.trim();
-  const tabs = getDetailTabs(shortcut, links);
+  const related = getRelatedSnippets(shortcut);
+  const tabs = getDetailTabs(shortcut, links, related);
   ensureValidDetailTab(tabs);
 
   // Header: name + actions — dark bg zone
@@ -286,6 +369,8 @@ function renderDetail() {
     renderLinksTab(links);
   } else if (detailTab === 'note' && hasNote) {
     renderNoteView(shortcut);
+  } else if (detailTab === 'related') {
+    renderRelatedTab(related);
   } else {
     detailTab = 'code';
     renderCodeTab(shortcut, links, hasLinks);
@@ -382,6 +467,58 @@ function renderLinksTab(links) {
   });
 
   detailEl.appendChild(view);
+}
+
+function renderRelatedTab(related) {
+  const view = document.createElement('div');
+  view.className = 'snippet-tab-pane snippet-related-tab';
+
+  related.forEach(item => {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'snippet-related-row';
+
+    const name = document.createElement('span');
+    name.className = 'snippet-related-name';
+    name.textContent = item.shortcut.name;
+    row.appendChild(name);
+
+    const keys = document.createElement('span');
+    keys.className = 'snippet-related-keys';
+    item.sharedKeys.forEach(key => {
+      keys.appendChild(createKeyPill(key));
+    });
+    row.appendChild(keys);
+
+    row.addEventListener('click', () => {
+      const idx = shortcuts.findIndex(s => s.id === item.shortcut.id);
+      if (idx >= 0) {
+        selectedIndex = idx;
+        detailTab = 'code';
+        renderList();
+        renderDetail();
+      } else {
+        currentQuery = item.shortcut.name;
+        selectedIndex = -1;
+        loadShortcuts();
+      }
+    });
+
+    view.appendChild(row);
+  });
+
+  detailEl.appendChild(view);
+}
+
+function createKeyPill(key) {
+  const pill = document.createElement('span');
+  pill.className = 'snippet-key-pill';
+  pill.textContent = key;
+  const color = getKeyColor(key);
+  pill.style.borderColor = color;
+  pill.style.color = color;
+  pill.style.background = color + '18';
+  return pill;
 }
 
 // ── Obsidian Note View ──────────────────────────────────────
@@ -691,6 +828,53 @@ function renderTagPanel() {
   addBtn.style.cssText = 'background:transparent;border:1px solid var(--text-muted);color:var(--text-muted);width:24px;height:24px;border-radius:12px;font-size:14px;cursor:pointer;padding:0;display:flex;align-items:center;justify-content:center;line-height:1';
   addBtn.addEventListener('click', openTagManager);
   tagPanelEl.appendChild(addBtn);
+}
+
+function openKeyCloudModal() {
+  const items = getKeyCloudItems();
+  const body = document.createElement('div');
+  body.className = 'snippet-key-cloud-modal';
+
+  if (items.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'snippet-key-cloud-empty';
+    empty.textContent = 'No snippet keys found';
+    body.appendChild(empty);
+  } else {
+    const cloud = document.createElement('div');
+    cloud.className = 'snippet-key-cloud';
+    items.forEach(item => {
+      const bubble = document.createElement('button');
+      bubble.type = 'button';
+      bubble.className = 'snippet-key-bubble';
+      bubble.dataset.key = item.key;
+      bubble.dataset.count = String(item.count);
+      bubble.style.width = item.size + 'px';
+      bubble.style.height = item.size + 'px';
+      bubble.style.borderColor = item.color;
+      bubble.style.color = item.color;
+      bubble.style.background = item.color + '20';
+
+      const key = document.createElement('span');
+      key.className = 'snippet-key-bubble-key';
+      key.textContent = item.key;
+      bubble.appendChild(key);
+
+      const count = document.createElement('span');
+      count.className = 'snippet-key-bubble-count';
+      count.textContent = String(item.count);
+      bubble.appendChild(count);
+
+      cloud.appendChild(bubble);
+    });
+    body.appendChild(cloud);
+  }
+
+  showModal({
+    title: 'Key Cloud',
+    body,
+    onConfirm: async () => {},
+  }).catch(() => {});
 }
 
 function openTagManager() {

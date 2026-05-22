@@ -1,0 +1,60 @@
+# Snippet Key Cloud Spec
+
+## Requirement
+
+Add automatic snippet keys derived from snippet names. A name like
+`bash_cd_guide` yields keys `bash`, `cd`, and `guide`.
+
+The Snippets module must show:
+
+- a separate `Key Cloud` modal with all keys across snippets;
+- circle-like key bubbles whose size reflects how many snippets contain the key;
+- a `Related` detail tab for the selected snippet;
+- related snippets sorted by most shared keys, then alphabetically;
+- stable automatic key colors.
+
+## Approved Design
+
+Use the selected D layout:
+
+- Add a `Key Cloud` button in the Snippets header, next to search/add.
+- Open the cloud in a separate modal.
+- Add a `Related` tab in the selected snippet detail view when related snippets
+  exist.
+- Keep manual snippet tags and automatic keys visually separate.
+
+## Data Model
+
+No database or server changes for this iteration.
+
+Keys are derived on the frontend from `shortcut.name` every time snippets are
+loaded. This keeps the feature eligible for a frontend-only release.
+
+Rules:
+
+- split `name` by `_`;
+- trim each part;
+- lowercase keys;
+- ignore empty parts and parts containing whitespace;
+- de-duplicate keys within one snippet.
+
+Color is deterministic from the key text using a small fixed palette. No color
+table is stored; the same key text maps to the same color as long as the palette
+and hash function stay unchanged.
+
+## Related Tab
+
+For the selected snippet:
+
+- compute its keys;
+- compare against all loaded snippets, not only the current filtered list;
+- exclude the selected snippet itself;
+- include snippets with at least one shared key;
+- show snippet name in the left column;
+- show shared keys in the right column as colored pills;
+- sort by shared-key count descending, then snippet name ascending.
+
+## Release Scope
+
+Frontend-only desktop change. Do not add Tauri commands, migrations, API fields,
+or server changes.

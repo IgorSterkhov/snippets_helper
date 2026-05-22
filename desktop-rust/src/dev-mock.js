@@ -95,8 +95,52 @@
         created_at: now(),
         updated_at: now(),
       },
+      {
+        id: 5,
+        uuid: uuid(),
+        name: 'bash_cd_guide',
+        value: 'cd /srv/app',
+        description: '',
+        links: [],
+        obsidian_note: null,
+        created_at: now(),
+        updated_at: now(),
+      },
+      {
+        id: 6,
+        uuid: uuid(),
+        name: 'bash_cd_cheatsheet',
+        value: 'pwd && ls -la',
+        description: '',
+        links: [],
+        obsidian_note: null,
+        created_at: now(),
+        updated_at: now(),
+      },
+      {
+        id: 7,
+        uuid: uuid(),
+        name: 'bash_ssh_guide',
+        value: 'ssh user@host',
+        description: '',
+        links: [],
+        obsidian_note: null,
+        created_at: now(),
+        updated_at: now(),
+      },
+      {
+        id: 8,
+        uuid: uuid(),
+        name: 'sql_guide',
+        value: 'select 1;',
+        description: '',
+        links: [],
+        obsidian_note: null,
+        created_at: now(),
+        updated_at: now(),
+      },
     ]);
-    storeSet('__seq.shortcuts', 4);
+    storeSet('__seq.shortcuts', 8);
 
     storeSet('note_folders', [
       { id: 1, name: 'Inbox', sort_order: 0, parent_id: null },

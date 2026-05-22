@@ -205,3 +205,24 @@ editor without removing global filters.
   pane scroll so there is no blank area under a short capped card.
 - Do not mix compact-index rows with card drag-and-drop unless a separate
   reorder design is approved.
+
+---
+
+## §7 Derived key chips and clouds
+
+**Used in:** Snippets tab (Key Cloud, Related snippets)
+
+Use this pattern when a module needs lightweight analytics from already-loaded
+names or titles and does not need a persisted taxonomy.
+
+- Derive keys in the frontend from the canonical display name.
+- Keep the rule explicit and cheap. For Snippets: split by `_`, trim,
+  lowercase, ignore empty/whitespace parts, and de-duplicate within one item.
+- Keep a separate unfiltered cache when related/analytics views must consider
+  all items, not only the currently filtered list.
+- Use deterministic color from key text (`hash(key) -> fixed palette`) instead
+  of storing color state unless the user needs editable colors.
+- For related rows, sort by strongest match first, then alphabetically:
+  shared-key count descending, name ascending.
+- Keep derived keys visually separate from user-managed tags so automatic
+  grouping does not look editable or synced.
