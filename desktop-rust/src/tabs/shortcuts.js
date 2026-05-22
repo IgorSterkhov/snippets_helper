@@ -20,6 +20,7 @@ let obsidianConfigured = false;
 let tags = [];
 let selectedTagId = null;
 let tagPanelEl = null;
+let searchInputEl = null;
 
 export async function init(container) {
   container.innerHTML = '';
@@ -41,6 +42,7 @@ export async function init(container) {
   header.style.cssText = 'display:flex;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--border);background:var(--bg-secondary);flex-shrink:0';
 
   const searchBar = createSearchBar(onSearch);
+  searchInputEl = searchBar.querySelector('input');
   searchBar.style.flex = '1';
   searchBar.style.marginBottom = '0';
   header.appendChild(searchBar);
@@ -91,6 +93,15 @@ export async function init(container) {
 async function onSearch(query) {
   currentQuery = query;
   selectedIndex = -1;
+  await loadShortcuts();
+}
+
+async function applyKeySearch(key) {
+  currentQuery = key;
+  selectedTagId = null;
+  selectedIndex = -1;
+  detailTab = 'code';
+  if (searchInputEl) searchInputEl.value = key;
   await loadShortcuts();
 }
 
@@ -864,6 +875,13 @@ function openKeyCloudModal() {
       count.className = 'snippet-key-bubble-count';
       count.textContent = String(item.count);
       bubble.appendChild(count);
+
+      bubble.addEventListener('click', () => {
+        bubble.closest('.modal-overlay')
+          ?.querySelector('.modal-actions button:last-child')
+          ?.click();
+        applyKeySearch(item.key).catch(err => showToast('Error: ' + err, 'error'));
+      });
 
       cloud.appendChild(bubble);
     });

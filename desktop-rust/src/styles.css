@@ -528,7 +528,7 @@ button:hover, .btn:hover {
   max-width: 92px;
   max-height: 92px;
   line-height: 1.05;
-  cursor: default;
+  cursor: pointer;
 }
 .snippet-key-bubble-key {
   max-width: 84%;

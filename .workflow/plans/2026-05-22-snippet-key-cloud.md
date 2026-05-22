@@ -46,6 +46,8 @@
 
 - [ ] Add the `Key Cloud` header button.
 - [ ] Implement `openKeyCloudModal`.
+- [ ] Make key bubbles clickable: close the modal, clear selected tag, set the
+      search input to the key, and reload the snippet list.
 - [ ] Add `Related` to detail tabs only when related snippets exist.
 - [ ] Implement `renderRelatedTab`.
 - [ ] Add compact styles for cloud bubbles, related rows, and key pills.

@@ -4,6 +4,9 @@
 
 ## 1.3.27 OTA patches (2026-05-22)
 
+- **f-20260522-8 — Snippets Key Cloud search:** clicking a key bubble now
+  closes the cloud, clears the selected tag, writes the key into search, and
+  runs the snippet search immediately.
 - **f-20260522-7 — Snippets Key Cloud:** added a Key Cloud modal that derives
   stable colored keys from underscore-separated snippet names, plus a Related
   detail tab sorted by shared keys.

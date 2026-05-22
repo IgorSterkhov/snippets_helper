@@ -19,6 +19,8 @@ Use the selected D layout:
 
 - Add a `Key Cloud` button in the Snippets header, next to search/add.
 - Open the cloud in a separate modal.
+- Clicking a key bubble closes the modal, writes the key into the Snippets
+  search field, clears any selected manual tag, and runs search immediately.
 - Add a `Related` tab in the selected snippet detail view when related snippets
   exist.
 - Keep manual snippet tags and automatic keys visually separate.

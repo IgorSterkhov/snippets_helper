@@ -222,6 +222,8 @@ names or titles and does not need a persisted taxonomy.
   all items, not only the currently filtered list.
 - Use deterministic color from key text (`hash(key) -> fixed palette`) instead
   of storing color state unless the user needs editable colors.
+- If key bubbles act as filters, make the action explicit in state: update the
+  visible search input, clear incompatible manual filters, and reload the list.
 - For related rows, sort by strongest match first, then alphabetically:
   shared-key count descending, name ascending.
 - Keep derived keys visually separate from user-managed tags so automatic

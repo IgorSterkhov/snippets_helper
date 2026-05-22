@@ -170,6 +170,13 @@ async def run_tests():
         await close_modals()
         await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"shortcuts\"]').click()")
         await wait_until(cdp, "!!document.querySelector('#panel-shortcuts')", timeout=4)
+        await cdp.eval("""(() => {
+          const input = document.querySelector('#panel-shortcuts .search-bar input');
+          if (input && input.value) {
+            input.value = '';
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+        })()""")
         await wait_until(cdp, "document.body.innerText.includes('SELECT all')", timeout=5)
 
     # ── T1: mock handler count ───────────────────────────────
@@ -783,6 +790,12 @@ async def run_tests():
     # ── T24: Snippets key cloud modal ───────────────────────
     async def t24_snippets_key_cloud_modal():
         await open_shortcuts_tab()
+        await cdp.eval(
+            "[...document.querySelectorAll('#panel-shortcuts div button')]"
+            ".find(x => x.textContent.trim() === 'sql').click()"
+        )
+        await wait_until(cdp, "!!document.querySelector('#panel-shortcuts div button[style*=\"font-weight: 600\"]')", timeout=3)
+
         await cdp.eval("document.querySelector('#panel-shortcuts button[title=\"Key Cloud\"]').click()")
         await wait_until(cdp, "!!document.querySelector('.snippet-key-cloud-modal')", timeout=3)
         labels = await cdp.eval(
@@ -792,8 +805,21 @@ async def run_tests():
         counts = {item['key']: item['count'] for item in labels}
         assert counts.get('bash') == '3', f'cloud counts: {counts!r}'
         assert counts.get('guide') == '3', f'cloud counts: {counts!r}'
-        await cdp.eval("document.querySelector('.modal-overlay .modal-actions button:last-child').click()")
+
+        await cdp.eval("document.querySelector('.snippet-key-bubble[data-key=\"bash\"]').click()")
         await wait_until(cdp, "!document.querySelector('.modal-overlay')", timeout=3)
+        search_value = await cdp.eval("document.querySelector('#panel-shortcuts .search-bar input')?.value")
+        assert search_value == 'bash', f'search value: {search_value!r}'
+        active_tag = await cdp.eval("!!document.querySelector('#panel-shortcuts div button[style*=\"font-weight: 600\"]')")
+        assert not active_tag, 'tag filter should be cleared after key cloud click'
+        names = await cdp.eval(
+            "[...document.querySelectorAll('#panel-shortcuts div')]"
+            ".map(x => x.textContent.trim())"
+        )
+        assert any(n == 'bash_cd_guide' for n in names), names
+        assert any(n == 'bash_cd_cheatsheet' for n in names), names
+        assert any(n == 'bash_ssh_guide' for n in names), names
+        assert not any(n == 'sql_guide' for n in names), names
     await check('T24 Snippets key cloud modal', t24_snippets_key_cloud_modal)
 
     # ── T25: Snippets related tab sorts by shared keys ──────
