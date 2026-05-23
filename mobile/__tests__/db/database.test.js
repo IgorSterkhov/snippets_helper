@@ -2,7 +2,7 @@ import { getDB, initDB } from '../../src/db/database';
 
 jest.mock('react-native-sqlite-storage', () => {
   const mockState = {
-    existingTables: new Set(),
+    syncMetaKeys: new Set(),
     noteFoldersHasId: true,
   };
 
@@ -19,9 +19,9 @@ jest.mock('react-native-sqlite-storage', () => {
       rows = mockState.noteFoldersHasId ? makeRows([{ name: 'id' }]) : makeRows();
     }
 
-    if (text.includes("sqlite_master WHERE type = 'table' AND name = ?")) {
-      const table = params[0];
-      rows = mockState.existingTables.has(table) ? makeRows([{ name: table }]) : makeRows();
+    if (text === 'SELECT value FROM sync_meta WHERE key = ?') {
+      const key = params[0];
+      rows = mockState.syncMetaKeys.has(key) ? makeRows([{ value: 'done' }]) : makeRows();
     }
 
     if (success) success({}, { rows });
@@ -44,7 +44,7 @@ describe('database', () => {
   beforeEach(() => {
     const SQLite = require('react-native-sqlite-storage');
     jest.clearAllMocks();
-    SQLite.__mockState.existingTables = new Set();
+    SQLite.__mockState.syncMetaKeys = new Set();
     SQLite.__mockState.noteFoldersHasId = true;
   });
 
@@ -67,7 +67,7 @@ describe('database', () => {
     expect(sql).toContain('CREATE TABLE IF NOT EXISTS task_links');
   });
 
-  test('initDB resets sync cursor when task tables are first added', async () => {
+  test('initDB resets sync cursor when task backfill marker is missing', async () => {
     const SQLite = require('react-native-sqlite-storage');
 
     await initDB();
@@ -78,17 +78,17 @@ describe('database', () => {
       expect.any(Function),
       expect.any(Function),
     );
+    expect(SQLite.__mockExecuteSql).toHaveBeenCalledWith(
+      'INSERT OR REPLACE INTO sync_meta (key, value) VALUES (?, ?)',
+      ['tasks_initial_sync_backfill_v1', expect.any(String)],
+      expect.any(Function),
+      expect.any(Function),
+    );
   });
 
-  test('initDB keeps sync cursor when task tables already exist', async () => {
+  test('initDB keeps sync cursor when task backfill marker exists', async () => {
     const SQLite = require('react-native-sqlite-storage');
-    SQLite.__mockState.existingTables = new Set([
-      'task_categories',
-      'task_statuses',
-      'tasks',
-      'task_checkboxes',
-      'task_links',
-    ]);
+    SQLite.__mockState.syncMetaKeys = new Set(['tasks_initial_sync_backfill_v1']);
 
     await initDB();
 

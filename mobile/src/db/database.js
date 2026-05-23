@@ -4,6 +4,7 @@ import { setLastSyncAt } from './syncMetaRepo';
 SQLite.enablePromise(true);
 
 let db = null;
+const TASKS_INITIAL_SYNC_BACKFILL_KEY = 'tasks_initial_sync_backfill_v1';
 
 export function getDB() {
   return db;
@@ -33,12 +34,12 @@ async function columnExists(db, table, column) {
   });
 }
 
-async function tableExists(db, table) {
+async function syncMetaKeyExists(db, key) {
   return new Promise((resolve) => {
     db.transaction((tx) => {
       tx.executeSql(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
-        [table],
+        'SELECT value FROM sync_meta WHERE key = ?',
+        [key],
         (_, result) => resolve(result.rows.length > 0),
         () => resolve(false),
       );
@@ -46,7 +47,20 @@ async function tableExists(db, table) {
   });
 }
 
-async function runMigrations(hadTaskTables) {
+async function setSyncMetaValue(key, value) {
+  return new Promise((resolve, reject) => {
+    db.transaction((tx) => {
+      tx.executeSql(
+        'INSERT OR REPLACE INTO sync_meta (key, value) VALUES (?, ?)',
+        [key, value],
+        () => resolve(),
+        (_, error) => reject(error),
+      );
+    });
+  });
+}
+
+async function runMigrations() {
   // Migration: note_folders needs integer `id` to resolve parent_id (int) hierarchy
   const hasId = await columnExists(db, 'note_folders', 'id');
   if (!hasId) {
@@ -61,22 +75,17 @@ async function runMigrations(hadTaskTables) {
     await setLastSyncAt(null).catch(() => {});
   }
 
-  if (!hadTaskTables) {
-    // Existing installs can have a fresh Tasks schema but an old last_sync_at.
-    // Force one full pull so pre-existing desktop/server tasks are backfilled.
+  const hasTaskBackfill = await syncMetaKeyExists(db, TASKS_INITIAL_SYNC_BACKFILL_KEY);
+  if (!hasTaskBackfill) {
+    // Existing installs can have Tasks tables from OTA 1.0.6 but an old
+    // last_sync_at. Force one full pull so server tasks are backfilled.
     await setLastSyncAt(null).catch(() => {});
+    await setSyncMetaValue(TASKS_INITIAL_SYNC_BACKFILL_KEY, new Date().toISOString()).catch(() => {});
   }
 }
 
 export async function initDB() {
   db = await SQLite.openDatabase({ name: 'snippets_helper.db', location: 'default' });
-  const hadTaskTables = (await Promise.all([
-    tableExists(db, 'task_categories'),
-    tableExists(db, 'task_statuses'),
-    tableExists(db, 'tasks'),
-    tableExists(db, 'task_checkboxes'),
-    tableExists(db, 'task_links'),
-  ])).every(Boolean);
 
   await db.transaction((tx) => {
     tx.executeSql(`
@@ -205,7 +214,7 @@ export async function initDB() {
     `);
   });
 
-  await runMigrations(hadTaskTables);
+  await runMigrations();
 
   return db;
 }
