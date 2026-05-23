@@ -140,6 +140,43 @@ def test_tasks_sync_contract_preserves_uuid_relationships(
     assert deleted_task["is_deleted"] is True
 
 
+def test_tasks_sync_contract_ignores_task_children_without_task_uuid(
+    api_client,
+    iso_timestamp,
+    uuid_factory,
+):
+    checkbox_uuid = uuid_factory()
+    link_uuid = uuid_factory()
+
+    push_result = _push(
+        api_client,
+        {
+            "task_checkboxes": [
+                {
+                    "uuid": checkbox_uuid,
+                    "text": "invalid orphan checkbox",
+                    "updated_at": iso_timestamp(),
+                    "is_deleted": False,
+                }
+            ],
+            "task_links": [
+                {
+                    "uuid": link_uuid,
+                    "url": "https://example.invalid/orphan",
+                    "updated_at": iso_timestamp(),
+                    "is_deleted": False,
+                }
+            ],
+        },
+    )
+    assert push_result["accepted"] == 0
+    assert push_result["conflicts"] == []
+
+    pulled = _pull_all(api_client)
+    assert checkbox_uuid not in _rows_by_uuid(pulled, "task_checkboxes")
+    assert link_uuid not in _rows_by_uuid(pulled, "task_links")
+
+
 def test_tasks_sync_contract_uses_last_write_wins(
     api_client,
     iso_timestamp,
