@@ -308,6 +308,40 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     // Seed Tasks module defaults on a fresh DB. Idempotent — only inserts
     // when tables are empty, so existing users' custom sets aren't clobbered.
     seed_task_defaults(conn).ok();
+    mark_existing_tasks_pending_for_initial_sync(conn).ok();
+
+    Ok(())
+}
+
+fn mark_existing_tasks_pending_for_initial_sync(conn: &Connection) -> Result<(), rusqlite::Error> {
+    const COMPUTER_ID: &str = "__global__";
+    const MARKER: &str = "tasks_sync_backfill_v1";
+
+    let done: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM app_settings WHERE computer_id = ?1 AND setting_key = ?2",
+        rusqlite::params![COMPUTER_ID, MARKER],
+        |r| r.get(0),
+    )?;
+    if done > 0 {
+        return Ok(());
+    }
+
+    for table in [
+        "task_categories",
+        "task_statuses",
+        "tasks",
+        "task_checkboxes",
+        "task_links",
+    ] {
+        let sql = format!("UPDATE {table} SET sync_status = 'pending' WHERE sync_status != 'deleted'");
+        conn.execute(&sql, [])?;
+    }
+
+    conn.execute(
+        "INSERT OR REPLACE INTO app_settings (computer_id, setting_key, setting_value)
+         VALUES (?1, ?2, '1')",
+        rusqlite::params![COMPUTER_ID, MARKER],
+    )?;
 
     Ok(())
 }
@@ -467,5 +501,51 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM task_categories", [], |r| r.get(0))
             .unwrap();
         assert_eq!(n, 2);
+    }
+
+    #[test]
+    fn test_task_sync_backfill_marks_existing_rows_pending_once() {
+        let conn = init_test_db();
+
+        conn.execute(
+            "DELETE FROM app_settings WHERE computer_id = '__global__' AND setting_key = 'tasks_sync_backfill_v1'",
+            [],
+        )
+        .unwrap();
+        conn.execute("UPDATE task_categories SET sync_status = 'synced'", [])
+            .unwrap();
+        conn.execute("UPDATE task_statuses SET sync_status = 'synced'", [])
+            .unwrap();
+
+        run_migrations(&conn).unwrap();
+
+        let pending_categories: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM task_categories WHERE sync_status = 'pending'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let pending_statuses: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM task_statuses WHERE sync_status = 'pending'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(pending_categories, 2);
+        assert_eq!(pending_statuses, 4);
+
+        conn.execute("UPDATE task_categories SET sync_status = 'synced'", [])
+            .unwrap();
+        run_migrations(&conn).unwrap();
+        let pending_after_marker: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM task_categories WHERE sync_status = 'pending'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(pending_after_marker, 0);
     }
 }

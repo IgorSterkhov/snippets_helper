@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## v1.3.29 (2026-05-23)
+
+- **Tasks sync backfill:** existing local desktop task categories, statuses,
+  tasks, checkboxes, and links are now marked for one-time upload when the
+  desktop app is updated, so mobile devices can pull them after sync.
+- **Sync diagnostics:** desktop Debug Sync now includes local task table
+  counts.
+
 ## v1.3.28 (2026-05-23)
 
 - **Tasks sync:** added server-side sync tables for task categories, statuses,

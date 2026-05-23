@@ -310,7 +310,19 @@ pub async fn debug_sync(state: State<'_, DbState>) -> Result<Value, String> {
     let local_counts = {
         let conn = state.lock_recover();
         let mut counts = serde_json::Map::new();
-        for table in &["shortcuts", "note_folders", "notes", "sql_table_analyzer_templates", "sql_macrosing_templates", "obfuscation_mappings"] {
+        for table in &[
+            "shortcuts",
+            "note_folders",
+            "notes",
+            "sql_table_analyzer_templates",
+            "sql_macrosing_templates",
+            "obfuscation_mappings",
+            "task_categories",
+            "task_statuses",
+            "tasks",
+            "task_checkboxes",
+            "task_links",
+        ] {
             let count: i64 = conn.query_row(
                 &format!("SELECT COUNT(*) FROM {}", table), [], |row| row.get(0)
             ).unwrap_or(0);
