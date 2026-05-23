@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a frontend-only key cloud modal and related-snippets tab derived from snippet names.
+**Goal:** Add and refine a frontend-only key cloud modal and related-snippets tab derived from snippet names.
 
-**Architecture:** `shortcuts.js` computes keys from snippet names and keeps an unfiltered `allShortcuts` cache for analytics. `styles.css` owns the reusable key-cloud and related-list styling. `dev-test.py` adds smoke coverage using underscore-named snippets from `dev-mock.js`.
+**Architecture:** `shortcuts.js` computes keys from snippet names and keeps an unfiltered `allShortcuts` cache for analytics. It also owns the small deterministic packed-cloud layout because it depends only on already-derived key counts. `styles.css` owns the reusable key-cloud, zoom controls, tooltip, and related-list styling. `dev-test.py` adds smoke coverage using underscore-named snippets from `dev-mock.js`.
 
 **Tech Stack:** Vanilla JavaScript, existing modal/toast components, existing CDP smoke tests.
 
@@ -70,3 +70,24 @@
 - [ ] Run `python3 dev-test.py` from `desktop-rust/src`.
 - [ ] Run `cargo check` from `desktop-rust/src-tauri`.
 - [ ] Commit, tag, push, and verify frontend release assets.
+
+### Task 6: Variant C Packed Cloud Upgrade
+
+**Files:**
+- Modify: `desktop-rust/src/tabs/shortcuts.js`
+- Modify: `desktop-rust/src/styles.css`
+- Modify: `desktop-rust/src/dev-test.py`
+
+- [ ] Extend the smoke test for `Key Cloud` so it verifies the packed viewport,
+      zoom controls, proportional bubble diameters, tooltip text, and visible
+      center bias for high-count keys.
+- [ ] Run the smoke test and verify it fails against the old flex-wrap cloud.
+- [ ] Replace flex-wrap cloud rendering with an organic packed absolute layout:
+      largest keys sorted first, relaxed collision resolution, larger keys near
+      the center, smaller keys toward the edges.
+- [ ] Add zoom in/out, wheel zoom, drag-to-pan, and `Fit` behavior without
+      adding Tauri commands.
+- [ ] Make bubble font size depend on diameter and key length, and show a
+      hover tooltip with full key and count.
+- [ ] Run `node --check desktop-rust/src/tabs/shortcuts.js` and
+      `python3 dev-test.py` from `desktop-rust/src`.

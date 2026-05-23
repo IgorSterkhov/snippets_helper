@@ -805,6 +805,36 @@ async def run_tests():
         counts = {item['key']: item['count'] for item in labels}
         assert counts.get('bash') == '3', f'cloud counts: {counts!r}'
         assert counts.get('guide') == '3', f'cloud counts: {counts!r}'
+        assert await cdp.eval("!!document.querySelector('.snippet-key-cloud-viewport')"), 'missing packed cloud viewport'
+        assert await cdp.eval("!!document.querySelector('.snippet-key-cloud-fit')"), 'missing Fit control'
+        metrics = await cdp.eval(
+            "(() => {"
+            "const viewport = document.querySelector('.snippet-key-cloud-viewport').getBoundingClientRect();"
+            "const center = { x: viewport.left + viewport.width / 2, y: viewport.top + viewport.height / 2 };"
+            "return [...document.querySelectorAll('.snippet-key-bubble')].reduce((acc, el) => {"
+            "const r = el.getBoundingClientRect();"
+            "acc[el.dataset.key] = {"
+            "w: Math.round(r.width),"
+            "d: Math.round(parseFloat(el.style.width)),"
+            "font: parseFloat(getComputedStyle(el.querySelector('.snippet-key-bubble-key')).fontSize),"
+            "dist: Math.round(Math.hypot(r.left + r.width / 2 - center.x, r.top + r.height / 2 - center.y)),"
+            "title: el.getAttribute('title')"
+            "};"
+            "return acc;"
+            "}, {});"
+            "})()"
+        )
+        assert metrics['bash']['d'] >= 150, f'bash bubble source diameter too small: {metrics!r}'
+        assert metrics['bash']['w'] - metrics['sql']['w'] >= 45, f'weak size contrast: {metrics!r}'
+        assert metrics['sql']['font'] <= metrics['bash']['font'], f'font not scaled down: {metrics!r}'
+        assert metrics['bash']['dist'] < metrics['sql']['dist'], f'large key not centered: {metrics!r}'
+        assert metrics['bash']['title'] == 'bash · 3 snippets', f'title tooltip text: {metrics!r}'
+        await cdp.eval(
+            "document.querySelector('.snippet-key-bubble[data-key=\"bash\"]').dispatchEvent("
+            "new MouseEvent('mouseenter', { bubbles: true, clientX: 80, clientY: 80 }));"
+        )
+        tooltip_text = await wait_until(cdp, "document.querySelector('.snippet-key-tooltip.visible')?.textContent", timeout=3)
+        assert 'bash' in tooltip_text and '3 snippets' in tooltip_text, f'tooltip: {tooltip_text!r}'
 
         await cdp.eval("document.querySelector('.snippet-key-bubble[data-key=\"bash\"]').click()")
         await wait_until(cdp, "!document.querySelector('.modal-overlay')", timeout=3)

@@ -15,10 +15,20 @@ The Snippets module must show:
 
 ## Approved Design
 
-Use the selected D layout:
+Use the selected D layout for the first release, then upgrade the cloud layout
+to the selected C visual treatment:
 
 - Add a `Key Cloud` button in the Snippets header, next to search/add.
 - Open the cloud in a separate modal.
+- Arrange bubbles as an organic packed cloud: larger keys are placed near the
+  center, smaller keys are pushed outward, and empty space between bubbles is
+  minimized.
+- Bubble diameter must make count differences obvious. Keep a readable minimum
+  size for one-snippet keys and scale larger keys clearly above it.
+- The cloud supports mouse-wheel zoom, drag-to-pan, explicit zoom in/out
+  buttons, and `Fit`.
+- Bubble text size adapts to bubble diameter and key length. If text is still
+  truncated, hover shows a tooltip with the full key and snippet count.
 - Clicking a key bubble closes the modal, writes the key into the Snippets
   search field, clears any selected manual tag, and runs search immediately.
 - Add a `Related` tab in the selected snippet detail view when related snippets

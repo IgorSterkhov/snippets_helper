@@ -496,18 +496,77 @@ button:hover, .btn:hover {
   align-items: center;
   justify-content: center;
 }
+.snippet-key-cloud-shell {
+  width: min(780px, 92vw);
+  max-width: none;
+  padding: 18px;
+}
 .snippet-key-cloud-modal {
-  width: min(620px, 82vw);
-  max-height: 62vh;
-  overflow-y: auto;
+  width: 100%;
+  height: min(560px, 74vh);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+}
+.snippet-key-cloud-controls {
+  height: 31px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.snippet-key-cloud-summary {
+  margin-right: auto;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.snippet-key-cloud-controls button {
+  height: 27px;
+  min-width: 29px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-tertiary);
+  color: var(--text);
+  cursor: pointer;
+}
+.snippet-key-cloud-controls button:hover {
+  border-color: var(--accent);
+  background: rgba(88, 166, 255, 0.14);
+}
+.snippet-key-cloud-zoom-label {
+  width: 48px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.snippet-key-cloud-viewport {
+  position: relative;
+  flex: 1;
+  min-height: 320px;
+  overflow: hidden;
+  cursor: grab;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(88, 166, 255, 0.08), transparent 38%),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(0deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+  background-size: auto, 40px 40px, 40px 40px;
+}
+.snippet-key-cloud-viewport.dragging {
+  cursor: grabbing;
 }
 .snippet-key-cloud {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  padding: 10px 4px;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 1px;
+  height: 1px;
+  transform-origin: 0 0;
 }
 .snippet-key-cloud-empty {
   color: var(--text-muted);
@@ -515,32 +574,69 @@ button:hover, .btn:hover {
   margin: 24px 0;
 }
 .snippet-key-bubble {
+  position: absolute;
   border: 1px solid;
   border-radius: 999px;
-  display: inline-flex;
+  display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 2px;
-  padding: 0;
-  min-width: 42px;
-  min-height: 42px;
-  max-width: 92px;
-  max-height: 92px;
+  padding: 4px;
   line-height: 1.05;
   cursor: pointer;
+  user-select: none;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04), 0 7px 20px rgba(0, 0, 0, 0.22);
+}
+.snippet-key-bubble:hover {
+  filter: brightness(1.14);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 0 0 2px rgba(88, 166, 255, 0.24),
+    0 12px 28px rgba(0, 0, 0, 0.3);
+  z-index: 20;
 }
 .snippet-key-bubble-key {
-  max-width: 84%;
+  max-width: 92%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
-  font-weight: 700;
+  font-weight: 780;
 }
 .snippet-key-bubble-count {
   font-size: 10px;
   color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.snippet-key-tooltip {
+  position: fixed;
+  z-index: 1200;
+  pointer-events: none;
+  max-width: 260px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.38);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translate(-50%, calc(-100% - 12px));
+  transition: opacity 0.08s ease;
+}
+.snippet-key-tooltip.visible {
+  opacity: 1;
+}
+.snippet-key-tooltip span {
+  font-weight: 750;
+}
+.snippet-key-tooltip em {
+  margin-left: 8px;
+  color: var(--text-muted);
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
 }
 .snippet-related-tab {
   flex: 1;

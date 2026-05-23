@@ -222,6 +222,14 @@ names or titles and does not need a persisted taxonomy.
   all items, not only the currently filtered list.
 - Use deterministic color from key text (`hash(key) -> fixed palette`) instead
   of storing color state unless the user needs editable colors.
+- For clouds, use an absolute-positioned packed layout instead of flex-wrap
+  when relative frequency matters visually. Sort high-count keys first, keep the
+  strongest keys near the center, and provide pan, wheel zoom, zoom buttons,
+  and Fit when paths/labels may be too dense.
+- Scale bubble diameter from the raw count with a readable minimum, not only a
+  square-root transform, when users need obvious differences between counts.
+- Scale key label font by bubble diameter and key length. Also set a full text
+  tooltip/title because small bubbles still need to remain compact.
 - If key bubbles act as filters, make the action explicit in state: update the
   visible search input, clear incompatible manual filters, and reload the list.
 - For related rows, sort by strongest match first, then alphabetically:

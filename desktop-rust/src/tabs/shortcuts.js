@@ -265,9 +265,62 @@ function getKeyCloudItems() {
       key,
       count,
       color: getKeyColor(key),
-      size: Math.round(42 + (Math.sqrt(count) / Math.sqrt(maxCount)) * 46),
+      size: getKeyBubbleDiameter(count, maxCount),
     }))
     .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
+}
+
+function getKeyBubbleDiameter(count, maxCount) {
+  return Math.max(52, Math.round(48 + (count / Math.max(1, maxCount)) * 108));
+}
+
+function getKeyBubbleFontSize(size, key) {
+  const base = size < 62 ? size / 7.8 : size / 6.9;
+  const longKeyPenalty = key.length > 7 ? Math.min(3, (key.length - 7) * 0.45) : 0;
+  return Math.max(8, Math.min(18, Math.round(base - longKeyPenalty)));
+}
+
+function getPackedKeyCloudNodes(items) {
+  const nodes = items.map((item, index) => {
+    const angle = index * 2.399963229728653;
+    const radius = index === 0 ? 0 : 34 + Math.sqrt(index) * 42;
+    return {
+      ...item,
+      x: Math.cos(angle) * radius,
+      y: Math.sin(angle) * radius,
+    };
+  });
+
+  for (let iter = 0; iter < 280; iter++) {
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const a = nodes[i];
+        const b = nodes[j];
+        let dx = b.x - a.x;
+        let dy = b.y - a.y;
+        let dist = Math.hypot(dx, dy) || 0.01;
+        const minDist = (a.size + b.size) / 2 + 2;
+        if (dist >= minDist) continue;
+
+        const push = (minDist - dist) * 0.54;
+        dx /= dist;
+        dy /= dist;
+        if (i !== 0) {
+          a.x -= dx * push;
+          a.y -= dy * push;
+        }
+        b.x += dx * push;
+        b.y += dy * push;
+      }
+    }
+
+    for (let i = 1; i < nodes.length; i++) {
+      nodes[i].x *= 0.992;
+      nodes[i].y *= 0.992;
+    }
+  }
+
+  return nodes;
 }
 
 function getRelatedSnippets(shortcut) {
@@ -852,22 +905,70 @@ function openKeyCloudModal() {
     empty.textContent = 'No snippet keys found';
     body.appendChild(empty);
   } else {
+    const controls = document.createElement('div');
+    controls.className = 'snippet-key-cloud-controls';
+
+    const summary = document.createElement('span');
+    summary.className = 'snippet-key-cloud-summary';
+    summary.textContent = `${items.length} keys`;
+    controls.appendChild(summary);
+
+    const zoomOut = document.createElement('button');
+    zoomOut.type = 'button';
+    zoomOut.className = 'snippet-key-cloud-zoom-out';
+    zoomOut.textContent = '−';
+    zoomOut.title = 'Zoom out';
+    controls.appendChild(zoomOut);
+
+    const zoomLabel = document.createElement('span');
+    zoomLabel.className = 'snippet-key-cloud-zoom-label';
+    zoomLabel.textContent = '100%';
+    controls.appendChild(zoomLabel);
+
+    const zoomIn = document.createElement('button');
+    zoomIn.type = 'button';
+    zoomIn.className = 'snippet-key-cloud-zoom-in';
+    zoomIn.textContent = '+';
+    zoomIn.title = 'Zoom in';
+    controls.appendChild(zoomIn);
+
+    const fitBtn = document.createElement('button');
+    fitBtn.type = 'button';
+    fitBtn.className = 'snippet-key-cloud-fit';
+    fitBtn.textContent = 'Fit';
+    fitBtn.title = 'Fit to window';
+    controls.appendChild(fitBtn);
+    body.appendChild(controls);
+
+    const viewport = document.createElement('div');
+    viewport.className = 'snippet-key-cloud-viewport';
     const cloud = document.createElement('div');
     cloud.className = 'snippet-key-cloud';
-    items.forEach(item => {
+    const tooltip = document.createElement('div');
+    tooltip.className = 'snippet-key-tooltip';
+    viewport.appendChild(cloud);
+    viewport.appendChild(tooltip);
+    body.appendChild(viewport);
+
+    const nodes = getPackedKeyCloudNodes(items);
+    nodes.forEach(item => {
       const bubble = document.createElement('button');
       bubble.type = 'button';
       bubble.className = 'snippet-key-bubble';
       bubble.dataset.key = item.key;
       bubble.dataset.count = String(item.count);
+      bubble.title = `${item.key} · ${item.count} snippets`;
       bubble.style.width = item.size + 'px';
       bubble.style.height = item.size + 'px';
+      bubble.style.left = (item.x - item.size / 2) + 'px';
+      bubble.style.top = (item.y - item.size / 2) + 'px';
       bubble.style.borderColor = item.color;
       bubble.style.color = item.color;
       bubble.style.background = item.color + '20';
 
       const key = document.createElement('span');
       key.className = 'snippet-key-bubble-key';
+      key.style.fontSize = getKeyBubbleFontSize(item.size, item.key) + 'px';
       key.textContent = item.key;
       bubble.appendChild(key);
 
@@ -882,17 +983,113 @@ function openKeyCloudModal() {
           ?.click();
         applyKeySearch(item.key).catch(err => showToast('Error: ' + err, 'error'));
       });
+      bubble.addEventListener('mouseenter', event => {
+        tooltip.replaceChildren(
+          Object.assign(document.createElement('span'), { textContent: item.key }),
+          Object.assign(document.createElement('em'), { textContent: `${item.count} snippets` }),
+        );
+        moveKeyCloudTooltip(tooltip, event);
+        tooltip.classList.add('visible');
+      });
+      bubble.addEventListener('mousemove', event => moveKeyCloudTooltip(tooltip, event));
+      bubble.addEventListener('mouseleave', () => tooltip.classList.remove('visible'));
 
       cloud.appendChild(bubble);
     });
-    body.appendChild(cloud);
+
+    setupKeyCloudViewport({ viewport, cloud, nodes, zoomLabel, zoomIn, zoomOut, fitBtn });
   }
 
-  showModal({
+  const modalPromise = showModal({
     title: 'Key Cloud',
     body,
     onConfirm: async () => {},
-  }).catch(() => {});
+  });
+  const modal = body.closest('.modal');
+  if (modal) {
+    modal.classList.add('snippet-key-cloud-shell');
+    const cancelBtn = modal.querySelector('.modal-actions .btn-secondary');
+    const confirmBtn = modal.querySelector('.modal-actions button:last-child');
+    if (cancelBtn) cancelBtn.style.display = 'none';
+    if (confirmBtn) confirmBtn.textContent = 'Close';
+  }
+  modalPromise.catch(() => {});
+}
+
+function moveKeyCloudTooltip(tooltip, event) {
+  tooltip.style.left = event.clientX + 'px';
+  tooltip.style.top = event.clientY + 'px';
+}
+
+function setupKeyCloudViewport({ viewport, cloud, nodes, zoomLabel, zoomIn, zoomOut, fitBtn }) {
+  let scale = 1;
+  let panX = 0;
+  let panY = 0;
+  let dragging = false;
+  let start = null;
+
+  function applyTransform() {
+    cloud.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+    zoomLabel.textContent = Math.round(scale * 100) + '%';
+  }
+
+  function fit() {
+    const xs = nodes.flatMap(item => [item.x - item.size / 2, item.x + item.size / 2]);
+    const ys = nodes.flatMap(item => [item.y - item.size / 2, item.y + item.size / 2]);
+    const width = Math.max(...xs) - Math.min(...xs);
+    const height = Math.max(...ys) - Math.min(...ys);
+    const centerX = (Math.min(...xs) + Math.max(...xs)) / 2;
+    const centerY = (Math.min(...ys) + Math.max(...ys)) / 2;
+    scale = Math.min(1.18, Math.max(0.34, Math.min(
+      (viewport.clientWidth - 36) / Math.max(1, width),
+      (viewport.clientHeight - 36) / Math.max(1, height),
+    )));
+    panX = -centerX * scale;
+    panY = -centerY * scale;
+    applyTransform();
+  }
+
+  function zoomBy(factor, clientX = viewport.clientWidth / 2, clientY = viewport.clientHeight / 2) {
+    const previous = scale;
+    scale = Math.max(0.32, Math.min(3, scale * factor));
+    const rect = viewport.getBoundingClientRect();
+    const x = clientX - rect.left - viewport.clientWidth / 2;
+    const y = clientY - rect.top - viewport.clientHeight / 2;
+    panX = x - (x - panX) * (scale / previous);
+    panY = y - (y - panY) * (scale / previous);
+    applyTransform();
+  }
+
+  viewport.addEventListener('wheel', event => {
+    event.preventDefault();
+    zoomBy(event.deltaY < 0 ? 1.12 : 0.89, event.clientX, event.clientY);
+  }, { passive: false });
+
+  viewport.addEventListener('pointerdown', event => {
+    if (event.target.closest('.snippet-key-bubble')) return;
+    dragging = true;
+    viewport.classList.add('dragging');
+    start = { x: event.clientX, y: event.clientY, panX, panY };
+    viewport.setPointerCapture(event.pointerId);
+  });
+  viewport.addEventListener('pointermove', event => {
+    if (!dragging || !start) return;
+    panX = start.panX + event.clientX - start.x;
+    panY = start.panY + event.clientY - start.y;
+    applyTransform();
+  });
+  function endDrag() {
+    dragging = false;
+    start = null;
+    viewport.classList.remove('dragging');
+  }
+  viewport.addEventListener('pointerup', endDrag);
+  viewport.addEventListener('pointercancel', endDrag);
+
+  zoomIn.addEventListener('click', () => zoomBy(1.18));
+  zoomOut.addEventListener('click', () => zoomBy(0.85));
+  fitBtn.addEventListener('click', fit);
+  requestAnimationFrame(fit);
 }
 
 function openTagManager() {
