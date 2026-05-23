@@ -791,7 +791,7 @@ async def run_tests():
     async def t24_snippets_key_cloud_modal():
         await open_shortcuts_tab()
         await cdp.eval(
-            "Promise.all(Array.from({ length: 34 }, (_, i) => "
+            "Promise.all(Array.from({ length: 70 }, (_, i) => "
             "window.__TAURI__.core.invoke('create_shortcut', {"
             "name: `cloudk${i}_solo${i}`, value: 'x', description: '', links: []"
             "})))"
@@ -802,8 +802,10 @@ async def run_tests():
         )
         await wait_until(cdp, "!!document.querySelector('#panel-shortcuts div button[style*=\"font-weight: 600\"]')", timeout=3)
 
-        await cdp.eval("document.querySelector('#panel-shortcuts button[title=\"Key Cloud\"]').click()")
+        await cdp.eval("window.__keyCloudPerfStart = performance.now(); document.querySelector('#panel-shortcuts button[title=\"Key Cloud\"]').click()")
         await wait_until(cdp, "!!document.querySelector('.snippet-key-cloud-modal')", timeout=3)
+        open_ms = await cdp.eval("performance.now() - window.__keyCloudPerfStart")
+        assert open_ms < 3000, f'key cloud opens too slowly: {open_ms:.0f}ms'
         labels = await cdp.eval(
             "[...document.querySelectorAll('.snippet-key-bubble')]"
             ".map(x => ({ key: x.dataset.key, count: x.dataset.count }))"

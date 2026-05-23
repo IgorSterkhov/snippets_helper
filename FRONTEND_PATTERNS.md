@@ -229,6 +229,9 @@ names or titles and does not need a persisted taxonomy.
 - Do not rely on a fixed number of physics/relaxation iterations to separate
   bubbles. Use collision-aware placement and keep a smoke test that checks
   rendered bubble rectangles for overlap on a dense cloud.
+- Keep dense cloud placement bounded. A spatial hash plus spiral candidate
+  generation avoids checking every candidate against every existing bubble and
+  keeps hundreds of keys interactive.
 - Scale bubble diameter from the raw count with a readable minimum, not only a
   square-root transform, when users need obvious differences between counts.
 - Scale key label font by bubble diameter and key length. Also set a full text

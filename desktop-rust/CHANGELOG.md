@@ -4,6 +4,9 @@
 
 ## 1.3.27 OTA patches (2026-05-23)
 
+- **f-20260523-3 — Snippets Key Cloud performance:** replaced slow ring
+  probing with spatial-hash spiral placement so dense key clouds open
+  interactively while still avoiding overlaps.
 - **f-20260523-2 — Snippets Key Cloud overlap fix:** changed the packed cloud
   placement to reject colliding bubble positions and added smoke coverage for
   dense clouds so key circles do not overlap.

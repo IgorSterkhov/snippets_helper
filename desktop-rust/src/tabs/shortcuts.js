@@ -283,41 +283,66 @@ function getKeyBubbleFontSize(size, key) {
 function getPackedKeyCloudNodes(items) {
   const placed = [];
   const gap = 3;
+  const maxSize = Math.max(1, ...items.map(item => item.size));
+  const cellSize = maxSize + gap;
+  const grid = new Map();
+
+  function addToGrid(item) {
+    const key = keyCloudCellKey(item.x, item.y, cellSize);
+    const bucket = grid.get(key) || [];
+    bucket.push(item);
+    grid.set(key, bucket);
+  }
+
+  function collides(candidate) {
+    const cellX = Math.floor(candidate.x / cellSize);
+    const cellY = Math.floor(candidate.y / cellSize);
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        const bucket = grid.get(`${cellX + dx}:${cellY + dy}`);
+        if (!bucket) continue;
+        for (const item of bucket) {
+          const dist = Math.hypot(candidate.x - item.x, candidate.y - item.y);
+          if (dist < (candidate.size + item.size) / 2 + gap) return true;
+        }
+      }
+    }
+    return false;
+  }
 
   items.forEach((item, index) => {
     if (index === 0) {
-      placed.push({ ...item, x: 0, y: 0 });
+      const first = { ...item, x: 0, y: 0 };
+      placed.push(first);
+      addToGrid(first);
       return;
     }
 
-    let best = null;
-    for (let radius = item.size / 2; radius < 5000 && !best; radius += 4) {
-      const steps = Math.max(24, Math.ceil((Math.PI * 2 * radius) / 10));
-      for (let step = 0; step < steps; step++) {
-        const angle = (step / steps) * Math.PI * 2 + index * 0.618;
-        const candidate = {
-          ...item,
-          x: Math.cos(angle) * radius,
-          y: Math.sin(angle) * radius,
-        };
-        if (keyCloudCollides(candidate, placed, gap)) continue;
-
-        const score = Math.hypot(candidate.x, candidate.y) + Math.abs(candidate.y) * 0.04;
-        if (!best || score < best.score) best = { ...candidate, score };
-      }
+    let node = null;
+    const phase = index * 2.399963229728653;
+    for (let step = 0; step < 12000; step++) {
+      const radius = item.size / 2 + step * 3.2;
+      const angle = phase + step * 0.48;
+      const candidate = {
+        ...item,
+        x: Math.cos(angle) * radius,
+        y: Math.sin(angle) * radius,
+      };
+      if (collides(candidate)) continue;
+      node = candidate;
+      break;
     }
 
-    placed.push(best || { ...item, x: index * (item.size + gap), y: 0 });
+    node = node || { ...item, x: index * (item.size + gap), y: 0 };
+    placed.push(node);
+    addToGrid(node);
   });
 
-  return placed.map(({ score, ...item }) => item);
+  return placed;
 }
 
-function keyCloudCollides(candidate, placed, gap) {
-  return placed.some(item => {
-    const dist = Math.hypot(candidate.x - item.x, candidate.y - item.y);
-    return dist < (candidate.size + item.size) / 2 + gap;
-  });
+function keyCloudCellKey(x, y, cellSize) {
+  return `${Math.floor(x / cellSize)}:${Math.floor(y / cellSize)}`;
 }
 
 function getRelatedSnippets(shortcut) {

@@ -24,7 +24,8 @@ to the selected C visual treatment:
   center, smaller keys are pushed outward, and empty space between bubbles is
   minimized. Bubbles must not visually overlap; the packing algorithm should
   reject colliding positions instead of relying only on fixed-iteration
-  relaxation.
+  relaxation. Dense clouds with hundreds of keys should use spatial indexing
+  and bounded candidate generation so the modal opens interactively.
 - Bubble diameter must make count differences obvious. Keep a readable minimum
   size for one-snippet keys and scale larger keys clearly above it.
 - The cloud supports mouse-wheel zoom, drag-to-pan, explicit zoom in/out
