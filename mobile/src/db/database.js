@@ -33,7 +33,20 @@ async function columnExists(db, table, column) {
   });
 }
 
-async function runMigrations() {
+async function tableExists(db, table) {
+  return new Promise((resolve) => {
+    db.transaction((tx) => {
+      tx.executeSql(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+        [table],
+        (_, result) => resolve(result.rows.length > 0),
+        () => resolve(false),
+      );
+    });
+  });
+}
+
+async function runMigrations(hadTaskTables) {
   // Migration: note_folders needs integer `id` to resolve parent_id (int) hierarchy
   const hasId = await columnExists(db, 'note_folders', 'id');
   if (!hasId) {
@@ -47,10 +60,23 @@ async function runMigrations() {
     // Trigger full re-sync so that `id` fields are pulled from the server.
     await setLastSyncAt(null).catch(() => {});
   }
+
+  if (!hadTaskTables) {
+    // Existing installs can have a fresh Tasks schema but an old last_sync_at.
+    // Force one full pull so pre-existing desktop/server tasks are backfilled.
+    await setLastSyncAt(null).catch(() => {});
+  }
 }
 
 export async function initDB() {
   db = await SQLite.openDatabase({ name: 'snippets_helper.db', location: 'default' });
+  const hadTaskTables = (await Promise.all([
+    tableExists(db, 'task_categories'),
+    tableExists(db, 'task_statuses'),
+    tableExists(db, 'tasks'),
+    tableExists(db, 'task_checkboxes'),
+    tableExists(db, 'task_links'),
+  ])).every(Boolean);
 
   await db.transaction((tx) => {
     tx.executeSql(`
@@ -179,7 +205,7 @@ export async function initDB() {
     `);
   });
 
-  await runMigrations();
+  await runMigrations(hadTaskTables);
 
   return db;
 }
