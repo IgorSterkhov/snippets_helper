@@ -4,7 +4,7 @@ import { setLastSyncAt } from './syncMetaRepo';
 SQLite.enablePromise(true);
 
 let db = null;
-const TASKS_INITIAL_SYNC_BACKFILL_KEY = 'tasks_initial_sync_backfill_v1';
+const TASKS_INITIAL_SYNC_BACKFILL_KEY = 'tasks_initial_sync_backfill_v2';
 
 export function getDB() {
   return db;

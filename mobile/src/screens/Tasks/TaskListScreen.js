@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, RefreshControl, ScrollView } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../../theme/ThemeContext';
@@ -9,7 +9,7 @@ import {
   getTasksByFilters,
   getNextTaskSortOrder,
 } from '../../db/taskRepo';
-import { performSync } from '../../sync/syncService';
+import { performSync, subscribeSyncStatus } from '../../sync/syncService';
 import SearchBar from '../../components/SearchBar';
 import SyncStatusBar from '../../components/SyncStatusBar';
 import { uuidv4 } from '../../lib/uuid';
@@ -40,6 +40,22 @@ export default function TaskListScreen({ navigation }) {
   }, [query, selectedCategory, selectedStatus]);
 
   useFocusEffect(useCallback(() => { loadData(); }, [loadData]));
+
+  useEffect(() => {
+    let wasSyncing = false;
+    const unsubscribe = subscribeSyncStatus((evt) => {
+      if (evt.type !== 'syncing') return;
+      if (evt.value) {
+        wasSyncing = true;
+        return;
+      }
+      if (wasSyncing) {
+        wasSyncing = false;
+        loadData().catch((e) => console.warn('Task reload failed:', e));
+      }
+    });
+    return unsubscribe;
+  }, [loadData]);
 
   const onRefresh = async () => {
     setRefreshing(true);

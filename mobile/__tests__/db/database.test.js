@@ -80,7 +80,7 @@ describe('database', () => {
     );
     expect(SQLite.__mockExecuteSql).toHaveBeenCalledWith(
       'INSERT OR REPLACE INTO sync_meta (key, value) VALUES (?, ?)',
-      ['tasks_initial_sync_backfill_v1', expect.any(String)],
+      ['tasks_initial_sync_backfill_v2', expect.any(String)],
       expect.any(Function),
       expect.any(Function),
     );
@@ -88,7 +88,7 @@ describe('database', () => {
 
   test('initDB keeps sync cursor when task backfill marker exists', async () => {
     const SQLite = require('react-native-sqlite-storage');
-    SQLite.__mockState.syncMetaKeys = new Set(['tasks_initial_sync_backfill_v1']);
+    SQLite.__mockState.syncMetaKeys = new Set(['tasks_initial_sync_backfill_v2']);
 
     await initDB();
 
