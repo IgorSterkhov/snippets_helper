@@ -120,4 +120,38 @@ describe('syncService', () => {
       }),
     );
   });
+
+  test('pull skips task child rows without task_uuid', async () => {
+    syncMeta.getLastSyncAt.mockResolvedValue(null);
+    endpoints.syncPull.mockResolvedValue({
+      changes: {
+        tasks: [{ uuid: 'task-1', title: 'Task', updated_at: '2026-05-23T10:00:00', is_deleted: false }],
+        task_checkboxes: [
+          { uuid: 'checkbox-valid', task_uuid: 'task-1', text: 'valid', updated_at: '2026-05-23T10:00:00' },
+          { uuid: 'checkbox-invalid', task_uuid: null, text: 'invalid', updated_at: '2026-05-23T10:00:00' },
+        ],
+        task_links: [
+          { uuid: 'link-valid', task_uuid: 'task-1', url: 'https://example.invalid', updated_at: '2026-05-23T10:00:00' },
+          { uuid: 'link-invalid', task_uuid: null, url: 'https://example.invalid', updated_at: '2026-05-23T10:00:00' },
+        ],
+      },
+      server_time: '2026-05-23T10:00:00',
+    });
+    snippetRepo.getModifiedSnippetsSince.mockResolvedValue([]);
+    snippetRepo.getModifiedTagsSince.mockResolvedValue([]);
+    noteRepo.getModifiedNotesSince.mockResolvedValue([]);
+    noteRepo.getModifiedFoldersSince.mockResolvedValue([]);
+    endpoints.syncPush.mockResolvedValue({ status: 'ok', accepted: 0, conflicts: [] });
+
+    await performSync();
+
+    expect(taskRepo.buildUpsertTaskCheckbox).toHaveBeenCalledTimes(1);
+    expect(taskRepo.buildUpsertTaskCheckbox).toHaveBeenCalledWith(
+      expect.objectContaining({ uuid: 'checkbox-valid' }),
+    );
+    expect(taskRepo.buildUpsertTaskLink).toHaveBeenCalledTimes(1);
+    expect(taskRepo.buildUpsertTaskLink).toHaveBeenCalledWith(
+      expect.objectContaining({ uuid: 'link-valid' }),
+    );
+  });
 });

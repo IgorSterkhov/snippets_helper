@@ -40,6 +40,16 @@ const TABLE_ORDER = [
   'task_links',
 ];
 
+function shouldApplyPulledRow(table, row) {
+  if (!row || typeof row !== 'object') {
+    return false;
+  }
+  if ((table === 'task_checkboxes' || table === 'task_links') && !row.task_uuid) {
+    return false;
+  }
+  return true;
+}
+
 let syncing = false;
 const listeners = new Set();
 
@@ -86,7 +96,8 @@ function applyPulledChanges(changes) {
   const input = changes || {};
   const entries = TABLE_ORDER
     .filter((table) => Array.isArray(input[table]))
-    .map((table) => [table, input[table]]);
+    .map((table) => [table, input[table].filter((row) => shouldApplyPulledRow(table, row))])
+    .filter(([, rows]) => rows.length > 0);
   let totalRows = 0;
   for (const [, rows] of entries) totalRows += rows.length;
   if (!totalRows) return Promise.resolve();

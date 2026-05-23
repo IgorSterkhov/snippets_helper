@@ -34,6 +34,13 @@ def _row_to_dict(row, columns: list[str]) -> dict:
     return d
 
 
+def _has_required_uuid_relations(table_name: str, row: dict) -> bool:
+    """Rows that reference a task must carry UUID relationships for mobile sync."""
+    if table_name in {"task_checkboxes", "task_links"}:
+        return bool(row.get("task_uuid"))
+    return True
+
+
 @router.post("/push", response_model=PushResponse)
 async def push(
     req: PushRequest,
@@ -78,6 +85,9 @@ async def push(
                     extra[key] = val
                 if isinstance(extra.get(key), datetime) and extra[key].tzinfo is not None:
                     extra[key] = extra[key].replace(tzinfo=None)
+
+            if not is_deleted and not _has_required_uuid_relations(table_name, extra):
+                continue
 
             if existing:
                 # Conflict check: last-write-wins
@@ -140,6 +150,12 @@ async def pull(
 
         if rows:
             data_cols = _get_data_columns(model)
-            changes[table_name] = [_row_to_dict(r, data_cols) for r in rows]
+            table_rows = [
+                row
+                for row in (_row_to_dict(r, data_cols) for r in rows)
+                if _has_required_uuid_relations(table_name, row)
+            ]
+            if table_rows:
+                changes[table_name] = table_rows
 
     return PullResponse(changes=changes, server_time=server_time)
