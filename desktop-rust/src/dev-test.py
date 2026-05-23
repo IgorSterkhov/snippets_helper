@@ -791,6 +791,10 @@ async def run_tests():
     async def t24_snippets_key_cloud_modal():
         await open_shortcuts_tab()
         await cdp.eval(
+            "localStorage.removeItem('snippet_key_cloud_cache_v2');"
+            "localStorage.removeItem('snippet_key_cloud_cache_v3');"
+        )
+        await cdp.eval(
             "Promise.all(Array.from({ length: 70 }, (_, i) => "
             "window.__TAURI__.core.invoke('create_shortcut', {"
             "name: `cloudk${i}_solo${i}`, value: 'x', description: '', links: []"
@@ -805,7 +809,18 @@ async def run_tests():
         await cdp.eval("window.__keyCloudPerfStart = performance.now(); document.querySelector('#panel-shortcuts button[title=\"Key Cloud\"]').click()")
         await wait_until(cdp, "!!document.querySelector('.snippet-key-cloud-modal')", timeout=3)
         open_ms = await cdp.eval("performance.now() - window.__keyCloudPerfStart")
-        assert open_ms < 3000, f'key cloud opens too slowly: {open_ms:.0f}ms'
+        assert open_ms < 700, f'key cloud modal opens too slowly without cache: {open_ms:.0f}ms'
+        assert await cdp.eval("!!document.querySelector('.snippet-key-cloud-progress')"), 'missing no-cache progress state'
+        await wait_until(cdp, "document.querySelectorAll('.snippet-key-bubble').length > 20", timeout=8)
+        cached_after_build = await cdp.eval("!!localStorage.getItem('snippet_key_cloud_cache_v3')")
+        assert cached_after_build, 'key cloud cache was not persisted'
+
+        await cdp.eval("document.querySelector('.modal-actions button:last-child').click()")
+        await wait_until(cdp, "!document.querySelector('.modal-overlay')", timeout=3)
+        await cdp.eval("window.__keyCloudCachedOpenStart = performance.now(); document.querySelector('#panel-shortcuts button[title=\"Key Cloud\"]').click()")
+        await wait_until(cdp, "document.querySelectorAll('.snippet-key-bubble').length > 20", timeout=3)
+        cached_open_ms = await cdp.eval("performance.now() - window.__keyCloudCachedOpenStart")
+        assert cached_open_ms < 700, f'cached key cloud opens too slowly: {cached_open_ms:.0f}ms'
         labels = await cdp.eval(
             "[...document.querySelectorAll('.snippet-key-bubble')]"
             ".map(x => ({ key: x.dataset.key, count: x.dataset.count }))"

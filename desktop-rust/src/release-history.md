@@ -4,6 +4,9 @@
 
 ## 1.3.27 OTA patches (2026-05-23)
 
+- **f-20260523-4 — Snippets Key Cloud cache:** added persistent
+  stale-while-revalidate cache and a no-cache progress state, while restoring
+  the denser ring-probing layout in async chunks.
 - **f-20260523-3 — Snippets Key Cloud performance:** replaced slow ring
   probing with spatial-hash spiral placement so dense key clouds open
   interactively while still avoiding overlaps.

@@ -573,6 +573,39 @@ button:hover, .btn:hover {
   text-align: center;
   margin: 24px 0;
 }
+.snippet-key-cloud-progress {
+  flex: 1;
+  min-height: 320px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 9px;
+  padding: 20px 28px;
+  color: var(--text-muted);
+}
+.snippet-key-cloud-progress-label {
+  font-size: 13px;
+}
+.snippet-key-cloud-progress-bar {
+  height: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-tertiary);
+}
+.snippet-key-cloud-progress-fill {
+  height: 100%;
+  width: 0;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 0.12s ease;
+}
+.snippet-key-cloud-progress-percent {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
 .snippet-key-bubble {
   position: absolute;
   border: 1px solid;

@@ -21,6 +21,14 @@ let tags = [];
 let selectedTagId = null;
 let tagPanelEl = null;
 let searchInputEl = null;
+const KEY_CLOUD_CACHE_KEY = 'snippet_key_cloud_cache_v3';
+const KEY_CLOUD_CACHE_SCHEMA = 3;
+let keyCloudCache = null;
+let keyCloudBuildPromise = null;
+let keyCloudBuildFingerprint = '';
+let keyCloudBuildSeq = 0;
+let keyCloudProgress = { status: 'idle', percent: 0, message: '' };
+const keyCloudProgressListeners = new Set();
 
 export async function init(container) {
   container.innerHTML = '';
@@ -120,6 +128,7 @@ async function loadShortcuts() {
     renderTagPanel();
 
     allShortcuts = await call('list_shortcuts');
+    refreshKeyCloudCacheInBackground();
 
     // Load shortcuts based on tag + search
     if (selectedTagId !== null) {
@@ -270,6 +279,102 @@ function getKeyCloudItems() {
     .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
 }
 
+function getKeyCloudFingerprint() {
+  return allShortcuts
+    .map(shortcut => `${shortcut.id}:${shortcut.updated_at || ''}:${shortcut.name || ''}`)
+    .sort()
+    .join('|');
+}
+
+function readStoredKeyCloudCache({ allowStale = false } = {}) {
+  try {
+    const raw = localStorage.getItem(KEY_CLOUD_CACHE_KEY);
+    if (!raw) return null;
+    const cache = JSON.parse(raw);
+    if (cache.schema !== KEY_CLOUD_CACHE_SCHEMA) return null;
+    if (!Array.isArray(cache.items) || !Array.isArray(cache.nodes)) return null;
+    if (!allowStale && cache.fingerprint !== getKeyCloudFingerprint()) return null;
+    return cache;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredKeyCloudCache(cache) {
+  keyCloudCache = cache;
+  try {
+    localStorage.setItem(KEY_CLOUD_CACHE_KEY, JSON.stringify(cache));
+  } catch {
+    // Cache is an optimization; ignore quota/private-mode failures.
+  }
+}
+
+function notifyKeyCloudProgress(update) {
+  keyCloudProgress = { ...keyCloudProgress, ...update };
+  keyCloudProgressListeners.forEach(listener => listener(keyCloudProgress));
+}
+
+function subscribeKeyCloudProgress(listener) {
+  keyCloudProgressListeners.add(listener);
+  listener(keyCloudProgress);
+  return () => keyCloudProgressListeners.delete(listener);
+}
+
+function refreshKeyCloudCacheInBackground() {
+  getKeyCloudLayoutCache().catch(() => {});
+}
+
+function getKeyCloudLayoutCache({ force = false } = {}) {
+  const fingerprint = getKeyCloudFingerprint();
+  const validCache = !force && (keyCloudCache?.fingerprint === fingerprint
+    ? keyCloudCache
+    : readStoredKeyCloudCache());
+  if (validCache) {
+    keyCloudCache = validCache;
+    notifyKeyCloudProgress({ status: 'ready', percent: 100, message: 'Ready' });
+    return Promise.resolve(validCache);
+  }
+
+  if (keyCloudBuildPromise && keyCloudBuildFingerprint === fingerprint) {
+    return keyCloudBuildPromise;
+  }
+
+  const buildSeq = ++keyCloudBuildSeq;
+  keyCloudBuildFingerprint = fingerprint;
+  const items = getKeyCloudItems();
+  notifyKeyCloudProgress({
+    status: 'building',
+    percent: items.length === 0 ? 100 : 1,
+    message: items.length === 0 ? 'No keys' : 'Preparing key cloud...',
+  });
+
+  keyCloudBuildPromise = (async () => {
+    const nodes = await getPackedKeyCloudNodes(items, progress => {
+      if (buildSeq !== keyCloudBuildSeq) return;
+      notifyKeyCloudProgress(progress);
+    });
+    const cache = {
+      schema: KEY_CLOUD_CACHE_SCHEMA,
+      fingerprint,
+      items,
+      nodes,
+      builtAt: Date.now(),
+    };
+    if (buildSeq === keyCloudBuildSeq) {
+      writeStoredKeyCloudCache(cache);
+      notifyKeyCloudProgress({ status: 'ready', percent: 100, message: 'Ready' });
+    }
+    return cache;
+  })().finally(() => {
+    if (buildSeq === keyCloudBuildSeq) {
+      keyCloudBuildPromise = null;
+      keyCloudBuildFingerprint = '';
+    }
+  });
+
+  return keyCloudBuildPromise;
+}
+
 function getKeyBubbleDiameter(count, maxCount) {
   return Math.max(52, Math.round(48 + (count / Math.max(1, maxCount)) * 108));
 }
@@ -280,12 +385,13 @@ function getKeyBubbleFontSize(size, key) {
   return Math.max(8, Math.min(18, Math.round(base - longKeyPenalty)));
 }
 
-function getPackedKeyCloudNodes(items) {
+async function getPackedKeyCloudNodes(items, onProgress = () => {}) {
   const placed = [];
   const gap = 3;
   const maxSize = Math.max(1, ...items.map(item => item.size));
   const cellSize = maxSize + gap;
   const grid = new Map();
+  let lastYield = performance.now();
 
   function addToGrid(item) {
     const key = keyCloudCellKey(item.x, item.y, cellSize);
@@ -310,35 +416,53 @@ function getPackedKeyCloudNodes(items) {
     return false;
   }
 
-  items.forEach((item, index) => {
+  for (let index = 0; index < items.length; index++) {
+    const item = items[index];
     if (index === 0) {
       const first = { ...item, x: 0, y: 0 };
       placed.push(first);
       addToGrid(first);
-      return;
+      continue;
     }
 
-    let node = null;
-    const phase = index * 2.399963229728653;
-    for (let step = 0; step < 12000; step++) {
-      const radius = item.size / 2 + step * 3.2;
-      const angle = phase + step * 0.48;
-      const candidate = {
-        ...item,
-        x: Math.cos(angle) * radius,
-        y: Math.sin(angle) * radius,
-      };
-      if (collides(candidate)) continue;
-      node = candidate;
-      break;
+    let best = null;
+    for (let radius = item.size / 2; radius < 5000 && !best; radius += 7) {
+      const steps = Math.max(20, Math.ceil((Math.PI * 2 * radius) / 18));
+      for (let step = 0; step < steps; step++) {
+        const angle = (step / steps) * Math.PI * 2 + index * 0.618;
+        const candidate = {
+          ...item,
+          x: Math.cos(angle) * radius,
+          y: Math.sin(angle) * radius,
+        };
+        if (collides(candidate)) continue;
+
+        const score = Math.hypot(candidate.x, candidate.y) + Math.abs(candidate.y) * 0.04;
+        if (!best || score < best.score) best = { ...candidate, score };
+      }
+
+      if (performance.now() - lastYield > 16) {
+        onProgress({
+          status: 'building',
+          percent: Math.max(1, Math.round((index / Math.max(1, items.length)) * 100)),
+          message: `Building key cloud ${index}/${items.length}`,
+        });
+        await new Promise(resolve => setTimeout(resolve, 0));
+        lastYield = performance.now();
+      }
     }
 
-    node = node || { ...item, x: index * (item.size + gap), y: 0 };
+    const node = best || { ...item, x: index * (item.size + gap), y: 0 };
     placed.push(node);
     addToGrid(node);
-  });
+    onProgress({
+      status: 'building',
+      percent: Math.max(1, Math.round(((index + 1) / Math.max(1, items.length)) * 100)),
+      message: `Building key cloud ${index + 1}/${items.length}`,
+    });
+  }
 
-  return placed;
+  return placed.map(({ score, ...item }) => item);
 }
 
 function keyCloudCellKey(x, y, cellSize) {
@@ -917,109 +1041,19 @@ function renderTagPanel() {
 }
 
 function openKeyCloudModal() {
-  const items = getKeyCloudItems();
+  const fingerprint = getKeyCloudFingerprint();
+  const cached = readStoredKeyCloudCache({ allowStale: true });
+  const validCache = cached?.fingerprint === fingerprint ? cached : null;
   const body = document.createElement('div');
   body.className = 'snippet-key-cloud-modal';
+  let unsubscribeProgress = null;
 
-  if (items.length === 0) {
-    const empty = document.createElement('p');
-    empty.className = 'snippet-key-cloud-empty';
-    empty.textContent = 'No snippet keys found';
-    body.appendChild(empty);
+  if (validCache) {
+    renderKeyCloudLayout(body, validCache);
+  } else if (cached?.nodes?.length) {
+    renderKeyCloudLayout(body, cached, { stale: true });
   } else {
-    const controls = document.createElement('div');
-    controls.className = 'snippet-key-cloud-controls';
-
-    const summary = document.createElement('span');
-    summary.className = 'snippet-key-cloud-summary';
-    summary.textContent = `${items.length} keys`;
-    controls.appendChild(summary);
-
-    const zoomOut = document.createElement('button');
-    zoomOut.type = 'button';
-    zoomOut.className = 'snippet-key-cloud-zoom-out';
-    zoomOut.textContent = '−';
-    zoomOut.title = 'Zoom out';
-    controls.appendChild(zoomOut);
-
-    const zoomLabel = document.createElement('span');
-    zoomLabel.className = 'snippet-key-cloud-zoom-label';
-    zoomLabel.textContent = '100%';
-    controls.appendChild(zoomLabel);
-
-    const zoomIn = document.createElement('button');
-    zoomIn.type = 'button';
-    zoomIn.className = 'snippet-key-cloud-zoom-in';
-    zoomIn.textContent = '+';
-    zoomIn.title = 'Zoom in';
-    controls.appendChild(zoomIn);
-
-    const fitBtn = document.createElement('button');
-    fitBtn.type = 'button';
-    fitBtn.className = 'snippet-key-cloud-fit';
-    fitBtn.textContent = 'Fit';
-    fitBtn.title = 'Fit to window';
-    controls.appendChild(fitBtn);
-    body.appendChild(controls);
-
-    const viewport = document.createElement('div');
-    viewport.className = 'snippet-key-cloud-viewport';
-    const cloud = document.createElement('div');
-    cloud.className = 'snippet-key-cloud';
-    const tooltip = document.createElement('div');
-    tooltip.className = 'snippet-key-tooltip';
-    viewport.appendChild(cloud);
-    viewport.appendChild(tooltip);
-    body.appendChild(viewport);
-
-    const nodes = getPackedKeyCloudNodes(items);
-    nodes.forEach(item => {
-      const bubble = document.createElement('button');
-      bubble.type = 'button';
-      bubble.className = 'snippet-key-bubble';
-      bubble.dataset.key = item.key;
-      bubble.dataset.count = String(item.count);
-      bubble.title = `${item.key} · ${item.count} snippets`;
-      bubble.style.width = item.size + 'px';
-      bubble.style.height = item.size + 'px';
-      bubble.style.left = (item.x - item.size / 2) + 'px';
-      bubble.style.top = (item.y - item.size / 2) + 'px';
-      bubble.style.borderColor = item.color;
-      bubble.style.color = item.color;
-      bubble.style.background = item.color + '20';
-
-      const key = document.createElement('span');
-      key.className = 'snippet-key-bubble-key';
-      key.style.fontSize = getKeyBubbleFontSize(item.size, item.key) + 'px';
-      key.textContent = item.key;
-      bubble.appendChild(key);
-
-      const count = document.createElement('span');
-      count.className = 'snippet-key-bubble-count';
-      count.textContent = String(item.count);
-      bubble.appendChild(count);
-
-      bubble.addEventListener('click', () => {
-        bubble.closest('.modal-overlay')
-          ?.querySelector('.modal-actions button:last-child')
-          ?.click();
-        applyKeySearch(item.key).catch(err => showToast('Error: ' + err, 'error'));
-      });
-      bubble.addEventListener('mouseenter', event => {
-        tooltip.replaceChildren(
-          Object.assign(document.createElement('span'), { textContent: item.key }),
-          Object.assign(document.createElement('em'), { textContent: `${item.count} snippets` }),
-        );
-        moveKeyCloudTooltip(tooltip, event);
-        tooltip.classList.add('visible');
-      });
-      bubble.addEventListener('mousemove', event => moveKeyCloudTooltip(tooltip, event));
-      bubble.addEventListener('mouseleave', () => tooltip.classList.remove('visible'));
-
-      cloud.appendChild(bubble);
-    });
-
-    setupKeyCloudViewport({ viewport, cloud, nodes, zoomLabel, zoomIn, zoomOut, fitBtn });
+    renderKeyCloudProgress(body, keyCloudProgress);
   }
 
   const modalPromise = showModal({
@@ -1035,7 +1069,163 @@ function openKeyCloudModal() {
     if (cancelBtn) cancelBtn.style.display = 'none';
     if (confirmBtn) confirmBtn.textContent = 'Close';
   }
-  modalPromise.catch(() => {});
+  modalPromise.catch(() => {}).finally(() => {
+    if (unsubscribeProgress) unsubscribeProgress();
+  });
+
+  if (!validCache) {
+    unsubscribeProgress = subscribeKeyCloudProgress(progress => {
+      if (!body.isConnected || body.querySelector('.snippet-key-cloud')) return;
+      renderKeyCloudProgress(body, progress);
+    });
+    getKeyCloudLayoutCache({ force: !cached || cached.fingerprint !== fingerprint })
+      .then(cache => {
+        if (body.isConnected) renderKeyCloudLayout(body, cache);
+      })
+      .catch(err => {
+        if (body.isConnected) renderKeyCloudError(body, err);
+      });
+  }
+}
+
+function renderKeyCloudProgress(body, progress) {
+  body.innerHTML = '';
+  const box = document.createElement('div');
+  box.className = 'snippet-key-cloud-progress';
+
+  const label = document.createElement('div');
+  label.className = 'snippet-key-cloud-progress-label';
+  label.textContent = progress.message || 'Building key cloud...';
+  box.appendChild(label);
+
+  const bar = document.createElement('div');
+  bar.className = 'snippet-key-cloud-progress-bar';
+  const fill = document.createElement('div');
+  fill.className = 'snippet-key-cloud-progress-fill';
+  fill.style.width = Math.max(0, Math.min(100, progress.percent || 0)) + '%';
+  bar.appendChild(fill);
+  box.appendChild(bar);
+
+  const pct = document.createElement('div');
+  pct.className = 'snippet-key-cloud-progress-percent';
+  pct.textContent = Math.round(progress.percent || 0) + '%';
+  box.appendChild(pct);
+
+  body.appendChild(box);
+}
+
+function renderKeyCloudError(body, err) {
+  body.innerHTML = '';
+  const empty = document.createElement('p');
+  empty.className = 'snippet-key-cloud-empty';
+  empty.textContent = 'Failed to build key cloud: ' + String(err?.message || err);
+  body.appendChild(empty);
+}
+
+function renderKeyCloudLayout(body, cache, { stale = false } = {}) {
+  body.innerHTML = '';
+  const nodes = cache.nodes || [];
+
+  if (nodes.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'snippet-key-cloud-empty';
+    empty.textContent = 'No snippet keys found';
+    body.appendChild(empty);
+    return;
+  }
+
+  const controls = document.createElement('div');
+  controls.className = 'snippet-key-cloud-controls';
+
+  const summary = document.createElement('span');
+  summary.className = 'snippet-key-cloud-summary';
+  summary.textContent = `${nodes.length} keys${stale ? ' · updating...' : ''}`;
+  controls.appendChild(summary);
+
+  const zoomOut = document.createElement('button');
+  zoomOut.type = 'button';
+  zoomOut.className = 'snippet-key-cloud-zoom-out';
+  zoomOut.textContent = '−';
+  zoomOut.title = 'Zoom out';
+  controls.appendChild(zoomOut);
+
+  const zoomLabel = document.createElement('span');
+  zoomLabel.className = 'snippet-key-cloud-zoom-label';
+  zoomLabel.textContent = '100%';
+  controls.appendChild(zoomLabel);
+
+  const zoomIn = document.createElement('button');
+  zoomIn.type = 'button';
+  zoomIn.className = 'snippet-key-cloud-zoom-in';
+  zoomIn.textContent = '+';
+  zoomIn.title = 'Zoom in';
+  controls.appendChild(zoomIn);
+
+  const fitBtn = document.createElement('button');
+  fitBtn.type = 'button';
+  fitBtn.className = 'snippet-key-cloud-fit';
+  fitBtn.textContent = 'Fit';
+  fitBtn.title = 'Fit to window';
+  controls.appendChild(fitBtn);
+  body.appendChild(controls);
+
+  const viewport = document.createElement('div');
+  viewport.className = 'snippet-key-cloud-viewport';
+  const cloud = document.createElement('div');
+  cloud.className = 'snippet-key-cloud';
+  const tooltip = document.createElement('div');
+  tooltip.className = 'snippet-key-tooltip';
+  viewport.appendChild(cloud);
+  viewport.appendChild(tooltip);
+  body.appendChild(viewport);
+
+  nodes.forEach(item => {
+    const bubble = document.createElement('button');
+    bubble.type = 'button';
+    bubble.className = 'snippet-key-bubble';
+    bubble.dataset.key = item.key;
+    bubble.dataset.count = String(item.count);
+    bubble.title = `${item.key} · ${item.count} snippets`;
+    bubble.style.width = item.size + 'px';
+    bubble.style.height = item.size + 'px';
+    bubble.style.left = (item.x - item.size / 2) + 'px';
+    bubble.style.top = (item.y - item.size / 2) + 'px';
+    bubble.style.borderColor = item.color;
+    bubble.style.color = item.color;
+    bubble.style.background = item.color + '20';
+
+    const key = document.createElement('span');
+    key.className = 'snippet-key-bubble-key';
+    key.style.fontSize = getKeyBubbleFontSize(item.size, item.key) + 'px';
+    key.textContent = item.key;
+    bubble.appendChild(key);
+
+    const count = document.createElement('span');
+    count.className = 'snippet-key-bubble-count';
+    count.textContent = String(item.count);
+    bubble.appendChild(count);
+
+    bubble.addEventListener('click', () => {
+      bubble.closest('.modal-overlay')
+        ?.querySelector('.modal-actions button:last-child')
+        ?.click();
+      applyKeySearch(item.key).catch(err => showToast('Error: ' + err, 'error'));
+    });
+    bubble.addEventListener('mouseenter', event => {
+      tooltip.replaceChildren(
+        Object.assign(document.createElement('span'), { textContent: item.key }),
+        Object.assign(document.createElement('em'), { textContent: `${item.count} snippets` }),
+      );
+      moveKeyCloudTooltip(tooltip, event);
+      tooltip.classList.add('visible');
+    });
+    bubble.addEventListener('mousemove', event => moveKeyCloudTooltip(tooltip, event));
+    bubble.addEventListener('mouseleave', () => tooltip.classList.remove('visible'));
+
+    cloud.appendChild(bubble);
+  });
+
+  setupKeyCloudViewport({ viewport, cloud, nodes, zoomLabel, zoomIn, zoomOut, fitBtn });
 }
 
 function moveKeyCloudTooltip(tooltip, event) {

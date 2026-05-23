@@ -32,6 +32,14 @@ to the selected C visual treatment:
   buttons, and `Fit`.
 - Bubble text size adapts to bubble diameter and key length. If text is still
   truncated, hover shows a tooltip with the full key and snippet count.
+- The cloud layout is cached persistently in the frontend. Opening the modal
+  should use a valid cached layout immediately. If no valid cache is available,
+  the modal opens immediately with a progress bar while the dense layout is
+  calculated in small background chunks.
+- Cache invalidation is based on a fingerprint of snippet ids, names, and
+  update timestamps. Editing, creating, or deleting snippets marks the cache
+  stale; the next background pass rebuilds only the derived key index
+  incrementally where possible and then refreshes the layout cache.
 - Clicking a key bubble closes the modal, writes the key into the Snippets
   search field, clears any selected manual tag, and runs search immediately.
 - Add a `Related` tab in the selected snippet detail view when related snippets
