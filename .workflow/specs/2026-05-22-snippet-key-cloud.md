@@ -26,6 +26,10 @@ to the selected C visual treatment:
   reject colliding positions instead of relying only on fixed-iteration
   relaxation. Dense clouds with hundreds of keys should use spatial indexing
   and bounded candidate generation so the modal opens interactively.
+- Provide a layout algorithm setting in the Key Cloud modal. `Dense` is the
+  default and uses a slower tangent/ring placement that keeps bubbles touching
+  with no visible gaps. `Fast` remains available for very large clouds where
+  lower build time is more important than maximum packing density.
 - Bubble diameter must make count differences obvious. Keep a readable minimum
   size for one-snippet keys and scale larger keys clearly above it.
 - The cloud supports mouse-wheel zoom, drag-to-pan, explicit zoom in/out
@@ -35,7 +39,8 @@ to the selected C visual treatment:
 - The cloud layout is cached persistently in the frontend. Opening the modal
   should use a valid cached layout immediately. If no valid cache is available,
   the modal opens immediately with a progress bar while the dense layout is
-  calculated in small background chunks.
+  calculated in small background chunks. Cache entries are tied to both the
+  snippet fingerprint and the selected layout algorithm.
 - Cache invalidation is based on a fingerprint of snippet ids, names, and
   update timestamps. Editing, creating, or deleting snippets marks the cache
   stale; the next background pass rebuilds only the derived key index
@@ -61,9 +66,9 @@ Rules:
 - ignore empty parts and parts containing whitespace;
 - de-duplicate keys within one snippet.
 
-Color is deterministic from the key text using a small fixed palette. No color
-table is stored; the same key text maps to the same color as long as the palette
-and hash function stay unchanged.
+Color is deterministic from the key text using a fixed expanded palette. No
+color table is stored; the same key text maps to the same color as long as the
+palette and hash function stay unchanged.
 
 ## Related Tab
 

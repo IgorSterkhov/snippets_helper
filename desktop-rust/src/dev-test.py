@@ -793,6 +793,8 @@ async def run_tests():
         await cdp.eval(
             "localStorage.removeItem('snippet_key_cloud_cache_v2');"
             "localStorage.removeItem('snippet_key_cloud_cache_v3');"
+            "localStorage.removeItem('snippet_key_cloud_cache_v4');"
+            "localStorage.removeItem('snippet_key_cloud_algorithm');"
         )
         await cdp.eval(
             "Promise.all(Array.from({ length: 70 }, (_, i) => "
@@ -811,9 +813,33 @@ async def run_tests():
         open_ms = await cdp.eval("performance.now() - window.__keyCloudPerfStart")
         assert open_ms < 700, f'key cloud modal opens too slowly without cache: {open_ms:.0f}ms'
         assert await cdp.eval("!!document.querySelector('.snippet-key-cloud-progress')"), 'missing no-cache progress state'
-        await wait_until(cdp, "document.querySelectorAll('.snippet-key-bubble').length > 20", timeout=8)
-        cached_after_build = await cdp.eval("!!localStorage.getItem('snippet_key_cloud_cache_v3')")
+        await wait_until(cdp, "document.querySelectorAll('.snippet-key-bubble').length > 20", timeout=12)
+        cached_after_build = await cdp.eval("!!localStorage.getItem('snippet_key_cloud_cache_v4')")
         assert cached_after_build, 'key cloud cache was not persisted'
+        algorithm_value = await cdp.eval("document.querySelector('.snippet-key-cloud-algorithm')?.value")
+        assert algorithm_value == 'dense', f'key cloud algorithm: {algorithm_value!r}'
+        cache_meta = await cdp.eval(
+            "(() => {"
+            "const cache = JSON.parse(localStorage.getItem('snippet_key_cloud_cache_v4'));"
+            "const nearestGaps = cache.nodes.slice(1).map((a, index) => {"
+            "let best = Infinity;"
+            "cache.nodes.forEach((b, j) => {"
+            "if (j === index + 1) return;"
+            "const dist = Math.hypot(a.x - b.x, a.y - b.y) - (a.size + b.size) / 2;"
+            "best = Math.min(best, dist);"
+            "});"
+            "return best;"
+            "});"
+            "return {"
+            "algorithm: cache.algorithm,"
+            "maxNearestGap: Math.max(...nearestGaps),"
+            "colors: new Set(cache.nodes.map(x => x.color)).size"
+            "};"
+            "})()"
+        )
+        assert cache_meta['algorithm'] == 'dense', f'cache algorithm: {cache_meta!r}'
+        assert cache_meta['maxNearestGap'] <= 2.0, f'key cloud has loose gaps: {cache_meta!r}'
+        assert cache_meta['colors'] >= 12, f'key cloud palette too narrow: {cache_meta!r}'
 
         await cdp.eval("document.querySelector('.modal-actions button:last-child').click()")
         await wait_until(cdp, "!document.querySelector('.modal-overlay')", timeout=3)

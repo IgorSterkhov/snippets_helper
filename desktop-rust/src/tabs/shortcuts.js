@@ -21,8 +21,11 @@ let tags = [];
 let selectedTagId = null;
 let tagPanelEl = null;
 let searchInputEl = null;
-const KEY_CLOUD_CACHE_KEY = 'snippet_key_cloud_cache_v3';
-const KEY_CLOUD_CACHE_SCHEMA = 3;
+const KEY_CLOUD_CACHE_KEY = 'snippet_key_cloud_cache_v4';
+const KEY_CLOUD_CACHE_SCHEMA = 4;
+const KEY_CLOUD_ALGORITHM_KEY = 'snippet_key_cloud_algorithm';
+const KEY_CLOUD_ALGORITHMS = new Set(['dense', 'fast']);
+let keyCloudAlgorithm = readKeyCloudAlgorithm();
 let keyCloudCache = null;
 let keyCloudBuildPromise = null;
 let keyCloudBuildFingerprint = '';
@@ -230,6 +233,10 @@ function renderMarkdownHtml(text) {
 const SNIPPET_KEY_COLORS = [
   '#58a6ff', '#3fb950', '#d29922', '#a371f7', '#f778ba',
   '#ff7b72', '#39c5cf', '#bc8cff', '#f0883e', '#8b949e',
+  '#2dd4bf', '#facc15', '#fb7185', '#60a5fa', '#c084fc',
+  '#34d399', '#f97316', '#e879f9', '#22d3ee', '#a3e635',
+  '#f472b6', '#818cf8', '#f59e0b', '#14b8a6', '#c4b5fd',
+  '#ef4444', '#84cc16', '#06b6d4', '#eab308', '#94a3b8',
 ];
 
 function extractSnippetKeys(name) {
@@ -286,13 +293,36 @@ function getKeyCloudFingerprint() {
     .join('|');
 }
 
-function readStoredKeyCloudCache({ allowStale = false } = {}) {
+function readKeyCloudAlgorithm() {
+  try {
+    const stored = localStorage.getItem(KEY_CLOUD_ALGORITHM_KEY);
+    return KEY_CLOUD_ALGORITHMS.has(stored) ? stored : 'dense';
+  } catch {
+    return 'dense';
+  }
+}
+
+function writeKeyCloudAlgorithm(algorithm) {
+  keyCloudAlgorithm = KEY_CLOUD_ALGORITHMS.has(algorithm) ? algorithm : 'dense';
+  try {
+    localStorage.setItem(KEY_CLOUD_ALGORITHM_KEY, keyCloudAlgorithm);
+  } catch {
+    // Algorithm selection is a UI preference; ignore storage failures.
+  }
+}
+
+function getKeyCloudAlgorithmLabel(algorithm = keyCloudAlgorithm) {
+  return algorithm === 'fast' ? 'Fast' : 'Dense';
+}
+
+function readStoredKeyCloudCache({ allowStale = false, algorithm = keyCloudAlgorithm } = {}) {
   try {
     const raw = localStorage.getItem(KEY_CLOUD_CACHE_KEY);
     if (!raw) return null;
     const cache = JSON.parse(raw);
     if (cache.schema !== KEY_CLOUD_CACHE_SCHEMA) return null;
     if (!Array.isArray(cache.items) || !Array.isArray(cache.nodes)) return null;
+    if (cache.algorithm !== algorithm) return null;
     if (!allowStale && cache.fingerprint !== getKeyCloudFingerprint()) return null;
     return cache;
   } catch {
@@ -324,38 +354,40 @@ function refreshKeyCloudCacheInBackground() {
   getKeyCloudLayoutCache().catch(() => {});
 }
 
-function getKeyCloudLayoutCache({ force = false } = {}) {
+function getKeyCloudLayoutCache({ force = false, algorithm = keyCloudAlgorithm } = {}) {
   const fingerprint = getKeyCloudFingerprint();
-  const validCache = !force && (keyCloudCache?.fingerprint === fingerprint
+  const buildKey = `${algorithm}:${fingerprint}`;
+  const validCache = !force && (keyCloudCache?.fingerprint === fingerprint && keyCloudCache?.algorithm === algorithm
     ? keyCloudCache
-    : readStoredKeyCloudCache());
+    : readStoredKeyCloudCache({ algorithm }));
   if (validCache) {
     keyCloudCache = validCache;
     notifyKeyCloudProgress({ status: 'ready', percent: 100, message: 'Ready' });
     return Promise.resolve(validCache);
   }
 
-  if (keyCloudBuildPromise && keyCloudBuildFingerprint === fingerprint) {
+  if (keyCloudBuildPromise && keyCloudBuildFingerprint === buildKey) {
     return keyCloudBuildPromise;
   }
 
   const buildSeq = ++keyCloudBuildSeq;
-  keyCloudBuildFingerprint = fingerprint;
+  keyCloudBuildFingerprint = buildKey;
   const items = getKeyCloudItems();
   notifyKeyCloudProgress({
     status: 'building',
     percent: items.length === 0 ? 100 : 1,
-    message: items.length === 0 ? 'No keys' : 'Preparing key cloud...',
+    message: items.length === 0 ? 'No keys' : `Preparing ${getKeyCloudAlgorithmLabel(algorithm).toLowerCase()} key cloud...`,
   });
 
   keyCloudBuildPromise = (async () => {
     const nodes = await getPackedKeyCloudNodes(items, progress => {
       if (buildSeq !== keyCloudBuildSeq) return;
       notifyKeyCloudProgress(progress);
-    });
+    }, { algorithm });
     const cache = {
       schema: KEY_CLOUD_CACHE_SCHEMA,
       fingerprint,
+      algorithm,
       items,
       nodes,
       builtAt: Date.now(),
@@ -385,7 +417,104 @@ function getKeyBubbleFontSize(size, key) {
   return Math.max(8, Math.min(18, Math.round(base - longKeyPenalty)));
 }
 
-async function getPackedKeyCloudNodes(items, onProgress = () => {}) {
+async function getPackedKeyCloudNodes(items, onProgress = () => {}, { algorithm = 'dense' } = {}) {
+  if (algorithm === 'fast') {
+    return getFastKeyCloudNodes(items, onProgress);
+  }
+  return getDenseKeyCloudNodes(items, onProgress);
+}
+
+async function getDenseKeyCloudNodes(items, onProgress = () => {}) {
+  const placed = [];
+  const gap = 0;
+  let lastYield = performance.now();
+
+  function collides(candidate) {
+    return placed.some(item => {
+      const dist = Math.hypot(candidate.x - item.x, candidate.y - item.y);
+      return dist < (candidate.size + item.size) / 2 + gap - 0.25;
+    });
+  }
+
+  for (let index = 0; index < items.length; index++) {
+    const item = items[index];
+    if (index === 0) {
+      placed.push({ ...item, x: 0, y: 0 });
+      continue;
+    }
+
+    let best = null;
+    for (const anchor of placed) {
+      const radius = (item.size + anchor.size) / 2 + gap;
+      const steps = Math.max(96, Math.ceil((Math.PI * 2 * radius) / 4));
+      for (let step = 0; step < steps; step++) {
+        const angle = (step / steps) * Math.PI * 2 + index * 0.381966;
+        const candidate = {
+          ...item,
+          x: anchor.x + Math.cos(angle) * radius,
+          y: anchor.y + Math.sin(angle) * radius,
+        };
+        if (collides(candidate)) continue;
+
+        const centerScore = Math.hypot(candidate.x, candidate.y);
+        const verticalPenalty = Math.abs(candidate.y) * 0.018;
+        const anchorPenalty = Math.hypot(anchor.x, anchor.y) * 0.01;
+        const score = centerScore + verticalPenalty + anchorPenalty;
+        if (!best || score < best.score) best = { ...candidate, score };
+      }
+
+      if (performance.now() - lastYield > 16) {
+        onProgress({
+          status: 'building',
+          percent: Math.max(1, Math.round((index / Math.max(1, items.length)) * 100)),
+          message: `Building dense key cloud ${index}/${items.length}`,
+        });
+        await new Promise(resolve => setTimeout(resolve, 0));
+        lastYield = performance.now();
+      }
+    }
+
+    if (!best) {
+      best = findRingKeyCloudNode(item, placed, gap, index);
+    }
+
+    const node = best || { ...item, x: index * item.size, y: 0 };
+    placed.push(node);
+    onProgress({
+      status: 'building',
+      percent: Math.max(1, Math.round(((index + 1) / Math.max(1, items.length)) * 100)),
+      message: `Building dense key cloud ${index + 1}/${items.length}`,
+    });
+  }
+
+  return placed.map(({ score, ...item }) => item);
+}
+
+function findRingKeyCloudNode(item, placed, gap, index) {
+  let best = null;
+  for (let radius = item.size / 2; radius < 6500 && !best; radius += 2) {
+    const steps = Math.max(72, Math.ceil((Math.PI * 2 * radius) / 6));
+    for (let step = 0; step < steps; step++) {
+      const angle = (step / steps) * Math.PI * 2 + index * 0.618;
+      const candidate = {
+        ...item,
+        x: Math.cos(angle) * radius,
+        y: Math.sin(angle) * radius,
+      };
+      const collision = placed.some(other => {
+        const dist = Math.hypot(candidate.x - other.x, candidate.y - other.y);
+        return dist < (candidate.size + other.size) / 2 + gap - 0.25;
+      });
+      if (collision) continue;
+
+      const score = Math.hypot(candidate.x, candidate.y) + Math.abs(candidate.y) * 0.018;
+      if (!best || score < best.score) best = { ...candidate, score };
+    }
+  }
+  return best;
+}
+
+async function getFastKeyCloudNodes(items, onProgress = () => {}) {
   const placed = [];
   const gap = 3;
   const maxSize = Math.max(1, ...items.map(item => item.size));
@@ -1042,7 +1171,8 @@ function renderTagPanel() {
 
 function openKeyCloudModal() {
   const fingerprint = getKeyCloudFingerprint();
-  const cached = readStoredKeyCloudCache({ allowStale: true });
+  const algorithm = keyCloudAlgorithm;
+  const cached = readStoredKeyCloudCache({ allowStale: true, algorithm });
   const validCache = cached?.fingerprint === fingerprint ? cached : null;
   const body = document.createElement('div');
   body.className = 'snippet-key-cloud-modal';
@@ -1078,9 +1208,9 @@ function openKeyCloudModal() {
       if (!body.isConnected || body.querySelector('.snippet-key-cloud')) return;
       renderKeyCloudProgress(body, progress);
     });
-    getKeyCloudLayoutCache({ force: !cached || cached.fingerprint !== fingerprint })
+    getKeyCloudLayoutCache({ force: !cached || cached.fingerprint !== fingerprint, algorithm })
       .then(cache => {
-        if (body.isConnected) renderKeyCloudLayout(body, cache);
+        if (body.isConnected && cache.algorithm === keyCloudAlgorithm) renderKeyCloudLayout(body, cache);
       })
       .catch(err => {
         if (body.isConnected) renderKeyCloudError(body, err);
@@ -1088,8 +1218,55 @@ function openKeyCloudModal() {
   }
 }
 
+function createKeyCloudAlgorithmSelect(onChange) {
+  const select = document.createElement('select');
+  select.className = 'snippet-key-cloud-algorithm';
+  select.title = 'Cloud layout algorithm';
+  [
+    ['dense', 'Dense'],
+    ['fast', 'Fast'],
+  ].forEach(([value, label]) => {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    select.appendChild(option);
+  });
+  select.value = keyCloudAlgorithm;
+  select.addEventListener('change', () => {
+    writeKeyCloudAlgorithm(select.value);
+    keyCloudCache = null;
+    onChange?.(select.value);
+  });
+  return select;
+}
+
+function rebuildKeyCloudInBody(body, algorithm) {
+  renderKeyCloudProgress(body, {
+    status: 'building',
+    percent: 1,
+    message: `Preparing ${getKeyCloudAlgorithmLabel(algorithm).toLowerCase()} key cloud...`,
+  });
+  getKeyCloudLayoutCache({ force: true, algorithm })
+    .then(cache => {
+      if (body.isConnected && cache.algorithm === keyCloudAlgorithm) renderKeyCloudLayout(body, cache);
+    })
+    .catch(err => {
+      if (body.isConnected) renderKeyCloudError(body, err);
+    });
+}
+
 function renderKeyCloudProgress(body, progress) {
   body.innerHTML = '';
+  const controls = document.createElement('div');
+  controls.className = 'snippet-key-cloud-controls';
+
+  const summary = document.createElement('span');
+  summary.className = 'snippet-key-cloud-summary';
+  summary.textContent = 'Building layout';
+  controls.appendChild(summary);
+  controls.appendChild(createKeyCloudAlgorithmSelect(algorithm => rebuildKeyCloudInBody(body, algorithm)));
+  body.appendChild(controls);
+
   const box = document.createElement('div');
   box.className = 'snippet-key-cloud-progress';
 
@@ -1139,8 +1316,9 @@ function renderKeyCloudLayout(body, cache, { stale = false } = {}) {
 
   const summary = document.createElement('span');
   summary.className = 'snippet-key-cloud-summary';
-  summary.textContent = `${nodes.length} keys${stale ? ' · updating...' : ''}`;
+  summary.textContent = `${nodes.length} keys · ${getKeyCloudAlgorithmLabel(cache.algorithm)}${stale ? ' · updating...' : ''}`;
   controls.appendChild(summary);
+  controls.appendChild(createKeyCloudAlgorithmSelect(algorithm => rebuildKeyCloudInBody(body, algorithm)));
 
   const zoomOut = document.createElement('button');
   zoomOut.type = 'button';

@@ -218,6 +218,16 @@ names or titles and does not need a persisted taxonomy.
 - Derive keys in the frontend from the canonical display name.
 - Keep the rule explicit and cheap. For Snippets: split by `_`, trim,
   lowercase, ignore empty/whitespace parts, and de-duplicate within one item.
+- When a derived cloud layout is expensive, persist the finished layout with a
+  schema version, source fingerprint, and selected algorithm. Show stale cached
+  layout immediately, rebuild in small chunks, and invalidate the cache when
+  either source data or algorithm changes.
+- For packed circle clouds, keep a `Dense` algorithm available for visual
+  quality and a `Fast` algorithm available for very large datasets. `Dense`
+  should prefer tangent placements so each new bubble touches an existing
+  bubble and visible gaps stay minimal.
+- Use an expanded deterministic color palette for hashed keys. Avoid storing a
+  color table unless users need manual color editing.
 - Keep a separate unfiltered cache when related/analytics views must consider
   all items, not only the currently filtered list.
 - Use deterministic color from key text (`hash(key) -> fixed palette`) instead

@@ -4,6 +4,9 @@
 
 ## 1.3.27 OTA patches (2026-05-23)
 
+- **f-20260523-5 — Snippets Key Cloud density:** added a selectable
+  Dense/Fast cloud layout algorithm, made Dense the default tight tangent
+  packing mode, and expanded the deterministic key color palette.
 - **f-20260523-4 — Snippets Key Cloud cache:** added persistent
   stale-while-revalidate cache and a no-cache progress state, while restoring
   the denser ring-probing layout in async chunks.
