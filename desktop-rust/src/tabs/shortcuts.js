@@ -281,46 +281,43 @@ function getKeyBubbleFontSize(size, key) {
 }
 
 function getPackedKeyCloudNodes(items) {
-  const nodes = items.map((item, index) => {
-    const angle = index * 2.399963229728653;
-    const radius = index === 0 ? 0 : 34 + Math.sqrt(index) * 42;
-    return {
-      ...item,
-      x: Math.cos(angle) * radius,
-      y: Math.sin(angle) * radius,
-    };
-  });
+  const placed = [];
+  const gap = 3;
 
-  for (let iter = 0; iter < 280; iter++) {
-    for (let i = 0; i < nodes.length; i++) {
-      for (let j = i + 1; j < nodes.length; j++) {
-        const a = nodes[i];
-        const b = nodes[j];
-        let dx = b.x - a.x;
-        let dy = b.y - a.y;
-        let dist = Math.hypot(dx, dy) || 0.01;
-        const minDist = (a.size + b.size) / 2 + 2;
-        if (dist >= minDist) continue;
+  items.forEach((item, index) => {
+    if (index === 0) {
+      placed.push({ ...item, x: 0, y: 0 });
+      return;
+    }
 
-        const push = (minDist - dist) * 0.54;
-        dx /= dist;
-        dy /= dist;
-        if (i !== 0) {
-          a.x -= dx * push;
-          a.y -= dy * push;
-        }
-        b.x += dx * push;
-        b.y += dy * push;
+    let best = null;
+    for (let radius = item.size / 2; radius < 5000 && !best; radius += 4) {
+      const steps = Math.max(24, Math.ceil((Math.PI * 2 * radius) / 10));
+      for (let step = 0; step < steps; step++) {
+        const angle = (step / steps) * Math.PI * 2 + index * 0.618;
+        const candidate = {
+          ...item,
+          x: Math.cos(angle) * radius,
+          y: Math.sin(angle) * radius,
+        };
+        if (keyCloudCollides(candidate, placed, gap)) continue;
+
+        const score = Math.hypot(candidate.x, candidate.y) + Math.abs(candidate.y) * 0.04;
+        if (!best || score < best.score) best = { ...candidate, score };
       }
     }
 
-    for (let i = 1; i < nodes.length; i++) {
-      nodes[i].x *= 0.992;
-      nodes[i].y *= 0.992;
-    }
-  }
+    placed.push(best || { ...item, x: index * (item.size + gap), y: 0 });
+  });
 
-  return nodes;
+  return placed.map(({ score, ...item }) => item);
+}
+
+function keyCloudCollides(candidate, placed, gap) {
+  return placed.some(item => {
+    const dist = Math.hypot(candidate.x - item.x, candidate.y - item.y);
+    return dist < (candidate.size + item.size) / 2 + gap;
+  });
 }
 
 function getRelatedSnippets(shortcut) {

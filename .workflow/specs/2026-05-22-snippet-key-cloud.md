@@ -22,7 +22,9 @@ to the selected C visual treatment:
 - Open the cloud in a separate modal.
 - Arrange bubbles as an organic packed cloud: larger keys are placed near the
   center, smaller keys are pushed outward, and empty space between bubbles is
-  minimized.
+  minimized. Bubbles must not visually overlap; the packing algorithm should
+  reject colliding positions instead of relying only on fixed-iteration
+  relaxation.
 - Bubble diameter must make count differences obvious. Keep a readable minimum
   size for one-snippet keys and scale larger keys clearly above it.
 - The cloud supports mouse-wheel zoom, drag-to-pan, explicit zoom in/out

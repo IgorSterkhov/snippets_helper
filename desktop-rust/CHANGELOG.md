@@ -4,6 +4,9 @@
 
 ## 1.3.27 OTA patches (2026-05-23)
 
+- **f-20260523-2 — Snippets Key Cloud overlap fix:** changed the packed cloud
+  placement to reject colliding bubble positions and added smoke coverage for
+  dense clouds so key circles do not overlap.
 - **f-20260523-1 — Snippets Key Cloud layout:** upgraded Key Cloud to a
   packed zoomable cloud with larger count contrast, center-weighted high-count
   keys, pan/zoom/Fit controls, adaptive labels, and full-key hover tooltips.

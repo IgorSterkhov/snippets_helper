@@ -226,6 +226,9 @@ names or titles and does not need a persisted taxonomy.
   when relative frequency matters visually. Sort high-count keys first, keep the
   strongest keys near the center, and provide pan, wheel zoom, zoom buttons,
   and Fit when paths/labels may be too dense.
+- Do not rely on a fixed number of physics/relaxation iterations to separate
+  bubbles. Use collision-aware placement and keep a smoke test that checks
+  rendered bubble rectangles for overlap on a dense cloud.
 - Scale bubble diameter from the raw count with a readable minimum, not only a
   square-root transform, when users need obvious differences between counts.
 - Scale key label font by bubble diameter and key length. Also set a full text

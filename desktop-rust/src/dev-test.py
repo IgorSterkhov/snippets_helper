@@ -791,6 +791,12 @@ async def run_tests():
     async def t24_snippets_key_cloud_modal():
         await open_shortcuts_tab()
         await cdp.eval(
+            "Promise.all(Array.from({ length: 34 }, (_, i) => "
+            "window.__TAURI__.core.invoke('create_shortcut', {"
+            "name: `cloudk${i}_solo${i}`, value: 'x', description: '', links: []"
+            "})))"
+        )
+        await cdp.eval(
             "[...document.querySelectorAll('#panel-shortcuts div button')]"
             ".find(x => x.textContent.trim() === 'sql').click()"
         )
@@ -825,10 +831,32 @@ async def run_tests():
             "})()"
         )
         assert metrics['bash']['d'] >= 150, f'bash bubble source diameter too small: {metrics!r}'
-        assert metrics['bash']['w'] - metrics['sql']['w'] >= 45, f'weak size contrast: {metrics!r}'
+        assert metrics['bash']['d'] - metrics['sql']['d'] >= 45, f'weak size contrast: {metrics!r}'
         assert metrics['sql']['font'] <= metrics['bash']['font'], f'font not scaled down: {metrics!r}'
         assert metrics['bash']['dist'] < metrics['sql']['dist'], f'large key not centered: {metrics!r}'
         assert metrics['bash']['title'] == 'bash · 3 snippets', f'title tooltip text: {metrics!r}'
+        overlaps = await cdp.eval(
+            "(() => {"
+            "const bubbles = [...document.querySelectorAll('.snippet-key-bubble')].map(el => ({"
+            "key: el.dataset.key, rect: el.getBoundingClientRect()"
+            "}));"
+            "const out = [];"
+            "for (let i = 0; i < bubbles.length; i++) {"
+            "for (let j = i + 1; j < bubbles.length; j++) {"
+            "const a = bubbles[i], b = bubbles[j];"
+            "const ax = a.rect.left + a.rect.width / 2;"
+            "const ay = a.rect.top + a.rect.height / 2;"
+            "const bx = b.rect.left + b.rect.width / 2;"
+            "const by = b.rect.top + b.rect.height / 2;"
+            "const dist = Math.hypot(ax - bx, ay - by);"
+            "const min = (a.rect.width + b.rect.width) / 2 - 1;"
+            "if (dist < min) out.push(`${a.key}/${b.key}:${Math.round(min - dist)}`);"
+            "}"
+            "}"
+            "return out.slice(0, 8);"
+            "})()"
+        )
+        assert overlaps == [], f'key bubbles overlap: {overlaps!r}'
         await cdp.eval(
             "document.querySelector('.snippet-key-bubble[data-key=\"bash\"]').dispatchEvent("
             "new MouseEvent('mouseenter', { bubbles: true, clientX: 80, clientY: 80 }));"
