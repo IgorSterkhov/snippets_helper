@@ -9,13 +9,36 @@ import {
   buildUpsertNote, buildUpsertFolder,
   getModifiedNotesSince, getModifiedFoldersSince,
 } from '../db/noteRepo';
+import {
+  buildUpsertTaskCategory, buildUpsertTaskStatus, buildUpsertTask,
+  buildUpsertTaskCheckbox, buildUpsertTaskLink,
+  getModifiedTaskCategoriesSince, getModifiedTaskStatusesSince, getModifiedTasksSince,
+  getModifiedTaskCheckboxesSince, getModifiedTaskLinksSince,
+} from '../db/taskRepo';
 
 const BUILDERS = {
   shortcuts: buildUpsertSnippet,
   snippet_tags: buildUpsertTag,
   notes: buildUpsertNote,
   note_folders: buildUpsertFolder,
+  task_categories: buildUpsertTaskCategory,
+  task_statuses: buildUpsertTaskStatus,
+  tasks: buildUpsertTask,
+  task_checkboxes: buildUpsertTaskCheckbox,
+  task_links: buildUpsertTaskLink,
 };
+
+const TABLE_ORDER = [
+  'shortcuts',
+  'snippet_tags',
+  'note_folders',
+  'notes',
+  'task_categories',
+  'task_statuses',
+  'tasks',
+  'task_checkboxes',
+  'task_links',
+];
 
 let syncing = false;
 const listeners = new Set();
@@ -33,13 +56,18 @@ function emit(payload) {
 
 export async function countPendingChanges() {
   const since = await getLastSyncAt();
-  const [s, t, n, f] = await Promise.all([
+  const [s, t, n, f, tc, ts, task, cb, links] = await Promise.all([
     getModifiedSnippetsSince(since),
     getModifiedTagsSince(since),
     getModifiedNotesSince(since),
     getModifiedFoldersSince(since),
+    getModifiedTaskCategoriesSince(since),
+    getModifiedTaskStatusesSince(since),
+    getModifiedTasksSince(since),
+    getModifiedTaskCheckboxesSince(since),
+    getModifiedTaskLinksSince(since),
   ]);
-  return s.length + t.length + n.length + f.length;
+  return s.length + t.length + n.length + f.length + tc.length + ts.length + task.length + cb.length + links.length;
 }
 
 async function emitPending() {
@@ -55,7 +83,10 @@ export function notifyLocalChange() {
 }
 
 function applyPulledChanges(changes) {
-  const entries = Object.entries(changes || {});
+  const input = changes || {};
+  const entries = TABLE_ORDER
+    .filter((table) => Array.isArray(input[table]))
+    .map((table) => [table, input[table]]);
   let totalRows = 0;
   for (const [, rows] of entries) totalRows += rows.length;
   if (!totalRows) return Promise.resolve();
@@ -101,6 +132,16 @@ export async function performSync() {
     if (localNotes.length) changes.notes = localNotes;
     const localFolders = await getModifiedFoldersSince(lastSync);
     if (localFolders.length) changes.note_folders = localFolders;
+    const localTaskCategories = await getModifiedTaskCategoriesSince(lastSync);
+    if (localTaskCategories.length) changes.task_categories = localTaskCategories;
+    const localTaskStatuses = await getModifiedTaskStatusesSince(lastSync);
+    if (localTaskStatuses.length) changes.task_statuses = localTaskStatuses;
+    const localTasks = await getModifiedTasksSince(lastSync);
+    if (localTasks.length) changes.tasks = localTasks;
+    const localTaskCheckboxes = await getModifiedTaskCheckboxesSince(lastSync);
+    if (localTaskCheckboxes.length) changes.task_checkboxes = localTaskCheckboxes;
+    const localTaskLinks = await getModifiedTaskLinksSince(lastSync);
+    if (localTaskLinks.length) changes.task_links = localTaskLinks;
 
     if (Object.keys(changes).length > 0) {
       await syncPush(changes);

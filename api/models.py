@@ -130,6 +130,99 @@ class SnippetTag(Base):
     __table_args__ = (Index("idx_snippet_tags_user_updated", "user_id", "updated_at"),)
 
 
+class TaskCategory(Base):
+    __tablename__ = "task_categories"
+
+    uuid: Mapped[uuid_mod.UUID] = mapped_column(Uuid, primary_key=True, default=uuid_mod.uuid4)
+    user_id: Mapped[uuid_mod.UUID] = mapped_column(Uuid, ForeignKey("users.id"), nullable=False)
+    id: Mapped[int | None] = mapped_column(Integer)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    color: Mapped[str] = mapped_column(String, nullable=False, default="#8b949e")
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    __table_args__ = (Index("idx_task_categories_user_updated", "user_id", "updated_at"),)
+
+
+class TaskStatus(Base):
+    __tablename__ = "task_statuses"
+
+    uuid: Mapped[uuid_mod.UUID] = mapped_column(Uuid, primary_key=True, default=uuid_mod.uuid4)
+    user_id: Mapped[uuid_mod.UUID] = mapped_column(Uuid, ForeignKey("users.id"), nullable=False)
+    id: Mapped[int | None] = mapped_column(Integer)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    color: Mapped[str] = mapped_column(String, nullable=False, default="#8b949e")
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    __table_args__ = (Index("idx_task_statuses_user_updated", "user_id", "updated_at"),)
+
+
+class Task(Base):
+    __tablename__ = "tasks"
+
+    uuid: Mapped[uuid_mod.UUID] = mapped_column(Uuid, primary_key=True, default=uuid_mod.uuid4)
+    user_id: Mapped[uuid_mod.UUID] = mapped_column(Uuid, ForeignKey("users.id"), nullable=False)
+    id: Mapped[int | None] = mapped_column(Integer)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    category_id: Mapped[int | None] = mapped_column(Integer)
+    category_uuid: Mapped[uuid_mod.UUID | None] = mapped_column(Uuid)
+    status_id: Mapped[int | None] = mapped_column(Integer)
+    status_uuid: Mapped[uuid_mod.UUID | None] = mapped_column(Uuid)
+    is_pinned: Mapped[int] = mapped_column(Integer, default=0)
+    bg_color: Mapped[str | None] = mapped_column(String)
+    tracker_url: Mapped[str | None] = mapped_column(Text)
+    notes_md: Mapped[str] = mapped_column(Text, default="")
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    __table_args__ = (Index("idx_tasks_user_updated", "user_id", "updated_at"),)
+
+
+class TaskCheckbox(Base):
+    __tablename__ = "task_checkboxes"
+
+    uuid: Mapped[uuid_mod.UUID] = mapped_column(Uuid, primary_key=True, default=uuid_mod.uuid4)
+    user_id: Mapped[uuid_mod.UUID] = mapped_column(Uuid, ForeignKey("users.id"), nullable=False)
+    id: Mapped[int | None] = mapped_column(Integer)
+    task_id: Mapped[int | None] = mapped_column(Integer)
+    task_uuid: Mapped[uuid_mod.UUID | None] = mapped_column(Uuid)
+    parent_id: Mapped[int | None] = mapped_column(Integer)
+    parent_uuid: Mapped[uuid_mod.UUID | None] = mapped_column(Uuid)
+    text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    is_checked: Mapped[int] = mapped_column(Integer, default=0)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    __table_args__ = (Index("idx_task_checkboxes_user_updated", "user_id", "updated_at"),)
+
+
+class TaskLink(Base):
+    __tablename__ = "task_links"
+
+    uuid: Mapped[uuid_mod.UUID] = mapped_column(Uuid, primary_key=True, default=uuid_mod.uuid4)
+    user_id: Mapped[uuid_mod.UUID] = mapped_column(Uuid, ForeignKey("users.id"), nullable=False)
+    id: Mapped[int | None] = mapped_column(Integer)
+    task_id: Mapped[int | None] = mapped_column(Integer)
+    task_uuid: Mapped[uuid_mod.UUID | None] = mapped_column(Uuid)
+    url: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    label: Mapped[str | None] = mapped_column(Text)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    __table_args__ = (Index("idx_task_links_user_updated", "user_id", "updated_at"),)
+
+
 # Map table names to ORM models (used by sync routes)
 TABLE_MODELS = {
     "shortcuts": Shortcut,
@@ -139,4 +232,9 @@ TABLE_MODELS = {
     "notes": Note,
     "obfuscation_mappings": ObfuscationMapping,
     "snippet_tags": SnippetTag,
+    "task_categories": TaskCategory,
+    "task_statuses": TaskStatus,
+    "tasks": Task,
+    "task_checkboxes": TaskCheckbox,
+    "task_links": TaskLink,
 }

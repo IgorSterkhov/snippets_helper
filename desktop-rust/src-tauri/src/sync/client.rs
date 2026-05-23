@@ -160,6 +160,56 @@ impl SyncClient {
                     }
                 }
 
+                if table == "tasks" {
+                    if let Some(category_id) = obj.get("category_id").and_then(|v| v.as_i64()) {
+                        let category_uuid =
+                            queries::get_task_category_uuid_by_id(conn, category_id)
+                                .map_err(|e| format!("get_task_category_uuid_by_id: {e}"))?;
+                        obj.insert(
+                            "category_uuid".to_string(),
+                            category_uuid.map(Value::String).unwrap_or(Value::Null),
+                        );
+                    }
+                    if let Some(status_id) = obj.get("status_id").and_then(|v| v.as_i64()) {
+                        let status_uuid = queries::get_task_status_uuid_by_id(conn, status_id)
+                            .map_err(|e| format!("get_task_status_uuid_by_id: {e}"))?;
+                        obj.insert(
+                            "status_uuid".to_string(),
+                            status_uuid.map(Value::String).unwrap_or(Value::Null),
+                        );
+                    }
+                }
+
+                if table == "task_checkboxes" {
+                    if let Some(task_id) = obj.get("task_id").and_then(|v| v.as_i64()) {
+                        let task_uuid = queries::get_task_uuid_by_id(conn, task_id)
+                            .map_err(|e| format!("get_task_uuid_by_id: {e}"))?;
+                        obj.insert(
+                            "task_uuid".to_string(),
+                            task_uuid.map(Value::String).unwrap_or(Value::Null),
+                        );
+                    }
+                    if let Some(parent_id) = obj.get("parent_id").and_then(|v| v.as_i64()) {
+                        let parent_uuid = queries::get_task_checkbox_uuid_by_id(conn, parent_id)
+                            .map_err(|e| format!("get_task_checkbox_uuid_by_id: {e}"))?;
+                        obj.insert(
+                            "parent_uuid".to_string(),
+                            parent_uuid.map(Value::String).unwrap_or(Value::Null),
+                        );
+                    }
+                }
+
+                if table == "task_links" {
+                    if let Some(task_id) = obj.get("task_id").and_then(|v| v.as_i64()) {
+                        let task_uuid = queries::get_task_uuid_by_id(conn, task_id)
+                            .map_err(|e| format!("get_task_uuid_by_id: {e}"))?;
+                        obj.insert(
+                            "task_uuid".to_string(),
+                            task_uuid.map(Value::String).unwrap_or(Value::Null),
+                        );
+                    }
+                }
+
                 rows_to_push.push(row_data);
             }
 
@@ -278,7 +328,7 @@ impl SyncClient {
         let result: Value = resp.json().await.map_err(|e| format!("pull json: {e}"))?;
 
         // Phase 3: apply changes and collect pulled names (lock held briefly)
-        let pulled_names = {
+        let (pulled_names, skipped_counts) = {
             let conn = db.lock().unwrap_or_else(|e| e.into_inner());
             self.apply_pull(&conn, computer_id, &result)?
         };
@@ -292,7 +342,12 @@ impl SyncClient {
             })
             .collect();
 
-        Ok(json!({ "pulled": pulled, "total": total }))
+        let skipped: Map<String, Value> = skipped_counts
+            .into_iter()
+            .map(|(table, count)| (table, Value::Number(count.into())))
+            .collect();
+
+        Ok(json!({ "pulled": pulled, "total": total, "skipped": skipped }))
     }
 
     fn apply_pull(
@@ -300,20 +355,22 @@ impl SyncClient {
         conn: &rusqlite::Connection,
         computer_id: &str,
         result: &Value,
-    ) -> Result<HashMap<String, Vec<String>>, String> {
+    ) -> Result<(HashMap<String, Vec<String>>, HashMap<String, usize>), String> {
         let mut pulled_names: HashMap<String, Vec<String>> = HashMap::new();
+        let mut skipped_counts: HashMap<String, usize> = HashMap::new();
 
         if let Some(changes) = result.get("changes").and_then(|v| v.as_object()) {
-            for (table, rows_val) in changes {
-                if !SYNCED_TABLES.contains(&table.as_str()) {
+            for &table in SYNCED_TABLES {
+                let Some(rows_val) = changes.get(table) else {
                     continue;
-                }
+                };
                 let rows = match rows_val.as_array() {
                     Some(arr) if !arr.is_empty() => arr,
                     _ => continue,
                 };
 
                 let mut rows_owned: Vec<Value> = rows.clone();
+                let mut deferred_checkbox_parent_updates: Vec<(String, String, String)> = Vec::new();
 
                 // Collect display names from pulled rows
                 let mut table_names: Vec<String> = Vec::new();
@@ -323,7 +380,7 @@ impl SyncClient {
                     }
                 }
                 if !table_names.is_empty() {
-                    pulled_names.insert(table.clone(), table_names);
+                    pulled_names.insert(table.to_string(), table_names);
                 }
 
                 // Ensure user_id is set on every row (server may not include it)
@@ -361,8 +418,132 @@ impl SyncClient {
                     }
                 }
 
+                if table == "tasks" {
+                    for row in &mut rows_owned {
+                        if let Some(obj) = row.as_object_mut() {
+                            if let Some(uuid) = obj
+                                .get("category_uuid")
+                                .and_then(|v| v.as_str())
+                                .map(String::from)
+                            {
+                                let id = queries::get_task_category_id_by_uuid(conn, &uuid)
+                                    .map_err(|e| format!("get_task_category_id_by_uuid: {e}"))?;
+                                obj.insert(
+                                    "category_id".to_string(),
+                                    id.map(|v| Value::Number(v.into())).unwrap_or(Value::Null),
+                                );
+                            }
+                            if let Some(uuid) = obj
+                                .get("status_uuid")
+                                .and_then(|v| v.as_str())
+                                .map(String::from)
+                            {
+                                let id = queries::get_task_status_id_by_uuid(conn, &uuid)
+                                    .map_err(|e| format!("get_task_status_id_by_uuid: {e}"))?;
+                                obj.insert(
+                                    "status_id".to_string(),
+                                    id.map(|v| Value::Number(v.into())).unwrap_or(Value::Null),
+                                );
+                            }
+                        }
+                    }
+                }
+
+                if table == "task_checkboxes" {
+                    let before = rows_owned.len();
+                    rows_owned.retain_mut(|row| {
+                        let Some(obj) = row.as_object_mut() else {
+                            return false;
+                        };
+                        let Some(task_uuid) = obj
+                            .get("task_uuid")
+                            .and_then(|v| v.as_str())
+                            .map(String::from)
+                        else {
+                            return false;
+                        };
+                        let task_id = queries::get_task_id_by_uuid(conn, &task_uuid).ok().flatten();
+                        let Some(task_id) = task_id else {
+                            return false;
+                        };
+                        obj.insert("task_id".to_string(), Value::Number(task_id.into()));
+                        if let Some(parent_uuid) = obj
+                            .get("parent_uuid")
+                            .and_then(|v| v.as_str())
+                            .map(String::from)
+                        {
+                            if let (Some(uuid), Some(updated_at)) = (
+                                obj.get("uuid").and_then(|v| v.as_str()),
+                                obj.get("updated_at").and_then(|v| v.as_str()),
+                            ) {
+                                deferred_checkbox_parent_updates.push((
+                                    uuid.to_string(),
+                                    parent_uuid.clone(),
+                                    updated_at.to_string(),
+                                ));
+                            }
+                            let parent_id = queries::get_task_checkbox_id_by_uuid(conn, &parent_uuid)
+                                .ok()
+                                .flatten();
+                            obj.insert(
+                                "parent_id".to_string(),
+                                parent_id.map(|v| Value::Number(v.into())).unwrap_or(Value::Null),
+                            );
+                        }
+                        true
+                    });
+                    let skipped = before.saturating_sub(rows_owned.len());
+                    if skipped > 0 {
+                        skipped_counts.insert(table.to_string(), skipped);
+                    }
+                }
+
+                if table == "task_links" {
+                    let before = rows_owned.len();
+                    rows_owned.retain_mut(|row| {
+                        let Some(obj) = row.as_object_mut() else {
+                            return false;
+                        };
+                        let Some(task_uuid) = obj
+                            .get("task_uuid")
+                            .and_then(|v| v.as_str())
+                            .map(String::from)
+                        else {
+                            return false;
+                        };
+                        let task_id = queries::get_task_id_by_uuid(conn, &task_uuid).ok().flatten();
+                        let Some(task_id) = task_id else {
+                            return false;
+                        };
+                        obj.insert("task_id".to_string(), Value::Number(task_id.into()));
+                        true
+                    });
+                    let skipped = before.saturating_sub(rows_owned.len());
+                    if skipped > 0 {
+                        skipped_counts.insert(table.to_string(), skipped);
+                    }
+                }
+
                 queries::upsert_from_server(conn, table, &rows_owned)
                     .map_err(|e| format!("upsert_from_server({table}): {e}"))?;
+
+                if table == "task_checkboxes" {
+                    for (uuid, parent_uuid, updated_at) in &deferred_checkbox_parent_updates {
+                        let parent_id = queries::get_task_checkbox_id_by_uuid(conn, parent_uuid)
+                            .map_err(|e| format!("get_task_checkbox_id_by_uuid: {e}"))?;
+                        if let Some(parent_id) = parent_id {
+                            queries::set_task_checkbox_parent_if_not_newer(
+                                conn,
+                                uuid,
+                                parent_id,
+                                updated_at,
+                            )
+                            .map_err(|e| {
+                                format!("set_task_checkbox_parent_if_not_newer: {e}")
+                            })?;
+                        }
+                    }
+                }
             }
         }
 
@@ -372,14 +553,25 @@ impl SyncClient {
                 .map_err(|e| format!("save last_sync_at: {e}"))?;
         }
 
-        Ok(pulled_names)
+        Ok((pulled_names, skipped_counts))
+    }
+
+    fn truncate_display_name(val: &str) -> String {
+        if val.chars().count() > 40 {
+            let head: String = val.chars().take(37).collect();
+            format!("{}...", head)
+        } else {
+            val.to_string()
+        }
     }
 
     /// Extract a human-readable display name from a row for sync logging.
     fn extract_display_name(table: &str, obj: &Map<String, Value>) -> String {
         let name_field = match table {
-            "shortcuts" | "note_folders" | "snippet_tags" => "name",
-            "notes" => "title",
+            "shortcuts" | "note_folders" | "snippet_tags" | "task_categories"
+            | "task_statuses" => "name",
+            "notes" | "tasks" => "title",
+            "task_checkboxes" => "text",
             "sql_macrosing_templates" => "template_name",
             "obfuscation_mappings" => "session_name",
             _ => "",
@@ -390,13 +582,7 @@ impl SyncClient {
                 if !val.is_empty() {
                     // Truncate by CHARS, not bytes — otherwise a multibyte
                     // UTF-8 (e.g. Cyrillic) name slices mid-char and panics.
-                    let truncated = if val.chars().count() > 40 {
-                        let head: String = val.chars().take(37).collect();
-                        format!("{}...", head)
-                    } else {
-                        val.to_string()
-                    };
-                    return truncated;
+                    return Self::truncate_display_name(val);
                 }
             }
         }
@@ -407,14 +593,25 @@ impl SyncClient {
                 if !val.is_empty() {
                     // Char-based truncation (see above) — template_text may
                     // contain Cyrillic comments etc.
-                    let truncated = if val.chars().count() > 40 {
-                        let head: String = val.chars().take(37).collect();
-                        format!("{}...", head)
-                    } else {
-                        val.to_string()
-                    };
-                    return truncated;
+                    return Self::truncate_display_name(val);
                 }
+            }
+        }
+
+        if table == "task_links" {
+            if let Some(label) = obj
+                .get("label")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+            {
+                return Self::truncate_display_name(label);
+            }
+            if let Some(url) = obj
+                .get("url")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+            {
+                return Self::truncate_display_name(url);
             }
         }
 
@@ -430,6 +627,7 @@ impl SyncClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::run_migrations;
     use serde_json::json;
 
     #[test]
@@ -453,5 +651,148 @@ mod tests {
     fn extract_display_name_falls_back_to_uuid() {
         let obj = json!({ "uuid": "abcdef0123456789" }).as_object().unwrap().clone();
         assert_eq!(SyncClient::extract_display_name("tasks", &obj), "abcdef01");
+    }
+
+    #[test]
+    fn extract_display_name_handles_task_tables_with_utf8() {
+        let task = json!({ "title": "Задача синхронизации чеклистов между устройствами" })
+            .as_object()
+            .unwrap()
+            .clone();
+        let got = SyncClient::extract_display_name("tasks", &task);
+        assert!(got.ends_with("..."));
+        assert!(got.chars().count() <= 40);
+
+        let checkbox = json!({ "text": "Проверить вложенный чекбокс синхронизации ✅✅✅✅✅✅✅✅✅✅" })
+            .as_object()
+            .unwrap()
+            .clone();
+        let got = SyncClient::extract_display_name("task_checkboxes", &checkbox);
+        assert!(got.ends_with("..."));
+        assert!(got.chars().count() <= 40);
+
+        let link = json!({ "label": "Трекер", "url": "https://example.test/TASK-1" })
+            .as_object()
+            .unwrap()
+            .clone();
+        assert_eq!(SyncClient::extract_display_name("task_links", &link), "Трекер");
+    }
+
+    #[test]
+    fn apply_pull_uses_sync_order_for_task_relationships() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        run_migrations(&conn).unwrap();
+
+        let client = SyncClient::new("http://localhost", "test-key", None).unwrap();
+        let result = json!({
+            "changes": {
+                "task_checkboxes": [
+                    {
+                        "uuid": "11111111-1111-4111-8111-111111111111",
+                        "task_uuid": "33333333-3333-4333-8333-333333333333",
+                        "parent_uuid": null,
+                        "text": "parent",
+                        "is_checked": 0,
+                        "sort_order": 1,
+                        "created_at": "2026-05-23T00:00:03",
+                        "updated_at": "2026-05-23T00:00:03",
+                        "is_deleted": false
+                    },
+                    {
+                        "uuid": "22222222-2222-4222-8222-222222222222",
+                        "task_uuid": "33333333-3333-4333-8333-333333333333",
+                        "parent_uuid": "11111111-1111-4111-8111-111111111111",
+                        "text": "child",
+                        "is_checked": 0,
+                        "sort_order": 2,
+                        "created_at": "2026-05-23T00:00:04",
+                        "updated_at": "2026-05-23T00:00:04",
+                        "is_deleted": false
+                    }
+                ],
+                "task_links": [
+                    {
+                        "uuid": "44444444-4444-4444-8444-444444444444",
+                        "task_uuid": "33333333-3333-4333-8333-333333333333",
+                        "url": "https://example.test/task",
+                        "label": "Task",
+                        "sort_order": 1,
+                        "created_at": "2026-05-23T00:00:05",
+                        "updated_at": "2026-05-23T00:00:05",
+                        "is_deleted": false
+                    }
+                ],
+                "tasks": [
+                    {
+                        "uuid": "33333333-3333-4333-8333-333333333333",
+                        "title": "Synced task",
+                        "category_uuid": "55555555-5555-4555-8555-555555555555",
+                        "status_uuid": "66666666-6666-4666-8666-666666666666",
+                        "is_pinned": 0,
+                        "bg_color": null,
+                        "tracker_url": null,
+                        "notes_md": "",
+                        "sort_order": 1,
+                        "created_at": "2026-05-23T00:00:02",
+                        "updated_at": "2026-05-23T00:00:02",
+                        "is_deleted": false
+                    }
+                ],
+                "task_categories": [
+                    {
+                        "uuid": "55555555-5555-4555-8555-555555555555",
+                        "name": "Work",
+                        "color": "#388bfd",
+                        "sort_order": 1,
+                        "created_at": "2026-05-23T00:00:01",
+                        "updated_at": "2026-05-23T00:00:01",
+                        "is_deleted": false
+                    }
+                ],
+                "task_statuses": [
+                    {
+                        "uuid": "66666666-6666-4666-8666-666666666666",
+                        "name": "Next",
+                        "color": "#3fb950",
+                        "sort_order": 1,
+                        "created_at": "2026-05-23T00:00:01",
+                        "updated_at": "2026-05-23T00:00:01",
+                        "is_deleted": false
+                    }
+                ]
+            },
+            "server_time": "2026-05-23T00:00:10"
+        });
+
+        let (_pulled, skipped) = client.apply_pull(&conn, "pc-test", &result).unwrap();
+        assert!(skipped.is_empty());
+
+        let task_id =
+            queries::get_task_id_by_uuid(&conn, "33333333-3333-4333-8333-333333333333")
+                .unwrap()
+                .unwrap();
+        let link_task_id: i64 = conn
+            .query_row(
+                "SELECT task_id FROM task_links WHERE uuid = ?1",
+                ["44444444-4444-4444-8444-444444444444"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(link_task_id, task_id);
+
+        let parent_id = queries::get_task_checkbox_id_by_uuid(
+            &conn,
+            "11111111-1111-4111-8111-111111111111",
+        )
+        .unwrap()
+        .unwrap();
+        let child_parent_id: Option<i64> = conn
+            .query_row(
+                "SELECT parent_id FROM task_checkboxes WHERE uuid = ?1",
+                ["22222222-2222-4222-8222-222222222222"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(child_parent_id, Some(parent_id));
     }
 }

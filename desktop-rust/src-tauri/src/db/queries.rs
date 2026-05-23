@@ -1135,6 +1135,75 @@ pub fn get_folder_id_by_uuid(conn: &Connection, folder_uuid: &str) -> Result<Opt
     }
 }
 
+fn get_uuid_by_id(conn: &Connection, table: &str, id: i64) -> Result<Option<String>> {
+    validate_table(table)?;
+    let sql = format!("SELECT uuid FROM {table} WHERE id = ?1");
+    let mut stmt = conn.prepare(&sql)?;
+    let mut rows = stmt.query_map(params![id], |row| row.get(0))?;
+    match rows.next() {
+        Some(val) => Ok(Some(val?)),
+        None => Ok(None),
+    }
+}
+
+fn get_id_by_uuid(conn: &Connection, table: &str, uuid: &str) -> Result<Option<i64>> {
+    validate_table(table)?;
+    let sql = format!("SELECT id FROM {table} WHERE uuid = ?1");
+    let mut stmt = conn.prepare(&sql)?;
+    let mut rows = stmt.query_map(params![uuid], |row| row.get(0))?;
+    match rows.next() {
+        Some(val) => Ok(Some(val?)),
+        None => Ok(None),
+    }
+}
+
+pub fn get_task_category_uuid_by_id(conn: &Connection, id: i64) -> Result<Option<String>> {
+    get_uuid_by_id(conn, "task_categories", id)
+}
+
+pub fn get_task_status_uuid_by_id(conn: &Connection, id: i64) -> Result<Option<String>> {
+    get_uuid_by_id(conn, "task_statuses", id)
+}
+
+pub fn get_task_uuid_by_id(conn: &Connection, id: i64) -> Result<Option<String>> {
+    get_uuid_by_id(conn, "tasks", id)
+}
+
+pub fn get_task_checkbox_uuid_by_id(conn: &Connection, id: i64) -> Result<Option<String>> {
+    get_uuid_by_id(conn, "task_checkboxes", id)
+}
+
+pub fn get_task_category_id_by_uuid(conn: &Connection, uuid: &str) -> Result<Option<i64>> {
+    get_id_by_uuid(conn, "task_categories", uuid)
+}
+
+pub fn get_task_status_id_by_uuid(conn: &Connection, uuid: &str) -> Result<Option<i64>> {
+    get_id_by_uuid(conn, "task_statuses", uuid)
+}
+
+pub fn get_task_id_by_uuid(conn: &Connection, uuid: &str) -> Result<Option<i64>> {
+    get_id_by_uuid(conn, "tasks", uuid)
+}
+
+pub fn get_task_checkbox_id_by_uuid(conn: &Connection, uuid: &str) -> Result<Option<i64>> {
+    get_id_by_uuid(conn, "task_checkboxes", uuid)
+}
+
+pub fn set_task_checkbox_parent_if_not_newer(
+    conn: &Connection,
+    uuid: &str,
+    parent_id: i64,
+    incoming_updated_at: &str,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE task_checkboxes
+         SET parent_id = ?1
+         WHERE uuid = ?2 AND updated_at <= ?3",
+        params![parent_id, uuid, incoming_updated_at],
+    )?;
+    Ok(())
+}
+
 // ── Task Categories ──────────────────────────────────────────
 
 pub fn list_task_categories(conn: &Connection) -> Result<Vec<TaskCategory>> {
@@ -2204,6 +2273,40 @@ mod tests {
             .map(|c| c.id.unwrap())
             .collect();
         assert_eq!(after, reversed);
+    }
+
+    #[test]
+    fn test_task_uuid_lookup_helpers() {
+        let conn = init_test_db();
+        let cat = create_task_category(&conn, "Sync Cat", "#388bfd").unwrap();
+        let status = create_task_status(&conn, "Sync Status", "#3fb950").unwrap();
+        let task = create_task(&conn, "Sync Task", cat.id, status.id).unwrap();
+        let checkbox = create_task_checkbox(&conn, task.id.unwrap(), None, "Check me").unwrap();
+
+        assert_eq!(
+            get_task_category_uuid_by_id(&conn, cat.id.unwrap()).unwrap(),
+            Some(cat.uuid.clone())
+        );
+        assert_eq!(
+            get_task_status_uuid_by_id(&conn, status.id.unwrap()).unwrap(),
+            Some(status.uuid.clone())
+        );
+        assert_eq!(
+            get_task_uuid_by_id(&conn, task.id.unwrap()).unwrap(),
+            Some(task.uuid.clone())
+        );
+        assert_eq!(
+            get_task_checkbox_uuid_by_id(&conn, checkbox.id.unwrap()).unwrap(),
+            Some(checkbox.uuid.clone())
+        );
+
+        assert_eq!(get_task_category_id_by_uuid(&conn, &cat.uuid).unwrap(), cat.id);
+        assert_eq!(get_task_status_id_by_uuid(&conn, &status.uuid).unwrap(), status.id);
+        assert_eq!(get_task_id_by_uuid(&conn, &task.uuid).unwrap(), task.id);
+        assert_eq!(
+            get_task_checkbox_id_by_uuid(&conn, &checkbox.uuid).unwrap(),
+            checkbox.id
+        );
     }
 
     #[test]

@@ -2,6 +2,7 @@
 .venv/
 venv/
 ENV/
+tests/post_release/.venv/
 
 # Python
 __pycache__/

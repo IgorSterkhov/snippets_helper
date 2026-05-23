@@ -104,6 +104,74 @@ export async function initDB() {
     `);
 
     tx.executeSql(`
+      CREATE TABLE IF NOT EXISTS task_categories (
+        uuid TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        color TEXT NOT NULL DEFAULT '#8b949e',
+        sort_order INTEGER DEFAULT 0,
+        created_at TEXT,
+        updated_at TEXT NOT NULL,
+        is_deleted INTEGER DEFAULT 0
+      )
+    `);
+
+    tx.executeSql(`
+      CREATE TABLE IF NOT EXISTS task_statuses (
+        uuid TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        color TEXT NOT NULL DEFAULT '#8b949e',
+        sort_order INTEGER DEFAULT 0,
+        created_at TEXT,
+        updated_at TEXT NOT NULL,
+        is_deleted INTEGER DEFAULT 0
+      )
+    `);
+
+    tx.executeSql(`
+      CREATE TABLE IF NOT EXISTS tasks (
+        uuid TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        category_uuid TEXT,
+        status_uuid TEXT,
+        is_pinned INTEGER DEFAULT 0,
+        bg_color TEXT,
+        tracker_url TEXT,
+        notes_md TEXT DEFAULT '',
+        sort_order INTEGER DEFAULT 0,
+        created_at TEXT,
+        updated_at TEXT NOT NULL,
+        is_deleted INTEGER DEFAULT 0
+      )
+    `);
+
+    tx.executeSql(`
+      CREATE TABLE IF NOT EXISTS task_checkboxes (
+        uuid TEXT PRIMARY KEY,
+        task_uuid TEXT NOT NULL,
+        parent_uuid TEXT,
+        text TEXT NOT NULL DEFAULT '',
+        is_checked INTEGER DEFAULT 0,
+        sort_order INTEGER DEFAULT 0,
+        created_at TEXT,
+        updated_at TEXT NOT NULL,
+        is_deleted INTEGER DEFAULT 0
+      )
+    `);
+
+    tx.executeSql(`
+      CREATE TABLE IF NOT EXISTS task_links (
+        uuid TEXT PRIMARY KEY,
+        task_uuid TEXT NOT NULL,
+        url TEXT NOT NULL DEFAULT '',
+        label TEXT,
+        sort_order INTEGER DEFAULT 0,
+        created_at TEXT,
+        updated_at TEXT NOT NULL,
+        is_deleted INTEGER DEFAULT 0
+      )
+    `);
+
+    tx.executeSql(`
       CREATE TABLE IF NOT EXISTS sync_meta (
         key TEXT PRIMARY KEY,
         value TEXT

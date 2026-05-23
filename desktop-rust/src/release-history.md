@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## v1.3.28 (2026-05-23)
+
+- **Tasks sync:** added server-side sync tables for task categories, statuses,
+  tasks, checkboxes, and links, with UUID relationships preserved across
+  devices.
+- **Mobile Tasks:** added a mobile Tasks tab with local storage, CRUD flows,
+  and sync participation for categories, statuses, tasks, checkboxes, and links.
+- **Post-release smoke:** added non-UI smoke automation for API task sync and
+  desktop/mobile release manifest checks.
+
 ## 1.3.27 OTA patches (2026-05-23)
 
 - **f-20260523-5 — Snippets Key Cloud density:** added a selectable

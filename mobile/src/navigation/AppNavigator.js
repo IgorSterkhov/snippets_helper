@@ -13,6 +13,9 @@ import SnippetListScreen from '../screens/Snippets/SnippetListScreen';
 import SnippetDetailScreen from '../screens/Snippets/SnippetDetailScreen';
 import NoteListScreen from '../screens/Notes/NoteListScreen';
 import NoteEditorScreen from '../screens/Notes/NoteEditorScreen';
+import TaskListScreen from '../screens/Tasks/TaskListScreen';
+import TaskEditorScreen from '../screens/Tasks/TaskEditorScreen';
+import TaskManageScreen from '../screens/Tasks/TaskManageScreen';
 import SettingsScreen from '../screens/Settings/SettingsScreen';
 import UpdateBanner from '../components/UpdateBanner';
 
@@ -20,6 +23,7 @@ const Tab = createBottomTabNavigator();
 const AuthStack = createNativeStackNavigator();
 const SnippetsStack = createNativeStackNavigator();
 const NotesStack = createNativeStackNavigator();
+const TasksStack = createNativeStackNavigator();
 
 function AuthNavigator() {
   return (
@@ -50,6 +54,17 @@ function NotesNavigator() {
   );
 }
 
+function TasksNavigator() {
+  const { colors } = useTheme();
+  return (
+    <TasksStack.Navigator screenOptions={{ headerStyle: { backgroundColor: colors.bgSecondary }, headerTintColor: colors.text }}>
+      <TasksStack.Screen name="TaskList" component={TaskListScreen} options={{ headerShown: false }} />
+      <TasksStack.Screen name="TaskEditor" component={TaskEditorScreen} options={{ title: 'Задача' }} />
+      <TasksStack.Screen name="TaskManage" component={TaskManageScreen} options={{ title: 'Списки задач' }} />
+    </TasksStack.Navigator>
+  );
+}
+
 function MainTabs() {
   const { colors } = useTheme();
   return (
@@ -65,6 +80,7 @@ function MainTabs() {
       >
         <Tab.Screen name="Snippets" component={SnippetsNavigator} />
         <Tab.Screen name="Notes" component={NotesNavigator} />
+        <Tab.Screen name="Tasks" component={TasksNavigator} />
         <Tab.Screen name="Settings" component={SettingsScreen} />
       </Tab.Navigator>
     </View>
