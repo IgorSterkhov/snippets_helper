@@ -56,3 +56,25 @@ class PullRequest(BaseModel):
 class PullResponse(BaseModel):
     changes: dict[str, list[dict]]
     server_time: datetime
+
+
+# ==================== Share Links ====================
+
+class ShareLinkRequest(BaseModel):
+    item_type: str
+    item_uuid: str
+
+
+class ShareLinkResponse(BaseModel):
+    token: str
+    public_url: str
+    item_type: str
+    item_uuid: str
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+    revoked_at: Optional[datetime] = None
+
+
+class ShareLinkStatusResponse(BaseModel):
+    link: Optional[ShareLinkResponse] = None

@@ -1,6 +1,17 @@
 import uuid as uuid_mod
 from datetime import datetime
-from sqlalchemy import String, Text, Integer, Boolean, DateTime, ForeignKey, Index, Uuid
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    Uuid,
+    text,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -224,6 +235,33 @@ class TaskLink(Base):
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
 
     __table_args__ = (Index("idx_task_links_user_updated", "user_id", "updated_at"),)
+
+
+class ShareLink(Base):
+    __tablename__ = "share_links"
+
+    token: Mapped[str] = mapped_column(String(96), primary_key=True)
+    user_id: Mapped[uuid_mod.UUID] = mapped_column(Uuid, ForeignKey("users.id"), nullable=False)
+    item_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    item_uuid: Mapped[uuid_mod.UUID] = mapped_column(Uuid, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+    __table_args__ = (
+        CheckConstraint("item_type IN ('note', 'shortcut')", name="ck_share_links_item_type"),
+        Index("idx_share_links_token", "token"),
+        Index("idx_share_links_owner_item", "user_id", "item_type", "item_uuid"),
+        Index(
+            "uq_share_links_active_owner_item",
+            "user_id",
+            "item_type",
+            "item_uuid",
+            unique=True,
+            postgresql_where=text("is_active = true"),
+        ),
+    )
 
 
 # Map table names to ORM models (used by sync routes)
