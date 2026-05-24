@@ -42,7 +42,11 @@ def _parse_uuid(value: str) -> UUID:
 def _response(link: ShareLink, request: Request) -> ShareLinkResponse:
     return ShareLinkResponse(
         token=link.token,
-        public_url=build_public_url(str(request.url), link.token),
+        public_url=build_public_url(
+            str(request.url),
+            link.token,
+            forwarded_proto=request.headers.get("x-forwarded-proto"),
+        ),
         item_type=link.item_type,
         item_uuid=str(link.item_uuid),
         is_active=link.is_active,

@@ -66,6 +66,9 @@ def test_share_links_live_note_and_shortcut(
         "title": f"{unique_prefix}_note_v1",
         "content": "note content v1",
     }
+    if smoke_config.api_base_url.startswith("https://"):
+        assert note_link["public_url"].startswith("https://"), note_link
+    assert public_http.head_or_get_status(note_link["public_url"]) == 200
 
     status, public_snippet = public_http.request_json(
         "GET",
@@ -78,6 +81,9 @@ def test_share_links_live_note_and_shortcut(
     assert public_snippet["description"] == "snippet description"
     assert public_snippet["links"] == [{"label": "Docs", "url": "https://example.com"}]
     assert "obsidian_note" not in public_snippet
+    if smoke_config.api_base_url.startswith("https://"):
+        assert snippet_link["public_url"].startswith("https://"), snippet_link
+    assert public_http.head_or_get_status(snippet_link["public_url"]) == 200
 
     _push(
         api_client,

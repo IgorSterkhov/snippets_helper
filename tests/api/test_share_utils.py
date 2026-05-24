@@ -25,6 +25,17 @@ def test_build_public_url_uses_root_share_path():
     )
 
 
+def test_build_public_url_uses_forwarded_proto():
+    assert (
+        build_public_url(
+            "http://ister-app.ru/snippets-api/v1/share-links",
+            "abc",
+            forwarded_proto="https",
+        )
+        == "https://ister-app.ru/share/abc"
+    )
+
+
 def test_public_note_payload_exposes_only_title_and_content():
     row = Row(title="T", content="<b>secret</b>", folder_uuid="hidden", is_pinned=1)
     payload = public_note_payload(row)

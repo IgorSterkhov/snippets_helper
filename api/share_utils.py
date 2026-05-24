@@ -8,9 +8,14 @@ def generate_share_token() -> str:
     return secrets.token_urlsafe(32)
 
 
-def build_public_url(request_url: str, token: str) -> str:
+def build_public_url(request_url: str, token: str, forwarded_proto: str | None = None) -> str:
     parsed = urlparse(str(request_url))
-    return f"{parsed.scheme}://{parsed.netloc}/share/{token}"
+    scheme = parsed.scheme
+    if forwarded_proto:
+        candidate = forwarded_proto.split(",", 1)[0].strip().lower()
+        if candidate in {"http", "https"}:
+            scheme = candidate
+    return f"{scheme}://{parsed.netloc}/share/{token}"
 
 
 def _safe_links(raw: str | list | None) -> list[dict[str, str]]:
