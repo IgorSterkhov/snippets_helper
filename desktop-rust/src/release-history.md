@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## v1.3.32 (2026-05-24)
+
+- **Public share links:** Notes and Snippets can now be shared through live
+  secret-token public links. Desktop and mobile can create, copy, preview/open,
+  and revoke links without adding shared rows to generic sync.
+- **Share-safe public payloads:** public note pages expose only title and
+  content, while public snippet pages expose name, value, description, and safe
+  HTTP(S) links.
+- **Snippet pin polish:** desktop pinned snippet chips now use the same pin
+  icon language as Tasks.
+
 ## v1.3.31 (2026-05-24)
 
 - **Synced pinned snippets:** desktop Snippets now supports synced snippet
