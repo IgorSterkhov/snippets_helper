@@ -107,4 +107,51 @@ describe('taskRepo', () => {
       ['b', 0],
     ]);
   });
+
+  test('flattenCheckboxTree hides descendants of collapsed rows', () => {
+    const rows = [
+      { uuid: 'root', parent_uuid: null, text: 'Root', sort_order: 0, is_deleted: 0 },
+      { uuid: 'child', parent_uuid: 'root', text: 'Child', sort_order: 0, is_deleted: 0 },
+      { uuid: 'grandchild', parent_uuid: 'child', text: 'Grandchild', sort_order: 0, is_deleted: 0 },
+      { uuid: 'sibling', parent_uuid: null, text: 'Sibling', sort_order: 1, is_deleted: 0 },
+    ];
+
+    const result = flattenCheckboxTree(rows, { collapsedIds: new Set(['root']) });
+
+    expect(result.map(({ item, depth, hasChildren, hiddenDescendantCount }) => [
+      item.uuid,
+      depth,
+      hasChildren,
+      hiddenDescendantCount,
+    ])).toEqual([
+      ['root', 0, true, 2],
+      ['sibling', 0, false, 0],
+    ]);
+  });
+
+  test('flattenCheckboxTree hides checked leaves when hideDone is enabled', () => {
+    const rows = [
+      { uuid: 'root', parent_uuid: null, text: 'Root', sort_order: 0, is_checked: 0, is_deleted: 0 },
+      { uuid: 'done', parent_uuid: 'root', text: 'Done', sort_order: 0, is_checked: 1, is_deleted: 0 },
+      { uuid: 'open', parent_uuid: 'root', text: 'Open', sort_order: 1, is_checked: 0, is_deleted: 0 },
+    ];
+
+    expect(flattenCheckboxTree(rows, { hideDone: true }).map(({ item, depth }) => [item.uuid, depth])).toEqual([
+      ['root', 0],
+      ['open', 1],
+    ]);
+  });
+
+  test('flattenCheckboxTree keeps checked parent with unchecked descendants when hideDone is enabled', () => {
+    const rows = [
+      { uuid: 'root', parent_uuid: null, text: 'Root', sort_order: 0, is_checked: 1, is_deleted: 0 },
+      { uuid: 'open-child', parent_uuid: 'root', text: 'Open child', sort_order: 0, is_checked: 0, is_deleted: 0 },
+      { uuid: 'done-root', parent_uuid: null, text: 'Done root', sort_order: 1, is_checked: 1, is_deleted: 0 },
+    ];
+
+    expect(flattenCheckboxTree(rows, { hideDone: true }).map(({ item, depth }) => [item.uuid, depth])).toEqual([
+      ['root', 0],
+      ['open-child', 1],
+    ]);
+  });
 });

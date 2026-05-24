@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../../theme/ThemeContext';
+import { loadTaskPreferences } from './taskPreferences';
 import {
   deleteTask,
   flattenCheckboxTree,
@@ -31,6 +32,7 @@ import { uuidv4 } from '../../lib/uuid';
 const COLORS = [null, '#fff8c5', '#dcffe4', '#ddf4ff', '#fbefff', '#ffeef0'];
 const CHECKBOX_INDENT_STEP = 18;
 const CHECKBOX_MAX_INDENT = 72;
+const DEFAULT_TASK_PREFS = { hideDone: false, wrapText: true };
 
 function collectCheckboxSubtree(items, rootUuid) {
   const ids = new Set([rootUuid]);
@@ -55,6 +57,8 @@ export default function TaskEditorScreen({ route, navigation }) {
   const [draft, setDraft] = useState(task);
   const [checkboxes, setCheckboxes] = useState([]);
   const [links, setLinks] = useState([]);
+  const [collapsedCheckboxIds, setCollapsedCheckboxIds] = useState(new Set());
+  const [taskPrefs, setTaskPrefs] = useState(DEFAULT_TASK_PREFS);
   const [saving, setSaving] = useState(false);
 
   const loadChildren = useCallback(async () => {
@@ -70,7 +74,12 @@ export default function TaskEditorScreen({ route, navigation }) {
     setLinks(taskLinks);
   }, [task.uuid]);
 
-  useFocusEffect(useCallback(() => { loadChildren(); }, [loadChildren]));
+  useFocusEffect(useCallback(() => {
+    loadChildren();
+    loadTaskPreferences()
+      .then(setTaskPrefs)
+      .catch(() => setTaskPrefs(DEFAULT_TASK_PREFS));
+  }, [loadChildren]));
 
   const patchDraft = (patch) => setDraft((prev) => ({ ...prev, ...patch }));
 
@@ -156,7 +165,53 @@ export default function TaskEditorScreen({ route, navigation }) {
     ]);
   };
 
-  const visibleCheckboxTree = flattenCheckboxTree(checkboxes);
+  const deleteCheckboxItem = (uuid) => {
+    const now = new Date().toISOString();
+    const deletedIds = collectCheckboxSubtree(checkboxes, uuid);
+    setCheckboxes((prev) => prev.map((c) => (
+      deletedIds.has(c.uuid) ? { ...c, is_deleted: 1, updated_at: now } : c
+    )));
+    setCollapsedCheckboxIds((prev) => {
+      const next = new Set(prev);
+      for (const id of deletedIds) next.delete(id);
+      return next;
+    });
+  };
+
+  const toggleCheckboxCollapse = (uuid, hasChildren) => {
+    if (!hasChildren) return;
+    setCollapsedCheckboxIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(uuid)) next.delete(uuid);
+      else next.add(uuid);
+      return next;
+    });
+  };
+
+  const openCheckboxMenu = (item, hasChildren) => {
+    const isCollapsed = collapsedCheckboxIds.has(item.uuid);
+    const buttons = [];
+    if (hasChildren) {
+      buttons.push({
+        text: isCollapsed ? 'Развернуть' : 'Свернуть',
+        onPress: () => toggleCheckboxCollapse(item.uuid, true),
+      });
+    }
+    buttons.push(
+      {
+        text: 'Удалить',
+        style: 'destructive',
+        onPress: () => deleteCheckboxItem(item.uuid),
+      },
+      { text: 'Отмена', style: 'cancel' },
+    );
+    Alert.alert(item.text || 'Пункт', 'Действия с чекбоксом', buttons);
+  };
+
+  const visibleCheckboxTree = flattenCheckboxTree(checkboxes, {
+    collapsedIds: collapsedCheckboxIds,
+    hideDone: taskPrefs.hideDone,
+  });
   const visibleLinks = links.filter((item) => !item.is_deleted);
 
   return (
@@ -224,40 +279,71 @@ export default function TaskEditorScreen({ route, navigation }) {
         </Section>
 
         <Section title="Чекбоксы" colors={colors} action="Добавить" onAction={addCheckbox}>
-          {visibleCheckboxTree.map(({ item, depth }) => (
-            <View
-              key={item.uuid}
-              style={[
-                s.itemRow,
-                depth ? { paddingLeft: Math.min(depth * CHECKBOX_INDENT_STEP, CHECKBOX_MAX_INDENT) } : null,
-              ]}
-            >
-              <TouchableOpacity
-                style={[s.checkBox, { borderColor: colors.border }, item.is_checked && { backgroundColor: colors.primary }]}
-                onPress={() => setCheckboxes((prev) => prev.map((c) => c.uuid === item.uuid ? { ...c, is_checked: c.is_checked ? 0 : 1, updated_at: new Date().toISOString() } : c))}
-              >
-                {item.is_checked ? <Text style={s.checkMark}>✓</Text> : null}
-              </TouchableOpacity>
-              <TextInput
-                style={[s.flexInput, { color: colors.text, borderColor: colors.border }]}
-                value={item.text}
-                onChangeText={(text) => setCheckboxes((prev) => prev.map((c) => c.uuid === item.uuid ? { ...c, text, updated_at: new Date().toISOString() } : c))}
-                placeholder="Пункт"
-                placeholderTextColor={colors.textMuted}
-              />
-              <TextButton
-                label="Del"
-                color={colors.danger}
-                onPress={() => {
-                  const now = new Date().toISOString();
-                  const deletedIds = collectCheckboxSubtree(checkboxes, item.uuid);
-                  setCheckboxes((prev) => prev.map((c) => (
-                    deletedIds.has(c.uuid) ? { ...c, is_deleted: 1, updated_at: now } : c
-                  )));
-                }}
-              />
-            </View>
-          ))}
+          <View style={s.checkboxTree}>
+            {visibleCheckboxTree.length > 0 ? (
+              <View style={[s.dotRail, { backgroundColor: colors.border }]} />
+            ) : null}
+            {visibleCheckboxTree.map(({ item, depth, hasChildren, hiddenDescendantCount }) => {
+              const isCollapsed = collapsedCheckboxIds.has(item.uuid);
+              return (
+                <View key={item.uuid} style={s.checkboxTreeRow}>
+                  <TouchableOpacity
+                    style={[s.dotHit, { backgroundColor: colors.bg }]}
+                    onPress={() => toggleCheckboxCollapse(item.uuid, hasChildren)}
+                    onLongPress={() => openCheckboxMenu(item, hasChildren)}
+                    delayLongPress={350}
+                    activeOpacity={hasChildren ? 0.65 : 0.9}
+                  >
+                    <View
+                      style={[
+                        s.dot,
+                        { borderColor: colors.textMuted, backgroundColor: colors.bg },
+                        hasChildren && { borderColor: colors.primary, backgroundColor: colors.primary },
+                        isCollapsed && { borderColor: '#d29922', backgroundColor: '#d29922' },
+                      ]}
+                    />
+                  </TouchableOpacity>
+                  <View
+                    style={[
+                      s.checkboxContent,
+                      depth ? { paddingLeft: Math.min(depth * CHECKBOX_INDENT_STEP, CHECKBOX_MAX_INDENT) } : null,
+                    ]}
+                  >
+                    <TouchableOpacity
+                      style={[s.checkBox, { borderColor: colors.border }, item.is_checked && { backgroundColor: colors.primary }]}
+                      onPress={() => setCheckboxes((prev) => prev.map((c) => c.uuid === item.uuid ? { ...c, is_checked: c.is_checked ? 0 : 1, updated_at: new Date().toISOString() } : c))}
+                    >
+                      {item.is_checked ? <Text style={s.checkMark}>✓</Text> : null}
+                    </TouchableOpacity>
+                    <TextInput
+                      style={[
+                        s.flexInput,
+                        taskPrefs.wrapText ? s.flexInputWrap : s.flexInputNoWrap,
+                        { color: colors.text, borderColor: colors.border },
+                      ]}
+                      value={item.text}
+                      onChangeText={(text) => setCheckboxes((prev) => prev.map((c) => c.uuid === item.uuid ? { ...c, text, updated_at: new Date().toISOString() } : c))}
+                      placeholder="Пункт"
+                      placeholderTextColor={colors.textMuted}
+                      multiline={taskPrefs.wrapText}
+                      numberOfLines={taskPrefs.wrapText ? undefined : 1}
+                    />
+                    {hiddenDescendantCount ? (
+                      <Text style={[s.hiddenCount, { color: colors.textMuted }]}>{hiddenDescendantCount}</Text>
+                    ) : null}
+                    <TouchableOpacity
+                      style={[s.trashBtn, { borderColor: colors.border }]}
+                      onPress={() => deleteCheckboxItem(item.uuid)}
+                      onLongPress={() => openCheckboxMenu(item, hasChildren)}
+                      delayLongPress={350}
+                    >
+                      <TrashIcon color={colors.danger} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
         </Section>
 
         <Section title="Ссылки" colors={colors} action="Добавить" onAction={addLink}>
@@ -336,6 +422,15 @@ function TextButton({ label, color, onPress }) {
   );
 }
 
+function TrashIcon({ color }) {
+  return (
+    <View style={[s.trashCan, { borderColor: color }]}>
+      <View style={[s.trashLid, { backgroundColor: color }]} />
+      <View style={[s.trashHandle, { borderColor: color }]} />
+    </View>
+  );
+}
+
 const s = StyleSheet.create({
   container: { flex: 1 },
   content: { padding: 16, paddingBottom: 40 },
@@ -351,12 +446,25 @@ const s = StyleSheet.create({
   label: { fontSize: 14, fontWeight: '600' },
   input: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 14, marginBottom: 8 },
   flexInput: { flex: 1, borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 14 },
+  flexInputWrap: { minHeight: 38, textAlignVertical: 'top' },
+  flexInputNoWrap: { height: 38 },
   notes: { minHeight: 130, borderWidth: 1, borderRadius: 8, padding: 10, fontSize: 14, lineHeight: 20 },
   palette: { flexDirection: 'row', gap: 8 },
   swatch: { width: 34, height: 34, borderRadius: 8, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   itemRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  checkboxTree: { position: 'relative' },
+  checkboxTreeRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
+  dotRail: { position: 'absolute', left: 13, top: 0, bottom: 0, width: 1 },
+  dotHit: { width: 28, minHeight: 42, alignItems: 'center', justifyContent: 'center', zIndex: 1 },
+  dot: { width: 12, height: 12, borderRadius: 6, borderWidth: 2 },
+  checkboxContent: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
   checkBox: { width: 28, height: 28, borderRadius: 6, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   checkMark: { color: '#fff', fontWeight: '900' },
+  hiddenCount: { fontSize: 11, minWidth: 16, textAlign: 'center', fontWeight: '700' },
+  trashBtn: { width: 34, height: 34, borderRadius: 8, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  trashCan: { width: 14, height: 15, borderWidth: 1.7, borderTopWidth: 0, borderRadius: 3, marginTop: 5 },
+  trashLid: { position: 'absolute', left: -3, top: -5, width: 18, height: 2, borderRadius: 2 },
+  trashHandle: { position: 'absolute', left: 4, top: -9, width: 6, height: 5, borderWidth: 1.5, borderBottomWidth: 0, borderTopLeftRadius: 3, borderTopRightRadius: 3 },
   linkBlock: { marginBottom: 10 },
   deleteBtn: { borderWidth: 1, borderRadius: 8, paddingVertical: 12, alignItems: 'center', marginTop: 22 },
   deleteText: { fontWeight: '800' },

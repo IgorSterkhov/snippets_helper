@@ -36,7 +36,9 @@ function compareCheckboxRows(a, b) {
   return String(a.uuid || '').localeCompare(String(b.uuid || ''));
 }
 
-export function flattenCheckboxTree(items = []) {
+export function flattenCheckboxTree(items = [], options = {}) {
+  const collapsedIds = options.collapsedIds || new Set();
+  const hideDone = !!options.hideDone;
   const visible = items
     .filter((item) => item && item.uuid && !item.is_deleted)
     .slice()
@@ -60,15 +62,74 @@ export function flattenCheckboxTree(items = []) {
 
   const result = [];
   const visited = new Set();
+  const visibleDescendantCountCache = new Map();
 
-  function visit(item, depth, stack) {
-    if (!item || visited.has(item.uuid) || stack.has(item.uuid)) return;
-    visited.add(item.uuid);
-    result.push({ item, depth });
+  function shouldShowSelf(item, visibleChildCount) {
+    return !hideDone || !item.is_checked || visibleChildCount > 0;
+  }
+
+  function countVisibleEntries(item, stack = new Set()) {
+    if (!item || stack.has(item.uuid)) return 0;
+    if (visibleDescendantCountCache.has(item.uuid)) {
+      return visibleDescendantCountCache.get(item.uuid);
+    }
 
     const nextStack = new Set(stack);
     nextStack.add(item.uuid);
     const children = childrenByParent.get(item.uuid) || [];
+    let childCount = 0;
+    for (const child of children) {
+      childCount += countVisibleEntries(child, nextStack);
+    }
+
+    const count = shouldShowSelf(item, childCount) ? childCount + 1 : childCount;
+    visibleDescendantCountCache.set(item.uuid, count);
+    return count;
+  }
+
+  function markDescendantsVisited(item, stack = new Set()) {
+    if (!item || stack.has(item.uuid)) return;
+    const nextStack = new Set(stack);
+    nextStack.add(item.uuid);
+    const children = childrenByParent.get(item.uuid) || [];
+    for (const child of children) {
+      visited.add(child.uuid);
+      markDescendantsVisited(child, nextStack);
+    }
+  }
+
+  function visit(item, depth, stack) {
+    if (!item || visited.has(item.uuid) || stack.has(item.uuid)) return;
+    const children = childrenByParent.get(item.uuid) || [];
+    const hiddenDescendantCount = children.reduce((sum, child) => (
+      sum + countVisibleEntries(child, new Set([item.uuid]))
+    ), 0);
+
+    if (!shouldShowSelf(item, hiddenDescendantCount)) {
+      visited.add(item.uuid);
+      const nextStack = new Set(stack);
+      nextStack.add(item.uuid);
+      for (const child of children) {
+        visit(child, depth, nextStack);
+      }
+      return;
+    }
+
+    visited.add(item.uuid);
+    const isCollapsed = collapsedIds.has(item.uuid);
+    result.push({
+      item,
+      depth,
+      hasChildren: children.length > 0,
+      hiddenDescendantCount: isCollapsed ? hiddenDescendantCount : 0,
+    });
+    if (isCollapsed) {
+      markDescendantsVisited(item, stack);
+      return;
+    }
+
+    const nextStack = new Set(stack);
+    nextStack.add(item.uuid);
     for (const child of children) {
       visit(child, depth + 1, nextStack);
     }
@@ -81,7 +142,15 @@ export function flattenCheckboxTree(items = []) {
   for (const item of visible) {
     if (!visited.has(item.uuid)) {
       visited.add(item.uuid);
-      result.push({ item, depth: 0 });
+      if (shouldShowSelf(item, 0)) {
+        const children = childrenByParent.get(item.uuid) || [];
+        result.push({
+          item,
+          depth: 0,
+          hasChildren: children.length > 0,
+          hiddenDescendantCount: 0,
+        });
+      }
     }
   }
 

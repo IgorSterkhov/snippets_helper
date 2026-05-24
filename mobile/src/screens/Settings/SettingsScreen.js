@@ -5,16 +5,28 @@ import { useAuth } from '../../auth/AuthContext';
 import { isBiometricAvailable } from '../../auth/biometrics';
 import { performSync } from '../../sync/syncService';
 import { useSyncStatus } from '../../sync/useSyncStatus';
+import { TASK_PREF_KEYS, loadTaskPreferences, setTaskPreference } from '../Tasks/taskPreferences';
 
 export default function SettingsScreen() {
   const { colors, isDark, toggle: toggleTheme } = useTheme();
   const { logout, biometricEnabled, toggleBiometric } = useAuth();
   const [bioAvailable, setBioAvailable] = useState(false);
+  const [taskPrefs, setTaskPrefs] = useState({ hideDone: false, wrapText: true });
   const { pending, syncing } = useSyncStatus();
 
   useEffect(() => {
     isBiometricAvailable().then(setBioAvailable);
+    loadTaskPreferences().then(setTaskPrefs).catch(() => {});
   }, []);
+
+  const updateTaskPreference = async (key, value) => {
+    await setTaskPreference(key, value);
+    setTaskPrefs((prev) => ({
+      ...prev,
+      hideDone: key === TASK_PREF_KEYS.hideDone ? value : prev.hideDone,
+      wrapText: key === TASK_PREF_KEYS.wrapText ? value : prev.wrapText,
+    }));
+  };
 
   const handleSync = async () => {
     try {
@@ -55,6 +67,20 @@ export default function SettingsScreen() {
     <ScrollView style={[s.container, { backgroundColor: colors.bg }]}>
       <Text style={[s.section, { color: colors.textSecondary }]}>Внешний вид</Text>
       {row('Тёмная тема', <Switch value={isDark} onValueChange={toggleTheme} />)}
+
+      <Text style={[s.section, { color: colors.textSecondary }]}>Задачи</Text>
+      {row('Скрывать выполненные чекбоксы', (
+        <Switch
+          value={taskPrefs.hideDone}
+          onValueChange={(value) => updateTaskPreference(TASK_PREF_KEYS.hideDone, value)}
+        />
+      ))}
+      {row('Переносить текст чекбоксов', (
+        <Switch
+          value={taskPrefs.wrapText}
+          onValueChange={(value) => updateTaskPreference(TASK_PREF_KEYS.wrapText, value)}
+        />
+      ))}
 
       {bioAvailable && (
         <>
