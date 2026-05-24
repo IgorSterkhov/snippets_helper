@@ -30,6 +30,10 @@ Before planning or editing, read the relevant existing guidance:
 5. Put implementation plans in `.workflow/plans`.
 6. Preserve existing user and Claude changes. Do not revert unrelated files.
 7. Keep commits short and one-line when commits are requested or required.
+8. For every desktop release with user-facing changes, update Help and release
+   history before tagging. Treat `desktop-rust/src/tabs/help.js`,
+   `desktop-rust/src/release-history.md`, and `desktop-rust/CHANGELOG.md` as a
+   mandatory release gate, not an optional cleanup.
 
 ## Desktop App Notes
 
