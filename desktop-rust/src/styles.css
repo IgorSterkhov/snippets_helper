@@ -298,9 +298,9 @@ button:hover, .btn:hover {
   background: var(--bg-secondary);
 }
 
-.snippet-pinned-chip-mark {
+.snippet-pinned-chip-icon {
   color: var(--accent);
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1;
   flex-shrink: 0;
 }
@@ -378,6 +378,90 @@ button:hover, .btn:hover {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.snippet-icon-action,
+.note-icon-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  min-width: 28px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.snippet-icon-action:hover,
+.note-icon-action:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--text-muted);
+}
+
+.snippet-icon-action[data-active="1"],
+.note-icon-action.active {
+  background: rgba(56, 139, 253, 0.18);
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.note-icon-action:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.share-link-dialog {
+  max-width: min(520px, 92vw);
+}
+
+.share-link-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: min(440px, 80vw);
+}
+
+.share-link-title {
+  color: var(--text);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.share-link-status {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.share-link-status.active {
+  color: #7ee787;
+}
+
+.share-link-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  color: var(--text);
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 12px;
+}
+
+.share-link-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 2px;
 }
 
 /* ── Toast ────────────────────────────────────────────────── */

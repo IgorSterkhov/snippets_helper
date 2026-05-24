@@ -5,6 +5,7 @@ import { showToast } from '../components/toast.js';
 import { marked } from '../lib/marked.min.js';
 import { attachToolbar } from '../components/md-toolbar.js';
 import { installWrappedChipDnd } from '../components/wrapped-chip-dnd.js';
+import { openShareLinkModal } from '../components/share-link-modal.js';
 
 let shortcuts = [];
 let allShortcuts = [];
@@ -947,18 +948,28 @@ function renderDetail() {
 
   // Action buttons
   const actions = document.createElement('div');
+  actions.className = 'snippet-detail-actions';
   actions.style.cssText = 'display:flex;gap:6px;flex-shrink:0;margin-left:auto';
 
   const pinBtn = document.createElement('button');
   pinBtn.type = 'button';
-  pinBtn.className = 'snippet-pin-button';
-  pinBtn.textContent = shortcut.is_pinned ? 'Pinned' : 'Pin';
+  pinBtn.className = 'snippet-pin-button snippet-icon-action';
+  pinBtn.textContent = '📌';
   pinBtn.title = shortcut.is_pinned ? 'Unpin snippet' : 'Pin snippet';
   pinBtn.dataset.pinned = shortcut.is_pinned ? '1' : '0';
-  pinBtn.style.cssText = shortcut.is_pinned
-    ? 'padding:4px 10px;font-size:11px;font-weight:600;background:var(--accent);color:white;border:1px solid var(--accent);border-radius:4px;cursor:pointer'
-    : 'padding:4px 10px;font-size:11px;font-weight:500;background:transparent;color:var(--text-muted);border:1px solid var(--border);border-radius:4px;cursor:pointer';
+  pinBtn.dataset.active = shortcut.is_pinned ? '1' : '0';
   pinBtn.addEventListener('click', () => toggleShortcutPinned(shortcut));
+
+  const shareBtn = document.createElement('button');
+  shareBtn.type = 'button';
+  shareBtn.className = 'snippet-icon-action';
+  shareBtn.textContent = '🔗';
+  shareBtn.title = 'Share public link';
+  shareBtn.addEventListener('click', () => openShareLinkModal({
+    itemType: 'shortcut',
+    itemUuid: shortcut.uuid,
+    title: shortcut.name || 'Shared snippet',
+  }));
 
   const copyBtn = document.createElement('button');
   copyBtn.textContent = 'Copy';
@@ -976,6 +987,7 @@ function renderDetail() {
   delBtn.addEventListener('click', () => confirmDelete(shortcut));
 
   actions.appendChild(pinBtn);
+  actions.appendChild(shareBtn);
   actions.appendChild(copyBtn);
   actions.appendChild(editBtn);
   actions.appendChild(delBtn);
@@ -1449,10 +1461,10 @@ function renderPinnedSnippetPanel() {
     chip.title = shortcut.name || '(untitled)';
     chip.dataset.snippetId = String(shortcut.id);
 
-    const mark = document.createElement('span');
-    mark.className = 'snippet-pinned-chip-mark';
-    mark.textContent = '◆';
-    chip.appendChild(mark);
+    const icon = document.createElement('span');
+    icon.className = 'snippet-pinned-chip-icon';
+    icon.textContent = '📌';
+    chip.appendChild(icon);
 
     const label = document.createElement('span');
     label.className = 'snippet-pinned-chip-label';

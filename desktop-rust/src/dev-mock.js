@@ -279,6 +279,27 @@
     return item;
   }
 
+  const shareLinks = new Map();
+
+  function shareKey(itemType, itemUuid) {
+    return `${itemType}:${itemUuid}`;
+  }
+
+  function mockShareLink(itemType, itemUuid) {
+    const token = `mock-${itemType}-${itemUuid}`;
+    const stamp = now();
+    return {
+      token,
+      public_url: `https://ister-app.ru/share/${token}`,
+      item_type: itemType,
+      item_uuid: itemUuid,
+      is_active: true,
+      created_at: stamp,
+      updated_at: stamp,
+      revoked_at: null,
+    };
+  }
+
   // ----- whisper mocks -----
   const whisperMockState = {
     installedModels: [],
@@ -385,6 +406,24 @@
     async copy_to_clipboard({ text }) { navigator.clipboard.writeText(text).catch(() => {}); },
     async read_clipboard() { try { return await navigator.clipboard.readText(); } catch { return ''; } },
     async open_url({ url }) { window.open(url, '_blank'); },
+
+    // ── Share links ─────────────────────────────────────
+    async get_share_link({ itemType, itemUuid }) {
+      return shareLinks.get(shareKey(itemType, itemUuid)) || null;
+    },
+    async create_share_link({ itemType, itemUuid }) {
+      const key = shareKey(itemType, itemUuid);
+      if (!shareLinks.has(key)) {
+        shareLinks.set(key, mockShareLink(itemType, itemUuid));
+      }
+      return shareLinks.get(key);
+    },
+    async revoke_share_link({ token }) {
+      for (const [key, value] of shareLinks.entries()) {
+        if (value.token === token) shareLinks.delete(key);
+      }
+      return null;
+    },
 
     // ── Sync / Update ───────────────────────────────────
     async trigger_sync() {

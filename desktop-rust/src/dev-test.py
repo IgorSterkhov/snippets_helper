@@ -500,6 +500,10 @@ async def run_tests():
             ".some(x => x.textContent.includes('SELECT all'))",
             timeout=3,
         )
+        chip_icon = await cdp.eval(
+            "document.querySelector('#panel-shortcuts .snippet-pinned-chip-icon')?.textContent.trim()"
+        )
+        assert chip_icon == '📌', f'pinned chip icon: {chip_icon!r}'
         await cdp.eval("[...document.querySelectorAll('#panel-shortcuts button')].find(x => x.textContent === 'Edit').click()")
         await wait_until(cdp, "!!document.querySelector('.modal-overlay .modal-body input[type=\"text\"]')", timeout=3)
         await cdp.eval("""(() => {
@@ -538,6 +542,37 @@ async def run_tests():
             timeout=2,
         )
     await check('T14b Snippets pinned panel + rename chip', t14b_snippets_pinned_panel_and_rename)
+
+    # ── T14d: Snippets share link modal ────────────────────
+    async def t14d_snippets_share_link_modal():
+        await open_shortcuts_tab()
+        await cdp.eval("[...document.querySelectorAll('#panel-shortcuts .shortcut-list-name')].find(x => x.textContent.includes('SELECT all')).click()")
+        await wait_until(cdp, "!!document.querySelector('#panel-shortcuts .snippet-detail-actions')", timeout=3)
+        toolbar_text = await cdp.eval(
+            "[...document.querySelectorAll('#panel-shortcuts .snippet-detail-actions button')]"
+            ".map(b => b.textContent.trim()).join('|')"
+        )
+        assert toolbar_text.startswith('📌|🔗|Copy|Edit|Del'), toolbar_text
+        chip_icon = await cdp.eval(
+            "document.querySelector('#panel-shortcuts .snippet-pinned-chip-icon')?.textContent.trim() || ''"
+        )
+        if chip_icon:
+            assert chip_icon == '📌', f'pinned chip icon: {chip_icon!r}'
+        await cdp.eval(
+            "[...document.querySelectorAll('#panel-shortcuts .snippet-detail-actions button')]"
+            ".find(b => b.textContent.trim() === '🔗').click()"
+        )
+        await wait_until(cdp, "document.body.innerText.includes('Share link')", timeout=3)
+        await cdp.eval("[...document.querySelectorAll('.share-link-actions button')].find(b => b.textContent === 'Create link').click()")
+        await wait_until(cdp, "!document.body.innerText.includes('Share link')", timeout=3)
+        await cdp.eval(
+            "[...document.querySelectorAll('#panel-shortcuts .snippet-detail-actions button')]"
+            ".find(b => b.textContent.trim() === '🔗').click()"
+        )
+        await wait_until(cdp, "document.body.innerText.includes('Public live link is active')", timeout=3)
+        await cdp.eval("[...document.querySelectorAll('.share-link-actions button')].find(b => b.textContent === 'Revoke').click()")
+        await wait_until(cdp, "!document.body.innerText.includes('Share link')", timeout=3)
+    await check('T14d Snippets share link modal', t14d_snippets_share_link_modal)
 
     # ── T14c: Notes pinned chips drag reorder ────────────────
     async def t14c_notes_pinned_chip_drag_reorder():
@@ -601,6 +636,24 @@ async def run_tests():
         })()""")
         assert order == ['Pinned note B', 'Pinned note A'], f'stored order: {order!r}'
     await check('T14c Notes pinned chips drag reorder', t14c_notes_pinned_chip_drag_reorder)
+
+    # ── T14e: Notes share link modal ───────────────────────
+    async def t14e_notes_share_link_modal():
+        await close_modals()
+        await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"notes\"]').click()")
+        await wait_until(cdp, "!!document.querySelector('#panel-notes .note-card-title')", timeout=5)
+        await cdp.eval("document.querySelector('#panel-notes .note-card-title').click()")
+        await wait_until(cdp, "[...document.querySelectorAll('#panel-notes .note-toolbar button')].some(b => b.textContent.trim() === '🔗')", timeout=3)
+        toolbar_text = await cdp.eval(
+            "[...document.querySelectorAll('#panel-notes .note-toolbar button')]"
+            ".map(b => b.textContent.trim()).join('|')"
+        )
+        assert toolbar_text.startswith('📌|🔗|Copy|'), toolbar_text
+        await cdp.eval("[...document.querySelectorAll('#panel-notes .note-toolbar button')].find(b => b.textContent.trim() === '🔗').click()")
+        await wait_until(cdp, "document.body.innerText.includes('Share link')", timeout=3)
+        await cdp.eval("[...document.querySelectorAll('.share-link-actions button')].find(b => b.textContent === 'Create link').click()")
+        await wait_until(cdp, "!document.body.innerText.includes('Share link')", timeout=3)
+    await check('T14e Notes share link modal', t14e_notes_share_link_modal)
 
     # ── T15: Tasks Pin updates pinned chip strip ─────────────
     async def t15_tasks_pin_updates_strip():

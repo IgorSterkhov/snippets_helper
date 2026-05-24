@@ -4,6 +4,7 @@ import { showToast } from '../components/toast.js';
 import { marked } from '../lib/marked.min.js';
 import { attachToolbar } from '../components/md-toolbar.js';
 import { installWrappedChipDnd } from '../components/wrapped-chip-dnd.js';
+import { openShareLinkModal } from '../components/share-link-modal.js';
 
 let root = null;
 let folders = [];
@@ -577,15 +578,41 @@ function renderEditor() {
   // Toolbar
   const toolbar = el('div', { class: 'note-toolbar' });
   const pinBtn = el('button', {
-    text: editingNote.is_pinned ? '\uD83D\uDCCC Pinned' : 'Pin',
-    class: editingNote.is_pinned ? '' : 'btn-secondary',
-    style: 'font-size:12px;padding:4px 10px',
+    text: '\uD83D\uDCCC',
+    class: editingNote.is_pinned ? 'note-icon-action active' : 'note-icon-action',
+    title: editingNote.is_pinned ? 'Unpin note' : 'Pin note',
   });
   pinBtn.addEventListener('click', () => {
     editingNote.is_pinned = !editingNote.is_pinned;
     renderEditor();
   });
   toolbar.appendChild(pinBtn);
+
+  const shareBtn = el('button', {
+    text: '\uD83D\uDD17',
+    class: 'note-icon-action',
+    title: editingNote.uuid ? 'Share public link' : 'Save note before sharing',
+  });
+  shareBtn.disabled = !editingNote.uuid;
+  shareBtn.addEventListener('click', () => openShareLinkModal({
+    itemType: 'note',
+    itemUuid: editingNote.uuid,
+    title: editingNote.title || 'Shared note',
+  }));
+  toolbar.appendChild(shareBtn);
+
+  const copyBtn = el('button', {
+    text: 'Copy',
+    class: 'btn-secondary',
+    style: 'font-size:12px;padding:4px 10px',
+  });
+  copyBtn.addEventListener('click', async () => {
+    const ta = right.querySelector('.note-content-input');
+    if (ta) editingNote.content = ta.value;
+    await navigator.clipboard.writeText(editingNote.content || '');
+    showToast('Copied to clipboard', 'success');
+  });
+  toolbar.appendChild(copyBtn);
 
   const previewBtn = el('button', {
     text: previewMode ? 'Edit' : 'Preview',
