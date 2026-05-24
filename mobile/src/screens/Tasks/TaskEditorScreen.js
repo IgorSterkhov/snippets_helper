@@ -17,11 +17,13 @@ import { loadTaskPreferences } from './taskPreferences';
 import {
   deleteTask,
   flattenCheckboxTree,
+  getCheckboxMoveAvailability,
   getAllTaskCategories,
   getAllTaskStatuses,
   getNextTaskSortOrder,
   getTaskCheckboxes,
   getTaskLinks,
+  moveCheckboxInTree,
   setTaskCheckboxChecked,
   upsertTask,
   upsertTaskCheckbox,
@@ -59,6 +61,8 @@ export default function TaskEditorScreen({ route, navigation }) {
   const [checkboxes, setCheckboxes] = useState([]);
   const [links, setLinks] = useState([]);
   const [collapsedCheckboxIds, setCollapsedCheckboxIds] = useState(new Set());
+  const [reorderCheckboxUuid, setReorderCheckboxUuid] = useState(null);
+  const [reorderSaving, setReorderSaving] = useState(false);
   const [taskPrefs, setTaskPrefs] = useState(DEFAULT_TASK_PREFS);
   const [saving, setSaving] = useState(false);
 
@@ -177,6 +181,7 @@ export default function TaskEditorScreen({ route, navigation }) {
       for (const id of deletedIds) next.delete(id);
       return next;
     });
+    setReorderCheckboxUuid((prev) => (prev && deletedIds.has(prev) ? null : prev));
   };
 
   const toggleCheckboxCollapse = (uuid, hasChildren) => {
@@ -207,6 +212,39 @@ export default function TaskEditorScreen({ route, navigation }) {
     }
   };
 
+  const moveSelectedCheckbox = async (direction) => {
+    if (!reorderCheckboxUuid || reorderSaving) return;
+
+    const previousCheckboxes = checkboxes;
+    const updatedAt = new Date().toISOString();
+    const result = moveCheckboxInTree(previousCheckboxes, reorderCheckboxUuid, direction, updatedAt);
+    if (!result.changed.length) return;
+
+    setCheckboxes(result.items);
+    if (result.parentToExpand) {
+      setCollapsedCheckboxIds((prev) => {
+        const next = new Set(prev);
+        next.delete(result.parentToExpand);
+        return next;
+      });
+    }
+
+    if (isNew) return;
+
+    setReorderSaving(true);
+    try {
+      for (const item of result.changed) {
+        await upsertTaskCheckbox(item);
+      }
+      notifyLocalChange();
+    } catch (e) {
+      setCheckboxes(previousCheckboxes);
+      Alert.alert('Ошибка', String(e));
+    } finally {
+      setReorderSaving(false);
+    }
+  };
+
   const openCheckboxMenu = (item, hasChildren) => {
     const isCollapsed = collapsedCheckboxIds.has(item.uuid);
     const buttons = [];
@@ -217,6 +255,10 @@ export default function TaskEditorScreen({ route, navigation }) {
       });
     }
     buttons.push(
+      {
+        text: 'Переместить',
+        onPress: () => setReorderCheckboxUuid(item.uuid),
+      },
       {
         text: 'Удалить',
         style: 'destructive',
@@ -229,16 +271,22 @@ export default function TaskEditorScreen({ route, navigation }) {
 
   const visibleCheckboxTree = flattenCheckboxTree(checkboxes, {
     collapsedIds: collapsedCheckboxIds,
-    hideDone: taskPrefs.hideDone,
+    hideDone: taskPrefs.hideDone && !reorderCheckboxUuid,
   });
   const visibleLinks = links.filter((item) => !item.is_deleted);
+  const reorderMoveState = reorderCheckboxUuid
+    ? getCheckboxMoveAvailability(checkboxes, reorderCheckboxUuid)
+    : { up: false, down: false, left: false, right: false };
+  const reorderItem = reorderCheckboxUuid
+    ? checkboxes.find((item) => item.uuid === reorderCheckboxUuid && !item.is_deleted)
+    : null;
 
   return (
     <KeyboardAvoidingView
       style={[s.container, { backgroundColor: colors.bg }]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <ScrollView contentContainerStyle={s.content}>
+      <ScrollView contentContainerStyle={[s.content, reorderCheckboxUuid ? s.contentWithToolbar : null]}>
         <TextInput
           style={[s.titleInput, { color: colors.text, borderColor: colors.border }]}
           value={draft.title}
@@ -304,8 +352,18 @@ export default function TaskEditorScreen({ route, navigation }) {
             ) : null}
             {visibleCheckboxTree.map(({ item, depth, hasChildren, hiddenDescendantCount }) => {
               const isCollapsed = collapsedCheckboxIds.has(item.uuid);
+              const isReorderTarget = reorderCheckboxUuid === item.uuid;
               return (
-                <View key={item.uuid} style={s.checkboxTreeRow}>
+                <View
+                  key={item.uuid}
+                  style={[
+                    s.checkboxTreeRow,
+                    isReorderTarget && [
+                      s.checkboxTreeRowActive,
+                      { backgroundColor: colors.primaryLight, borderColor: colors.primary },
+                    ],
+                  ]}
+                >
                   <TouchableOpacity
                     style={[s.dotHit, { backgroundColor: colors.bg }]}
                     onPress={() => toggleCheckboxCollapse(item.uuid, hasChildren)}
@@ -319,6 +377,7 @@ export default function TaskEditorScreen({ route, navigation }) {
                         { borderColor: colors.textMuted, backgroundColor: colors.bg },
                         hasChildren && { borderColor: colors.primary, backgroundColor: colors.primary },
                         isCollapsed && { borderColor: '#d29922', backgroundColor: '#d29922' },
+                        isReorderTarget && { borderColor: colors.primary, backgroundColor: colors.card },
                       ]}
                     />
                   </TouchableOpacity>
@@ -394,6 +453,26 @@ export default function TaskEditorScreen({ route, navigation }) {
           <Text style={[s.deleteText, { color: colors.danger }]}>{isNew ? 'Отменить' : 'Удалить задачу'}</Text>
         </TouchableOpacity>
       </ScrollView>
+      {reorderCheckboxUuid ? (
+        <View style={[s.reorderToolbar, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[s.reorderTitle, { color: colors.text }]} numberOfLines={1}>
+            {reorderItem?.text || 'Пункт'}
+          </Text>
+          <View style={s.reorderControls}>
+            <ReorderButton label="↑" colors={colors} disabled={reorderSaving || !reorderMoveState.up} onPress={() => moveSelectedCheckbox('up')} />
+            <ReorderButton label="↓" colors={colors} disabled={reorderSaving || !reorderMoveState.down} onPress={() => moveSelectedCheckbox('down')} />
+            <ReorderButton label="←" colors={colors} disabled={reorderSaving || !reorderMoveState.left} onPress={() => moveSelectedCheckbox('left')} />
+            <ReorderButton label="→" colors={colors} disabled={reorderSaving || !reorderMoveState.right} onPress={() => moveSelectedCheckbox('right')} />
+            <TouchableOpacity
+              style={[s.reorderOkBtn, { backgroundColor: colors.primary }]}
+              onPress={() => setReorderCheckboxUuid(null)}
+              disabled={reorderSaving}
+            >
+              <Text style={s.reorderOkText}>OK</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : null}
     </KeyboardAvoidingView>
   );
 }
@@ -441,6 +520,22 @@ function TextButton({ label, color, onPress }) {
   );
 }
 
+function ReorderButton({ label, colors, disabled, onPress }) {
+  return (
+    <TouchableOpacity
+      style={[
+        s.reorderArrowBtn,
+        { borderColor: colors.border, backgroundColor: colors.bgSecondary },
+        disabled && { opacity: 0.35 },
+      ]}
+      onPress={onPress}
+      disabled={disabled}
+    >
+      <Text style={[s.reorderArrowText, { color: colors.text }]}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
 function TrashIcon({ color }) {
   return (
     <View style={[s.trashCan, { borderColor: color }]}>
@@ -453,6 +548,7 @@ function TrashIcon({ color }) {
 const s = StyleSheet.create({
   container: { flex: 1 },
   content: { padding: 16, paddingBottom: 40 },
+  contentWithToolbar: { paddingBottom: 112 },
   headerBtn: { paddingHorizontal: 14, paddingVertical: 6 },
   headerBtnText: { fontSize: 16, fontWeight: '600' },
   titleInput: { fontSize: 22, fontWeight: '700', borderBottomWidth: 1, paddingVertical: 10 },
@@ -473,6 +569,7 @@ const s = StyleSheet.create({
   itemRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
   checkboxTree: { position: 'relative' },
   checkboxTreeRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
+  checkboxTreeRowActive: { borderWidth: 1, borderRadius: 8 },
   dotRail: { position: 'absolute', left: 13, top: 0, bottom: 0, width: 1 },
   dotHit: { width: 28, minHeight: 42, alignItems: 'center', justifyContent: 'center', zIndex: 1 },
   dot: { width: 12, height: 12, borderRadius: 6, borderWidth: 2 },
@@ -484,6 +581,13 @@ const s = StyleSheet.create({
   trashCan: { width: 14, height: 15, borderWidth: 1.7, borderTopWidth: 0, borderRadius: 3, marginTop: 5 },
   trashLid: { position: 'absolute', left: -3, top: -5, width: 18, height: 2, borderRadius: 2 },
   trashHandle: { position: 'absolute', left: 4, top: -9, width: 6, height: 5, borderWidth: 1.5, borderBottomWidth: 0, borderTopLeftRadius: 3, borderTopRightRadius: 3 },
+  reorderToolbar: { position: 'absolute', left: 12, right: 12, bottom: 12, borderWidth: 1, borderRadius: 8, padding: 10 },
+  reorderTitle: { fontSize: 13, fontWeight: '700', marginBottom: 8 },
+  reorderControls: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  reorderArrowBtn: { width: 42, height: 38, borderWidth: 1, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  reorderArrowText: { fontSize: 20, fontWeight: '900' },
+  reorderOkBtn: { height: 38, minWidth: 52, borderRadius: 8, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12 },
+  reorderOkText: { color: '#fff', fontSize: 13, fontWeight: '900' },
   linkBlock: { marginBottom: 10 },
   deleteBtn: { borderWidth: 1, borderRadius: 8, paddingVertical: 12, alignItems: 'center', marginTop: 22 },
   deleteText: { fontWeight: '800' },

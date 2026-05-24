@@ -36,6 +36,139 @@ function compareCheckboxRows(a, b) {
   return String(a.uuid || '').localeCompare(String(b.uuid || ''));
 }
 
+function createCheckboxMoveIndex(items = []) {
+  const active = items.filter((item) => item && item.uuid && !item.is_deleted);
+  const byUuid = new Map(active.map((item) => [item.uuid, item]));
+
+  const parentUuidOf = (item) => {
+    const parentUuid = item && item.parent_uuid ? item.parent_uuid : null;
+    return parentUuid && byUuid.has(parentUuid) ? parentUuid : null;
+  };
+
+  const sortedSiblings = (parentUuid, updates = new Map()) => {
+    const normalizedParentUuid = parentUuid || null;
+    return active
+      .map((item) => updates.get(item.uuid) || item)
+      .filter((item) => parentUuidOf(item) === normalizedParentUuid)
+      .slice()
+      .sort(compareCheckboxRows);
+  };
+
+  return { active, byUuid, parentUuidOf, sortedSiblings };
+}
+
+function emptyCheckboxMove(items) {
+  return { items, changed: [], parentToExpand: null };
+}
+
+export function getCheckboxMoveAvailability(items = [], uuid) {
+  const { byUuid, parentUuidOf, sortedSiblings } = createCheckboxMoveIndex(items);
+  const item = byUuid.get(uuid);
+  if (!item) {
+    return { up: false, down: false, left: false, right: false };
+  }
+
+  const parentUuid = parentUuidOf(item);
+  const siblings = sortedSiblings(parentUuid);
+  const index = siblings.findIndex((sibling) => sibling.uuid === uuid);
+
+  return {
+    up: index > 0,
+    down: index >= 0 && index < siblings.length - 1,
+    left: !!parentUuid,
+    right: index > 0,
+  };
+}
+
+export function moveCheckboxInTree(items = [], uuid, direction, updatedAt = nowIso()) {
+  const { active, byUuid } = createCheckboxMoveIndex(items);
+  const moving = byUuid.get(uuid);
+  if (!moving) return emptyCheckboxMove(items);
+
+  const updates = new Map();
+  const currentRow = (row) => updates.get(row.uuid) || row;
+  const parentUuidOf = (row) => {
+    const parentUuid = row && row.parent_uuid ? row.parent_uuid : null;
+    return parentUuid && byUuid.has(parentUuid) ? parentUuid : null;
+  };
+  const sortedSiblings = (parentUuid) => {
+    const normalizedParentUuid = parentUuid || null;
+    return active
+      .map((item) => currentRow(item))
+      .filter((item) => parentUuidOf(item) === normalizedParentUuid)
+      .slice()
+      .sort(compareCheckboxRows);
+  };
+  const stageOrder = (parentUuid, orderedRows) => {
+    const normalizedParentUuid = parentUuid || null;
+    orderedRows.forEach((row, index) => {
+      const current = currentRow(row);
+      const currentParentUuid = current.parent_uuid || null;
+      const currentSortOrder = Number.isFinite(Number(current.sort_order)) ? Number(current.sort_order) : 0;
+      if (currentParentUuid !== normalizedParentUuid || currentSortOrder !== index) {
+        updates.set(current.uuid, {
+          ...current,
+          parent_uuid: normalizedParentUuid,
+          sort_order: index,
+          updated_at: updatedAt,
+        });
+      }
+    });
+  };
+
+  let parentToExpand = null;
+  const parentUuid = parentUuidOf(moving);
+  const siblings = sortedSiblings(parentUuid);
+  const index = siblings.findIndex((sibling) => sibling.uuid === uuid);
+  if (index < 0) return emptyCheckboxMove(items);
+
+  if (direction === 'up') {
+    if (index === 0) return emptyCheckboxMove(items);
+    const ordered = siblings.slice();
+    [ordered[index - 1], ordered[index]] = [ordered[index], ordered[index - 1]];
+    stageOrder(parentUuid, ordered);
+  } else if (direction === 'down') {
+    if (index >= siblings.length - 1) return emptyCheckboxMove(items);
+    const ordered = siblings.slice();
+    [ordered[index], ordered[index + 1]] = [ordered[index + 1], ordered[index]];
+    stageOrder(parentUuid, ordered);
+  } else if (direction === 'right') {
+    if (index === 0) return emptyCheckboxMove(items);
+    const newParent = siblings[index - 1];
+    const oldGroup = siblings.filter((sibling) => sibling.uuid !== uuid);
+    const childGroup = sortedSiblings(newParent.uuid);
+    const moved = { ...currentRow(moving), parent_uuid: newParent.uuid };
+    stageOrder(parentUuid, oldGroup);
+    stageOrder(newParent.uuid, [...childGroup, moved]);
+    parentToExpand = newParent.uuid;
+  } else if (direction === 'left') {
+    if (!parentUuid) return emptyCheckboxMove(items);
+    const parent = byUuid.get(parentUuid);
+    if (!parent) return emptyCheckboxMove(items);
+    const newParentUuid = parentUuidOf(parent);
+    const oldGroup = siblings.filter((sibling) => sibling.uuid !== uuid);
+    const targetGroup = sortedSiblings(newParentUuid);
+    const parentIndex = targetGroup.findIndex((sibling) => sibling.uuid === parent.uuid);
+    if (parentIndex < 0) return emptyCheckboxMove(items);
+    const moved = { ...currentRow(moving), parent_uuid: newParentUuid };
+    const orderedTarget = [
+      ...targetGroup.slice(0, parentIndex + 1),
+      moved,
+      ...targetGroup.slice(parentIndex + 1),
+    ];
+    stageOrder(parentUuid, oldGroup);
+    stageOrder(newParentUuid, orderedTarget);
+  } else {
+    return emptyCheckboxMove(items);
+  }
+
+  if (updates.size === 0) return emptyCheckboxMove(items);
+
+  const nextItems = items.map((item) => updates.get(item.uuid) || item);
+  const changed = nextItems.filter((item) => updates.has(item.uuid));
+  return { items: nextItems, changed, parentToExpand };
+}
+
 export function flattenCheckboxTree(items = [], options = {}) {
   const collapsedIds = options.collapsedIds || new Set();
   const hideDone = !!options.hideDone;

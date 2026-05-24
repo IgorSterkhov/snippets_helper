@@ -5,6 +5,8 @@ import {
   buildUpsertTaskCheckbox,
   buildUpsertTaskLink,
   flattenCheckboxTree,
+  getCheckboxMoveAvailability,
+  moveCheckboxInTree,
   setTaskCheckboxChecked,
 } from '../../src/db/taskRepo';
 import { getDB } from '../../src/db/database';
@@ -196,5 +198,124 @@ describe('taskRepo', () => {
       ['root', 0],
       ['open-child', 1],
     ]);
+  });
+
+  test('getCheckboxMoveAvailability exposes possible reorder directions', () => {
+    const rows = [
+      { uuid: 'root', parent_uuid: null, text: 'Root', sort_order: 0, is_deleted: 0 },
+      { uuid: 'a', parent_uuid: 'root', text: 'A', sort_order: 0, is_deleted: 0 },
+      { uuid: 'b', parent_uuid: 'root', text: 'B', sort_order: 1, is_deleted: 0 },
+      { uuid: 'c', parent_uuid: 'root', text: 'C', sort_order: 2, is_deleted: 0 },
+    ];
+
+    expect(getCheckboxMoveAvailability(rows, 'b')).toEqual({
+      up: true,
+      down: true,
+      left: true,
+      right: true,
+    });
+    expect(getCheckboxMoveAvailability(rows, 'a')).toEqual({
+      up: false,
+      down: true,
+      left: true,
+      right: false,
+    });
+    expect(getCheckboxMoveAvailability(rows, 'missing')).toEqual({
+      up: false,
+      down: false,
+      left: false,
+      right: false,
+    });
+  });
+
+  test('moveCheckboxInTree moves a sibling up and keeps its subtree attached', () => {
+    const rows = [
+      { uuid: 'root', parent_uuid: null, text: 'Root', sort_order: 0, is_deleted: 0 },
+      { uuid: 'a', parent_uuid: 'root', text: 'A', sort_order: 0, is_deleted: 0 },
+      { uuid: 'b', parent_uuid: 'root', text: 'B', sort_order: 1, is_deleted: 0 },
+      { uuid: 'grand', parent_uuid: 'b', text: 'Grand', sort_order: 0, is_deleted: 0 },
+      { uuid: 'c', parent_uuid: 'root', text: 'C', sort_order: 2, is_deleted: 0 },
+    ];
+
+    const result = moveCheckboxInTree(rows, 'b', 'up', '2026-05-24T12:00:00');
+
+    expect(flattenCheckboxTree(result.items).map(({ item, depth }) => [item.uuid, depth])).toEqual([
+      ['root', 0],
+      ['b', 1],
+      ['grand', 2],
+      ['a', 1],
+      ['c', 1],
+    ]);
+    expect(result.changed.map((item) => [item.uuid, item.parent_uuid, item.sort_order, item.updated_at])).toEqual([
+      ['a', 'root', 1, '2026-05-24T12:00:00'],
+      ['b', 'root', 0, '2026-05-24T12:00:00'],
+    ]);
+  });
+
+  test('moveCheckboxInTree indents a row under the previous sibling', () => {
+    const rows = [
+      { uuid: 'root', parent_uuid: null, text: 'Root', sort_order: 0, is_deleted: 0 },
+      { uuid: 'a', parent_uuid: 'root', text: 'A', sort_order: 0, is_deleted: 0 },
+      { uuid: 'b', parent_uuid: 'root', text: 'B', sort_order: 1, is_deleted: 0 },
+      { uuid: 'grand', parent_uuid: 'b', text: 'Grand', sort_order: 0, is_deleted: 0 },
+      { uuid: 'c', parent_uuid: 'root', text: 'C', sort_order: 2, is_deleted: 0 },
+    ];
+
+    const result = moveCheckboxInTree(rows, 'b', 'right', '2026-05-24T12:01:00');
+
+    expect(result.parentToExpand).toBe('a');
+    expect(flattenCheckboxTree(result.items).map(({ item, depth }) => [item.uuid, depth])).toEqual([
+      ['root', 0],
+      ['a', 1],
+      ['b', 2],
+      ['grand', 3],
+      ['c', 1],
+    ]);
+    expect(result.changed.map((item) => [item.uuid, item.parent_uuid, item.sort_order, item.updated_at])).toEqual([
+      ['b', 'a', 0, '2026-05-24T12:01:00'],
+      ['c', 'root', 1, '2026-05-24T12:01:00'],
+    ]);
+  });
+
+  test('moveCheckboxInTree outdents a row immediately after its parent', () => {
+    const rows = [
+      { uuid: 'root', parent_uuid: null, text: 'Root', sort_order: 0, is_deleted: 0 },
+      { uuid: 'a', parent_uuid: 'root', text: 'A', sort_order: 0, is_deleted: 0 },
+      { uuid: 'b', parent_uuid: 'root', text: 'B', sort_order: 1, is_deleted: 0 },
+      { uuid: 'grand', parent_uuid: 'b', text: 'Grand', sort_order: 0, is_deleted: 0 },
+      { uuid: 'c', parent_uuid: 'root', text: 'C', sort_order: 2, is_deleted: 0 },
+    ];
+
+    const result = moveCheckboxInTree(rows, 'grand', 'left', '2026-05-24T12:02:00');
+
+    expect(flattenCheckboxTree(result.items).map(({ item, depth }) => [item.uuid, depth])).toEqual([
+      ['root', 0],
+      ['a', 1],
+      ['b', 1],
+      ['grand', 1],
+      ['c', 1],
+    ]);
+    expect(result.changed.map((item) => [item.uuid, item.parent_uuid, item.sort_order, item.updated_at])).toEqual([
+      ['grand', 'root', 2, '2026-05-24T12:02:00'],
+      ['c', 'root', 3, '2026-05-24T12:02:00'],
+    ]);
+  });
+
+  test('moveCheckboxInTree leaves impossible boundary moves unchanged', () => {
+    const rows = [
+      { uuid: 'root', parent_uuid: null, text: 'Root', sort_order: 0, is_deleted: 0 },
+      { uuid: 'a', parent_uuid: 'root', text: 'A', sort_order: 0, is_deleted: 0 },
+    ];
+
+    expect(moveCheckboxInTree(rows, 'a', 'up', '2026-05-24T12:03:00')).toEqual({
+      items: rows,
+      changed: [],
+      parentToExpand: null,
+    });
+    expect(moveCheckboxInTree(rows, 'root', 'left', '2026-05-24T12:03:00')).toEqual({
+      items: rows,
+      changed: [],
+      parentToExpand: null,
+    });
   });
 });
