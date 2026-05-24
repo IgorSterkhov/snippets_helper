@@ -52,8 +52,8 @@ Add a new API table:
 
 Indexes:
 
-- unique active link lookup for owner/item:
-  `(user_id, item_type, item_uuid, is_active)`
+- partial unique active link lookup for owner/item:
+  `(user_id, item_type, item_uuid) WHERE is_active = true`
 - public lookup by `token`
 
 Token generation:
