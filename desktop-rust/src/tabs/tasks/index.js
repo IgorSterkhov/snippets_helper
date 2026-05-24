@@ -2,7 +2,7 @@ import { call } from '../../tauri-api.js';
 import { showToast } from '../../components/toast.js';
 import { showModal } from '../../components/modal.js';
 import { tasksCSS } from './tasks-css.js';
-import { renderCard, resetCollapseState, invalidateCheckboxCache, loadCheckboxes, focusAfterReload } from './card.js';
+import { renderCard, resetCollapseState, invalidateCheckboxCache, invalidateAllCheckboxCache, loadCheckboxes, focusAfterReload } from './card.js';
 import { renderPinnedChips, renderFilterDropdown } from './dropdown.js';
 import { helpButton } from '../sql/sql-help.js';
 import { TASKS_HELP_HTML } from './help-content.js';
@@ -31,6 +31,16 @@ const state = {
   orphanCatCount: 0,
   orphanStatusCount: 0,
 };
+
+const TASK_SYNC_TABLES = new Set([
+  'task_categories',
+  'task_statuses',
+  'tasks',
+  'task_checkboxes',
+  'task_links',
+]);
+
+let syncRefreshListenerInstalled = false;
 
 // ── Public init ─────────────────────────────────────────────
 
@@ -70,6 +80,7 @@ export async function init(container) {
   await loadPinned();
   resetCollapseState();
   await renderAll();
+  installSyncRefreshListener();
 
   // Pointer-based DnD: card → dropdown item / card → card / checkbox → row.
   // New model (v1.3.23): the DOM is reordered live during drag; on drop
@@ -90,6 +101,30 @@ export async function init(container) {
       focusAfterReload(`[data-cb-id="${draggedId}"] .tcb-text[contenteditable="true"]`);
     },
   });
+}
+
+function installSyncRefreshListener() {
+  if (syncRefreshListenerInstalled) return;
+  syncRefreshListenerInstalled = true;
+  window.addEventListener('snippets:sync-complete', async (event) => {
+    const result = event.detail?.result || {};
+    if (!syncResultTouchesTasks(result)) return;
+    if (!state.root) return;
+    invalidateAllCheckboxCache();
+    await reloadAll();
+  });
+}
+
+function syncResultTouchesTasks(result) {
+  return syncMapTouchesTasks(result?.pull?.pulled)
+    || syncMapTouchesTasks(result?.push?.pushed);
+}
+
+function syncMapTouchesTasks(map) {
+  if (!map || typeof map !== 'object') return false;
+  return Object.entries(map).some(([table, rows]) => (
+    TASK_SYNC_TABLES.has(table) && Array.isArray(rows) && rows.length > 0
+  ));
 }
 
 // ── Layout ──────────────────────────────────────────────────

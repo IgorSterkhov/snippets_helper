@@ -358,6 +358,16 @@ export async function upsertTaskCheckbox(c) {
   await query(sql, params);
 }
 
+export async function setTaskCheckboxChecked(c, isChecked, updatedAt = nowIso()) {
+  const updated = {
+    ...c,
+    is_checked: isChecked ? 1 : 0,
+    updated_at: updatedAt,
+  };
+  await upsertTaskCheckbox(updated);
+  return updated;
+}
+
 export async function deleteTaskCheckbox(uuid) {
   const now = nowIso();
   const toDelete = new Set([uuid]);

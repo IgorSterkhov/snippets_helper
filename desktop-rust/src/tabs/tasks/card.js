@@ -48,6 +48,10 @@ export function invalidateCheckboxCache(taskId) {
   checkboxCache.delete(taskId);
 }
 
+export function invalidateAllCheckboxCache() {
+  checkboxCache.clear();
+}
+
 /**
  * Render a single task card. Returns the outer DOM node.
  *   renderCard(task, {

@@ -635,6 +635,80 @@ async def run_tests():
         assert 'Personal' in category_label, f'category label: {category_label!r}'
     await check('T16 Tasks Focus view layout/search/outside pinned', t16_tasks_focus_view_layout_search_and_outside_pin)
 
+    # ── T16b: Tasks refresh checkbox state after sync pull ───
+    async def t16b_tasks_refresh_after_sync_pull():
+        await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"tasks\"]').click()")
+        await wait_until(cdp, "!!document.querySelector('#tasks-layout-one')", timeout=5)
+        await cdp.eval("document.querySelector('#tasks-layout-one').click()")
+        await wait_until(cdp, "!!document.querySelector('#tasks-cards-scroll.one-col')", timeout=3)
+
+        for dropdown_id in ['tasks-cat-dropdown', 'tasks-status-dropdown']:
+            await cdp.eval(f"document.querySelector('#{dropdown_id}').click()")
+            await wait_until(cdp, "!!document.querySelector('.tasks-dropdown-menu')", timeout=3)
+            await cdp.eval(
+                "[...document.querySelectorAll('.tasks-dropdown-item')]"
+                ".find(x => x.textContent.includes('All')).click()"
+            )
+            await wait_until(cdp, "!document.querySelector('.tasks-dropdown-menu')", timeout=3)
+
+        await wait_until(
+            cdp,
+            "[...document.querySelectorAll('.task-title')]"
+            ".some(x => x.textContent.includes('Regular mock task'))",
+            timeout=3,
+        )
+        await cdp.eval(
+            "[...document.querySelectorAll('.task-title')]"
+            ".find(x => x.textContent.includes('Regular mock task')).click()"
+        )
+        await wait_until(
+            cdp,
+            "[...document.querySelectorAll('.tcb-text')]"
+            ".some(x => x.textContent.includes('Regular todo visible'))",
+            timeout=3,
+        )
+        await cdp.eval("""(() => {
+          const card = [...document.querySelectorAll('.task-card')]
+            .find(x => x.querySelector('.task-title')?.textContent.includes('Regular mock task'));
+          const activeEye = card?.querySelector('.task-hide-done-btn.active');
+          if (activeEye) activeEye.click();
+        })()""")
+        initial_checked = await cdp.eval("""(() => {
+          const row = [...document.querySelectorAll('.tcb-item')]
+            .find(x => x.textContent.includes('Regular todo visible'));
+          return row?.querySelector('input[type="checkbox"]')?.checked;
+        })()""")
+        assert initial_checked is False, f'checkbox should start unchecked, got {initial_checked!r}'
+
+        await cdp.eval("""(() => {
+          window.__mockTriggerSync = () => {
+            const key = 'mock.task_checkboxes';
+            const items = JSON.parse(localStorage.getItem(key) || '[]');
+            const idx = items.findIndex(x => x.text === 'Regular todo visible');
+            if (idx >= 0) {
+              items[idx] = { ...items[idx], is_checked: true, updated_at: new Date().toISOString() };
+              localStorage.setItem(key, JSON.stringify(items));
+            }
+            return {
+              timestamp: '12:00:00',
+              push: { total: 0, pushed: {} },
+              pull: { total: 1, pulled: { task_checkboxes: ['Regular todo visible'] } },
+            };
+          };
+          document.querySelector('.sb-sync').click();
+        })()""")
+        await wait_until(
+            cdp,
+            "(() => {"
+            "const row = [...document.querySelectorAll('.tcb-item')]"
+            ".find(x => x.textContent.includes('Regular todo visible'));"
+            "return row?.querySelector('input[type=\"checkbox\"]')?.checked === true;"
+            "})()",
+            timeout=3,
+        )
+        await cdp.eval("delete window.__mockTriggerSync")
+    await check('T16b Tasks refresh after sync pull', t16b_tasks_refresh_after_sync_pull)
+
     # ── T17: Snippets detail tabs are conditional ────────────
     async def t17_snippets_tabs_conditional():
         await open_shortcuts_tab()

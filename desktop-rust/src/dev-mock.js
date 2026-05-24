@@ -340,6 +340,9 @@
 
     // ── Sync / Update ───────────────────────────────────
     async trigger_sync() {
+      if (typeof window.__mockTriggerSync === 'function') {
+        return await window.__mockTriggerSync();
+      }
       return { timestamp: now(), push: { total: 0, shortcuts: 0, notes: 0 }, pull: { total: 0, shortcuts: 0, notes: 0 } };
     },
     async register_sync({ apiUrl, name }) { return { api_key: 'mock-key-' + name, computer_id: 'mock-cid' }; },

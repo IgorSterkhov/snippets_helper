@@ -5,9 +5,26 @@ import {
   buildUpsertTaskCheckbox,
   buildUpsertTaskLink,
   flattenCheckboxTree,
+  setTaskCheckboxChecked,
 } from '../../src/db/taskRepo';
+import { getDB } from '../../src/db/database';
+
+jest.mock('../../src/db/database');
 
 describe('taskRepo', () => {
+  const mockExecuteSql = jest.fn();
+  const mockTx = { executeSql: mockExecuteSql };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    getDB.mockReturnValue({
+      transaction: jest.fn((cb) => cb(mockTx)),
+    });
+    mockExecuteSql.mockImplementation((sql, params, success) => {
+      if (success) success(mockTx, { rows: { length: 0, item: () => ({}) } });
+    });
+  });
+
   test('buildUpsertTask writes UUID relationships', () => {
     const { sql, params } = buildUpsertTask({
       uuid: 'task-1',
@@ -37,6 +54,32 @@ describe('taskRepo', () => {
     expect(sql).toContain('parent_uuid');
     expect(params).toContain('task-1');
     expect(params).toContain('cb-parent');
+  });
+
+  test('setTaskCheckboxChecked persists checked state immediately', async () => {
+    const updated = await setTaskCheckboxChecked({
+      uuid: 'cb-1',
+      task_uuid: 'task-1',
+      parent_uuid: null,
+      text: 'Check',
+      is_checked: 0,
+      sort_order: 0,
+      created_at: '2026-05-23T10:00:00',
+      updated_at: '2026-05-23T10:00:00',
+      is_deleted: 0,
+    }, true);
+
+    expect(updated).toEqual(expect.objectContaining({
+      uuid: 'cb-1',
+      is_checked: 1,
+      updated_at: expect.any(String),
+    }));
+    expect(mockExecuteSql).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT OR REPLACE INTO task_checkboxes'),
+      expect.arrayContaining(['cb-1', 'task-1', 1]),
+      expect.any(Function),
+      expect.any(Function),
+    );
   });
 
   test('category and status builders write sync fields', () => {

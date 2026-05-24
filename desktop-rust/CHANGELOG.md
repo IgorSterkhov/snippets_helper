@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## f-20260524-1 (2026-05-24)
+
+- **Tasks checkbox sync:** after a desktop sync pulls task changes, the open
+  Tasks tab now clears its checkbox cache and refreshes the visible task
+  state, so remote checkbox checkmarks appear without reopening the tab.
+- **Mobile checkbox sync:** tapping an existing task checkbox now persists the
+  checked state immediately and schedules sync, instead of waiting for the
+  whole task editor to be saved.
+
 ## v1.3.29 (2026-05-23)
 
 - **Tasks sync backfill:** existing local desktop task categories, statuses,

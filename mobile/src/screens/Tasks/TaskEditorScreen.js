@@ -22,6 +22,7 @@ import {
   getNextTaskSortOrder,
   getTaskCheckboxes,
   getTaskLinks,
+  setTaskCheckboxChecked,
   upsertTask,
   upsertTaskCheckbox,
   upsertTaskLink,
@@ -188,6 +189,24 @@ export default function TaskEditorScreen({ route, navigation }) {
     });
   };
 
+  const toggleCheckboxChecked = async (item) => {
+    const updatedAt = new Date().toISOString();
+    const nextChecked = item.is_checked ? 0 : 1;
+    const optimistic = { ...item, is_checked: nextChecked, updated_at: updatedAt };
+    setCheckboxes((prev) => prev.map((c) => (c.uuid === item.uuid ? optimistic : c)));
+
+    if (isNew) return;
+
+    try {
+      const persisted = await setTaskCheckboxChecked(item, !!nextChecked, updatedAt);
+      setCheckboxes((prev) => prev.map((c) => (c.uuid === item.uuid ? persisted : c)));
+      notifyLocalChange();
+    } catch (e) {
+      setCheckboxes((prev) => prev.map((c) => (c.uuid === item.uuid ? item : c)));
+      Alert.alert('Ошибка', String(e));
+    }
+  };
+
   const openCheckboxMenu = (item, hasChildren) => {
     const isCollapsed = collapsedCheckboxIds.has(item.uuid);
     const buttons = [];
@@ -311,7 +330,7 @@ export default function TaskEditorScreen({ route, navigation }) {
                   >
                     <TouchableOpacity
                       style={[s.checkBox, { borderColor: colors.border }, item.is_checked && { backgroundColor: colors.primary }]}
-                      onPress={() => setCheckboxes((prev) => prev.map((c) => c.uuid === item.uuid ? { ...c, is_checked: c.is_checked ? 0 : 1, updated_at: new Date().toISOString() } : c))}
+                      onPress={() => toggleCheckboxChecked(item)}
                     >
                       {item.is_checked ? <Text style={s.checkMark}>✓</Text> : null}
                     </TouchableOpacity>

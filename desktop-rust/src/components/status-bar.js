@@ -136,6 +136,7 @@ export async function doSync() {
       pull: result.pull,
     });
     setSyncStatus('ok', detail);
+    window.dispatchEvent(new CustomEvent('snippets:sync-complete', { detail: { result } }));
     return result;
   } catch (err) {
     const msg = String(err);
