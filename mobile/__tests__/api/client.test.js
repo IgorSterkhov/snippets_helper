@@ -35,4 +35,14 @@ describe('API client', () => {
     const client = createClient('https://example.com', 'bad-key');
     await expect(client.get('/v1/auth/me')).rejects.toThrow('401');
   });
+
+  test('delete sends DELETE request', async () => {
+    fetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({ link: null }) });
+    const client = createClient('https://example.com', 'test-key-123');
+    await client.delete('/v1/share-links/token-1');
+    expect(fetch).toHaveBeenCalledWith(
+      'https://example.com/v1/share-links/token-1',
+      expect.objectContaining({ method: 'DELETE' }),
+    );
+  });
 });

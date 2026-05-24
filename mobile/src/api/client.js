@@ -19,5 +19,6 @@ export function createClient(baseUrl, apiKey) {
   return {
     get: (path) => request('GET', path),
     post: (path, body) => request('POST', path, body),
+    delete: (path) => request('DELETE', path),
   };
 }

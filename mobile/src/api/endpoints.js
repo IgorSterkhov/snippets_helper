@@ -21,3 +21,17 @@ export function syncPull(lastSyncAt) {
 export function checkUpdate() {
   return client.get('/v1/mobile/update/check');
 }
+
+export function getShareLink(itemType, itemUuid) {
+  const type = encodeURIComponent(itemType);
+  const uuid = encodeURIComponent(itemUuid);
+  return client.get(`/v1/share-links?item_type=${type}&item_uuid=${uuid}`);
+}
+
+export function createShareLink(itemType, itemUuid) {
+  return client.post('/v1/share-links', { item_type: itemType, item_uuid: itemUuid });
+}
+
+export function revokeShareLink(token) {
+  return client.delete(`/v1/share-links/${encodeURIComponent(token)}`);
+}

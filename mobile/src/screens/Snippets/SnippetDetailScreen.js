@@ -1,21 +1,19 @@
 import React, { useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Share } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
+import ShareLinkSheet from '../../components/ShareLinkSheet';
 import { useTheme } from '../../theme/ThemeContext';
 
 export default function SnippetDetailScreen({ route }) {
   const { snippet } = route.params;
   const { colors } = useTheme();
   const [copied, setCopied] = useState(false);
+  const [shareVisible, setShareVisible] = useState(false);
 
   const copyToClipboard = () => {
     Clipboard.setString(snippet.value);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-  };
-
-  const shareSnippet = () => {
-    Share.share({ message: snippet.value, title: snippet.name });
   };
 
   return (
@@ -34,10 +32,20 @@ export default function SnippetDetailScreen({ route }) {
         <TouchableOpacity style={[s.btn, { backgroundColor: colors.primary }]} onPress={copyToClipboard}>
           <Text style={s.btnText}>{copied ? 'Скопировано!' : 'Копировать'}</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={[s.btn, { backgroundColor: colors.bgTertiary }]} onPress={shareSnippet}>
-          <Text style={[s.btnText, { color: colors.text }]}>Поделиться</Text>
+        <TouchableOpacity
+          style={[s.iconBtn, { backgroundColor: colors.bgTertiary }]}
+          onPress={() => setShareVisible(true)}
+          activeOpacity={0.85}
+        >
+          <Text style={[s.iconText, { color: colors.text }]}>🔗</Text>
         </TouchableOpacity>
       </View>
+      <ShareLinkSheet
+        visible={shareVisible}
+        itemType="shortcut"
+        itemUuid={snippet.uuid}
+        onClose={() => setShareVisible(false)}
+      />
     </View>
   );
 }
@@ -50,5 +58,7 @@ const s = StyleSheet.create({
   code: { fontSize: 14, fontFamily: 'monospace' },
   actions: { flexDirection: 'row', gap: 12 },
   btn: { flex: 1, padding: 14, borderRadius: 8, alignItems: 'center' },
+  iconBtn: { width: 52, padding: 14, borderRadius: 8, alignItems: 'center' },
+  iconText: { fontSize: 18, fontWeight: '600' },
   btnText: { color: '#fff', fontWeight: '600' },
 });

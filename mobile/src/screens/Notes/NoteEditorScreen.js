@@ -10,7 +10,9 @@ import {
   Platform,
   Alert,
 } from 'react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
 import Markdown from 'react-native-markdown-display';
+import ShareLinkSheet from '../../components/ShareLinkSheet';
 import { useTheme } from '../../theme/ThemeContext';
 import { upsertNote } from '../../db/noteRepo';
 import { notifyLocalChange } from '../../sync/syncService';
@@ -22,6 +24,7 @@ export default function NoteEditorScreen({ route, navigation }) {
   const [content, setContent] = useState(note.content || '');
   const [preview, setPreview] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [shareVisible, setShareVisible] = useState(false);
 
   const save = useCallback(async () => {
     if (saving) return;
@@ -44,21 +47,30 @@ export default function NoteEditorScreen({ route, navigation }) {
   useLayoutEffect(() => {
     navigation.setOptions({
       headerRight: () => (
-        <TouchableOpacity
-          onPress={save}
-          disabled={saving}
-          style={s.headerBtn}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        >
-          <Text
-            style={[
-              s.headerBtnText,
-              { color: saving ? colors.textMuted : colors.primary },
-            ]}
+        <View style={s.headerActions}>
+          <TouchableOpacity
+            onPress={() => setShareVisible(true)}
+            style={s.headerIconBtn}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 6 }}
           >
-            {saving ? 'Сохр…' : 'Сохранить'}
-          </Text>
-        </TouchableOpacity>
+            <Text style={{ color: colors.primary, fontSize: 18 }}>🔗</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={save}
+            disabled={saving}
+            style={s.headerBtn}
+            hitSlop={{ top: 10, bottom: 10, left: 6, right: 10 }}
+          >
+            <Text
+              style={[
+                s.headerBtnText,
+                { color: saving ? colors.textMuted : colors.primary },
+              ]}
+            >
+              {saving ? 'Сохр…' : 'Сохранить'}
+            </Text>
+          </TouchableOpacity>
+        </View>
       ),
     });
   }, [navigation, save, saving, colors]);
@@ -88,9 +100,21 @@ export default function NoteEditorScreen({ route, navigation }) {
         placeholderTextColor={colors.textMuted}
       />
 
-      <View style={[s.segmented, { backgroundColor: colors.bgSecondary }]}>
-        <Segment label="Написать" active={!preview} onPress={() => setPreview(false)} colors={colors} />
-        <Segment label="Превью" active={preview} onPress={() => setPreview(true)} colors={colors} />
+      <View style={s.editorControls}>
+        <View style={[s.segmented, { backgroundColor: colors.bgSecondary }]}>
+          <Segment label="Написать" active={!preview} onPress={() => setPreview(false)} colors={colors} />
+          <Segment label="Превью" active={preview} onPress={() => setPreview(true)} colors={colors} />
+        </View>
+        <TouchableOpacity
+          style={[s.copyBtn, { borderColor: colors.border }]}
+          onPress={() => {
+            Clipboard.setString(content || '');
+            Alert.alert('Скопировано', 'Текст заметки скопирован');
+          }}
+          activeOpacity={0.85}
+        >
+          <Text style={[s.copyBtnText, { color: colors.primary }]}>Copy</Text>
+        </TouchableOpacity>
       </View>
 
       {preview ? (
@@ -114,6 +138,12 @@ export default function NoteEditorScreen({ route, navigation }) {
           placeholderTextColor={colors.textMuted}
         />
       )}
+      <ShareLinkSheet
+        visible={shareVisible}
+        itemType="note"
+        itemUuid={note.uuid}
+        onClose={() => setShareVisible(false)}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -144,6 +174,8 @@ function Segment({ label, active, onPress, colors }) {
 
 const s = StyleSheet.create({
   container: { flex: 1, paddingHorizontal: 16, paddingTop: 8 },
+  headerActions: { flexDirection: 'row', alignItems: 'center' },
+  headerIconBtn: { paddingHorizontal: 8, paddingVertical: 6 },
   headerBtn: { paddingHorizontal: 14, paddingVertical: 6 },
   headerBtnText: { fontSize: 16, fontWeight: '600' },
   titleInput: {
@@ -152,11 +184,12 @@ const s = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 2,
   },
+  editorControls: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
   segmented: {
+    flex: 1,
     flexDirection: 'row',
     borderRadius: 10,
     padding: 3,
-    marginBottom: 12,
   },
   segment: {
     flex: 1,
@@ -165,6 +198,8 @@ const s = StyleSheet.create({
     borderRadius: 7,
   },
   segmentText: { fontSize: 14, fontWeight: '600' },
+  copyBtn: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 9 },
+  copyBtnText: { fontSize: 14, fontWeight: '600' },
   body: { flex: 1 },
   bodyContent: { paddingVertical: 8, paddingBottom: 40 },
   editor: {
