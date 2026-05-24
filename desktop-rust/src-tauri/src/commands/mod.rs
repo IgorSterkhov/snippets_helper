@@ -1,6 +1,7 @@
 pub mod notes;
 pub mod settings;
 pub mod shortcuts;
+pub mod share_links;
 pub mod sql_tools;
 pub mod sync_cmd;
 pub mod superset;
