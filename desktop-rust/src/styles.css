@@ -193,6 +193,75 @@ button:hover, .btn:hover {
   padding: 8px 12px;
 }
 
+.snippet-sort-button {
+  height: 32px;
+  min-width: 82px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.snippet-sort-button:hover {
+  border-color: var(--accent);
+  background: var(--bg-tertiary);
+}
+
+.snippet-sort-button[data-sort-mode="modified"] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.snippet-sort-menu {
+  position: fixed;
+  z-index: 9999;
+  min-width: 172px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg-secondary);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+}
+
+.snippet-sort-menu-item {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+}
+
+.snippet-sort-menu-item:hover,
+.snippet-sort-menu-item.active {
+  background: var(--bg-tertiary);
+}
+
+.snippet-sort-menu-check {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.snippet-sort-menu-label {
+  font-weight: 600;
+}
+
+.snippet-sort-menu-hint {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
 /* ── List Items ───────────────────────────────────────────── */
 
 .list-item {

@@ -21,10 +21,15 @@ let tags = [];
 let selectedTagId = null;
 let tagPanelEl = null;
 let searchInputEl = null;
+let sortButtonEl = null;
+let sortMode = 'name';
+let sortMenuDocClick = null;
 const KEY_CLOUD_CACHE_KEY = 'snippet_key_cloud_cache_v4';
 const KEY_CLOUD_CACHE_SCHEMA = 4;
 const KEY_CLOUD_ALGORITHM_KEY = 'snippet_key_cloud_algorithm';
 const KEY_CLOUD_ALGORITHMS = new Set(['dense', 'fast']);
+const SNIPPETS_SORT_SETTING_KEY = 'snippets_sort_mode';
+const SNIPPET_SORT_MODES = new Set(['name', 'modified']);
 let keyCloudAlgorithm = readKeyCloudAlgorithm();
 let keyCloudCache = null;
 let keyCloudBuildPromise = null;
@@ -46,6 +51,7 @@ export async function init(container) {
     if (lw) listWidth = parseInt(lw) || 260;
     const eh = await call('get_setting', { key: 'snippet_expand_multiplier' });
     if (eh) expandHeight = parseInt(eh) || 4;
+    sortMode = normalizeSnippetSortMode(await call('get_setting', { key: SNIPPETS_SORT_SETTING_KEY }));
   } catch {}
 
   // Header row: search + add button (fixed)
@@ -57,6 +63,16 @@ export async function init(container) {
   searchBar.style.flex = '1';
   searchBar.style.marginBottom = '0';
   header.appendChild(searchBar);
+
+  sortButtonEl = document.createElement('button');
+  sortButtonEl.type = 'button';
+  sortButtonEl.className = 'snippet-sort-button';
+  sortButtonEl.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleSnippetSortMenu(sortButtonEl);
+  });
+  updateSnippetSortButton();
+  header.appendChild(sortButtonEl);
 
   const keyCloudBtn = document.createElement('button');
   keyCloudBtn.textContent = 'Key Cloud';
@@ -118,6 +134,8 @@ async function applyKeySearch(key) {
 
 async function loadShortcuts() {
   try {
+    const previousSelectedKey = getSelectedShortcutKey();
+
     // Check obsidian configuration
     try {
       const obsPath = await call('get_setting', { key: 'obsidian_vaults_path' });
@@ -150,8 +168,7 @@ async function loadShortcuts() {
     } else {
       shortcuts = allShortcuts;
     }
-    if (selectedIndex < 0 && shortcuts.length > 0) selectedIndex = 0;
-    if (selectedIndex >= shortcuts.length) selectedIndex = shortcuts.length - 1;
+    applyShortcutSort(previousSelectedKey);
     renderList();
     renderDetail();
   } catch (err) {
@@ -174,6 +191,7 @@ function renderList() {
     const isSelected = index === selectedIndex;
 
     const item = document.createElement('div');
+    item.className = 'shortcut-list-item';
     item.style.cssText = `
       padding:8px 12px;
       cursor:pointer;
@@ -190,6 +208,7 @@ function renderList() {
     }
 
     const nameEl = document.createElement('div');
+    nameEl.className = 'shortcut-list-name';
     nameEl.style.cssText = 'font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
     nameEl.textContent = shortcut.name;
     item.appendChild(nameEl);
@@ -203,6 +222,155 @@ function renderList() {
 
     listEl.appendChild(item);
   });
+}
+
+function normalizeSnippetSortMode(value) {
+  return SNIPPET_SORT_MODES.has(value) ? value : 'name';
+}
+
+function getShortcutKey(shortcut) {
+  if (!shortcut) return null;
+  if (shortcut.id !== undefined && shortcut.id !== null) return String(shortcut.id);
+  if (shortcut.uuid !== undefined && shortcut.uuid !== null) return String(shortcut.uuid);
+  return null;
+}
+
+function getSelectedShortcutKey() {
+  if (selectedIndex < 0 || selectedIndex >= shortcuts.length) return null;
+  return getShortcutKey(shortcuts[selectedIndex]);
+}
+
+function compareShortcutNames(a, b) {
+  const an = String(a?.name || '').toLowerCase();
+  const bn = String(b?.name || '').toLowerCase();
+  const byName = an.localeCompare(bn);
+  if (byName !== 0) return byName;
+  return String(getShortcutKey(a) || '').localeCompare(String(getShortcutKey(b) || ''));
+}
+
+function shortcutUpdatedMillis(shortcut) {
+  const raw = shortcut?.updated_at || shortcut?.created_at || '';
+  const ms = Date.parse(raw);
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+function sortShortcuts(items) {
+  return [...items].sort((a, b) => {
+    if (sortMode === 'modified') {
+      const byUpdated = shortcutUpdatedMillis(b) - shortcutUpdatedMillis(a);
+      if (byUpdated !== 0) return byUpdated;
+    }
+    return compareShortcutNames(a, b);
+  });
+}
+
+function applyShortcutSort(preferredShortcutKey = null) {
+  shortcuts = sortShortcuts(shortcuts);
+  if (preferredShortcutKey !== null) {
+    const nextIndex = shortcuts.findIndex(s => getShortcutKey(s) === preferredShortcutKey);
+    if (nextIndex >= 0) selectedIndex = nextIndex;
+  }
+  if (selectedIndex < 0 && shortcuts.length > 0) selectedIndex = 0;
+  if (selectedIndex >= shortcuts.length) selectedIndex = shortcuts.length - 1;
+}
+
+function snippetSortLabel(mode = sortMode) {
+  return mode === 'modified' ? 'Modified' : 'A-Z';
+}
+
+function updateSnippetSortButton() {
+  if (!sortButtonEl) return;
+  sortButtonEl.textContent = `${snippetSortLabel()} ▾`;
+  sortButtonEl.title = sortMode === 'modified'
+    ? 'Sort snippets by modified date'
+    : 'Sort snippets by name';
+  sortButtonEl.dataset.sortMode = sortMode;
+}
+
+function closeSnippetSortMenu() {
+  for (const menu of document.querySelectorAll('.snippet-sort-menu')) {
+    menu.remove();
+  }
+  if (sortMenuDocClick) {
+    document.removeEventListener('click', sortMenuDocClick);
+    sortMenuDocClick = null;
+  }
+}
+
+function toggleSnippetSortMenu(anchor) {
+  if (document.querySelector('.snippet-sort-menu')) {
+    closeSnippetSortMenu();
+    return;
+  }
+  openSnippetSortMenu(anchor);
+}
+
+function openSnippetSortMenu(anchor) {
+  closeSnippetSortMenu();
+  const menu = document.createElement('div');
+  menu.className = 'snippet-sort-menu';
+  const rect = anchor.getBoundingClientRect();
+  menu.style.left = Math.max(8, rect.left) + 'px';
+  menu.style.top = (rect.bottom + 4) + 'px';
+
+  const options = [
+    { mode: 'name', label: 'A-Z', hint: 'Name' },
+    { mode: 'modified', label: 'Modified', hint: 'Newest first' },
+  ];
+  for (const option of options) {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'snippet-sort-menu-item' + (sortMode === option.mode ? ' active' : '');
+    item.dataset.sortMode = option.mode;
+
+    const check = document.createElement('span');
+    check.className = 'snippet-sort-menu-check';
+    check.textContent = sortMode === option.mode ? '✓' : '';
+    item.appendChild(check);
+
+    const text = document.createElement('span');
+    text.className = 'snippet-sort-menu-label';
+    text.textContent = option.label;
+    item.appendChild(text);
+
+    const hint = document.createElement('span');
+    hint.className = 'snippet-sort-menu-hint';
+    hint.textContent = option.hint;
+    item.appendChild(hint);
+
+    item.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      closeSnippetSortMenu();
+      await setSnippetSortMode(option.mode);
+    });
+    menu.appendChild(item);
+  }
+
+  document.body.appendChild(menu);
+  sortMenuDocClick = (event) => {
+    if (!menu.contains(event.target) && event.target !== anchor) {
+      closeSnippetSortMenu();
+    }
+  };
+  setTimeout(() => document.addEventListener('click', sortMenuDocClick), 0);
+}
+
+async function setSnippetSortMode(mode) {
+  const nextMode = normalizeSnippetSortMode(mode);
+  if (nextMode === sortMode) return;
+
+  const selectedKey = getSelectedShortcutKey();
+  sortMode = nextMode;
+  updateSnippetSortButton();
+  applyShortcutSort(selectedKey);
+  renderList();
+  renderDetail();
+
+  try {
+    await call('set_setting', { key: SNIPPETS_SORT_SETTING_KEY, value: sortMode });
+  } catch (err) {
+    showToast('Failed to save snippet sort mode: ' + err, 'error');
+  }
 }
 
 function parseLinks(shortcut) {

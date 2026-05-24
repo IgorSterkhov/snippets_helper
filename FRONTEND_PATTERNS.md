@@ -294,3 +294,23 @@ names or titles and does not need a persisted taxonomy.
   shared-key count descending, name ascending.
 - Keep derived keys visually separate from user-managed tags so automatic
   grouping does not look editable or synced.
+
+---
+
+## §9 Local list sort modes
+
+**Used in:** Snippets tab left panel
+
+Use this pattern when a list needs a lightweight local sort preference without
+changing backend APIs.
+
+- Keep backend commands responsible for fetching/searching/filtering. Apply the
+  sort in the frontend after the current filtered list is loaded.
+- Persist only the selected mode with `get_setting` / `set_setting`; do not
+  sync view preferences between devices unless explicitly requested.
+- Keep the existing default mode unchanged for users who never touch the
+  control.
+- When switching modes, capture the selected item id before sorting and restore
+  the selected index after sorting if the item is still present.
+- Use deterministic tie-breakers. For modified-date sorting, sort by
+  `updated_at` descending, then fall back to the same name comparator as A-Z.

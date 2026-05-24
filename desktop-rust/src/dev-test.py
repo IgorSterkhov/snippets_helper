@@ -1358,6 +1358,81 @@ async def run_tests():
         assert rows[2]['keys'] == ['guide'], rows
     await check('T25 Snippets related tab sorts by shared keys', t25_snippets_related_tab_sorting)
 
+    # ── T26: Snippets left panel sort mode ───────────────────
+    async def t26_snippets_left_panel_sort_mode():
+        await cdp.eval("""(() => {
+          const settings = JSON.parse(localStorage.getItem('mock.settings') || '{}');
+          settings.snippets_sort_mode = 'name';
+          localStorage.setItem('mock.settings', JSON.stringify(settings));
+
+          const updatedAt = {
+            'SELECT all': '2026-05-24T14:00:00.000Z',
+            'sql_guide': '2026-05-24T13:00:00.000Z',
+            'Python markdown block': '2026-05-23T12:00:00.000Z',
+            'Minimal plain snippet': '2026-05-22T11:00:00.000Z',
+            'Indented fenced blocks': '2026-05-21T10:00:00.000Z',
+            'bash_cd_guide': '2026-05-20T09:00:00.000Z',
+            'bash_ssh_guide': '2026-05-19T08:00:00.000Z',
+            'bash_cd_cheatsheet': '2026-05-18T07:00:00.000Z'
+          };
+          const items = JSON.parse(localStorage.getItem('mock.shortcuts') || '[]');
+          for (const item of items) {
+            item.updated_at = updatedAt[item.name] || '2026-01-01T00:00:00.000Z';
+          }
+          localStorage.setItem('mock.shortcuts', JSON.stringify(items));
+        })()""")
+        await cdp.send('Page.reload', ignoreCache=True)
+        await asyncio.sleep(0.8)
+        await wait_until(cdp, "!!document.querySelector('.tab-btn')", timeout=8)
+        await wait_until(cdp, "!!window.__TAURI__ && !!window.__TAURI__.core", timeout=5)
+        await open_shortcuts_tab()
+
+        alpha_names = await cdp.eval(
+            "[...document.querySelectorAll('#panel-shortcuts .shortcut-list-item .shortcut-list-name')]"
+            ".map(x => x.textContent.trim()).slice(0, 3)"
+        )
+        assert alpha_names == [
+            'bash_cd_cheatsheet',
+            'bash_cd_guide',
+            'bash_ssh_guide',
+        ], f'alphabetical order: {alpha_names!r}'
+
+        await cdp.eval("document.querySelector('#panel-shortcuts .snippet-sort-button').click()")
+        await wait_until(cdp, "document.querySelectorAll('.snippet-sort-menu [data-sort-mode]').length === 2", timeout=3)
+        await cdp.eval("document.querySelector('.snippet-sort-menu [data-sort-mode=\"modified\"]').click()")
+        await wait_until(
+            cdp,
+            "document.querySelector('#panel-shortcuts .snippet-sort-button')?.textContent.includes('Modified')",
+            timeout=3,
+        )
+
+        modified_names = await cdp.eval(
+            "[...document.querySelectorAll('#panel-shortcuts .shortcut-list-item .shortcut-list-name')]"
+            ".map(x => x.textContent.trim()).slice(0, 3)"
+        )
+        assert modified_names == [
+            'SELECT all',
+            'sql_guide',
+            'Python markdown block',
+        ], f'modified order: {modified_names!r}'
+
+        stored_mode = await cdp.eval(
+            "JSON.parse(localStorage.getItem('mock.settings') || '{}').snippets_sort_mode"
+        )
+        assert stored_mode == 'modified', f'stored sort mode: {stored_mode!r}'
+
+        await cdp.send('Page.reload', ignoreCache=True)
+        await asyncio.sleep(0.8)
+        await wait_until(cdp, "!!document.querySelector('.tab-btn')", timeout=8)
+        await wait_until(cdp, "!!window.__TAURI__ && !!window.__TAURI__.core", timeout=5)
+        await open_shortcuts_tab()
+        reloaded_names = await cdp.eval(
+            "[...document.querySelectorAll('#panel-shortcuts .shortcut-list-item .shortcut-list-name')]"
+            ".map(x => x.textContent.trim()).slice(0, 2)"
+        )
+        assert reloaded_names == ['SELECT all', 'sql_guide'], f'reloaded modified order: {reloaded_names!r}'
+    await check('T26 Snippets left panel sort mode', t26_snippets_left_panel_sort_mode)
+
     # Summary
     print()
     passed = sum(1 for _, ok, _ in results if ok)

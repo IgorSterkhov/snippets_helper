@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## f-20260524-5 (2026-05-24)
+
+- **Snippets left-panel sorting:** the Snippets header now has a compact sort
+  menu for switching the left list between name (A-Z) and modified date
+  (newest first), with the chosen mode saved locally across reloads.
+
 ## f-20260524-4 (2026-05-24)
 
 - **Tasks checkbox collapse persistence:** collapsed checklist branches now
