@@ -20,3 +20,9 @@ export async function loadTaskPreferences() {
 export async function setTaskPreference(key, value) {
   await AsyncStorage.setItem(key, value ? 'true' : 'false');
 }
+
+export async function toggleTaskPreference(key, currentValue) {
+  const nextValue = !currentValue;
+  await setTaskPreference(key, nextValue);
+  return nextValue;
+}

@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../../theme/ThemeContext';
-import { loadTaskPreferences } from './taskPreferences';
+import { TASK_PREF_KEYS, loadTaskPreferences, toggleTaskPreference } from './taskPreferences';
 import {
   deleteTask,
   flattenCheckboxTree,
@@ -108,17 +108,46 @@ export default function TaskEditorScreen({ route, navigation }) {
     }
   }, [checkboxes, draft, links, navigation, saving]);
 
+  const toggleHideDonePreference = useCallback(async () => {
+    const previousValue = taskPrefs.hideDone;
+    const nextValue = !previousValue;
+    setTaskPrefs((prev) => ({ ...prev, hideDone: nextValue }));
+    try {
+      await toggleTaskPreference(TASK_PREF_KEYS.hideDone, previousValue);
+    } catch (e) {
+      setTaskPrefs((prev) => ({ ...prev, hideDone: previousValue }));
+      Alert.alert('Ошибка', String(e));
+    }
+  }, [taskPrefs.hideDone]);
+
   useLayoutEffect(() => {
     navigation.setOptions({
       headerRight: () => (
-        <TouchableOpacity onPress={save} disabled={saving} style={s.headerBtn}>
-          <Text style={[s.headerBtnText, { color: saving ? colors.textMuted : colors.primary }]}>
-            {saving ? 'Сохр…' : 'Сохранить'}
-          </Text>
-        </TouchableOpacity>
+        <View style={s.headerActions}>
+          <TouchableOpacity
+            onPress={toggleHideDonePreference}
+            style={s.headerEyeTouch}
+            activeOpacity={0.72}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 4 }}
+          >
+            <EyeIcon hidden={taskPrefs.hideDone} colors={colors} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={save}
+            disabled={saving}
+            style={[
+              s.headerSaveBtn,
+              { borderColor: saving ? colors.border : colors.primary, opacity: saving ? 0.65 : 1 },
+            ]}
+          >
+            <Text style={[s.headerSaveText, { color: saving ? colors.textMuted : colors.primary }]}>
+              {saving ? 'Сохр…' : 'Сохранить'}
+            </Text>
+          </TouchableOpacity>
+        </View>
       ),
     });
-  }, [colors, navigation, save, saving]);
+  }, [colors, navigation, save, saving, taskPrefs.hideDone, toggleHideDonePreference]);
 
   const addCheckbox = async () => {
     const now = new Date().toISOString();
@@ -536,6 +565,26 @@ function ReorderButton({ label, colors, disabled, onPress }) {
   );
 }
 
+function EyeIcon({ hidden, colors }) {
+  const color = hidden ? colors.textMuted : colors.primary;
+  return (
+    <View
+      style={[
+        s.eyeBtn,
+        {
+          backgroundColor: hidden ? colors.bgSecondary : colors.primaryLight,
+          borderColor: hidden ? colors.border : colors.primaryLight,
+        },
+      ]}
+    >
+      <View style={[s.eyeShape, { borderColor: color, backgroundColor: colors.card }]}>
+        <View style={[s.eyePupil, { backgroundColor: color, borderColor: hidden ? colors.bgTertiary : colors.primaryLight }]} />
+      </View>
+      {hidden ? <View style={[s.eyeSlash, { backgroundColor: color }]} /> : null}
+    </View>
+  );
+}
+
 function TrashIcon({ color }) {
   return (
     <View style={[s.trashCan, { borderColor: color }]}>
@@ -549,8 +598,10 @@ const s = StyleSheet.create({
   container: { flex: 1 },
   content: { padding: 16, paddingBottom: 40 },
   contentWithToolbar: { paddingBottom: 112 },
-  headerBtn: { paddingHorizontal: 14, paddingVertical: 6 },
-  headerBtnText: { fontSize: 16, fontWeight: '600' },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: 2 },
+  headerEyeTouch: { width: 38, height: 36 },
+  headerSaveBtn: { height: 36, borderRadius: 18, borderWidth: 1, paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center' },
+  headerSaveText: { fontSize: 14, fontWeight: '800' },
   titleInput: { fontSize: 22, fontWeight: '700', borderBottomWidth: 1, paddingVertical: 10 },
   section: { marginTop: 18 },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
@@ -581,6 +632,10 @@ const s = StyleSheet.create({
   trashCan: { width: 14, height: 15, borderWidth: 1.7, borderTopWidth: 0, borderRadius: 3, marginTop: 5 },
   trashLid: { position: 'absolute', left: -3, top: -5, width: 18, height: 2, borderRadius: 2 },
   trashHandle: { position: 'absolute', left: 4, top: -9, width: 6, height: 5, borderWidth: 1.5, borderBottomWidth: 0, borderTopLeftRadius: 3, borderTopRightRadius: 3 },
+  eyeBtn: { width: 38, height: 36, borderRadius: 18, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  eyeShape: { width: 22, height: 14, borderWidth: 2, borderRadius: 12, alignItems: 'center', justifyContent: 'center', transform: [{ rotate: '-1deg' }] },
+  eyePupil: { width: 8, height: 8, borderRadius: 4, borderWidth: 2 },
+  eyeSlash: { position: 'absolute', width: 25, height: 2, borderRadius: 2, transform: [{ rotate: '-38deg' }] },
   reorderToolbar: { position: 'absolute', left: 12, right: 12, bottom: 12, borderWidth: 1, borderRadius: 8, padding: 10 },
   reorderTitle: { fontSize: 13, fontWeight: '700', marginBottom: 8 },
   reorderControls: { flexDirection: 'row', alignItems: 'center', gap: 8 },

@@ -3,6 +3,7 @@ import {
   TASK_PREF_KEYS,
   loadTaskPreferences,
   setTaskPreference,
+  toggleTaskPreference,
 } from '../../src/screens/Tasks/taskPreferences';
 
 jest.mock('@react-native-async-storage/async-storage', () => ({
@@ -43,5 +44,15 @@ describe('taskPreferences', () => {
     await setTaskPreference(TASK_PREF_KEYS.hideDone, true);
 
     expect(AsyncStorage.setItem).toHaveBeenCalledWith(TASK_PREF_KEYS.hideDone, 'true');
+  });
+
+  test('toggleTaskPreference stores and returns the inverse value', async () => {
+    AsyncStorage.setItem.mockResolvedValue(undefined);
+
+    await expect(toggleTaskPreference(TASK_PREF_KEYS.hideDone, false)).resolves.toBe(true);
+    expect(AsyncStorage.setItem).toHaveBeenCalledWith(TASK_PREF_KEYS.hideDone, 'true');
+
+    await expect(toggleTaskPreference(TASK_PREF_KEYS.hideDone, true)).resolves.toBe(false);
+    expect(AsyncStorage.setItem).toHaveBeenCalledWith(TASK_PREF_KEYS.hideDone, 'false');
   });
 });
