@@ -282,28 +282,48 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     )?;
 
     // Migration: add links column to shortcuts (may already exist)
-    conn.execute_batch("ALTER TABLE shortcuts ADD COLUMN links TEXT NOT NULL DEFAULT '[]'").ok();
+    conn.execute_batch("ALTER TABLE shortcuts ADD COLUMN links TEXT NOT NULL DEFAULT '[]'")
+        .ok();
 
     // Migration: add obsidian_note column to shortcuts (may already exist)
-    conn.execute_batch("ALTER TABLE shortcuts ADD COLUMN obsidian_note TEXT NOT NULL DEFAULT ''").ok();
+    conn.execute_batch("ALTER TABLE shortcuts ADD COLUMN obsidian_note TEXT NOT NULL DEFAULT ''")
+        .ok();
 
     // Migration: add parent_id column to note_folders (may already exist)
-    conn.execute_batch("ALTER TABLE note_folders ADD COLUMN parent_id INTEGER DEFAULT NULL").ok();
+    conn.execute_batch("ALTER TABLE note_folders ADD COLUMN parent_id INTEGER DEFAULT NULL")
+        .ok();
 
     // Migration (v1.3.16): per-transcription performance metrics.
-    conn.execute_batch("ALTER TABLE whisper_history ADD COLUMN cpu_peak_percent REAL NOT NULL DEFAULT 0").ok();
-    conn.execute_batch("ALTER TABLE whisper_history ADD COLUMN gpu_peak_percent REAL NOT NULL DEFAULT 0").ok();
-    conn.execute_batch("ALTER TABLE whisper_history ADD COLUMN vram_peak_mb    INTEGER NOT NULL DEFAULT 0").ok();
+    conn.execute_batch(
+        "ALTER TABLE whisper_history ADD COLUMN cpu_peak_percent REAL NOT NULL DEFAULT 0",
+    )
+    .ok();
+    conn.execute_batch(
+        "ALTER TABLE whisper_history ADD COLUMN gpu_peak_percent REAL NOT NULL DEFAULT 0",
+    )
+    .ok();
+    conn.execute_batch(
+        "ALTER TABLE whisper_history ADD COLUMN vram_peak_mb    INTEGER NOT NULL DEFAULT 0",
+    )
+    .ok();
 
     // Migration (v1.3.24): Whisper post-processed text persisted alongside raw transcript.
     // Nullable — old rows stay NULL until user runs ✨ Post-process on them.
-    conn.execute_batch("ALTER TABLE whisper_history ADD COLUMN postprocessed_text TEXT").ok();
+    conn.execute_batch("ALTER TABLE whisper_history ADD COLUMN postprocessed_text TEXT")
+        .ok();
 
     // Migration (v1.3.20): per-command shell selector for Exec tab.
     // 'host'  → cmd /c (Win) or sh -c (mac/linux)
     // 'wsl'   → wsl.exe [-d distro] -- bash -lc <cmd>  (Windows only)
-    conn.execute_batch("ALTER TABLE exec_commands ADD COLUMN shell TEXT NOT NULL DEFAULT 'host'").ok();
-    conn.execute_batch("ALTER TABLE exec_commands ADD COLUMN wsl_distro TEXT").ok();
+    conn.execute_batch("ALTER TABLE exec_commands ADD COLUMN shell TEXT NOT NULL DEFAULT 'host'")
+        .ok();
+    conn.execute_batch("ALTER TABLE exec_commands ADD COLUMN wsl_distro TEXT")
+        .ok();
+
+    // Migration (v1.3.30): normalize API-pulled ISO datetime strings to the
+    // canonical desktop SQLite format so UI queries and SQL LWW comparisons
+    // read `updated_at` / `created_at` consistently.
+    queries::normalize_synced_datetime_strings(conn)?;
 
     // Seed Tasks module defaults on a fresh DB. Idempotent — only inserts
     // when tables are empty, so existing users' custom sets aren't clobbered.
@@ -333,7 +353,8 @@ fn mark_existing_tasks_pending_for_initial_sync(conn: &Connection) -> Result<(),
         "task_checkboxes",
         "task_links",
     ] {
-        let sql = format!("UPDATE {table} SET sync_status = 'pending' WHERE sync_status != 'deleted'");
+        let sql =
+            format!("UPDATE {table} SET sync_status = 'pending' WHERE sync_status != 'deleted'");
         conn.execute(&sql, [])?;
     }
 
@@ -349,15 +370,15 @@ fn mark_existing_tasks_pending_for_initial_sync(conn: &Connection) -> Result<(),
 fn seed_task_defaults(conn: &Connection) -> Result<(), rusqlite::Error> {
     use chrono::Utc;
     // Same format as queries.rs `now_str()` so parse_dt round-trips cleanly.
-    let now = Utc::now().naive_utc().format("%Y-%m-%d %H:%M:%S%.f").to_string();
+    let now = Utc::now()
+        .naive_utc()
+        .format("%Y-%m-%d %H:%M:%S%.f")
+        .to_string();
 
     let cat_count: i64 =
         conn.query_row("SELECT COUNT(*) FROM task_categories", [], |r| r.get(0))?;
     if cat_count == 0 {
-        let defaults = [
-            ("Work", "#388bfd", 0_i64),
-            ("Home", "#3fb950", 1),
-        ];
+        let defaults = [("Work", "#388bfd", 0_i64), ("Home", "#3fb950", 1)];
         for (name, color, ord) in defaults {
             conn.execute(
                 "INSERT INTO task_categories (name, color, sort_order, created_at, updated_at, uuid, sync_status, user_id)
@@ -367,14 +388,13 @@ fn seed_task_defaults(conn: &Connection) -> Result<(), rusqlite::Error> {
         }
     }
 
-    let st_count: i64 =
-        conn.query_row("SELECT COUNT(*) FROM task_statuses", [], |r| r.get(0))?;
+    let st_count: i64 = conn.query_row("SELECT COUNT(*) FROM task_statuses", [], |r| r.get(0))?;
     if st_count == 0 {
         let defaults = [
-            ("Open",        "#8b949e", 0_i64),
+            ("Open", "#8b949e", 0_i64),
             ("In progress", "#d29922", 1),
-            ("Blocked",     "#f85149", 2),
-            ("Done",        "#3fb950", 3),
+            ("Blocked", "#f85149", 2),
+            ("Done", "#3fb950", 3),
         ];
         for (name, color, ord) in defaults {
             conn.execute(
@@ -450,14 +470,21 @@ mod tests {
                 table_name
             );
         }
-        assert_eq!(tables.len(), expected.len(), "Unexpected extra tables: {:?}", tables);
+        assert_eq!(
+            tables.len(),
+            expected.len(),
+            "Unexpected extra tables: {:?}",
+            tables
+        );
     }
 
     #[test]
     fn whisper_history_index_created() {
         let conn = init_test_db();
         let indexes: Vec<String> = conn
-            .prepare("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='whisper_history'")
+            .prepare(
+                "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='whisper_history'",
+            )
             .unwrap()
             .query_map([], |r| r.get(0))
             .unwrap()

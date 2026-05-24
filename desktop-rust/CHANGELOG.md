@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## v1.3.30 (2026-05-24)
+
+- **Sync datetime normalization:** desktop now accepts and normalizes API ISO /
+  RFC3339 `created_at` and `updated_at` values into the local SQLite datetime
+  format. This keeps Last Write Wins comparisons consistent and fixes Snippets
+  modified-date sorting for rows pulled from the API before they are edited
+  locally again.
+
 ## f-20260524-5 (2026-05-24)
 
 - **Snippets left-panel sorting:** the Snippets header now has a compact sort

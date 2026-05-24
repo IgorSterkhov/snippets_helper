@@ -1,4 +1,4 @@
-use chrono::{NaiveDateTime, Utc};
+use chrono::{DateTime, NaiveDateTime, Utc};
 use regex::Regex;
 use rusqlite::{params, Connection, Result};
 use serde_json::{Map, Value};
@@ -16,10 +16,34 @@ fn now_str() -> String {
     Utc::now().naive_utc().format(DT_FMT).to_string()
 }
 
-fn parse_dt(s: &str) -> NaiveDateTime {
+fn parse_dt_opt(s: &str) -> Option<NaiveDateTime> {
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+
     NaiveDateTime::parse_from_str(s, DT_FMT)
         .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S"))
-        .unwrap_or_default()
+        .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f"))
+        .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S"))
+        .ok()
+        .or_else(|| {
+            DateTime::parse_from_rfc3339(s)
+                .ok()
+                .map(|dt| dt.naive_utc())
+        })
+}
+
+fn parse_dt(s: &str) -> NaiveDateTime {
+    parse_dt_opt(s).unwrap_or_default()
+}
+
+fn normalize_dt_string(s: &str) -> Option<String> {
+    parse_dt_opt(s).map(|dt| dt.format(DT_FMT).to_string())
+}
+
+fn is_datetime_column(col: &str) -> bool {
+    matches!(col, "created_at" | "updated_at")
 }
 
 // ── Shortcuts ────────────────────────────────────────────────
@@ -74,7 +98,14 @@ pub fn search_shortcuts(conn: &Connection, query: &str) -> Result<Vec<Shortcut>>
     rows.collect()
 }
 
-pub fn create_shortcut(conn: &Connection, name: &str, value: &str, description: &str, links: &str, obsidian_note: &str) -> Result<Shortcut> {
+pub fn create_shortcut(
+    conn: &Connection,
+    name: &str,
+    value: &str,
+    description: &str,
+    links: &str,
+    obsidian_note: &str,
+) -> Result<Shortcut> {
     let uuid = Uuid::new_v4().to_string();
     let now = now_str();
     conn.execute(
@@ -97,7 +128,15 @@ pub fn create_shortcut(conn: &Connection, name: &str, value: &str, description: 
     })
 }
 
-pub fn update_shortcut(conn: &Connection, id: i64, name: &str, value: &str, description: &str, links: &str, obsidian_note: &str) -> Result<()> {
+pub fn update_shortcut(
+    conn: &Connection,
+    id: i64,
+    name: &str,
+    value: &str,
+    description: &str,
+    links: &str,
+    obsidian_note: &str,
+) -> Result<()> {
     let now = now_str();
     conn.execute(
         "UPDATE shortcuts SET name = ?1, value = ?2, description = ?3, links = ?4, obsidian_note = ?5, updated_at = ?6, sync_status = 'pending'
@@ -267,7 +306,12 @@ pub fn list_note_folders(conn: &Connection) -> Result<Vec<NoteFolder>> {
     rows.collect()
 }
 
-pub fn create_note_folder(conn: &Connection, name: &str, sort_order: i32, parent_id: Option<i64>) -> Result<NoteFolder> {
+pub fn create_note_folder(
+    conn: &Connection,
+    name: &str,
+    sort_order: i32,
+    parent_id: Option<i64>,
+) -> Result<NoteFolder> {
     let uuid = Uuid::new_v4().to_string();
     let now = now_str();
     conn.execute(
@@ -288,7 +332,13 @@ pub fn create_note_folder(conn: &Connection, name: &str, sort_order: i32, parent
     })
 }
 
-pub fn update_note_folder(conn: &Connection, id: i64, name: &str, sort_order: i32, parent_id: Option<i64>) -> Result<()> {
+pub fn update_note_folder(
+    conn: &Connection,
+    id: i64,
+    name: &str,
+    sort_order: i32,
+    parent_id: Option<i64>,
+) -> Result<()> {
     let now = now_str();
     conn.execute(
         "UPDATE note_folders SET name = ?1, sort_order = ?2, parent_id = ?3, updated_at = ?4, sync_status = 'pending'
@@ -385,7 +435,9 @@ pub fn delete_note(conn: &Connection, id: i64) -> Result<()> {
 
 // ── SQL Table Analyzer Templates ─────────────────────────────
 
-pub fn list_sql_table_analyzer_templates(conn: &Connection) -> Result<Vec<SqlTableAnalyzerTemplate>> {
+pub fn list_sql_table_analyzer_templates(
+    conn: &Connection,
+) -> Result<Vec<SqlTableAnalyzerTemplate>> {
     let mut stmt = conn.prepare(
         "SELECT id, template_text, uuid, updated_at, sync_status, user_id
          FROM sql_table_analyzer_templates WHERE sync_status != 'deleted' ORDER BY id",
@@ -404,7 +456,10 @@ pub fn list_sql_table_analyzer_templates(conn: &Connection) -> Result<Vec<SqlTab
     rows.collect()
 }
 
-pub fn create_sql_table_analyzer_template(conn: &Connection, template_text: &str) -> Result<SqlTableAnalyzerTemplate> {
+pub fn create_sql_table_analyzer_template(
+    conn: &Connection,
+    template_text: &str,
+) -> Result<SqlTableAnalyzerTemplate> {
     let uuid = Uuid::new_v4().to_string();
     let now = now_str();
     conn.execute(
@@ -473,7 +528,15 @@ pub fn create_sql_macrosing_template(
             (template_name, template_text, placeholders_config, combination_mode, separator,
              uuid, updated_at, sync_status, user_id)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'pending', '')",
-        params![template_name, template_text, placeholders_config, combination_mode, separator, uuid, now],
+        params![
+            template_name,
+            template_text,
+            placeholders_config,
+            combination_mode,
+            separator,
+            uuid,
+            now
+        ],
     )?;
     let id = conn.last_insert_rowid();
     Ok(SqlMacrosingTemplate {
@@ -505,7 +568,15 @@ pub fn update_sql_macrosing_template(
          SET template_name = ?1, template_text = ?2, placeholders_config = ?3,
              combination_mode = ?4, separator = ?5, updated_at = ?6, sync_status = 'pending'
          WHERE id = ?7",
-        params![template_name, template_text, placeholders_config, combination_mode, separator, now, id],
+        params![
+            template_name,
+            template_text,
+            placeholders_config,
+            combination_mode,
+            separator,
+            now,
+            id
+        ],
     )?;
     Ok(())
 }
@@ -521,7 +592,10 @@ pub fn delete_sql_macrosing_template(conn: &Connection, id: i64) -> Result<()> {
 
 // ── Obfuscation Mappings ────────────────────────────────────
 
-pub fn list_obfuscation_mappings_by_session(conn: &Connection, session_name: &str) -> Result<Vec<ObfuscationMapping>> {
+pub fn list_obfuscation_mappings_by_session(
+    conn: &Connection,
+    session_name: &str,
+) -> Result<Vec<ObfuscationMapping>> {
     let mut stmt = conn.prepare(
         "SELECT id, session_name, entity_type, original_value, obfuscated_value,
                 created_at, uuid, updated_at, sync_status, user_id
@@ -613,7 +687,11 @@ pub fn set_setting(conn: &Connection, computer_id: &str, key: &str, value: &str)
 
 // ── Superset Settings ────────────────────────────────────────
 
-pub fn get_superset_setting(conn: &Connection, computer_id: &str, key: &str) -> Result<Option<String>> {
+pub fn get_superset_setting(
+    conn: &Connection,
+    computer_id: &str,
+    key: &str,
+) -> Result<Option<String>> {
     let mut stmt = conn.prepare(
         "SELECT setting_value FROM superset_settings WHERE computer_id = ?1 AND setting_key = ?2",
     )?;
@@ -624,7 +702,12 @@ pub fn get_superset_setting(conn: &Connection, computer_id: &str, key: &str) -> 
     }
 }
 
-pub fn set_superset_setting(conn: &Connection, computer_id: &str, key: &str, value: &str) -> Result<()> {
+pub fn set_superset_setting(
+    conn: &Connection,
+    computer_id: &str,
+    key: &str,
+    value: &str,
+) -> Result<()> {
     conn.execute(
         "INSERT INTO superset_settings (computer_id, setting_key, setting_value)
          VALUES (?1, ?2, ?3)
@@ -652,7 +735,12 @@ pub fn list_commit_tags(conn: &Connection, computer_id: &str) -> Result<Vec<Comm
     rows.collect()
 }
 
-pub fn create_commit_tag(conn: &Connection, computer_id: &str, tag_name: &str, is_default: bool) -> Result<CommitTag> {
+pub fn create_commit_tag(
+    conn: &Connection,
+    computer_id: &str,
+    tag_name: &str,
+    is_default: bool,
+) -> Result<CommitTag> {
     conn.execute(
         "INSERT INTO commit_tags (computer_id, tag_name, is_default) VALUES (?1, ?2, ?3)",
         params![computer_id, tag_name, is_default],
@@ -727,9 +815,20 @@ pub fn create_commit_history(
              mr_link, test_report, prod_report, transfer_connect, test_dag)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         params![
-            computer_id, now, task_link, task_id, commit_type,
-            object_category, object_value, message, selected_tags,
-            mr_link, test_report, prod_report, transfer_connect, test_dag
+            computer_id,
+            now,
+            task_link,
+            task_id,
+            commit_type,
+            object_category,
+            object_value,
+            message,
+            selected_tags,
+            mr_link,
+            test_report,
+            prod_report,
+            transfer_connect,
+            test_dag
         ],
     )?;
     let id = conn.last_insert_rowid();
@@ -760,9 +859,8 @@ pub fn delete_commit_history(conn: &Connection, id: i64) -> Result<()> {
 // ── Exec Categories ──────────────────────────────────────────
 
 pub fn list_exec_categories(conn: &Connection) -> Result<Vec<ExecCategory>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, name, sort_order FROM exec_categories ORDER BY sort_order, name",
-    )?;
+    let mut stmt =
+        conn.prepare("SELECT id, name, sort_order FROM exec_categories ORDER BY sort_order, name")?;
     let rows = stmt.query_map([], |row| {
         Ok(ExecCategory {
             id: row.get(0)?,
@@ -773,7 +871,11 @@ pub fn list_exec_categories(conn: &Connection) -> Result<Vec<ExecCategory>> {
     rows.collect()
 }
 
-pub fn create_exec_category(conn: &Connection, name: &str, sort_order: i32) -> Result<ExecCategory> {
+pub fn create_exec_category(
+    conn: &Connection,
+    name: &str,
+    sort_order: i32,
+) -> Result<ExecCategory> {
     conn.execute(
         "INSERT INTO exec_categories (name, sort_order) VALUES (?1, ?2)",
         params![name, sort_order],
@@ -816,7 +918,9 @@ pub fn list_exec_commands(conn: &Connection, category_id: i64) -> Result<Vec<Exe
             description: row.get(4)?,
             sort_order: row.get(5)?,
             hide_after_run: row.get(6)?,
-            shell: row.get::<_, Option<String>>(7)?.unwrap_or_else(|| "host".to_string()),
+            shell: row
+                .get::<_, Option<String>>(7)?
+                .unwrap_or_else(|| "host".to_string()),
             wsl_distro: row.get(8)?,
         })
     })?;
@@ -870,7 +974,16 @@ pub fn update_exec_command(
         "UPDATE exec_commands SET name = ?1, command = ?2, description = ?3,
                 sort_order = ?4, hide_after_run = ?5, shell = ?6, wsl_distro = ?7
          WHERE id = ?8",
-        params![name, command, description, sort_order, hide_after_run, shell, wsl_distro, id],
+        params![
+            name,
+            command,
+            description,
+            sort_order,
+            hide_after_run,
+            shell,
+            wsl_distro,
+            id
+        ],
     )?;
     Ok(())
 }
@@ -948,6 +1061,46 @@ fn validate_table(table: &str) -> Result<()> {
     }
 }
 
+fn datetime_columns_for_table(table: &str) -> Vec<&'static str> {
+    let mut cols = vec!["updated_at"];
+    if schema::data_columns(table).contains(&"created_at") {
+        cols.push("created_at");
+    }
+    cols
+}
+
+fn normalize_datetime_columns_for_table(conn: &Connection, table: &str) -> Result<()> {
+    validate_table(table)?;
+    for col in datetime_columns_for_table(table) {
+        let select_sql = format!("SELECT id, {col} FROM {table}");
+        let rows: Vec<(i64, Option<String>)> = {
+            let mut stmt = conn.prepare(&select_sql)?;
+            let mapped = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+            mapped.collect::<Result<Vec<_>>>()?
+        };
+
+        let update_sql = format!("UPDATE {table} SET {col} = ?1 WHERE id = ?2");
+        let mut stmt = conn.prepare(&update_sql)?;
+        for (id, raw) in rows {
+            let Some(raw) = raw else { continue };
+            let Some(normalized) = normalize_dt_string(&raw) else {
+                continue;
+            };
+            if normalized != raw {
+                stmt.execute(params![normalized, id])?;
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn normalize_synced_datetime_strings(conn: &Connection) -> Result<()> {
+    for &table in SYNCED_TABLES {
+        normalize_datetime_columns_for_table(conn, table)?;
+    }
+    Ok(())
+}
+
 /// Get all rows with sync_status = 'pending' or 'deleted' from a synced table.
 /// Returns each row as a serde_json::Value (object).
 pub fn get_pending_rows(conn: &Connection, table: &str) -> Result<Vec<Value>> {
@@ -959,9 +1112,7 @@ pub fn get_pending_rows(conn: &Connection, table: &str) -> Result<Vec<Value>> {
     cols.extend_from_slice(&["uuid", "updated_at", "sync_status", "user_id"]);
 
     let col_list = cols.join(", ");
-    let sql = format!(
-        "SELECT {col_list} FROM {table} WHERE sync_status IN ('pending', 'deleted')"
-    );
+    let sql = format!("SELECT {col_list} FROM {table} WHERE sync_status IN ('pending', 'deleted')");
 
     let mut stmt = conn.prepare(&sql)?;
     let col_count = cols.len();
@@ -971,11 +1122,9 @@ pub fn get_pending_rows(conn: &Connection, table: &str) -> Result<Vec<Value>> {
             let val: Value = match row.get_ref(i)? {
                 rusqlite::types::ValueRef::Null => Value::Null,
                 rusqlite::types::ValueRef::Integer(n) => Value::Number(n.into()),
-                rusqlite::types::ValueRef::Real(f) => {
-                    serde_json::Number::from_f64(f)
-                        .map(Value::Number)
-                        .unwrap_or(Value::Null)
-                }
+                rusqlite::types::ValueRef::Real(f) => serde_json::Number::from_f64(f)
+                    .map(Value::Number)
+                    .unwrap_or(Value::Null),
                 rusqlite::types::ValueRef::Text(s) => {
                     Value::String(String::from_utf8_lossy(s).to_string())
                 }
@@ -999,9 +1148,8 @@ pub fn mark_as_synced(
     uuid_timestamps: &[(String, String)],
 ) -> Result<()> {
     validate_table(table)?;
-    let sql = format!(
-        "UPDATE {table} SET sync_status = 'synced' WHERE uuid = ?1 AND updated_at = ?2"
-    );
+    let sql =
+        format!("UPDATE {table} SET sync_status = 'synced' WHERE uuid = ?1 AND updated_at = ?2");
     let mut stmt = conn.prepare(&sql)?;
     for (uuid, updated_at) in uuid_timestamps {
         stmt.execute(params![uuid, updated_at])?;
@@ -1020,8 +1168,10 @@ pub fn purge_deleted(conn: &Connection, table: &str, uuids: &[String]) -> Result
         "DELETE FROM {table} WHERE uuid IN ({})",
         placeholders.join(", ")
     );
-    let params: Vec<&dyn rusqlite::types::ToSql> =
-        uuids.iter().map(|u| u as &dyn rusqlite::types::ToSql).collect();
+    let params: Vec<&dyn rusqlite::types::ToSql> = uuids
+        .iter()
+        .map(|u| u as &dyn rusqlite::types::ToSql)
+        .collect();
     conn.execute(&sql, params.as_slice())?;
     Ok(())
 }
@@ -1034,6 +1184,7 @@ pub fn upsert_from_server(conn: &Connection, table: &str, rows: &[Value]) -> Res
     if rows.is_empty() {
         return Ok(());
     }
+    normalize_datetime_columns_for_table(conn, table)?;
 
     // Ensure unique index on uuid exists (idempotent)
     conn.execute_batch(&format!(
@@ -1081,7 +1232,13 @@ pub fn upsert_from_server(conn: &Connection, table: &str, rows: &[Value]) -> Res
             .iter()
             .map(|&col| -> Box<dyn rusqlite::types::ToSql> {
                 match obj.get(col) {
-                    Some(Value::String(s)) => Box::new(s.clone()),
+                    Some(Value::String(s)) => {
+                        if is_datetime_column(col) {
+                            Box::new(normalize_dt_string(s).unwrap_or_else(|| s.clone()))
+                        } else {
+                            Box::new(s.clone())
+                        }
+                    }
                     Some(Value::Number(n)) => {
                         if let Some(i) = n.as_i64() {
                             Box::new(i)
@@ -1195,6 +1352,8 @@ pub fn set_task_checkbox_parent_if_not_newer(
     parent_id: i64,
     incoming_updated_at: &str,
 ) -> Result<()> {
+    let incoming_updated_at =
+        normalize_dt_string(incoming_updated_at).unwrap_or_else(|| incoming_updated_at.to_string());
     conn.execute(
         "UPDATE task_checkboxes
          SET parent_id = ?1
@@ -1232,12 +1391,11 @@ pub fn list_task_categories(conn: &Connection) -> Result<Vec<TaskCategory>> {
 pub fn create_task_category(conn: &Connection, name: &str, color: &str) -> Result<TaskCategory> {
     let uuid = Uuid::new_v4().to_string();
     let now = now_str();
-    let sort_order: i32 = conn
-        .query_row(
-            "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM task_categories",
-            [],
-            |r| r.get(0),
-        )?;
+    let sort_order: i32 = conn.query_row(
+        "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM task_categories",
+        [],
+        |r| r.get(0),
+    )?;
     conn.execute(
         "INSERT INTO task_categories (name, color, sort_order, created_at, updated_at, uuid, sync_status, user_id)
          VALUES (?1, ?2, ?3, ?4, ?4, ?5, 'pending', '')",
@@ -1318,12 +1476,11 @@ pub fn list_task_statuses(conn: &Connection) -> Result<Vec<TaskStatus>> {
 pub fn create_task_status(conn: &Connection, name: &str, color: &str) -> Result<TaskStatus> {
     let uuid = Uuid::new_v4().to_string();
     let now = now_str();
-    let sort_order: i32 = conn
-        .query_row(
-            "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM task_statuses",
-            [],
-            |r| r.get(0),
-        )?;
+    let sort_order: i32 = conn.query_row(
+        "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM task_statuses",
+        [],
+        |r| r.get(0),
+    )?;
     conn.execute(
         "INSERT INTO task_statuses (name, color, sort_order, created_at, updated_at, uuid, sync_status, user_id)
          VALUES (?1, ?2, ?3, ?4, ?4, ?5, 'pending', '')",
@@ -1512,7 +1669,17 @@ pub fn update_task(
                           bg_color = ?5, tracker_url = ?6, notes_md = ?7,
                           updated_at = ?8, sync_status = 'pending'
          WHERE id = ?9",
-        params![title, category_id, status_id, is_pinned, bg_color, tracker_url, notes_md, now, id],
+        params![
+            title,
+            category_id,
+            status_id,
+            is_pinned,
+            bg_color,
+            tracker_url,
+            notes_md,
+            now,
+            id
+        ],
     )?;
     Ok(())
 }
@@ -1790,12 +1957,7 @@ pub fn create_task_link(
     })
 }
 
-pub fn update_task_link(
-    conn: &Connection,
-    id: i64,
-    url: &str,
-    label: Option<&str>,
-) -> Result<()> {
+pub fn update_task_link(conn: &Connection, id: i64, url: &str, label: Option<&str>) -> Result<()> {
     let now = now_str();
     conn.execute(
         "UPDATE task_links SET url = ?1, label = ?2, updated_at = ?3, sync_status = 'pending' WHERE id = ?4",
@@ -1866,7 +2028,11 @@ mod tests {
         delete_shortcut(&conn, s.id.unwrap()).unwrap();
 
         let list = list_shortcuts(&conn).unwrap();
-        assert_eq!(list.len(), 0, "Soft-deleted shortcut should not appear in list");
+        assert_eq!(
+            list.len(),
+            0,
+            "Soft-deleted shortcut should not appear in list"
+        );
     }
 
     #[test]
@@ -1891,6 +2057,129 @@ mod tests {
         assert!(!s.uuid.is_empty());
         // UUID v4 format: 8-4-4-4-12 hex chars
         assert_eq!(s.uuid.len(), 36);
+    }
+
+    #[test]
+    fn test_parse_dt_accepts_api_iso_formats() {
+        let expected =
+            NaiveDateTime::parse_from_str("2026-05-17 10:15:30", "%Y-%m-%d %H:%M:%S").unwrap();
+
+        assert_eq!(parse_dt("2026-05-17 10:15:30"), expected);
+        assert_eq!(parse_dt("2026-05-17T10:15:30"), expected);
+        assert_eq!(parse_dt("2026-05-17T10:15:30Z"), expected);
+        assert_eq!(parse_dt("2026-05-17T13:15:30+03:00"), expected);
+    }
+
+    #[test]
+    fn test_shortcut_server_iso_updated_at_is_readable() {
+        let conn = init_test_db();
+        let row = serde_json::json!({
+            "uuid": "22222222-2222-2222-2222-222222222222",
+            "name": "server_snippet",
+            "value": "server value",
+            "description": "",
+            "links": "[]",
+            "obsidian_note": "",
+            "updated_at": "2026-05-17T10:15:30",
+            "user_id": "user-1",
+            "is_deleted": false
+        });
+
+        upsert_from_server(&conn, "shortcuts", &[row]).unwrap();
+
+        let list = list_shortcuts(&conn).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].name, "server_snippet");
+        assert_eq!(
+            list[0].updated_at,
+            NaiveDateTime::parse_from_str("2026-05-17 10:15:30", "%Y-%m-%d %H:%M:%S").unwrap()
+        );
+
+        let stored: String = conn
+            .query_row(
+                "SELECT updated_at FROM shortcuts WHERE uuid = ?1",
+                params!["22222222-2222-2222-2222-222222222222"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored, "2026-05-17 10:15:30");
+    }
+
+    #[test]
+    fn test_shortcut_lww_normalizes_existing_iso_before_compare() {
+        let conn = init_test_db();
+        conn.execute(
+            "INSERT INTO shortcuts (name, value, description, links, obsidian_note, uuid, updated_at, sync_status, user_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'synced', ?8)",
+            params![
+                "old_name",
+                "old value",
+                "",
+                "[]",
+                "",
+                "33333333-3333-3333-3333-333333333333",
+                "2026-05-17T12:00:00",
+                "user-1",
+            ],
+        )
+        .unwrap();
+
+        let newer = serde_json::json!({
+            "uuid": "33333333-3333-3333-3333-333333333333",
+            "name": "new_name",
+            "value": "new value",
+            "description": "",
+            "links": "[]",
+            "obsidian_note": "",
+            "updated_at": "2026-05-17T13:00:00",
+            "user_id": "user-1",
+            "is_deleted": false
+        });
+        upsert_from_server(&conn, "shortcuts", &[newer]).unwrap();
+
+        let row: (String, String) = conn
+            .query_row(
+                "SELECT name, updated_at FROM shortcuts WHERE uuid = ?1",
+                params!["33333333-3333-3333-3333-333333333333"],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(row.0, "new_name");
+        assert_eq!(row.1, "2026-05-17 13:00:00");
+    }
+
+    #[test]
+    fn test_sync_datetime_normalization_migrates_created_updated_without_sync_fields() {
+        let conn = init_test_db();
+        conn.execute(
+            "INSERT INTO task_categories (name, color, sort_order, created_at, updated_at, uuid, sync_status, user_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                "Server category",
+                "#388bfd",
+                0,
+                "2026-05-17T10:00:00Z",
+                "2026-05-17T13:30:00+03:00",
+                "44444444-4444-4444-4444-444444444444",
+                "pending",
+                "user-1",
+            ],
+        )
+        .unwrap();
+
+        normalize_synced_datetime_strings(&conn).unwrap();
+
+        let row: (String, String, String, String) = conn
+            .query_row(
+                "SELECT created_at, updated_at, sync_status, user_id FROM task_categories WHERE uuid = ?1",
+                params!["44444444-4444-4444-4444-444444444444"],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(row.0, "2026-05-17 10:00:00");
+        assert_eq!(row.1, "2026-05-17 10:30:00");
+        assert_eq!(row.2, "pending");
+        assert_eq!(row.3, "user-1");
     }
 
     // ── App Settings CRUD ────────────────────────────────────
@@ -1994,17 +2283,23 @@ mod tests {
     #[test]
     fn test_sql_macrosing_templates_crud() {
         let conn = init_test_db();
-        let t = create_sql_macrosing_template(
-            &conn, "tmpl1", "SELECT 1", "{}", "cross", ","
-        ).unwrap();
+        let t =
+            create_sql_macrosing_template(&conn, "tmpl1", "SELECT 1", "{}", "cross", ",").unwrap();
         assert!(t.id.is_some());
 
         let list = list_sql_macrosing_templates(&conn).unwrap();
         assert_eq!(list.len(), 1);
 
         update_sql_macrosing_template(
-            &conn, t.id.unwrap(), "tmpl1_upd", "SELECT 2", "{}", "zip", ";"
-        ).unwrap();
+            &conn,
+            t.id.unwrap(),
+            "tmpl1_upd",
+            "SELECT 2",
+            "{}",
+            "zip",
+            ";",
+        )
+        .unwrap();
         let list = list_sql_macrosing_templates(&conn).unwrap();
         assert_eq!(list[0].template_name, "tmpl1_upd");
 
@@ -2018,9 +2313,7 @@ mod tests {
     #[test]
     fn test_obfuscation_mappings_crud() {
         let conn = init_test_db();
-        let m = create_obfuscation_mapping(
-            &conn, "session1", "table", "users", "t_001"
-        ).unwrap();
+        let m = create_obfuscation_mapping(&conn, "session1", "table", "users", "t_001").unwrap();
         assert!(m.id.is_some());
 
         let list = list_obfuscation_mappings_by_session(&conn, "session1").unwrap();
@@ -2057,10 +2350,22 @@ mod tests {
     fn test_commit_history_crud() {
         let conn = init_test_db();
         let h = create_commit_history(
-            &conn, "pc1", "http://task", "TASK-1", "feat",
-            "ETL", "dag_x", "Added new dag", "tag1,tag2",
-            "http://mr", "", "", "", "",
-        ).unwrap();
+            &conn,
+            "pc1",
+            "http://task",
+            "TASK-1",
+            "feat",
+            "ETL",
+            "dag_x",
+            "Added new dag",
+            "tag1,tag2",
+            "http://mr",
+            "",
+            "",
+            "",
+            "",
+        )
+        .unwrap();
         assert!(h.id.is_some());
 
         let list = list_commit_history(&conn, "pc1").unwrap();
@@ -2077,14 +2382,23 @@ mod tests {
     #[test]
     fn test_snippet_tags_crud() {
         let conn = init_test_db();
-        let t = create_snippet_tag(&conn, "Airflow", r#"["af_*","airflow_*"]"#, "#f0883e", 0).unwrap();
+        let t =
+            create_snippet_tag(&conn, "Airflow", r#"["af_*","airflow_*"]"#, "#f0883e", 0).unwrap();
         assert!(t.id.is_some());
         assert_eq!(t.name, "Airflow");
 
         let list = list_snippet_tags(&conn).unwrap();
         assert_eq!(list.len(), 1);
 
-        update_snippet_tag(&conn, t.id.unwrap(), "Airflow v2", r#"["af_*"]"#, "#00ff00", 1).unwrap();
+        update_snippet_tag(
+            &conn,
+            t.id.unwrap(),
+            "Airflow v2",
+            r#"["af_*"]"#,
+            "#00ff00",
+            1,
+        )
+        .unwrap();
         let list = list_snippet_tags(&conn).unwrap();
         assert_eq!(list[0].name, "Airflow v2");
         assert_eq!(list[0].color, "#00ff00");
@@ -2137,15 +2451,14 @@ mod tests {
         assert!(results.iter().all(|s| s.name.starts_with("af_")));
 
         // Filter by multiple patterns
-        let results = filter_shortcuts_by_patterns(
-            &conn,
-            &["af_*".to_string(), "airflow_*".to_string()],
-            "",
-        ).unwrap();
+        let results =
+            filter_shortcuts_by_patterns(&conn, &["af_*".to_string(), "airflow_*".to_string()], "")
+                .unwrap();
         assert_eq!(results.len(), 3);
 
         // Filter by pattern + search query
-        let results = filter_shortcuts_by_patterns(&conn, &["af_*".to_string()], "pipeline").unwrap();
+        let results =
+            filter_shortcuts_by_patterns(&conn, &["af_*".to_string()], "pipeline").unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].name, "af_pipeline");
 
@@ -2180,14 +2493,36 @@ mod tests {
         let cat = create_exec_category(&conn, "Cat1", 0).unwrap();
         let cid = cat.id.unwrap();
 
-        let cmd = create_exec_command(&conn, cid, "Run", "make run", "Run the app", 0, false, "host", None).unwrap();
+        let cmd = create_exec_command(
+            &conn,
+            cid,
+            "Run",
+            "make run",
+            "Run the app",
+            0,
+            false,
+            "host",
+            None,
+        )
+        .unwrap();
         assert!(cmd.id.is_some());
 
         let list = list_exec_commands(&conn, cid).unwrap();
         assert_eq!(list.len(), 1);
         assert!(!list[0].hide_after_run);
 
-        update_exec_command(&conn, cmd.id.unwrap(), "Run V2", "make run2", "Run v2", 1, true, "wsl", Some("Ubuntu")).unwrap();
+        update_exec_command(
+            &conn,
+            cmd.id.unwrap(),
+            "Run V2",
+            "make run2",
+            "Run v2",
+            1,
+            true,
+            "wsl",
+            Some("Ubuntu"),
+        )
+        .unwrap();
         let list = list_exec_commands(&conn, cid).unwrap();
         assert_eq!(list[0].name, "Run V2");
         assert!(list[0].hide_after_run);
@@ -2204,7 +2539,18 @@ mod tests {
         let conn = init_test_db();
         let cat_a = create_exec_category(&conn, "A", 0).unwrap();
         let cat_b = create_exec_category(&conn, "B", 0).unwrap();
-        let cmd = create_exec_command(&conn, cat_a.id.unwrap(), "c1", "echo hi", "", 0, false, "host", None).unwrap();
+        let cmd = create_exec_command(
+            &conn,
+            cat_a.id.unwrap(),
+            "c1",
+            "echo hi",
+            "",
+            0,
+            false,
+            "host",
+            None,
+        )
+        .unwrap();
         move_exec_command(&conn, cmd.id.unwrap(), cat_b.id.unwrap(), 5).unwrap();
         let in_b = list_exec_commands(&conn, cat_b.id.unwrap()).unwrap();
         assert_eq!(in_b.len(), 1);
@@ -2217,7 +2563,18 @@ mod tests {
     fn test_move_exec_command_invalid_target_returns_err() {
         let conn = init_test_db();
         let cat = create_exec_category(&conn, "A", 0).unwrap();
-        let cmd = create_exec_command(&conn, cat.id.unwrap(), "c1", "x", "", 0, false, "host", None).unwrap();
+        let cmd = create_exec_command(
+            &conn,
+            cat.id.unwrap(),
+            "c1",
+            "x",
+            "",
+            0,
+            false,
+            "host",
+            None,
+        )
+        .unwrap();
         let r = move_exec_command(&conn, cmd.id.unwrap(), 9999, 0);
         assert!(r.is_err(), "expected Err on missing target group");
     }
@@ -2227,9 +2584,18 @@ mod tests {
         let conn = init_test_db();
         let cat = create_exec_category(&conn, "A", 0).unwrap();
         let cid = cat.id.unwrap();
-        let id1 = create_exec_command(&conn, cid, "c1", "x", "", 0, false, "host", None).unwrap().id.unwrap();
-        let id2 = create_exec_command(&conn, cid, "c2", "x", "", 1, false, "host", None).unwrap().id.unwrap();
-        let id3 = create_exec_command(&conn, cid, "c3", "x", "", 2, false, "host", None).unwrap().id.unwrap();
+        let id1 = create_exec_command(&conn, cid, "c1", "x", "", 0, false, "host", None)
+            .unwrap()
+            .id
+            .unwrap();
+        let id2 = create_exec_command(&conn, cid, "c2", "x", "", 1, false, "host", None)
+            .unwrap()
+            .id
+            .unwrap();
+        let id3 = create_exec_command(&conn, cid, "c3", "x", "", 2, false, "host", None)
+            .unwrap()
+            .id
+            .unwrap();
         reorder_exec_commands(&conn, &[id3, id1, id2]).unwrap();
         let l = list_exec_commands(&conn, cid).unwrap();
         let order: Vec<i64> = l.iter().map(|c| c.id.unwrap()).collect();
@@ -2300,8 +2666,14 @@ mod tests {
             Some(checkbox.uuid.clone())
         );
 
-        assert_eq!(get_task_category_id_by_uuid(&conn, &cat.uuid).unwrap(), cat.id);
-        assert_eq!(get_task_status_id_by_uuid(&conn, &status.uuid).unwrap(), status.id);
+        assert_eq!(
+            get_task_category_id_by_uuid(&conn, &cat.uuid).unwrap(),
+            cat.id
+        );
+        assert_eq!(
+            get_task_status_id_by_uuid(&conn, &status.uuid).unwrap(),
+            status.id
+        );
         assert_eq!(get_task_id_by_uuid(&conn, &task.uuid).unwrap(), task.id);
         assert_eq!(
             get_task_checkbox_id_by_uuid(&conn, &checkbox.uuid).unwrap(),
@@ -2337,7 +2709,18 @@ mod tests {
         assert_eq!(list[0].id, t1.id); // lower sort_order first
 
         // Pin t2 — it should come first.
-        update_task(&conn, t2.id.unwrap(), "Second", None, None, true, None, None, "").unwrap();
+        update_task(
+            &conn,
+            t2.id.unwrap(),
+            "Second",
+            None,
+            None,
+            true,
+            None,
+            None,
+            "",
+        )
+        .unwrap();
         let list = list_tasks(&conn, TaskFilter::All, TaskFilter::All).unwrap();
         assert_eq!(list[0].id, t2.id);
 
@@ -2347,7 +2730,12 @@ mod tests {
         assert_eq!(p[0].id, t2.id);
 
         delete_task(&conn, t1.id.unwrap()).unwrap();
-        assert_eq!(list_tasks(&conn, TaskFilter::All, TaskFilter::All).unwrap().len(), 1);
+        assert_eq!(
+            list_tasks(&conn, TaskFilter::All, TaskFilter::All)
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[test]
@@ -2424,8 +2812,16 @@ mod tests {
             &conn,
             task.id.unwrap(),
             &[
-                CheckboxReorderEntry { id: b.id.unwrap(), parent_id: None, sort_order: 0 },
-                CheckboxReorderEntry { id: a.id.unwrap(), parent_id: None, sort_order: 1 },
+                CheckboxReorderEntry {
+                    id: b.id.unwrap(),
+                    parent_id: None,
+                    sort_order: 0,
+                },
+                CheckboxReorderEntry {
+                    id: a.id.unwrap(),
+                    parent_id: None,
+                    sort_order: 1,
+                },
             ],
         )
         .unwrap();
@@ -2437,7 +2833,11 @@ mod tests {
         reorder_task_checkboxes(
             &conn,
             task.id.unwrap(),
-            &[CheckboxReorderEntry { id: c.id.unwrap(), parent_id: b.id, sort_order: 0 }],
+            &[CheckboxReorderEntry {
+                id: c.id.unwrap(),
+                parent_id: b.id,
+                sort_order: 0,
+            }],
         )
         .unwrap();
     }
@@ -2642,8 +3042,12 @@ pub fn whisper_set_postprocessed(conn: &Connection, id: i64, text: &str) -> Resu
 
 pub fn whisper_delete_history(conn: &Connection, id: Option<i64>) -> Result<()> {
     match id {
-        Some(id) => { conn.execute("DELETE FROM whisper_history WHERE id = ?1", params![id])?; }
-        None => { conn.execute("DELETE FROM whisper_history", [])?; }
+        Some(id) => {
+            conn.execute("DELETE FROM whisper_history WHERE id = ?1", params![id])?;
+        }
+        None => {
+            conn.execute("DELETE FROM whisper_history", [])?;
+        }
     }
     Ok(())
 }
@@ -2656,7 +3060,8 @@ mod whisper_crud_tests {
     #[test]
     fn model_insert_then_list_roundtrip() {
         let conn = init_test_db();
-        whisper_insert_or_upgrade_model(&conn, "ggml-small", "small", "/tmp/small.bin", 100, "abc").unwrap();
+        whisper_insert_or_upgrade_model(&conn, "ggml-small", "small", "/tmp/small.bin", 100, "abc")
+            .unwrap();
         let models = whisper_list_models(&conn).unwrap();
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].name, "ggml-small");
@@ -2670,8 +3075,11 @@ mod whisper_crud_tests {
         whisper_insert_or_upgrade_model(&conn, "ggml-b", "b", "/tmp/b", 2, "h2").unwrap();
         whisper_set_default_model(&mut conn, "ggml-a").unwrap();
         whisper_set_default_model(&mut conn, "ggml-b").unwrap();
-        let defaults: Vec<_> = whisper_list_models(&conn).unwrap()
-            .into_iter().filter(|m| m.is_default).collect();
+        let defaults: Vec<_> = whisper_list_models(&conn)
+            .unwrap()
+            .into_iter()
+            .filter(|m| m.is_default)
+            .collect();
         assert_eq!(defaults.len(), 1);
         assert_eq!(defaults[0].name, "ggml-b");
     }
@@ -2686,7 +3094,20 @@ mod whisper_crud_tests {
     fn history_trim_keeps_last_200() {
         let conn = init_test_db();
         for i in 0..250 {
-            whisper_insert_history(&conn, &format!("t{}", i), None, "ggml-small", 100, 50, None, None, 0.0, 0.0, 0).unwrap();
+            whisper_insert_history(
+                &conn,
+                &format!("t{}", i),
+                None,
+                "ggml-small",
+                100,
+                50,
+                None,
+                None,
+                0.0,
+                0.0,
+                0,
+            )
+            .unwrap();
         }
         let rows = whisper_list_history(&conn, 1000).unwrap();
         assert_eq!(rows.len(), 200);
