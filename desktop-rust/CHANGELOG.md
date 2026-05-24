@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## f-20260524-2 (2026-05-24)
+
+- **Tasks pinned chip reorder:** pinned task chips in the desktop Tasks tab
+  can now be reordered directly in the top chip strip with pointer drag,
+  wrapped-row placeholder feedback, and click behavior preserved.
+
 ## f-20260524-1 (2026-05-24)
 
 - **Tasks checkbox sync:** after a desktop sync pulls task changes, the open

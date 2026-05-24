@@ -15,6 +15,8 @@ export function renderPinnedChips(container, pinned, categories, onChipClick) {
     chip.type = 'button';
     chip.className = 'tasks-pinned-chip';
     chip.title = task.title || '(untitled)';
+    chip.dataset.taskId = String(task.id);
+    chip.dataset.dragKind = 'pinned-chip';
 
     const bar = document.createElement('span');
     bar.className = 'tasks-pinned-chip-bar';
@@ -25,7 +27,15 @@ export function renderPinnedChips(container, pinned, categories, onChipClick) {
     chip.appendChild(el('span', { text: '📌' }));
     chip.appendChild(el('span', { class: 'tasks-pinned-chip-label', text: task.title || '(untitled)' }));
 
-    chip.addEventListener('click', () => onChipClick(task));
+    chip.addEventListener('click', (e) => {
+      if (chip.dataset.dragSuppressClick === '1') {
+        e.preventDefault();
+        e.stopPropagation();
+        delete chip.dataset.dragSuppressClick;
+        return;
+      }
+      onChipClick(task);
+    });
     container.appendChild(chip);
   }
 }

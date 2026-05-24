@@ -530,6 +530,61 @@ async def run_tests():
         )
     await check('T15 Tasks Pin updates pinned strip', t15_tasks_pin_updates_strip)
 
+    # ── T15b: Tasks pinned chips drag reorder ────────────────
+    async def t15b_tasks_pinned_chip_drag_reorder():
+        await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"tasks\"]').click()")
+        await wait_until(cdp, "document.querySelectorAll('#tasks-pinned .tasks-pinned-chip').length >= 2", timeout=5)
+        before = await cdp.eval(
+            "[...document.querySelectorAll('#tasks-pinned .tasks-pinned-chip-label')]"
+            ".map(x => x.textContent.trim())"
+        )
+        assert before[-1] == 'Pinned personal task', f'expected personal task last before drag, got {before!r}'
+
+        await cdp.eval("""(async () => {
+          const chips = [...document.querySelectorAll('#tasks-pinned .tasks-pinned-chip')];
+          const from = chips[chips.length - 1];
+          const to = chips[0];
+          const fr = from.getBoundingClientRect();
+          const tr = to.getBoundingClientRect();
+          const sx = fr.left + fr.width / 2;
+          const sy = fr.top + fr.height / 2;
+          const tx = tr.left + 3;
+          const ty = tr.top + tr.height / 2;
+          const emit = (target, type, x, y, buttons = 1) => {
+            target.dispatchEvent(new PointerEvent(type, {
+              bubbles: true,
+              cancelable: true,
+              pointerId: 15,
+              pointerType: 'mouse',
+              button: 0,
+              buttons,
+              clientX: x,
+              clientY: y,
+            }));
+          };
+          emit(from, 'pointerdown', sx, sy);
+          await new Promise(resolve => setTimeout(resolve, 30));
+          emit(document, 'pointermove', sx - 16, sy);
+          await new Promise(resolve => setTimeout(resolve, 30));
+          emit(document, 'pointermove', tx, ty);
+          await new Promise(resolve => setTimeout(resolve, 30));
+          emit(document, 'pointerup', tx, ty, 0);
+        })()""")
+
+        await wait_until(
+            cdp,
+            "[...document.querySelectorAll('#tasks-pinned .tasks-pinned-chip-label')]"
+            "[0]?.textContent.trim() === 'Pinned personal task'",
+            timeout=3,
+        )
+        await cdp.eval("document.querySelector('#tasks-pinned .tasks-pinned-chip').click()")
+        await wait_until(
+            cdp,
+            "document.querySelector('.task-editor-title')?.value === 'Pinned personal task'",
+            timeout=3,
+        )
+    await check('T15b Tasks pinned chips drag reorder', t15b_tasks_pinned_chip_drag_reorder)
+
     # ── T16: Tasks Focus view layout/search/outside pinned ──
     async def t16_tasks_focus_view_layout_search_and_outside_pin():
         await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"tasks\"]').click()")

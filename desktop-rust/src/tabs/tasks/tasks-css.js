@@ -620,6 +620,9 @@ export function tasksCSS() {
   flex-shrink: 0;
   background: rgba(56, 139, 253, 0.04);
 }
+.task-dnd-chip-placeholder {
+  display: inline-flex;
+}
 
 /* Manage modal */
 .tasks-manage-row {

@@ -39,7 +39,7 @@ the relevant section after implementation.
 
 ## §2 Pointer-based DnD with slot placeholder + FLIP
 
-**Used in:** Exec tab (command cards, already implemented), Tasks tab (checkbox rows, this plan)
+**Used in:** Exec tab (command cards, already implemented), Tasks tab (checkbox rows, pinned chips)
 
 **Pattern:**
 1. Use Pointer Events API, NOT HTML5 Drag and Drop (broken in Tauri WebView2).
@@ -70,6 +70,18 @@ the relevant section after implementation.
      clear all FLIP transforms.
 
 **Z-index:** ghost at 10000, placeholder inherits normal flow.
+
+**Wrapped flex chips:** for chip strips using `flex-wrap`, use a same-size
+slot placeholder and compute the target in two dimensions:
+
+- group peer rects into visual rows by `top` within a small tolerance;
+- select the first row whose bottom is below the pointer Y;
+- within that row, insert before the first chip whose horizontal midpoint is
+  to the right of the pointer X;
+- when dropping after the row's last chip, insert before the next row's first
+  DOM peer or append at the end;
+- animate both X and Y deltas in the FLIP step with
+  `transform: translate(dx, dy)`.
 
 ---
 

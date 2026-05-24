@@ -26,9 +26,13 @@ import { showToast } from '../../components/toast.js';
 //   2. "checkbox"  — source is `.tcb-item`; drop target: another row inside
 //                    the SAME task's cb list → reorder. Horizontal offset
 //                    > NEST_THRESHOLD_PX nests under the row above.
+//   3. "pinned-chip" — source is `.tasks-pinned-chip`; drop target: another
+//                    slot inside the wrapped pinned chip strip.
 
 const HOVER_OPEN_MS = 300;
 const NEST_THRESHOLD_PX = 30;
+const PINNED_DRAG_START_PX = 5;
+const PINNED_ROW_TOLERANCE_PX = 8;
 
 let active = null;
 // Fields while active:
@@ -41,20 +45,31 @@ let active = null;
 //                 (null = line at end of list)
 //   mode: 'reorder' | 'dropdown' — current drop-target mode
 //   dropdownItem: HTMLElement | null — highlighted dropdown menu item
-//   placeholder      — real DOM element holding source's slot during drag (checkbox only)
+//   placeholder      — real DOM element holding source's slot during drag
 //   sourceHidden     — whether source has display:none applied
 
 export function installTaskDnd(rootEl, {
   onTaskReorderCommit,
   onTaskMetaChange,
   onCheckboxReorderCommit,
+  onPinnedReorderCommit,
 }) {
   rootEl.addEventListener('pointerdown', (e) => {
     const handle = e.target.closest('[data-drag-kind]');
     if (!handle) return;
     if (e.button !== 0) return;
     const kind = handle.dataset.dragKind;
-    if (kind !== 'card' && kind !== 'checkbox') return;
+    if (kind !== 'card' && kind !== 'checkbox' && kind !== 'pinned-chip') return;
+
+    if (kind === 'pinned-chip') {
+      startPinnedDragAfterThreshold(handle, e, {
+        onTaskReorderCommit,
+        onTaskMetaChange,
+        onCheckboxReorderCommit,
+        onPinnedReorderCommit,
+      });
+      return;
+    }
 
     e.preventDefault();
     startDrag(handle, kind, e);
@@ -79,8 +94,60 @@ export function installTaskDnd(rootEl, {
   });
 }
 
+function startPinnedDragAfterThreshold(handle, startEvent, callbacks) {
+  const startX = startEvent.clientX;
+  const startY = startEvent.clientY;
+  let dragStarted = false;
+  let sourceForClickSuppression = null;
+
+  const onMove = (ev) => {
+    if (!dragStarted) {
+      const dx = ev.clientX - startX;
+      const dy = ev.clientY - startY;
+      if (Math.hypot(dx, dy) < PINNED_DRAG_START_PX) return;
+      ev.preventDefault();
+      startDrag(handle, 'pinned-chip', startEvent);
+      if (!active) return;
+      dragStarted = true;
+      sourceForClickSuppression = active.source;
+      if (sourceForClickSuppression) {
+        sourceForClickSuppression.dataset.dragSuppressClick = '1';
+      }
+    }
+    onPointerMove(ev);
+  };
+
+  const onUp = async (ev) => {
+    document.removeEventListener('pointermove', onMove);
+    document.removeEventListener('pointerup', onUp);
+    if (!dragStarted) return;
+    ev.preventDefault();
+    try {
+      await onPointerUp(ev, callbacks);
+    } finally {
+      cleanup();
+      if (sourceForClickSuppression) {
+        setTimeout(() => {
+          if (sourceForClickSuppression.dataset.dragSuppressClick === '1') {
+            delete sourceForClickSuppression.dataset.dragSuppressClick;
+          }
+        }, 350);
+      }
+    }
+  };
+
+  document.addEventListener('pointermove', onMove);
+  document.addEventListener('pointerup', onUp);
+}
+
 function startDrag(handle, kind, e) {
-  const source = handle.closest(kind === 'card' ? '.task-card' : '.tcb-item');
+  const source = handle.closest(
+    kind === 'card'
+      ? '.task-card'
+      : kind === 'checkbox'
+        ? '.tcb-item'
+        : '.tasks-pinned-chip',
+  );
   if (!source) return;
 
   const rect = source.getBoundingClientRect();
@@ -97,6 +164,9 @@ function startDrag(handle, kind, e) {
   ghost.style.transform = 'rotate(-0.8deg)';
   ghost.style.boxShadow = '0 16px 32px rgba(0,0,0,0.55)';
   // Neutralise inputs/animations inside the clone
+  if (ghost.matches('input, button, textarea, select')) {
+    ghost.disabled = true;
+  }
   for (const el of ghost.querySelectorAll('input, button, textarea, select')) {
     el.disabled = true;
   }
@@ -105,16 +175,23 @@ function startDrag(handle, kind, e) {
   source.classList.add('task-dnd-source');
 
   // List container: for cards the nearest .tasks-col (two-col) or
-  // .tasks-cards-scroll (one-col); for checkbox the row's parent.
+  // .tasks-cards-scroll (one-col); for checkbox/chips the row's parent.
   const listEl = kind === 'card'
     ? (source.closest('.tasks-col') || source.closest('.tasks-cards-scroll') || source.parentElement)
-    : source.parentElement;
+    : kind === 'checkbox'
+      ? source.parentElement
+      : (source.closest('#tasks-pinned') || source.parentElement);
 
-  // Checkbox mode: build placeholder, hide source, early return
-  if (kind === 'checkbox') {
+  // Placeholder modes: build placeholder, hide source, early return.
+  if (kind === 'checkbox' || kind === 'pinned-chip') {
     const placeholder = document.createElement('div');
-    placeholder.className = 'task-dnd-placeholder';
+    placeholder.className = kind === 'pinned-chip'
+      ? 'task-dnd-placeholder task-dnd-chip-placeholder'
+      : 'task-dnd-placeholder';
     placeholder.style.height = rect.height + 'px';
+    if (kind === 'pinned-chip') {
+      placeholder.style.width = rect.width + 'px';
+    }
     source.parentElement.insertBefore(placeholder, source);
     source.style.display = 'none';
     active = {
@@ -215,6 +292,24 @@ function onPointerMove(e) {
     return;
   }
 
+  // ── Pinned chip mode — relaxed drop zone over wrapped strip ──
+  if (active.kind === 'pinned-chip') {
+    const listEl = active.listEl;
+    if (!listEl) return;
+    const lr = listEl.getBoundingClientRect();
+    const insideList = e.clientX >= lr.left && e.clientX <= lr.right
+                    && e.clientY >= lr.top  && e.clientY <= lr.bottom;
+    if (insideList) {
+      active.mode = 'reorder';
+      if (active.placeholder) active.placeholder.style.display = '';
+      updatePinnedChipPlaceholder(e);
+    } else {
+      active.mode = null;
+      if (active.placeholder) active.placeholder.style.display = 'none';
+    }
+    return;
+  }
+
   // ── Reorder mode ────────────────────────────────────────────
   active.mode = 'reorder';
   updateInsertionLine(e);
@@ -245,6 +340,12 @@ function updateInsertionLine(e) {
 
   placeLine(listEl, before);
   active.insertBefore = before;
+}
+
+function nextSiblingExceptSource(el) {
+  let next = el ? el.nextElementSibling : null;
+  while (next && next === active.source) next = next.nextElementSibling;
+  return next;
 }
 
 function updateCheckboxPlaceholder(e) {
@@ -291,6 +392,81 @@ function updateCheckboxPlaceholder(e) {
   }
 }
 
+function updatePinnedChipPlaceholder(e) {
+  const listEl = active.listEl;
+  const ph = active.placeholder;
+  if (!listEl || !ph) return;
+
+  const peers = Array.from(listEl.querySelectorAll(':scope > .tasks-pinned-chip'))
+    .filter(el => el !== active.source);
+
+  let beforeEl = null;
+  if (peers.length > 0) {
+    const rows = [];
+    for (const peer of peers) {
+      const rect = peer.getBoundingClientRect();
+      let row = rows.find(r => Math.abs(r.top - rect.top) <= PINNED_ROW_TOLERANCE_PX);
+      if (!row) {
+        row = { top: rect.top, bottom: rect.bottom, items: [] };
+        rows.push(row);
+      }
+      row.top = Math.min(row.top, rect.top);
+      row.bottom = Math.max(row.bottom, rect.bottom);
+      row.items.push({ el: peer, rect });
+    }
+    rows.sort((a, b) => a.top - b.top);
+    for (const row of rows) {
+      row.items.sort((a, b) => a.rect.left - b.rect.left);
+    }
+
+    let targetRow = null;
+    for (const row of rows) {
+      if (e.clientY <= row.bottom + PINNED_ROW_TOLERANCE_PX) {
+        targetRow = row;
+        break;
+      }
+    }
+
+    if (targetRow) {
+      const beforeInRow = targetRow.items.find(({ rect }) => (
+        e.clientX < rect.left + rect.width / 2
+      ));
+      if (beforeInRow) {
+        beforeEl = beforeInRow.el;
+      } else {
+        const rowLast = targetRow.items[targetRow.items.length - 1].el;
+        const rowLastIndex = peers.indexOf(rowLast);
+        beforeEl = peers[rowLastIndex + 1] || null;
+      }
+    }
+  }
+
+  if (beforeEl === nextSiblingExceptSource(ph)) return;
+  if (beforeEl === null && nextSiblingExceptSource(ph) === null) return;
+
+  const tracked = [...peers, ph];
+  const oldRects = new Map();
+  for (const el of tracked) {
+    const r = el.getBoundingClientRect();
+    oldRects.set(el, { left: r.left, top: r.top });
+  }
+
+  listEl.insertBefore(ph, beforeEl);
+
+  for (const el of tracked) {
+    const oldRect = oldRects.get(el);
+    const newRect = el.getBoundingClientRect();
+    const dx = oldRect.left - newRect.left;
+    const dy = oldRect.top - newRect.top;
+    if (dx === 0 && dy === 0) continue;
+    el.style.transition = 'none';
+    el.style.transform = `translate(${dx}px, ${dy}px)`;
+    void el.offsetHeight;  // force reflow
+    el.style.transition = 'transform 180ms ease';
+    el.style.transform = '';
+  }
+}
+
 function placeLine(listEl, beforeEl) {
   if (!active.line) {
     const line = document.createElement('div');
@@ -325,6 +501,7 @@ async function onPointerUp(e, {
   onTaskReorderCommit,
   onTaskMetaChange,
   onCheckboxReorderCommit,
+  onPinnedReorderCommit,
 }) {
   if (!active) return;
 
@@ -349,7 +526,7 @@ async function onPointerUp(e, {
       await onTaskReorderCommit(sourceId, beforeId);
       return;
     }
-  } else {
+  } else if (active.kind === 'checkbox') {
     // checkbox — derive order from placeholder position
     if (active.mode !== 'reorder') return;
     const taskCard = active.source.closest('.task-card');
@@ -382,6 +559,23 @@ async function onPointerUp(e, {
     const draggedId = Number(active.source.dataset.cbId);
     const orderedIds = rowsInOrder.map(el => Number(el.dataset.cbId));
     await onCheckboxReorderCommit(taskId, draggedId, orderedIds, nestUnder);
+  } else if (active.kind === 'pinned-chip') {
+    if (active.mode !== 'reorder') return;
+    const listEl = active.listEl;
+    if (!listEl || !active.source || !active.placeholder) return;
+
+    listEl.insertBefore(active.source, active.placeholder);
+    active.placeholder.remove();
+    active.placeholder = null;
+    active.source.style.display = '';
+    active.sourceHidden = false;
+
+    const orderedPinnedIds = Array.from(listEl.querySelectorAll(':scope > .tasks-pinned-chip'))
+      .map(el => Number(el.dataset.taskId))
+      .filter(Number.isFinite);
+    if (orderedPinnedIds.length >= 2 && typeof onPinnedReorderCommit === 'function') {
+      await onPinnedReorderCommit(orderedPinnedIds);
+    }
   }
 }
 
@@ -402,11 +596,16 @@ function cleanup() {
       active.source.style.display = '';
     }
   }
-  // Wipe FLIP transforms on checkbox peers
-  if (active.listEl && active.kind === 'checkbox') {
-    for (const el of active.listEl.querySelectorAll(':scope > .tcb-item')) {
+  // Wipe FLIP transforms on reordered peers
+  if (active.listEl && (active.kind === 'checkbox' || active.kind === 'pinned-chip')) {
+    const peerSel = active.kind === 'checkbox' ? '.tcb-item' : '.tasks-pinned-chip';
+    for (const el of active.listEl.querySelectorAll(`:scope > ${peerSel}`)) {
       el.style.transition = '';
       el.style.transform = '';
+    }
+    if (active.placeholder) {
+      active.placeholder.style.transition = '';
+      active.placeholder.style.transform = '';
     }
   }
   if (active.hoverTimer) clearTimeout(active.hoverTimer);
@@ -460,6 +659,23 @@ export async function commitCardReorder(state, draggedId, beforeId) {
     await call('reorder_tasks', { ids });
   } catch (e) {
     showToast('Reorder failed: ' + e, 'error');
+  }
+}
+
+export async function commitPinnedChipReorder(state, orderedPinnedIds) {
+  if (!state || !Array.isArray(state.tasks) || !Array.isArray(orderedPinnedIds)) return;
+  const pinnedIds = orderedPinnedIds.map(Number).filter(Number.isFinite);
+  if (pinnedIds.length < 2) return;
+  const pinnedSet = new Set(pinnedIds);
+  const remainingVisibleIds = state.tasks
+    .map(t => t.id)
+    .filter(id => !pinnedSet.has(id));
+  const ids = [...pinnedIds, ...remainingVisibleIds];
+  if (ids.length < 2) return;
+  try {
+    await call('reorder_tasks', { ids });
+  } catch (e) {
+    showToast('Pinned reorder failed: ' + e, 'error');
   }
 }
 

@@ -411,6 +411,15 @@
         notes_md: notesMd || '',
       });
     },
+    async reorder_tasks({ ids }) {
+      const order = new Map((ids || []).map((id, index) => [Number(id), index]));
+      const tasks = storeGet('tasks', []).map(t => (
+        order.has(Number(t.id))
+          ? { ...t, sort_order: order.get(Number(t.id)), updated_at: now() }
+          : t
+      ));
+      storeSet('tasks', tasks);
+    },
     async list_task_checkboxes({ taskId }) {
       return storeGet('task_checkboxes', []).filter(x => x.task_id === taskId && x.sync_status !== 'deleted');
     },

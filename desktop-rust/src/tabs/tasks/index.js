@@ -6,7 +6,7 @@ import { renderCard, resetCollapseState, invalidateCheckboxCache, invalidateAllC
 import { renderPinnedChips, renderFilterDropdown } from './dropdown.js';
 import { helpButton } from '../sql/sql-help.js';
 import { TASKS_HELP_HTML } from './help-content.js';
-import { installTaskDnd, commitCardMetaChange, commitCardReorder, commitCheckboxReorder } from './dnd.js';
+import { installTaskDnd, commitCardMetaChange, commitCardReorder, commitCheckboxReorder, commitPinnedChipReorder } from './dnd.js';
 
 // ── Module-level state ──────────────────────────────────────
 
@@ -99,6 +99,10 @@ export async function init(container) {
       invalidateCheckboxCache(taskId);
       await renderTaskList();
       focusAfterReload(`[data-cb-id="${draggedId}"] .tcb-text[contenteditable="true"]`);
+    },
+    onPinnedReorderCommit: async (orderedPinnedIds) => {
+      await commitPinnedChipReorder(state, orderedPinnedIds);
+      await reloadTasks();
     },
   });
 }
