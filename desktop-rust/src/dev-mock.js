@@ -423,6 +423,21 @@
     async list_task_checkboxes({ taskId }) {
       return storeGet('task_checkboxes', []).filter(x => x.task_id === taskId && x.sync_status !== 'deleted');
     },
+    async reorder_task_checkboxes({ taskId, entries }) {
+      const updates = new Map((entries || []).map(e => [Number(e.id), e]));
+      const items = storeGet('task_checkboxes', []).map(x => {
+        const entry = updates.get(Number(x.id));
+        if (!entry || Number(x.task_id) !== Number(taskId)) return x;
+        return {
+          ...x,
+          parent_id: entry.parent_id ?? null,
+          sort_order: entry.sort_order ?? x.sort_order,
+          updated_at: now(),
+          sync_status: 'pending',
+        };
+      });
+      storeSet('task_checkboxes', items);
+    },
 
     // ── SQL tools ───────────────────────────────────────
     async parse_sql_tables({ sql }) {

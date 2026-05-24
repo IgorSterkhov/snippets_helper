@@ -683,11 +683,18 @@ export async function commitCheckboxReorder(taskId, draggedId, orderedIds, nestU
   try {
     const items = await call('list_task_checkboxes', { taskId });
     const byId = new Map(items.map(x => [x.id, { ...x }]));
-    // DOM gives us the flat visual order. We rebuild sort_order + parent
-    // from it: everything stays flat under the dragged item's new parent
-    // context (either nestUnder, its parent, or null for root).
     const dragged = byId.get(draggedId);
     if (!dragged) return;
+
+    const idxInOrder = orderedIds.indexOf(draggedId);
+    const prevId = idxInOrder > 0 ? orderedIds[idxInOrder - 1] : null;
+    const nextId = idxInOrder >= 0 && idxInOrder < orderedIds.length - 1
+      ? orderedIds[idxInOrder + 1]
+      : null;
+    const prev = prevId != null ? byId.get(prevId) : null;
+    const next = nextId != null ? byId.get(nextId) : null;
+    const oldParentId = dragged.parent_id ?? null;
+    let newParentId = null;
 
     if (nestUnder) {
       // Nest check: depth(nestUnder) + 1 ≤ 3
@@ -696,40 +703,93 @@ export async function commitCheckboxReorder(taskId, draggedId, orderedIds, nestU
         showToast('Max nesting depth is 3', 'info');
         return;
       }
-      dragged.parent_id = nestUnder;
+      newParentId = nestUnder;
     } else {
-      // Find the row visually before the dragged one and inherit its parent,
-      // so dragging between siblings keeps them as siblings.
-      const idxInOrder = orderedIds.indexOf(draggedId);
-      if (idxInOrder > 0) {
-        const prevId = orderedIds[idxInOrder - 1];
-        const prev = byId.get(prevId);
-        dragged.parent_id = prev ? prev.parent_id : null;
-      } else {
-        dragged.parent_id = null;
-      }
+      // Prefer the row visually below the placeholder: dropping before a root
+      // row must stay root-level even if the row above is a nested child.
+      // This keeps the persisted result aligned with the visible slot,
+      // especially when completed rows are hidden from the DOM.
+      newParentId = next ? (next.parent_id ?? null) : (prev ? (prev.parent_id ?? null) : null);
     }
 
-    // Assign sort_order from DOM order, per (parent_id) bucket.
-    const counterByParent = new Map();
-    for (const id of orderedIds) {
-      const node = byId.get(id);
-      if (!node) continue;
-      const key = node.parent_id == null ? 'root' : String(node.parent_id);
-      const n = counterByParent.get(key) || 0;
-      node.sort_order = n;
-      counterByParent.set(key, n + 1);
+    const descendants = descendantIdsOf(draggedId, byId);
+    if (newParentId != null && (newParentId === draggedId || descendants.has(newParentId))) {
+      showToast('Cannot nest under itself', 'info');
+      return;
     }
 
-    const entries = Array.from(byId.values()).map(x => ({
-      id: x.id,
-      parent_id: x.parent_id,
-      sort_order: x.sort_order,
-    }));
+    dragged.parent_id = newParentId;
+
+    const entriesById = new Map();
+    normalizeCheckboxSiblingOrder(byId, oldParentId, draggedId, null, null, entriesById);
+    normalizeCheckboxSiblingOrder(byId, newParentId, draggedId, prevId, nextId, entriesById);
+
+    if (!entriesById.has(draggedId)) {
+      entriesById.set(draggedId, {
+        id: dragged.id,
+        parent_id: dragged.parent_id,
+        sort_order: dragged.sort_order,
+      });
+    }
+
+    const entries = Array.from(entriesById.values());
     await call('reorder_task_checkboxes', { taskId, entries });
   } catch (e) {
     showToast('Reorder failed: ' + e, 'error');
   }
+}
+
+function normalizeCheckboxSiblingOrder(byId, parentId, draggedId, prevId, nextId, out) {
+  const dragged = byId.get(draggedId);
+  if (!dragged) return;
+  const parentKey = parentId ?? null;
+  const siblings = Array.from(byId.values())
+    .filter(node => node.id !== draggedId && (node.parent_id ?? null) === parentKey)
+    .sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
+
+  let insertAt = siblings.length;
+  const next = nextId != null ? byId.get(nextId) : null;
+  if (next && (next.parent_id ?? null) === parentKey) {
+    const idx = siblings.findIndex(node => node.id === nextId);
+    if (idx >= 0) insertAt = idx;
+  } else {
+    const prev = prevId != null ? byId.get(prevId) : null;
+    if (prev && (prev.parent_id ?? null) === parentKey) {
+      const idx = siblings.findIndex(node => node.id === prevId);
+      if (idx >= 0) insertAt = idx + 1;
+    }
+  }
+
+  const ordered = parentKey === (dragged.parent_id ?? null)
+    ? [...siblings.slice(0, insertAt), dragged, ...siblings.slice(insertAt)]
+    : siblings;
+
+  ordered.forEach((node, index) => {
+    node.sort_order = index;
+    out.set(node.id, {
+      id: node.id,
+      parent_id: node.parent_id ?? null,
+      sort_order: node.sort_order,
+    });
+  });
+}
+
+function descendantIdsOf(id, byId) {
+  const descendants = new Set();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const node of byId.values()) {
+      const parent = node.parent_id ?? null;
+      if (parent === id || descendants.has(parent)) {
+        if (!descendants.has(node.id)) {
+          descendants.add(node.id);
+          changed = true;
+        }
+      }
+    }
+  }
+  return descendants;
 }
 
 function depthOf(id, byId) {

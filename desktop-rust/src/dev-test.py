@@ -585,6 +585,156 @@ async def run_tests():
         )
     await check('T15b Tasks pinned chips drag reorder', t15b_tasks_pinned_chip_drag_reorder)
 
+    # ── T15c: Checkbox DnD ignores hidden completed rows ────
+    async def t15c_tasks_checkbox_drag_hidden_completed_context():
+        await cdp.eval("""(() => {
+          const stamp = new Date().toISOString();
+          const rows = [
+            {
+              id: 10, task_id: 2, parent_id: null,
+              text: 'Done parent with active child', is_checked: true,
+              sort_order: 0, created_at: stamp, updated_at: stamp,
+              sync_status: 'synced', user_id: 'mock-user',
+            },
+            {
+              id: 11, task_id: 2, parent_id: 10,
+              text: 'Active child under done parent', is_checked: false,
+              sort_order: 0, created_at: stamp, updated_at: stamp,
+              sync_status: 'synced', user_id: 'mock-user',
+            },
+            {
+              id: 12, task_id: 2, parent_id: null,
+              text: 'Hidden completed root', is_checked: true,
+              sort_order: 1, created_at: stamp, updated_at: stamp,
+              sync_status: 'synced', user_id: 'mock-user',
+            },
+            {
+              id: 13, task_id: 2, parent_id: null,
+              text: 'Visible root before', is_checked: false,
+              sort_order: 2, created_at: stamp, updated_at: stamp,
+              sync_status: 'synced', user_id: 'mock-user',
+            },
+            {
+              id: 14, task_id: 2, parent_id: null,
+              text: 'Visible root dragged', is_checked: false,
+              sort_order: 3, created_at: stamp, updated_at: stamp,
+              sync_status: 'synced', user_id: 'mock-user',
+            },
+          ];
+          const others = JSON.parse(localStorage.getItem('mock.task_checkboxes') || '[]')
+            .filter(x => x.task_id !== 2);
+          localStorage.setItem('mock.task_checkboxes', JSON.stringify([...others, ...rows]));
+          localStorage.setItem('mock.__seq.task_checkboxes', '14');
+          window.dispatchEvent(new CustomEvent('snippets:sync-complete', {
+            detail: {
+              result: {
+                timestamp: '12:00:00',
+                push: { total: 0, pushed: {} },
+                pull: { total: 1, pulled: { task_checkboxes: ['fixture'] } },
+              },
+            },
+          }));
+        })()""")
+        await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"tasks\"]').click()")
+        await wait_until(
+            cdp,
+            "[...document.querySelectorAll('.task-title')]"
+            ".some(x => x.textContent.includes('Regular mock task'))",
+            timeout=4,
+        )
+        await cdp.eval(
+            "[...document.querySelectorAll('.task-title')]"
+            ".find(x => x.textContent.includes('Regular mock task')).click()"
+        )
+        await wait_until(
+            cdp,
+            "[...document.querySelectorAll('.tcb-text')]"
+            ".some(x => x.textContent.includes('Visible root dragged'))",
+            timeout=4,
+        )
+        hidden_visible = await cdp.eval(
+            "[...document.querySelectorAll('.tcb-text')]"
+            ".some(x => x.textContent.includes('Hidden completed root'))"
+        )
+        assert hidden_visible is False, 'hidden completed root should not be visible in the DnD list'
+
+        await cdp.eval("""(async () => {
+          const rowByText = (text) => [...document.querySelectorAll('.tcb-item')]
+            .find(row => row.querySelector('.tcb-text')?.textContent.includes(text));
+          const from = rowByText('Visible root dragged');
+          const before = rowByText('Visible root before');
+          const handle = from.querySelector('[data-drag-kind="checkbox"]');
+          const fr = handle.getBoundingClientRect();
+          const br = before.getBoundingClientRect();
+          const sx = fr.left + fr.width / 2;
+          const sy = fr.top + fr.height / 2;
+          const tx = sx;
+          const ty = br.top + 2;
+          const emit = (target, type, x, y, buttons = 1) => {
+            target.dispatchEvent(new PointerEvent(type, {
+              bubbles: true,
+              cancelable: true,
+              pointerId: 16,
+              pointerType: 'mouse',
+              button: 0,
+              buttons,
+              clientX: x,
+              clientY: y,
+            }));
+          };
+          emit(handle, 'pointerdown', sx, sy);
+          await new Promise(resolve => setTimeout(resolve, 30));
+          emit(document, 'pointermove', tx, ty);
+          await new Promise(resolve => setTimeout(resolve, 30));
+          emit(document, 'pointerup', tx, ty, 0);
+        })()""")
+
+        await wait_until(
+            cdp,
+            "(() => {"
+            "const rows = JSON.parse(localStorage.getItem('mock.task_checkboxes') || '[]');"
+            "const dragged = rows.find(x => x.id === 14);"
+            "return dragged && dragged.sync_status === 'pending';"
+            "})()",
+            timeout=3,
+        )
+        parent_id = await cdp.eval("""(() => {
+          const rows = JSON.parse(localStorage.getItem('mock.task_checkboxes') || '[]');
+          return rows.find(x => x.id === 14)?.parent_id ?? null;
+        })()""")
+        assert parent_id is None, f'dragged root should stay root-level, got parent_id={parent_id!r}'
+        await cdp.eval("""(() => {
+          const stamp = new Date().toISOString();
+          const restored = [
+            {
+              id: 1, task_id: 2, parent_id: null,
+              text: 'Regular todo visible', is_checked: false,
+              sort_order: 0, created_at: stamp, updated_at: stamp,
+              sync_status: 'synced', user_id: 'mock-user',
+            },
+            {
+              id: 2, task_id: 2, parent_id: null,
+              text: 'Regular done hidden', is_checked: true,
+              sort_order: 1, created_at: stamp, updated_at: stamp,
+              sync_status: 'synced', user_id: 'mock-user',
+            },
+          ];
+          const others = JSON.parse(localStorage.getItem('mock.task_checkboxes') || '[]')
+            .filter(x => x.task_id !== 2);
+          localStorage.setItem('mock.task_checkboxes', JSON.stringify([...others, ...restored]));
+          localStorage.setItem('mock.__seq.task_checkboxes', '2');
+          window.dispatchEvent(new CustomEvent('snippets:sync-complete', {
+            detail: {
+              result: {
+                timestamp: '12:00:00',
+                push: { total: 0, pushed: {} },
+                pull: { total: 1, pulled: { task_checkboxes: ['restore'] } },
+              },
+            },
+          }));
+        })()""")
+    await check('T15c Tasks checkbox DnD hidden completed context', t15c_tasks_checkbox_drag_hidden_completed_context)
+
     # ── T16: Tasks Focus view layout/search/outside pinned ──
     async def t16_tasks_focus_view_layout_search_and_outside_pin():
         await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"tasks\"]').click()")

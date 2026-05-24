@@ -69,6 +69,13 @@ the relevant section after implementation.
    - Cleanup: remove ghost, remove placeholder, restore source visibility,
      clear all FLIP transforms.
 
+If a list can hide rows while keeping them in storage, do not rebuild the
+persisted hierarchy from visible `orderedIds` alone. Carry the visible
+previous/next drop context into the commit step, choose the parent from the
+visible slot (prefer the next visible row when dropping before it), and
+renormalize the full sibling bucket including hidden rows. Hidden rows should
+preserve relative order, but must not become implicit drop targets or parents.
+
 **Z-index:** ghost at 10000, placeholder inherits normal flow.
 
 **Wrapped flex chips:** for chip strips using `flex-wrap`, use a same-size

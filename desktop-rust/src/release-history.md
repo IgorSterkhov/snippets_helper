@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## f-20260524-3 (2026-05-24)
+
+- **Tasks checkbox DnD hidden-completed fix:** dragging checklist items now
+  commits to the same visible slot shown by the placeholder when completed
+  items are hidden, so hidden completed rows no longer become implicit drop
+  targets or parents.
+
 ## f-20260524-2 (2026-05-24)
 
 - **Tasks pinned chip reorder:** pinned task chips in the desktop Tasks tab
