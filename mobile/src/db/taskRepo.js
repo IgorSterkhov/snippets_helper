@@ -25,6 +25,69 @@ function deletedFlag(row) {
   return row.is_deleted ? 1 : 0;
 }
 
+function compareCheckboxRows(a, b) {
+  const sortA = Number.isFinite(Number(a.sort_order)) ? Number(a.sort_order) : 0;
+  const sortB = Number.isFinite(Number(b.sort_order)) ? Number(b.sort_order) : 0;
+  if (sortA !== sortB) return sortA - sortB;
+
+  const textCompare = String(a.text || '').localeCompare(String(b.text || ''));
+  if (textCompare !== 0) return textCompare;
+
+  return String(a.uuid || '').localeCompare(String(b.uuid || ''));
+}
+
+export function flattenCheckboxTree(items = []) {
+  const visible = items
+    .filter((item) => item && item.uuid && !item.is_deleted)
+    .slice()
+    .sort(compareCheckboxRows);
+  const byUuid = new Map(visible.map((item) => [item.uuid, item]));
+  const childrenByParent = new Map();
+  const roots = [];
+
+  for (const item of visible) {
+    if (item.parent_uuid && byUuid.has(item.parent_uuid)) {
+      if (!childrenByParent.has(item.parent_uuid)) childrenByParent.set(item.parent_uuid, []);
+      childrenByParent.get(item.parent_uuid).push(item);
+    } else {
+      roots.push(item);
+    }
+  }
+
+  for (const children of childrenByParent.values()) {
+    children.sort(compareCheckboxRows);
+  }
+
+  const result = [];
+  const visited = new Set();
+
+  function visit(item, depth, stack) {
+    if (!item || visited.has(item.uuid) || stack.has(item.uuid)) return;
+    visited.add(item.uuid);
+    result.push({ item, depth });
+
+    const nextStack = new Set(stack);
+    nextStack.add(item.uuid);
+    const children = childrenByParent.get(item.uuid) || [];
+    for (const child of children) {
+      visit(child, depth + 1, nextStack);
+    }
+  }
+
+  for (const root of roots) {
+    visit(root, 0, new Set());
+  }
+
+  for (const item of visible) {
+    if (!visited.has(item.uuid)) {
+      visited.add(item.uuid);
+      result.push({ item, depth: 0 });
+    }
+  }
+
+  return result;
+}
+
 function createdAt(row) {
   return row.created_at || row.updated_at || nowIso();
 }

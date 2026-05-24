@@ -4,6 +4,7 @@ import {
   buildUpsertTaskStatus,
   buildUpsertTaskCheckbox,
   buildUpsertTaskLink,
+  flattenCheckboxTree,
 } from '../../src/db/taskRepo';
 
 describe('taskRepo', () => {
@@ -62,5 +63,48 @@ describe('taskRepo', () => {
 
     expect(sql).toContain('task_uuid');
     expect(params).toContain('task-1');
+  });
+
+  test('flattenCheckboxTree returns depth-first hierarchy with depths', () => {
+    const rows = [
+      { uuid: 'child-2', parent_uuid: 'root-1', text: 'B', sort_order: 1, is_deleted: 0 },
+      { uuid: 'root-2', parent_uuid: null, text: 'Root 2', sort_order: 1, is_deleted: 0 },
+      { uuid: 'grandchild-1', parent_uuid: 'child-1', text: 'AA', sort_order: 0, is_deleted: 0 },
+      { uuid: 'root-1', parent_uuid: null, text: 'Root 1', sort_order: 0, is_deleted: 0 },
+      { uuid: 'child-1', parent_uuid: 'root-1', text: 'A', sort_order: 0, is_deleted: 0 },
+    ];
+
+    expect(flattenCheckboxTree(rows).map(({ item, depth }) => [item.uuid, depth])).toEqual([
+      ['root-1', 0],
+      ['child-1', 1],
+      ['grandchild-1', 2],
+      ['child-2', 1],
+      ['root-2', 0],
+    ]);
+  });
+
+  test('flattenCheckboxTree renders orphans once at root level', () => {
+    const rows = [
+      { uuid: 'orphan', parent_uuid: 'missing', text: 'Orphan', sort_order: 1, is_deleted: 0 },
+      { uuid: 'root', parent_uuid: null, text: 'Root', sort_order: 0, is_deleted: 0 },
+    ];
+
+    expect(flattenCheckboxTree(rows).map(({ item, depth }) => [item.uuid, depth])).toEqual([
+      ['root', 0],
+      ['orphan', 0],
+    ]);
+  });
+
+  test('flattenCheckboxTree skips deleted rows and avoids cycles', () => {
+    const rows = [
+      { uuid: 'deleted', parent_uuid: null, text: 'Deleted', sort_order: 0, is_deleted: 1 },
+      { uuid: 'a', parent_uuid: 'b', text: 'A', sort_order: 0, is_deleted: 0 },
+      { uuid: 'b', parent_uuid: 'a', text: 'B', sort_order: 0, is_deleted: 0 },
+    ];
+
+    expect(flattenCheckboxTree(rows).map(({ item, depth }) => [item.uuid, depth])).toEqual([
+      ['a', 0],
+      ['b', 0],
+    ]);
   });
 });

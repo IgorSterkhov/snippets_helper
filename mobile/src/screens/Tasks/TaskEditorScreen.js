@@ -15,6 +15,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../../theme/ThemeContext';
 import {
   deleteTask,
+  flattenCheckboxTree,
   getAllTaskCategories,
   getAllTaskStatuses,
   getNextTaskSortOrder,
@@ -28,6 +29,8 @@ import { notifyLocalChange } from '../../sync/syncService';
 import { uuidv4 } from '../../lib/uuid';
 
 const COLORS = [null, '#fff8c5', '#dcffe4', '#ddf4ff', '#fbefff', '#ffeef0'];
+const CHECKBOX_INDENT_STEP = 18;
+const CHECKBOX_MAX_INDENT = 72;
 
 function collectCheckboxSubtree(items, rootUuid) {
   const ids = new Set([rootUuid]);
@@ -153,7 +156,7 @@ export default function TaskEditorScreen({ route, navigation }) {
     ]);
   };
 
-  const visibleCheckboxes = checkboxes.filter((item) => !item.is_deleted);
+  const visibleCheckboxTree = flattenCheckboxTree(checkboxes);
   const visibleLinks = links.filter((item) => !item.is_deleted);
 
   return (
@@ -221,8 +224,14 @@ export default function TaskEditorScreen({ route, navigation }) {
         </Section>
 
         <Section title="Чекбоксы" colors={colors} action="Добавить" onAction={addCheckbox}>
-          {visibleCheckboxes.map((item) => (
-            <View key={item.uuid} style={s.itemRow}>
+          {visibleCheckboxTree.map(({ item, depth }) => (
+            <View
+              key={item.uuid}
+              style={[
+                s.itemRow,
+                depth ? { paddingLeft: Math.min(depth * CHECKBOX_INDENT_STEP, CHECKBOX_MAX_INDENT) } : null,
+              ]}
+            >
               <TouchableOpacity
                 style={[s.checkBox, { borderColor: colors.border }, item.is_checked && { backgroundColor: colors.primary }]}
                 onPress={() => setCheckboxes((prev) => prev.map((c) => c.uuid === item.uuid ? { ...c, is_checked: c.is_checked ? 0 : 1, updated_at: new Date().toISOString() } : c))}
