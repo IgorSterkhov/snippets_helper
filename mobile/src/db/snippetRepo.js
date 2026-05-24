@@ -34,9 +34,20 @@ export async function searchSnippets(q) {
 
 export function buildUpsertSnippet(s) {
   return {
-    sql: `INSERT OR REPLACE INTO shortcuts (uuid, name, value, description, links, obsidian_note, updated_at, is_deleted)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    params: [s.uuid, s.name, s.value, s.description || '', s.links || '[]', s.obsidian_note || '', s.updated_at, s.is_deleted ? 1 : 0],
+    sql: `INSERT OR REPLACE INTO shortcuts (uuid, name, value, description, links, obsidian_note, is_pinned, pinned_sort_order, updated_at, is_deleted)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    params: [
+      s.uuid,
+      s.name,
+      s.value,
+      s.description || '',
+      s.links || '[]',
+      s.obsidian_note || '',
+      s.is_pinned ? 1 : 0,
+      s.pinned_sort_order || 0,
+      s.updated_at,
+      s.is_deleted ? 1 : 0,
+    ],
   };
 }
 

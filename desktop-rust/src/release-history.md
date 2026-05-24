@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## v1.3.31 (2026-05-24)
+
+- **Synced pinned snippets:** desktop Snippets now supports synced snippet
+  pinning with a `Tags / Pinned` top-panel selector, a detail-header pin
+  button, wrapped pinned snippet chips, and drag-and-drop chip reorder.
+- **Pinned notes order:** pinned note chips can now be reordered by
+  drag-and-drop, with the order synced through the API.
+- **Mobile sync compatibility:** mobile local storage now preserves synced
+  snippet pin/order fields and pinned note order during pull/push, without
+  adding mobile UI for pinned snippets.
+
 ## v1.3.30 (2026-05-24)
 
 - **Sync datetime normalization:** desktop now accepts and normalizes API ISO /

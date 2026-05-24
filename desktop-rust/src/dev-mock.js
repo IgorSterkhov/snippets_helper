@@ -56,6 +56,8 @@
         description: 'SQL sample',
         links: [{ id: 1, title: 'PostgreSQL docs', url: 'https://postgresql.org' }],
         obsidian_note: null,
+        is_pinned: false,
+        pinned_sort_order: 0,
         created_at: now(),
         updated_at: now(),
       },
@@ -70,6 +72,8 @@
           { id: 2, title: 'Runbook', url: 'https://wiki.local/runbooks/python' },
         ],
         obsidian_note: 'MockVault/Snippets/python.md',
+        is_pinned: true,
+        pinned_sort_order: 0,
         created_at: now(),
         updated_at: now(),
       },
@@ -81,6 +85,8 @@
         description: '',
         links: [],
         obsidian_note: null,
+        is_pinned: false,
+        pinned_sort_order: 0,
         created_at: now(),
         updated_at: now(),
       },
@@ -92,6 +98,8 @@
         description: '',
         links: [],
         obsidian_note: null,
+        is_pinned: false,
+        pinned_sort_order: 0,
         created_at: now(),
         updated_at: now(),
       },
@@ -103,6 +111,8 @@
         description: '',
         links: [],
         obsidian_note: null,
+        is_pinned: false,
+        pinned_sort_order: 0,
         created_at: now(),
         updated_at: now(),
       },
@@ -114,6 +124,8 @@
         description: '',
         links: [],
         obsidian_note: null,
+        is_pinned: false,
+        pinned_sort_order: 0,
         created_at: now(),
         updated_at: now(),
       },
@@ -125,6 +137,8 @@
         description: '',
         links: [],
         obsidian_note: null,
+        is_pinned: false,
+        pinned_sort_order: 0,
         created_at: now(),
         updated_at: now(),
       },
@@ -136,6 +150,8 @@
         description: '',
         links: [],
         obsidian_note: null,
+        is_pinned: false,
+        pinned_sort_order: 0,
         created_at: now(),
         updated_at: now(),
       },
@@ -149,8 +165,8 @@
     ]);
     storeSet('__seq.note_folders', 3);
     storeSet('notes', [
-      { id: 1, uuid: uuid(), folder_id: 1, title: 'Shopping list', body: '- milk\n- bread', pinned: 0, created_at: now(), updated_at: now() },
-      { id: 2, uuid: uuid(), folder_id: 3, title: 'OTA plan', body: '# Plan\n1. design\n2. build', pinned: 1, created_at: now(), updated_at: now() },
+      { id: 1, uuid: uuid(), folder_id: 1, title: 'Shopping list', content: '- milk\n- bread', is_pinned: false, pinned_sort_order: 0, created_at: now(), updated_at: now() },
+      { id: 2, uuid: uuid(), folder_id: 3, title: 'OTA plan', content: '# Plan\n1. design\n2. build', is_pinned: true, pinned_sort_order: 0, created_at: now(), updated_at: now() },
     ]);
     storeSet('__seq.notes', 2);
 
@@ -313,9 +329,41 @@
       });
     },
     async create_shortcut(args) {
-      return createItem('shortcuts', { uuid: uuid(), ...args, obsidian_note: null });
+      return createItem('shortcuts', {
+        uuid: uuid(),
+        ...args,
+        obsidian_note: args.obsidian_note ?? null,
+        is_pinned: false,
+        pinned_sort_order: 0,
+      });
     },
     async update_shortcut({ id, ...patch }) { return updateItem('shortcuts', id, patch); },
+    async set_shortcut_pinned({ id, isPinned }) {
+      const shortcuts = storeGet('shortcuts', []);
+      const targetId = Number(id);
+      const isPinnedBool = !!isPinned;
+      const maxOrder = shortcuts
+        .filter(s => s.is_pinned && Number(s.id) !== targetId)
+        .reduce((max, s) => Math.max(max, Number(s.pinned_sort_order) || 0), -1);
+      const next = shortcuts.map(s => Number(s.id) === targetId
+        ? {
+            ...s,
+            is_pinned: isPinnedBool,
+            pinned_sort_order: isPinnedBool ? maxOrder + 1 : 0,
+            updated_at: now(),
+          }
+        : s);
+      storeSet('shortcuts', next);
+    },
+    async reorder_pinned_shortcuts({ ids }) {
+      const order = new Map((ids || []).map((id, index) => [Number(id), index]));
+      const shortcuts = storeGet('shortcuts', []).map(s => (
+        order.has(Number(s.id)) && s.is_pinned
+          ? { ...s, pinned_sort_order: order.get(Number(s.id)), updated_at: now() }
+          : s
+      ));
+      storeSet('shortcuts', shortcuts);
+    },
     async delete_shortcut({ id }) { deleteItem('shortcuts', id); },
     async list_snippet_tags() { return storeGet('snippet_tags', []); },
     async create_snippet_tag(args) { return createItem('snippet_tags', { uuid: uuid(), ...args }); },
@@ -372,10 +420,48 @@
       storeSet('notes', notes);
     },
     async list_notes({ folderId }) {
-      return storeGet('notes', []).filter(n => folderId == null || n.folder_id === folderId);
+      return storeGet('notes', [])
+        .filter(n => folderId == null || n.folder_id === folderId)
+        .sort((a, b) =>
+          Number(b.is_pinned) - Number(a.is_pinned)
+          || String(b.updated_at || '').localeCompare(String(a.updated_at || ''))
+        );
     },
-    async create_note(args) { return createItem('notes', { uuid: uuid(), ...args }); },
-    async update_note({ id, ...patch }) { return updateItem('notes', id, patch); },
+    async create_note({ folderId, title, content }) {
+      return createItem('notes', {
+        uuid: uuid(),
+        folder_id: folderId,
+        title,
+        content: content || '',
+        is_pinned: false,
+        pinned_sort_order: 0,
+      });
+    },
+    async update_note({ id, isPinned, ...patch }) {
+      const notes = storeGet('notes', []);
+      const targetId = Number(id);
+      const current = notes.find(n => Number(n.id) === targetId);
+      const nextPinned = isPinned !== undefined ? !!isPinned : !!current?.is_pinned;
+      const maxOrder = notes
+        .filter(n => n.is_pinned && Number(n.id) !== targetId)
+        .reduce((max, n) => Math.max(max, Number(n.pinned_sort_order) || 0), -1);
+      return updateItem('notes', id, {
+        ...patch,
+        is_pinned: nextPinned,
+        pinned_sort_order: nextPinned
+          ? (current?.is_pinned ? (Number(current.pinned_sort_order) || 0) : maxOrder + 1)
+          : 0,
+      });
+    },
+    async reorder_pinned_notes({ ids }) {
+      const order = new Map((ids || []).map((id, index) => [Number(id), index]));
+      const notes = storeGet('notes', []).map(n => (
+        order.has(Number(n.id)) && n.is_pinned
+          ? { ...n, pinned_sort_order: order.get(Number(n.id)), updated_at: now() }
+          : n
+      ));
+      storeSet('notes', notes);
+    },
     async delete_note({ id }) { deleteItem('notes', id); },
 
     // ── Tasks ───────────────────────────────────────────

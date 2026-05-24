@@ -5,6 +5,7 @@ SQLite.enablePromise(true);
 
 let db = null;
 const TASKS_INITIAL_SYNC_BACKFILL_KEY = 'tasks_initial_sync_backfill_v3';
+const PINNED_SNIPPETS_SYNC_BACKFILL_KEY = 'pinned_snippets_sync_backfill_v1';
 
 export function getDB() {
   return db;
@@ -61,6 +62,8 @@ async function setSyncMetaValue(key, value) {
 }
 
 async function runMigrations() {
+  let needsPinnedBackfill = false;
+
   // Migration: note_folders needs integer `id` to resolve parent_id (int) hierarchy
   const hasId = await columnExists(db, 'note_folders', 'id');
   if (!hasId) {
@@ -73,6 +76,50 @@ async function runMigrations() {
     });
     // Trigger full re-sync so that `id` fields are pulled from the server.
     await setLastSyncAt(null).catch(() => {});
+  }
+
+  const hasShortcutPinned = await columnExists(db, 'shortcuts', 'is_pinned');
+  if (!hasShortcutPinned) {
+    await new Promise((resolve) => {
+      db.transaction(
+        (tx) => { tx.executeSql('ALTER TABLE shortcuts ADD COLUMN is_pinned INTEGER DEFAULT 0'); },
+        () => resolve(),
+        () => resolve(),
+      );
+    });
+    needsPinnedBackfill = true;
+  }
+
+  const hasShortcutPinnedOrder = await columnExists(db, 'shortcuts', 'pinned_sort_order');
+  if (!hasShortcutPinnedOrder) {
+    await new Promise((resolve) => {
+      db.transaction(
+        (tx) => { tx.executeSql('ALTER TABLE shortcuts ADD COLUMN pinned_sort_order INTEGER DEFAULT 0'); },
+        () => resolve(),
+        () => resolve(),
+      );
+    });
+    needsPinnedBackfill = true;
+  }
+
+  const hasNotePinnedOrder = await columnExists(db, 'notes', 'pinned_sort_order');
+  if (!hasNotePinnedOrder) {
+    await new Promise((resolve) => {
+      db.transaction(
+        (tx) => { tx.executeSql('ALTER TABLE notes ADD COLUMN pinned_sort_order INTEGER DEFAULT 0'); },
+        () => resolve(),
+        () => resolve(),
+      );
+    });
+    needsPinnedBackfill = true;
+  }
+
+  const hasPinnedBackfill = await syncMetaKeyExists(db, PINNED_SNIPPETS_SYNC_BACKFILL_KEY);
+  if (needsPinnedBackfill || !hasPinnedBackfill) {
+    // Existing installs need one full pull so synced pin/order fields are
+    // fetched for snippets and notes even if their content is otherwise older.
+    await setLastSyncAt(null).catch(() => {});
+    await setSyncMetaValue(PINNED_SNIPPETS_SYNC_BACKFILL_KEY, new Date().toISOString()).catch(() => {});
   }
 
   const hasTaskBackfill = await syncMetaKeyExists(db, TASKS_INITIAL_SYNC_BACKFILL_KEY);
@@ -96,6 +143,8 @@ export async function initDB() {
         description TEXT,
         links TEXT DEFAULT '[]',
         obsidian_note TEXT DEFAULT '',
+        is_pinned INTEGER DEFAULT 0,
+        pinned_sort_order INTEGER DEFAULT 0,
         updated_at TEXT NOT NULL,
         is_deleted INTEGER DEFAULT 0
       )
@@ -134,6 +183,7 @@ export async function initDB() {
         created_at TEXT,
         updated_at TEXT NOT NULL,
         is_pinned INTEGER DEFAULT 0,
+        pinned_sort_order INTEGER DEFAULT 0,
         is_deleted INTEGER DEFAULT 0
       )
     `);

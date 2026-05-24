@@ -29,6 +29,18 @@ pub fn update_shortcut(state: State<DbState>, id: i64, name: String, value: Stri
 }
 
 #[tauri::command]
+pub fn set_shortcut_pinned(state: State<DbState>, id: i64, is_pinned: bool) -> Result<(), String> {
+    let conn = state.lock_recover();
+    queries::set_shortcut_pinned(&conn, id, is_pinned).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn reorder_pinned_shortcuts(state: State<DbState>, ids: Vec<i64>) -> Result<(), String> {
+    let conn = state.lock_recover();
+    queries::reorder_pinned_shortcuts(&conn, &ids).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn open_link_window(app: tauri::AppHandle, url: String, title: String) -> Result<(), String> {
     use tauri::{Manager, WebviewWindowBuilder, WebviewUrl};
 

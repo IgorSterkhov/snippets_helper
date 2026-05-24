@@ -47,6 +47,8 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
             name            TEXT NOT NULL,
             value           TEXT NOT NULL DEFAULT '',
             description     TEXT NOT NULL DEFAULT '',
+            is_pinned       INTEGER NOT NULL DEFAULT 0,
+            pinned_sort_order INTEGER NOT NULL DEFAULT 0,
             uuid            TEXT NOT NULL,
             updated_at      TIMESTAMP NOT NULL,
             sync_status     TEXT NOT NULL DEFAULT 'pending',
@@ -71,6 +73,7 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
             created_at      TIMESTAMP NOT NULL,
             updated_at      TIMESTAMP NOT NULL,
             is_pinned       INTEGER NOT NULL DEFAULT 0,
+            pinned_sort_order INTEGER NOT NULL DEFAULT 0,
             uuid            TEXT NOT NULL,
             sync_status     TEXT NOT NULL DEFAULT 'pending',
             user_id         TEXT NOT NULL DEFAULT ''
@@ -287,6 +290,14 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
 
     // Migration: add obsidian_note column to shortcuts (may already exist)
     conn.execute_batch("ALTER TABLE shortcuts ADD COLUMN obsidian_note TEXT NOT NULL DEFAULT ''")
+        .ok();
+
+    // Migration (v1.3.31): synced pinned snippets and pinned chip ordering.
+    conn.execute_batch("ALTER TABLE shortcuts ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0")
+        .ok();
+    conn.execute_batch("ALTER TABLE shortcuts ADD COLUMN pinned_sort_order INTEGER NOT NULL DEFAULT 0")
+        .ok();
+    conn.execute_batch("ALTER TABLE notes ADD COLUMN pinned_sort_order INTEGER NOT NULL DEFAULT 0")
         .ok();
 
     // Migration: add parent_id column to note_folders (may already exist)

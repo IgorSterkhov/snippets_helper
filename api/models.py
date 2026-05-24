@@ -28,6 +28,8 @@ class Shortcut(Base):
     description: Mapped[str | None] = mapped_column(Text)
     links: Mapped[str | None] = mapped_column(Text, default="[]")
     obsidian_note: Mapped[str | None] = mapped_column(Text, default="")
+    is_pinned: Mapped[int] = mapped_column(Integer, default=0)
+    pinned_sort_order: Mapped[int] = mapped_column(Integer, default=0)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
 
@@ -92,6 +94,7 @@ class Note(Base):
     created_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     is_pinned: Mapped[int] = mapped_column(Integer, default=0)
+    pinned_sort_order: Mapped[int] = mapped_column(Integer, default=0)
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
 
     __table_args__ = (Index("idx_notes_user_updated", "user_id", "updated_at"),)

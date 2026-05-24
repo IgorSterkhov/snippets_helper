@@ -3,6 +3,7 @@ import { showModal } from '../components/modal.js';
 import { showToast } from '../components/toast.js';
 import { marked } from '../lib/marked.min.js';
 import { attachToolbar } from '../components/md-toolbar.js';
+import { installWrappedChipDnd } from '../components/wrapped-chip-dnd.js';
 
 let root = null;
 let folders = [];
@@ -75,7 +76,10 @@ async function loadPinnedNotes() {
     pinnedNotes = results
       .flat()
       .filter(n => n && n.is_pinned)
-      .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''));
+      .sort((a, b) => (
+        (Number(a.pinned_sort_order) || 0) - (Number(b.pinned_sort_order) || 0)
+        || String(a.title || '').localeCompare(String(b.title || ''))
+      ));
   } catch {
     pinnedNotes = [];
   }
@@ -96,16 +100,33 @@ function renderPinnedChips() {
     chip.type = 'button';
     chip.className = 'pinned-chip';
     chip.title = n.title || '(untitled)';
+    chip.dataset.noteId = String(n.id);
     const icon = el('span', { class: 'pinned-chip-icon' });
     icon.textContent = '📌';
     chip.appendChild(icon);
     chip.appendChild(el('span', { text: n.title || '(untitled)', class: 'pinned-chip-label' }));
-    chip.addEventListener('click', () => {
+    chip.addEventListener('click', (event) => {
+      if (chip.dataset.dragSuppressClick === '1') {
+        event.preventDefault();
+        event.stopPropagation();
+        delete chip.dataset.dragSuppressClick;
+        return;
+      }
       if (n.folder_id != null) selectedFolderId = n.folder_id;
       openEditor(n);
     });
     row.appendChild(chip);
   }
+  installWrappedChipDnd(row, {
+    chipSelector: '.pinned-chip',
+    datasetKey: 'noteId',
+    placeholderClass: 'notes-chip-dnd-placeholder',
+    sourceClass: 'notes-chip-dnd-source',
+    onReorder: async (ids) => {
+      await call('reorder_pinned_notes', { ids });
+      await loadPinnedNotes();
+    },
+  });
 }
 
 // ── Folder tree helpers ─────────────────────────────────────────
@@ -735,6 +756,15 @@ function notesCSS() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.notes-chip-dnd-placeholder {
+  display: inline-flex;
+  border: 2px dashed var(--accent);
+  border-radius: 4px;
+  opacity: 0.55;
+  pointer-events: none;
+  flex-shrink: 0;
+  background: rgba(56, 139, 253, 0.05);
 }
 
 .notes-left {

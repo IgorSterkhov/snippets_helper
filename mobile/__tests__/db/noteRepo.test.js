@@ -45,10 +45,20 @@ describe('noteRepo', () => {
     mockExecuteSql.mockImplementation((sql, params, success) => {
       if (success) success(mockTx, { rows: { length: 0 } });
     });
-    await upsertNote({ uuid: 'n1', folder_uuid: 'f1', title: 'Test', content: 'body', created_at: '2026-01-01', updated_at: '2026-01-01', is_pinned: 0, is_deleted: 0 });
+    await upsertNote({
+      uuid: 'n1',
+      folder_uuid: 'f1',
+      title: 'Test',
+      content: 'body',
+      created_at: '2026-01-01',
+      updated_at: '2026-01-01',
+      is_pinned: 1,
+      pinned_sort_order: 3,
+      is_deleted: 0,
+    });
     expect(mockExecuteSql).toHaveBeenCalledWith(
-      expect.stringContaining('INSERT OR REPLACE'),
-      expect.arrayContaining(['n1', 'f1', 'Test']),
+      expect.stringContaining('pinned_sort_order'),
+      expect.arrayContaining(['n1', 'f1', 'Test', 'body', '2026-01-01', '2026-01-01', 1, 3]),
       expect.any(Function),
       expect.any(Function),
     );

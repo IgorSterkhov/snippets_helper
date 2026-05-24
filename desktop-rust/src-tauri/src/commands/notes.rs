@@ -48,6 +48,12 @@ pub fn update_note(state: State<DbState>, id: i64, title: String, content: Strin
 }
 
 #[tauri::command]
+pub fn reorder_pinned_notes(state: State<DbState>, ids: Vec<i64>) -> Result<(), String> {
+    let conn = state.lock_recover();
+    queries::reorder_pinned_notes(&conn, &ids).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn delete_note(state: State<DbState>, id: i64) -> Result<(), String> {
     let conn = state.lock_recover();
     queries::delete_note(&conn, id).map_err(|e| e.to_string())

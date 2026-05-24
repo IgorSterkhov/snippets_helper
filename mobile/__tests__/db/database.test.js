@@ -3,7 +3,11 @@ import { getDB, initDB } from '../../src/db/database';
 jest.mock('react-native-sqlite-storage', () => {
   const mockState = {
     syncMetaKeys: new Set(),
-    noteFoldersHasId: true,
+    tableColumns: {
+      note_folders: new Set(['id']),
+      shortcuts: new Set(['is_pinned', 'pinned_sort_order']),
+      notes: new Set(['pinned_sort_order']),
+    },
   };
 
   const makeRows = (items = []) => ({
@@ -15,8 +19,10 @@ jest.mock('react-native-sqlite-storage', () => {
     let rows = makeRows();
     const text = String(sql);
 
-    if (text.startsWith('PRAGMA table_info(note_folders)')) {
-      rows = mockState.noteFoldersHasId ? makeRows([{ name: 'id' }]) : makeRows();
+    const tableInfoMatch = text.match(/^PRAGMA table_info\(([^)]+)\)/);
+    if (tableInfoMatch) {
+      const columns = mockState.tableColumns[tableInfoMatch[1]] || new Set();
+      rows = makeRows([...columns].map(name => ({ name })));
     }
 
     if (text === 'SELECT value FROM sync_meta WHERE key = ?') {
@@ -45,7 +51,11 @@ describe('database', () => {
     const SQLite = require('react-native-sqlite-storage');
     jest.clearAllMocks();
     SQLite.__mockState.syncMetaKeys = new Set();
-    SQLite.__mockState.noteFoldersHasId = true;
+    SQLite.__mockState.tableColumns = {
+      note_folders: new Set(['id']),
+      shortcuts: new Set(['is_pinned', 'pinned_sort_order']),
+      notes: new Set(['pinned_sort_order']),
+    };
   });
 
   test('initDB opens database and creates tables', async () => {
@@ -88,7 +98,10 @@ describe('database', () => {
 
   test('initDB keeps sync cursor when task backfill marker exists', async () => {
     const SQLite = require('react-native-sqlite-storage');
-    SQLite.__mockState.syncMetaKeys = new Set(['tasks_initial_sync_backfill_v3']);
+    SQLite.__mockState.syncMetaKeys = new Set([
+      'tasks_initial_sync_backfill_v3',
+      'pinned_snippets_sync_backfill_v1',
+    ]);
 
     await initDB();
 
@@ -98,6 +111,43 @@ describe('database', () => {
       expect.any(Function),
       expect.any(Function),
     );
+  });
+
+  test('initDB resets sync cursor when pinned snippets backfill marker is missing', async () => {
+    const SQLite = require('react-native-sqlite-storage');
+    SQLite.__mockState.syncMetaKeys = new Set(['tasks_initial_sync_backfill_v3']);
+
+    await initDB();
+
+    expect(SQLite.__mockExecuteSql).toHaveBeenCalledWith(
+      'INSERT OR REPLACE INTO sync_meta (key, value) VALUES (?, ?)',
+      ['last_sync_at', null],
+      expect.any(Function),
+      expect.any(Function),
+    );
+    expect(SQLite.__mockExecuteSql).toHaveBeenCalledWith(
+      'INSERT OR REPLACE INTO sync_meta (key, value) VALUES (?, ?)',
+      ['pinned_snippets_sync_backfill_v1', expect.any(String)],
+      expect.any(Function),
+      expect.any(Function),
+    );
+  });
+
+  test('initDB adds pinned snippet and note columns for old databases', async () => {
+    const SQLite = require('react-native-sqlite-storage');
+    SQLite.__mockState.syncMetaKeys = new Set(['tasks_initial_sync_backfill_v3']);
+    SQLite.__mockState.tableColumns = {
+      note_folders: new Set(['id']),
+      shortcuts: new Set(),
+      notes: new Set(),
+    };
+
+    await initDB();
+
+    const sql = SQLite.__mockExecuteSql.mock.calls.map(call => call[0]);
+    expect(sql).toContain('ALTER TABLE shortcuts ADD COLUMN is_pinned INTEGER DEFAULT 0');
+    expect(sql).toContain('ALTER TABLE shortcuts ADD COLUMN pinned_sort_order INTEGER DEFAULT 0');
+    expect(sql).toContain('ALTER TABLE notes ADD COLUMN pinned_sort_order INTEGER DEFAULT 0');
   });
 
   test('initDB resets sync cursor when only the old task backfill marker exists', async () => {

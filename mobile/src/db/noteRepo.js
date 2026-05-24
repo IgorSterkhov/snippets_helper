@@ -75,9 +75,19 @@ export async function searchNotes(q) {
 
 export function buildUpsertNote(n) {
   return {
-    sql: `INSERT OR REPLACE INTO notes (uuid, folder_uuid, title, content, created_at, updated_at, is_pinned, is_deleted)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    params: [n.uuid, n.folder_uuid || null, n.title, n.content || '', n.created_at || new Date().toISOString(), n.updated_at, n.is_pinned || 0, n.is_deleted ? 1 : 0],
+    sql: `INSERT OR REPLACE INTO notes (uuid, folder_uuid, title, content, created_at, updated_at, is_pinned, pinned_sort_order, is_deleted)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    params: [
+      n.uuid,
+      n.folder_uuid || null,
+      n.title,
+      n.content || '',
+      n.created_at || new Date().toISOString(),
+      n.updated_at,
+      n.is_pinned ? 1 : 0,
+      n.pinned_sort_order || 0,
+      n.is_deleted ? 1 : 0,
+    ],
   };
 }
 

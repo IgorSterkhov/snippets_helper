@@ -4,6 +4,7 @@ import { showModal } from '../components/modal.js';
 import { showToast } from '../components/toast.js';
 import { marked } from '../lib/marked.min.js';
 import { attachToolbar } from '../components/md-toolbar.js';
+import { installWrappedChipDnd } from '../components/wrapped-chip-dnd.js';
 
 let shortcuts = [];
 let allShortcuts = [];
@@ -22,14 +23,19 @@ let selectedTagId = null;
 let tagPanelEl = null;
 let searchInputEl = null;
 let sortButtonEl = null;
+let panelButtonEl = null;
 let sortMode = 'name';
 let sortMenuDocClick = null;
+let panelMode = 'tags';
+let panelMenuDocClick = null;
 const KEY_CLOUD_CACHE_KEY = 'snippet_key_cloud_cache_v4';
 const KEY_CLOUD_CACHE_SCHEMA = 4;
 const KEY_CLOUD_ALGORITHM_KEY = 'snippet_key_cloud_algorithm';
 const KEY_CLOUD_ALGORITHMS = new Set(['dense', 'fast']);
 const SNIPPETS_SORT_SETTING_KEY = 'snippets_sort_mode';
 const SNIPPET_SORT_MODES = new Set(['name', 'modified']);
+const SNIPPETS_PANEL_SETTING_KEY = 'snippets_panel_mode';
+const SNIPPET_PANEL_MODES = new Set(['tags', 'pinned']);
 let keyCloudAlgorithm = readKeyCloudAlgorithm();
 let keyCloudCache = null;
 let keyCloudBuildPromise = null;
@@ -52,6 +58,7 @@ export async function init(container) {
     const eh = await call('get_setting', { key: 'snippet_expand_multiplier' });
     if (eh) expandHeight = parseInt(eh) || 4;
     sortMode = normalizeSnippetSortMode(await call('get_setting', { key: SNIPPETS_SORT_SETTING_KEY }));
+    panelMode = normalizeSnippetPanelMode(await call('get_setting', { key: SNIPPETS_PANEL_SETTING_KEY }));
   } catch {}
 
   // Header row: search + add button (fixed)
@@ -73,6 +80,16 @@ export async function init(container) {
   });
   updateSnippetSortButton();
   header.appendChild(sortButtonEl);
+
+  panelButtonEl = document.createElement('button');
+  panelButtonEl.type = 'button';
+  panelButtonEl.className = 'snippet-panel-button';
+  panelButtonEl.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleSnippetPanelMenu(panelButtonEl);
+  });
+  updateSnippetPanelButton();
+  header.appendChild(panelButtonEl);
 
   const keyCloudBtn = document.createElement('button');
   keyCloudBtn.textContent = 'Key Cloud';
@@ -146,9 +163,9 @@ async function loadShortcuts() {
     try {
       tags = await call('list_snippet_tags');
     } catch { tags = []; }
-    renderTagPanel();
 
     allShortcuts = await call('list_shortcuts');
+    renderSnippetTopPanel();
     refreshKeyCloudCacheInBackground();
 
     // Load shortcuts based on tag + search
@@ -228,6 +245,10 @@ function normalizeSnippetSortMode(value) {
   return SNIPPET_SORT_MODES.has(value) ? value : 'name';
 }
 
+function normalizeSnippetPanelMode(value) {
+  return SNIPPET_PANEL_MODES.has(value) ? value : 'tags';
+}
+
 function getShortcutKey(shortcut) {
   if (!shortcut) return null;
   if (shortcut.id !== undefined && shortcut.id !== null) return String(shortcut.id);
@@ -278,6 +299,10 @@ function snippetSortLabel(mode = sortMode) {
   return mode === 'modified' ? 'Modified' : 'A-Z';
 }
 
+function snippetPanelLabel(mode = panelMode) {
+  return mode === 'pinned' ? 'Pinned' : 'Tags';
+}
+
 function updateSnippetSortButton() {
   if (!sortButtonEl) return;
   sortButtonEl.textContent = `${snippetSortLabel()} ▾`;
@@ -306,6 +331,7 @@ function toggleSnippetSortMenu(anchor) {
 }
 
 function openSnippetSortMenu(anchor) {
+  closeSnippetPanelMenu();
   closeSnippetSortMenu();
   const menu = document.createElement('div');
   menu.className = 'snippet-sort-menu';
@@ -370,6 +396,99 @@ async function setSnippetSortMode(mode) {
     await call('set_setting', { key: SNIPPETS_SORT_SETTING_KEY, value: sortMode });
   } catch (err) {
     showToast('Failed to save snippet sort mode: ' + err, 'error');
+  }
+}
+
+function updateSnippetPanelButton() {
+  if (!panelButtonEl) return;
+  panelButtonEl.textContent = `${snippetPanelLabel()} ▾`;
+  panelButtonEl.title = panelMode === 'pinned'
+    ? 'Show pinned snippets'
+    : 'Show snippet tags';
+  panelButtonEl.dataset.panelMode = panelMode;
+}
+
+function closeSnippetPanelMenu() {
+  for (const menu of document.querySelectorAll('.snippet-panel-menu')) {
+    menu.remove();
+  }
+  if (panelMenuDocClick) {
+    document.removeEventListener('click', panelMenuDocClick);
+    panelMenuDocClick = null;
+  }
+}
+
+function toggleSnippetPanelMenu(anchor) {
+  if (document.querySelector('.snippet-panel-menu')) {
+    closeSnippetPanelMenu();
+    return;
+  }
+  openSnippetPanelMenu(anchor);
+}
+
+function openSnippetPanelMenu(anchor) {
+  closeSnippetSortMenu();
+  closeSnippetPanelMenu();
+  const menu = document.createElement('div');
+  menu.className = 'snippet-sort-menu snippet-panel-menu';
+  const rect = anchor.getBoundingClientRect();
+  menu.style.left = Math.max(8, rect.left) + 'px';
+  menu.style.top = (rect.bottom + 4) + 'px';
+
+  const options = [
+    { mode: 'tags', label: 'Tags', hint: 'Tag filters' },
+    { mode: 'pinned', label: 'Pinned', hint: 'Pinned snippets' },
+  ];
+  for (const option of options) {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'snippet-sort-menu-item' + (panelMode === option.mode ? ' active' : '');
+    item.dataset.panelMode = option.mode;
+
+    const check = document.createElement('span');
+    check.className = 'snippet-sort-menu-check';
+    check.textContent = panelMode === option.mode ? '✓' : '';
+    item.appendChild(check);
+
+    const label = document.createElement('span');
+    label.className = 'snippet-sort-menu-label';
+    label.textContent = option.label;
+    item.appendChild(label);
+
+    const hint = document.createElement('span');
+    hint.className = 'snippet-sort-menu-hint';
+    hint.textContent = option.hint;
+    item.appendChild(hint);
+
+    item.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      closeSnippetPanelMenu();
+      await setSnippetPanelMode(option.mode);
+    });
+    menu.appendChild(item);
+  }
+
+  document.body.appendChild(menu);
+  panelMenuDocClick = (event) => {
+    if (!menu.contains(event.target) && event.target !== anchor) {
+      closeSnippetPanelMenu();
+    }
+  };
+  setTimeout(() => document.addEventListener('click', panelMenuDocClick), 0);
+}
+
+async function setSnippetPanelMode(mode) {
+  const nextMode = normalizeSnippetPanelMode(mode);
+  if (nextMode === panelMode) return;
+
+  panelMode = nextMode;
+  updateSnippetPanelButton();
+  renderSnippetTopPanel();
+
+  try {
+    await call('set_setting', { key: SNIPPETS_PANEL_SETTING_KEY, value: panelMode });
+  } catch (err) {
+    showToast('Failed to save snippet panel mode: ' + err, 'error');
   }
 }
 
@@ -830,6 +949,17 @@ function renderDetail() {
   const actions = document.createElement('div');
   actions.style.cssText = 'display:flex;gap:6px;flex-shrink:0;margin-left:auto';
 
+  const pinBtn = document.createElement('button');
+  pinBtn.type = 'button';
+  pinBtn.className = 'snippet-pin-button';
+  pinBtn.textContent = shortcut.is_pinned ? 'Pinned' : 'Pin';
+  pinBtn.title = shortcut.is_pinned ? 'Unpin snippet' : 'Pin snippet';
+  pinBtn.dataset.pinned = shortcut.is_pinned ? '1' : '0';
+  pinBtn.style.cssText = shortcut.is_pinned
+    ? 'padding:4px 10px;font-size:11px;font-weight:600;background:var(--accent);color:white;border:1px solid var(--accent);border-radius:4px;cursor:pointer'
+    : 'padding:4px 10px;font-size:11px;font-weight:500;background:transparent;color:var(--text-muted);border:1px solid var(--border);border-radius:4px;cursor:pointer';
+  pinBtn.addEventListener('click', () => toggleShortcutPinned(shortcut));
+
   const copyBtn = document.createElement('button');
   copyBtn.textContent = 'Copy';
   copyBtn.style.cssText = 'padding:4px 10px;font-size:11px;font-weight:500;background:var(--accent);color:white;border:none;border-radius:4px;cursor:pointer';
@@ -845,6 +975,7 @@ function renderDetail() {
   delBtn.style.cssText = 'padding:4px 10px;font-size:11px;font-weight:500;background:transparent;color:var(--danger);border:1px solid var(--border);border-radius:4px;cursor:pointer';
   delBtn.addEventListener('click', () => confirmDelete(shortcut));
 
+  actions.appendChild(pinBtn);
   actions.appendChild(copyBtn);
   actions.appendChild(editBtn);
   actions.appendChild(delBtn);
@@ -1283,9 +1414,92 @@ async function openLinkNoteModal(shortcut) {
   }).catch(() => {});
 }
 
+function renderSnippetTopPanel() {
+  if (panelMode === 'pinned') {
+    renderPinnedSnippetPanel();
+  } else {
+    renderTagPanel();
+  }
+}
+
+function renderPinnedSnippetPanel() {
+  if (!tagPanelEl) return;
+  tagPanelEl.innerHTML = '';
+  tagPanelEl.className = 'snippet-pinned-panel';
+
+  const pinned = allShortcuts
+    .filter(shortcut => shortcut && shortcut.is_pinned)
+    .sort((a, b) => (
+      (Number(a.pinned_sort_order) || 0) - (Number(b.pinned_sort_order) || 0)
+      || compareShortcutNames(a, b)
+    ));
+
+  if (!pinned.length) {
+    const empty = document.createElement('span');
+    empty.className = 'snippet-pinned-empty';
+    empty.textContent = 'No pinned snippets';
+    tagPanelEl.appendChild(empty);
+    return;
+  }
+
+  for (const shortcut of pinned) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'snippet-pinned-chip';
+    chip.title = shortcut.name || '(untitled)';
+    chip.dataset.snippetId = String(shortcut.id);
+
+    const mark = document.createElement('span');
+    mark.className = 'snippet-pinned-chip-mark';
+    mark.textContent = '◆';
+    chip.appendChild(mark);
+
+    const label = document.createElement('span');
+    label.className = 'snippet-pinned-chip-label';
+    label.textContent = shortcut.name || '(untitled)';
+    chip.appendChild(label);
+
+    chip.addEventListener('click', (event) => {
+      if (chip.dataset.dragSuppressClick === '1') {
+        event.preventDefault();
+        event.stopPropagation();
+        delete chip.dataset.dragSuppressClick;
+        return;
+      }
+      openPinnedSnippet(shortcut.id);
+    });
+    tagPanelEl.appendChild(chip);
+  }
+
+  installWrappedChipDnd(tagPanelEl, {
+    chipSelector: '.snippet-pinned-chip',
+    datasetKey: 'snippetId',
+    placeholderClass: 'snippet-chip-dnd-placeholder',
+    sourceClass: 'snippet-chip-dnd-source',
+    onReorder: async (ids) => {
+      await call('reorder_pinned_shortcuts', { ids });
+      await loadShortcuts();
+    },
+  });
+}
+
+async function openPinnedSnippet(shortcutId) {
+  const shortcut = allShortcuts.find(s => Number(s.id) === Number(shortcutId));
+  if (!shortcut) return;
+  selectedTagId = null;
+  currentQuery = '';
+  if (searchInputEl) searchInputEl.value = '';
+  shortcuts = allShortcuts;
+  applyShortcutSort(getShortcutKey(shortcut));
+  detailTab = 'code';
+  renderList();
+  renderDetail();
+}
+
 function renderTagPanel() {
   if (!tagPanelEl) return;
   tagPanelEl.innerHTML = '';
+  tagPanelEl.className = '';
 
   if (tags.length === 0 && selectedTagId === null) {
     // Show only the "+" button when no tags exist
@@ -1957,6 +2171,17 @@ async function copyAndHide(text) {
     await call('hide_and_sync');
   } catch (err) {
     showToast('Failed to copy: ' + err, 'error');
+  }
+}
+
+async function toggleShortcutPinned(shortcut) {
+  if (!shortcut?.id) return;
+  try {
+    await call('set_shortcut_pinned', { id: shortcut.id, isPinned: !shortcut.is_pinned });
+    showToast(shortcut.is_pinned ? 'Snippet unpinned' : 'Snippet pinned', 'success');
+    await loadShortcuts();
+  } catch (err) {
+    showToast('Failed to update pin: ' + err, 'error');
   }
 }
 

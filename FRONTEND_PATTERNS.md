@@ -39,7 +39,7 @@ the relevant section after implementation.
 
 ## §2 Pointer-based DnD with slot placeholder + FLIP
 
-**Used in:** Exec tab (command cards, already implemented), Tasks tab (checkbox rows, pinned chips)
+**Used in:** Exec tab (command cards, already implemented), Tasks tab (checkbox rows, pinned chips), Snippets pinned chips, Notes pinned chips
 
 **Pattern:**
 1. Use Pointer Events API, NOT HTML5 Drag and Drop (broken in Tauri WebView2).
@@ -89,6 +89,11 @@ slot placeholder and compute the target in two dimensions:
   DOM peer or append at the end;
 - animate both X and Y deltas in the FLIP step with
   `transform: translate(dx, dy)`.
+
+For simple wrapped chip strips outside Tasks, prefer
+`desktop-rust/src/components/wrapped-chip-dnd.js` so click suppression,
+same-size placeholders, two-dimensional target calculation, and FLIP cleanup
+stay consistent across tabs.
 
 ---
 

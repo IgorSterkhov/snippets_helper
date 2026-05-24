@@ -476,6 +476,132 @@ async def run_tests():
         await wait_until(cdp, "!document.getElementById('rs-fullscreen-overlay')", timeout=3)
     await check('T14 expand/collapse file card', t14_expand_collapse_file_card)
 
+    # ── T14b: Snippets pinned panel + rename chip ───────────
+    async def t14b_snippets_pinned_panel_and_rename():
+        await open_shortcuts_tab()
+        await wait_until(cdp, "!!document.querySelector('#panel-shortcuts .snippet-panel-button')", timeout=4)
+        await cdp.eval("document.querySelector('#panel-shortcuts .snippet-panel-button').click()")
+        await wait_until(cdp, "!!document.querySelector('.snippet-panel-menu')", timeout=2)
+        await cdp.eval(
+            "[...document.querySelectorAll('.snippet-panel-menu .snippet-sort-menu-item')]"
+            ".find(x => x.textContent.includes('Pinned')).click()"
+        )
+        await wait_until(
+            cdp,
+            "document.querySelector('#panel-shortcuts .snippet-panel-button')?.textContent.includes('Pinned')",
+            timeout=2,
+        )
+        await cdp.eval("[...document.querySelectorAll('#panel-shortcuts .shortcut-list-name')].find(x => x.textContent.includes('SELECT all')).click()")
+        await wait_until(cdp, "!!document.querySelector('#panel-shortcuts .snippet-pin-button')", timeout=3)
+        await cdp.eval("document.querySelector('#panel-shortcuts .snippet-pin-button').click()")
+        await wait_until(
+            cdp,
+            "[...document.querySelectorAll('#panel-shortcuts .snippet-pinned-chip-label')]"
+            ".some(x => x.textContent.includes('SELECT all'))",
+            timeout=3,
+        )
+        await cdp.eval("[...document.querySelectorAll('#panel-shortcuts button')].find(x => x.textContent === 'Edit').click()")
+        await wait_until(cdp, "!!document.querySelector('.modal-overlay .modal-body input[type=\"text\"]')", timeout=3)
+        await cdp.eval("""(() => {
+          const input = document.querySelector('.modal-overlay .modal-body input[type="text"]');
+          input.value = 'SELECT all pinned renamed';
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          [...document.querySelectorAll('.modal-overlay .modal-actions button')].pop().click();
+        })()""")
+        await wait_until(
+            cdp,
+            "[...document.querySelectorAll('#panel-shortcuts .snippet-pinned-chip-label')]"
+            ".some(x => x.textContent.includes('SELECT all pinned renamed'))",
+            timeout=4,
+        )
+        await cdp.eval("""(() => {
+          const items = JSON.parse(localStorage.getItem('mock.shortcuts') || '[]');
+          for (const item of items) {
+            if (item.name === 'SELECT all pinned renamed') {
+              item.name = 'SELECT all';
+              item.is_pinned = false;
+              item.pinned_sort_order = 0;
+              item.updated_at = new Date().toISOString();
+            }
+          }
+          localStorage.setItem('mock.shortcuts', JSON.stringify(items));
+        })()""")
+        await cdp.eval("document.querySelector('#panel-shortcuts .snippet-panel-button').click()")
+        await wait_until(cdp, "!!document.querySelector('.snippet-panel-menu')", timeout=2)
+        await cdp.eval(
+            "[...document.querySelectorAll('.snippet-panel-menu .snippet-sort-menu-item')]"
+            ".find(x => x.textContent.includes('Tags')).click()"
+        )
+        await wait_until(
+            cdp,
+            "document.querySelector('#panel-shortcuts .snippet-panel-button')?.textContent.includes('Tags')",
+            timeout=2,
+        )
+    await check('T14b Snippets pinned panel + rename chip', t14b_snippets_pinned_panel_and_rename)
+
+    # ── T14c: Notes pinned chips drag reorder ────────────────
+    async def t14c_notes_pinned_chip_drag_reorder():
+        await cdp.eval("""(() => {
+          const stamp = new Date().toISOString();
+          localStorage.setItem('mock.notes', JSON.stringify([
+            { id: 1, uuid: 'note-a', folder_id: 1, title: 'Pinned note A', content: 'A', is_pinned: true, pinned_sort_order: 0, created_at: stamp, updated_at: stamp },
+            { id: 2, uuid: 'note-b', folder_id: 1, title: 'Pinned note B', content: 'B', is_pinned: true, pinned_sort_order: 1, created_at: stamp, updated_at: stamp }
+          ]));
+        })()""")
+        await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"notes\"]').click()")
+        await wait_until(cdp, "document.querySelectorAll('#pinned-chips .pinned-chip').length >= 2", timeout=5)
+        before = await cdp.eval(
+            "[...document.querySelectorAll('#pinned-chips .pinned-chip-label')]"
+            ".map(x => x.textContent.trim())"
+        )
+        assert before == ['Pinned note A', 'Pinned note B'], f'initial notes chips: {before!r}'
+
+        await cdp.eval("""(async () => {
+          const chips = [...document.querySelectorAll('#pinned-chips .pinned-chip')];
+          const from = chips[1];
+          const to = chips[0];
+          const fr = from.getBoundingClientRect();
+          const tr = to.getBoundingClientRect();
+          const sx = fr.left + fr.width / 2;
+          const sy = fr.top + fr.height / 2;
+          const tx = tr.left + 4;
+          const ty = tr.top + tr.height / 2;
+          const emit = (target, type, x, y, buttons = 1) => {
+            target.dispatchEvent(new PointerEvent(type, {
+              bubbles: true,
+              cancelable: true,
+              pointerId: 14,
+              pointerType: 'mouse',
+              button: 0,
+              buttons,
+              clientX: x,
+              clientY: y,
+            }));
+          };
+          emit(from, 'pointerdown', sx, sy);
+          await new Promise(resolve => setTimeout(resolve, 30));
+          emit(document, 'pointermove', sx - 16, sy);
+          await new Promise(resolve => setTimeout(resolve, 30));
+          emit(document, 'pointermove', tx, ty);
+          await new Promise(resolve => setTimeout(resolve, 30));
+          emit(document, 'pointerup', tx, ty, 0);
+        })()""")
+
+        await wait_until(
+            cdp,
+            "[...document.querySelectorAll('#pinned-chips .pinned-chip-label')]"
+            "[0]?.textContent.trim() === 'Pinned note B'",
+            timeout=3,
+        )
+        order = await cdp.eval("""(() => {
+          return JSON.parse(localStorage.getItem('mock.notes') || '[]')
+            .filter(n => n.is_pinned)
+            .sort((a, b) => a.pinned_sort_order - b.pinned_sort_order)
+            .map(n => n.title);
+        })()""")
+        assert order == ['Pinned note B', 'Pinned note A'], f'stored order: {order!r}'
+    await check('T14c Notes pinned chips drag reorder', t14c_notes_pinned_chip_drag_reorder)
+
     # ── T15: Tasks Pin updates pinned chip strip ─────────────
     async def t15_tasks_pin_updates_strip():
         await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"tasks\"]').click()")

@@ -32,10 +32,21 @@ describe('snippetRepo', () => {
     mockExecuteSql.mockImplementation((sql, params, success) => {
       if (success) success(mockTx, { rows: { length: 0 } });
     });
-    await upsertSnippet({ uuid: 'abc', name: 'test', value: 'val', description: '', links: '[]', obsidian_note: '', updated_at: '2026-01-01', is_deleted: 0 });
+    await upsertSnippet({
+      uuid: 'abc',
+      name: 'test',
+      value: 'val',
+      description: '',
+      links: '[]',
+      obsidian_note: '',
+      is_pinned: 1,
+      pinned_sort_order: 4,
+      updated_at: '2026-01-01',
+      is_deleted: 0,
+    });
     expect(mockExecuteSql).toHaveBeenCalledWith(
-      expect.stringContaining('INSERT OR REPLACE'),
-      expect.arrayContaining(['abc', 'test', 'val']),
+      expect.stringContaining('is_pinned, pinned_sort_order'),
+      expect.arrayContaining(['abc', 'test', 'val', '', '[]', '', 1, 4]),
       expect.any(Function),
       expect.any(Function),
     );

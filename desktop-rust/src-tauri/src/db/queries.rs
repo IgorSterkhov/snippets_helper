@@ -50,11 +50,11 @@ fn is_datetime_column(col: &str) -> bool {
 
 pub fn list_shortcuts(conn: &Connection) -> Result<Vec<Shortcut>> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, value, description, links, obsidian_note, uuid, updated_at, sync_status, user_id
+        "SELECT id, name, value, description, links, obsidian_note, is_pinned, pinned_sort_order, uuid, updated_at, sync_status, user_id
          FROM shortcuts WHERE sync_status != 'deleted' ORDER BY name",
     )?;
     let rows = stmt.query_map([], |row| {
-        let updated_at_str: String = row.get(7)?;
+        let updated_at_str: String = row.get(9)?;
         Ok(Shortcut {
             id: row.get(0)?,
             name: row.get(1)?,
@@ -62,10 +62,12 @@ pub fn list_shortcuts(conn: &Connection) -> Result<Vec<Shortcut>> {
             description: row.get(3)?,
             links: row.get(4)?,
             obsidian_note: row.get(5)?,
-            uuid: row.get(6)?,
+            is_pinned: row.get(6)?,
+            pinned_sort_order: row.get(7)?,
+            uuid: row.get(8)?,
             updated_at: parse_dt(&updated_at_str),
-            sync_status: row.get(8)?,
-            user_id: row.get(9)?,
+            sync_status: row.get(10)?,
+            user_id: row.get(11)?,
         })
     })?;
     rows.collect()
@@ -74,14 +76,14 @@ pub fn list_shortcuts(conn: &Connection) -> Result<Vec<Shortcut>> {
 pub fn search_shortcuts(conn: &Connection, query: &str) -> Result<Vec<Shortcut>> {
     let pattern = format!("%{}%", query);
     let mut stmt = conn.prepare(
-        "SELECT id, name, value, description, links, obsidian_note, uuid, updated_at, sync_status, user_id
+        "SELECT id, name, value, description, links, obsidian_note, is_pinned, pinned_sort_order, uuid, updated_at, sync_status, user_id
          FROM shortcuts
          WHERE sync_status != 'deleted'
            AND (name LIKE ?1 OR value LIKE ?1 OR description LIKE ?1)
          ORDER BY name",
     )?;
     let rows = stmt.query_map(params![pattern], |row| {
-        let updated_at_str: String = row.get(7)?;
+        let updated_at_str: String = row.get(9)?;
         Ok(Shortcut {
             id: row.get(0)?,
             name: row.get(1)?,
@@ -89,10 +91,12 @@ pub fn search_shortcuts(conn: &Connection, query: &str) -> Result<Vec<Shortcut>>
             description: row.get(3)?,
             links: row.get(4)?,
             obsidian_note: row.get(5)?,
-            uuid: row.get(6)?,
+            is_pinned: row.get(6)?,
+            pinned_sort_order: row.get(7)?,
+            uuid: row.get(8)?,
             updated_at: parse_dt(&updated_at_str),
-            sync_status: row.get(8)?,
-            user_id: row.get(9)?,
+            sync_status: row.get(10)?,
+            user_id: row.get(11)?,
         })
     })?;
     rows.collect()
@@ -109,8 +113,8 @@ pub fn create_shortcut(
     let uuid = Uuid::new_v4().to_string();
     let now = now_str();
     conn.execute(
-        "INSERT INTO shortcuts (name, value, description, links, obsidian_note, uuid, updated_at, sync_status, user_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'pending', '')",
+        "INSERT INTO shortcuts (name, value, description, links, obsidian_note, is_pinned, pinned_sort_order, uuid, updated_at, sync_status, user_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, ?6, ?7, 'pending', '')",
         params![name, value, description, links, obsidian_note, uuid, now],
     )?;
     let id = conn.last_insert_rowid();
@@ -121,6 +125,8 @@ pub fn create_shortcut(
         description: description.to_string(),
         links: links.to_string(),
         obsidian_note: obsidian_note.to_string(),
+        is_pinned: false,
+        pinned_sort_order: 0,
         uuid,
         updated_at: parse_dt(&now),
         sync_status: "pending".to_string(),
@@ -152,6 +158,52 @@ pub fn update_shortcut_obsidian_note(conn: &Connection, id: i64, note_path: &str
         "UPDATE shortcuts SET obsidian_note = ?1, updated_at = ?2, sync_status = 'pending' WHERE id = ?3",
         params![note_path, now, id],
     )?;
+    Ok(())
+}
+
+pub fn set_shortcut_pinned(conn: &Connection, id: i64, is_pinned: bool) -> Result<()> {
+    let now = now_str();
+    let current: Option<(bool, i32)> = conn
+        .query_row(
+            "SELECT is_pinned, pinned_sort_order FROM shortcuts WHERE id = ?1",
+            params![id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .ok();
+    let pinned_sort_order: i32 = if is_pinned {
+        if let Some((true, current_order)) = current {
+            current_order
+        } else {
+            conn.query_row(
+                "SELECT COALESCE(MAX(pinned_sort_order), -1) + 1 FROM shortcuts WHERE is_pinned = 1 AND sync_status != 'deleted'",
+                [],
+                |row| row.get(0),
+            )?
+        }
+    } else {
+        0
+    };
+    conn.execute(
+        "UPDATE shortcuts
+         SET is_pinned = ?1, pinned_sort_order = ?2, updated_at = ?3, sync_status = 'pending'
+         WHERE id = ?4",
+        params![is_pinned, pinned_sort_order, now, id],
+    )?;
+    Ok(())
+}
+
+pub fn reorder_pinned_shortcuts(conn: &Connection, ids_in_order: &[i64]) -> Result<()> {
+    let now = now_str();
+    let tx = conn.unchecked_transaction()?;
+    for (idx, id) in ids_in_order.iter().enumerate() {
+        tx.execute(
+            "UPDATE shortcuts
+             SET pinned_sort_order = ?1, updated_at = ?2, sync_status = 'pending'
+             WHERE id = ?3 AND is_pinned = 1 AND sync_status != 'deleted'",
+            params![idx as i32, now, id],
+        )?;
+    }
+    tx.commit()?;
     Ok(())
 }
 
@@ -361,7 +413,7 @@ pub fn delete_note_folder(conn: &Connection, id: i64) -> Result<()> {
 
 pub fn list_notes(conn: &Connection, folder_id: i64) -> Result<Vec<Note>> {
     let mut stmt = conn.prepare(
-        "SELECT id, folder_id, title, content, created_at, updated_at, is_pinned, uuid, sync_status, user_id
+        "SELECT id, folder_id, title, content, created_at, updated_at, is_pinned, pinned_sort_order, uuid, sync_status, user_id
          FROM notes WHERE folder_id = ?1 AND sync_status != 'deleted'
          ORDER BY is_pinned DESC, updated_at DESC",
     )?;
@@ -376,9 +428,10 @@ pub fn list_notes(conn: &Connection, folder_id: i64) -> Result<Vec<Note>> {
             created_at: parse_dt(&created_str),
             updated_at: parse_dt(&updated_str),
             is_pinned: row.get(6)?,
-            uuid: row.get(7)?,
-            sync_status: row.get(8)?,
-            user_id: row.get(9)?,
+            pinned_sort_order: row.get(7)?,
+            uuid: row.get(8)?,
+            sync_status: row.get(9)?,
+            user_id: row.get(10)?,
         })
     })?;
     rows.collect()
@@ -388,8 +441,8 @@ pub fn create_note(conn: &Connection, folder_id: i64, title: &str, content: &str
     let uuid = Uuid::new_v4().to_string();
     let now = now_str();
     conn.execute(
-        "INSERT INTO notes (folder_id, title, content, created_at, updated_at, is_pinned, uuid, sync_status, user_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, 'pending', '')",
+        "INSERT INTO notes (folder_id, title, content, created_at, updated_at, is_pinned, pinned_sort_order, uuid, sync_status, user_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, ?6, 'pending', '')",
         params![folder_id, title, content, now, now, uuid],
     )?;
     let id = conn.last_insert_rowid();
@@ -402,6 +455,7 @@ pub fn create_note(conn: &Connection, folder_id: i64, title: &str, content: &str
         created_at: dt,
         updated_at: dt,
         is_pinned: false,
+        pinned_sort_order: 0,
         uuid,
         sync_status: "pending".to_string(),
         user_id: String::new(),
@@ -416,11 +470,46 @@ pub fn update_note(
     is_pinned: bool,
 ) -> Result<()> {
     let now = now_str();
+    let current: Option<(bool, i32)> = conn
+        .query_row(
+            "SELECT is_pinned, pinned_sort_order FROM notes WHERE id = ?1",
+            params![id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .ok();
+    let pinned_sort_order: i32 = if is_pinned {
+        if let Some((true, current_order)) = current {
+            current_order
+        } else {
+            conn.query_row(
+                "SELECT COALESCE(MAX(pinned_sort_order), -1) + 1 FROM notes WHERE is_pinned = 1 AND sync_status != 'deleted'",
+                [],
+                |row| row.get(0),
+            )?
+        }
+    } else {
+        0
+    };
     conn.execute(
-        "UPDATE notes SET title = ?1, content = ?2, is_pinned = ?3, updated_at = ?4, sync_status = 'pending'
-         WHERE id = ?5",
-        params![title, content, is_pinned, now, id],
+        "UPDATE notes SET title = ?1, content = ?2, is_pinned = ?3, pinned_sort_order = ?4, updated_at = ?5, sync_status = 'pending'
+         WHERE id = ?6",
+        params![title, content, is_pinned, pinned_sort_order, now, id],
     )?;
+    Ok(())
+}
+
+pub fn reorder_pinned_notes(conn: &Connection, ids_in_order: &[i64]) -> Result<()> {
+    let now = now_str();
+    let tx = conn.unchecked_transaction()?;
+    for (idx, id) in ids_in_order.iter().enumerate() {
+        tx.execute(
+            "UPDATE notes
+             SET pinned_sort_order = ?1, updated_at = ?2, sync_status = 'pending'
+             WHERE id = ?3 AND is_pinned = 1 AND sync_status != 'deleted'",
+            params![idx as i32, now, id],
+        )?;
+    }
+    tx.commit()?;
     Ok(())
 }
 
@@ -2060,6 +2149,55 @@ mod tests {
     }
 
     #[test]
+    fn test_shortcut_pin_and_reorder_fields() {
+        let conn = init_test_db();
+        let a = create_shortcut(&conn, "a", "A", "", "[]", "").unwrap();
+        let b = create_shortcut(&conn, "b", "B", "", "[]", "").unwrap();
+
+        set_shortcut_pinned(&conn, a.id.unwrap(), true).unwrap();
+        set_shortcut_pinned(&conn, b.id.unwrap(), true).unwrap();
+        reorder_pinned_shortcuts(&conn, &[b.id.unwrap(), a.id.unwrap()]).unwrap();
+
+        let list = list_shortcuts(&conn).unwrap();
+        let a = list.iter().find(|s| s.name == "a").unwrap();
+        let b = list.iter().find(|s| s.name == "b").unwrap();
+        assert!(a.is_pinned);
+        assert!(b.is_pinned);
+        assert_eq!(b.pinned_sort_order, 0);
+        assert_eq!(a.pinned_sort_order, 1);
+
+        set_shortcut_pinned(&conn, b.id.unwrap(), false).unwrap();
+        let list = list_shortcuts(&conn).unwrap();
+        let b = list.iter().find(|s| s.name == "b").unwrap();
+        assert!(!b.is_pinned);
+    }
+
+    #[test]
+    fn test_shortcut_server_pinned_fields_are_preserved() {
+        let conn = init_test_db();
+        let row = serde_json::json!({
+            "uuid": "55555555-5555-5555-5555-555555555555",
+            "name": "server_pinned",
+            "value": "server value",
+            "description": "",
+            "links": "[]",
+            "obsidian_note": "",
+            "is_pinned": 1,
+            "pinned_sort_order": 7,
+            "updated_at": "2026-05-17T10:15:30",
+            "user_id": "user-1",
+            "is_deleted": false
+        });
+
+        upsert_from_server(&conn, "shortcuts", &[row]).unwrap();
+
+        let list = list_shortcuts(&conn).unwrap();
+        assert_eq!(list.len(), 1);
+        assert!(list[0].is_pinned);
+        assert_eq!(list[0].pinned_sort_order, 7);
+    }
+
+    #[test]
     fn test_parse_dt_accepts_api_iso_formats() {
         let expected =
             NaiveDateTime::parse_from_str("2026-05-17 10:15:30", "%Y-%m-%d %H:%M:%S").unwrap();
@@ -2260,6 +2398,27 @@ mod tests {
         delete_note(&conn, n.id.unwrap()).unwrap();
         let list = list_notes(&conn, fid).unwrap();
         assert_eq!(list.len(), 0);
+    }
+
+    #[test]
+    fn test_reorder_pinned_notes_updates_chip_order_only() {
+        let conn = init_test_db();
+        let folder = create_note_folder(&conn, "Folder", 0, None).unwrap();
+        let fid = folder.id.unwrap();
+        let a = create_note(&conn, fid, "A", "A").unwrap();
+        let b = create_note(&conn, fid, "B", "B").unwrap();
+
+        update_note(&conn, a.id.unwrap(), "A", "A", true).unwrap();
+        update_note(&conn, b.id.unwrap(), "B", "B", true).unwrap();
+        reorder_pinned_notes(&conn, &[b.id.unwrap(), a.id.unwrap()]).unwrap();
+
+        let list = list_notes(&conn, fid).unwrap();
+        let a = list.iter().find(|n| n.title == "A").unwrap();
+        let b = list.iter().find(|n| n.title == "B").unwrap();
+        assert!(a.is_pinned);
+        assert!(b.is_pinned);
+        assert_eq!(b.pinned_sort_order, 0);
+        assert_eq!(a.pinned_sort_order, 1);
     }
 
     // ── SQL Table Analyzer Templates ─────────────────────────
