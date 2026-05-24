@@ -8,12 +8,25 @@ import { CARD_BG_PALETTE } from './tasks-css.js';
 // render. Populated lazily as cards render.
 const checkboxCache = new Map();
 
-// Collapse state for checkbox rows. In-memory only; reset on tab re-entry
-// via resetCollapseState() called from index.js:init().
+// Collapse state for checkbox rows. Persisted locally so frontend OTA reloads
+// and normal app restarts do not expand every previously-collapsed branch.
+const COLLAPSED_CHECKBOXES_SETTING_KEY = 'tasks_collapsed_checkbox_ids';
 const collapsedNodes = new Map();
-function resetCollapseState() {
+async function resetCollapseState() {
   collapsedNodes.clear();
   hiddenCompleted.clear();
+  try {
+    const raw = await call('get_setting', { key: COLLAPSED_CHECKBOXES_SETTING_KEY });
+    const ids = JSON.parse(raw || '[]');
+    if (Array.isArray(ids)) {
+      for (const id of ids) {
+        const n = Number(id);
+        if (Number.isFinite(n)) collapsedNodes.set(n, true);
+      }
+    }
+  } catch (e) {
+    console.warn('[tasks] failed to restore collapsed checkbox state', e);
+  }
 }
 
 // Per-task "hide completed checkboxes" toggle.  In-memory, resets on tab re-entry.
@@ -370,9 +383,9 @@ function buildCheckboxRow(node, task, ctx, depth, { editable }) {
     const arrow = el('span', { class: 'tcb-arrow' });
     arrow.textContent = '▶';  // default; updated in renderNode
     arrow.title = 'Click to collapse/expand children. Ctrl+Click text for recursive.';
-    arrow.addEventListener('click', (e) => {
+    arrow.addEventListener('click', async (e) => {
       e.stopPropagation();
-      toggleCollapse(node.id);
+      await toggleCollapse(node.id);
       ctx.onTaskReload && ctx.onTaskReload();
     });
     row.appendChild(arrow);
@@ -447,7 +460,7 @@ function buildCheckboxRow(node, task, ctx, depth, { editable }) {
         e.preventDefault();
         const items = await loadCheckboxes(task.id);
         const collapsed = !isCollapsed(node.id);
-        collapseRecursive(node.id, collapsed, items);
+        await collapseRecursive(node.id, collapsed, items);
         ctx.onTaskReload && ctx.onTaskReload();
       }
     });
@@ -634,19 +647,45 @@ function isCollapsed(id) {
   return collapsedNodes.get(id) === true;
 }
 
-function toggleCollapse(id) {
+async function toggleCollapse(id) {
   if (collapsedNodes.get(id)) {
     collapsedNodes.delete(id);
   } else {
     collapsedNodes.set(id, true);
   }
+  await persistCollapseState();
 }
 
-function collapseRecursive(id, collapsed, items) {
+async function collapseRecursive(id, collapsed, items) {
+  applyCollapseRecursive(id, collapsed, items);
+  await persistCollapseState();
+}
+
+function applyCollapseRecursive(id, collapsed, items) {
   const children = items.filter(x => x.parent_id === id);
-  collapsedNodes.set(id, collapsed);
+  if (collapsed) {
+    collapsedNodes.set(id, true);
+  } else {
+    collapsedNodes.delete(id);
+  }
   for (const child of children) {
-    collapseRecursive(child.id, collapsed, items);
+    applyCollapseRecursive(child.id, collapsed, items);
+  }
+}
+
+async function persistCollapseState() {
+  const ids = Array.from(collapsedNodes.entries())
+    .filter(([, collapsed]) => collapsed === true)
+    .map(([id]) => Number(id))
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b);
+  try {
+    await call('set_setting', {
+      key: COLLAPSED_CHECKBOXES_SETTING_KEY,
+      value: JSON.stringify(ids),
+    });
+  } catch (e) {
+    console.warn('[tasks] failed to persist collapsed checkbox state', e);
   }
 }
 

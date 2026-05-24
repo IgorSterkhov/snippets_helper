@@ -78,7 +78,7 @@ export async function init(container) {
   await Promise.all([loadCategories(), loadStatuses()]);
   await loadTasks();
   await loadPinned();
-  resetCollapseState();
+  await resetCollapseState();
   await renderAll();
   installSyncRefreshListener();
 

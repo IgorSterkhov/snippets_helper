@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## f-20260524-4 (2026-05-24)
+
+- **Tasks checkbox collapse persistence:** collapsed checklist branches now
+  survive frontend OTA reloads and normal app restarts instead of expanding
+  all descendants after the WebView reloads.
+
 ## f-20260524-3 (2026-05-24)
 
 - **Tasks checkbox DnD hidden-completed fix:** dragging checklist items now

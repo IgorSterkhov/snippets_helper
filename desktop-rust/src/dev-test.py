@@ -735,6 +735,132 @@ async def run_tests():
         })()""")
     await check('T15c Tasks checkbox DnD hidden completed context', t15c_tasks_checkbox_drag_hidden_completed_context)
 
+    # ── T15d: Checkbox collapse survives frontend reload ─────
+    async def t15d_tasks_checkbox_collapse_survives_reload():
+        await cdp.eval("""(() => {
+          const stamp = new Date().toISOString();
+          const settings = JSON.parse(localStorage.getItem('mock.settings') || '{}');
+          settings.last_active_tab = 'tasks';
+          delete settings.tasks_collapsed_checkbox_ids;
+          localStorage.setItem('mock.settings', JSON.stringify(settings));
+          const rows = [
+            {
+              id: 20, task_id: 2, parent_id: null,
+              text: 'OTA collapse parent', is_checked: false,
+              sort_order: 0, created_at: stamp, updated_at: stamp,
+              sync_status: 'synced', user_id: 'mock-user',
+            },
+            {
+              id: 21, task_id: 2, parent_id: 20,
+              text: 'OTA collapse child', is_checked: false,
+              sort_order: 0, created_at: stamp, updated_at: stamp,
+              sync_status: 'synced', user_id: 'mock-user',
+            },
+          ];
+          const others = JSON.parse(localStorage.getItem('mock.task_checkboxes') || '[]')
+            .filter(x => x.task_id !== 2);
+          localStorage.setItem('mock.task_checkboxes', JSON.stringify([...others, ...rows]));
+          localStorage.setItem('mock.__seq.task_checkboxes', '21');
+          window.dispatchEvent(new CustomEvent('snippets:sync-complete', {
+            detail: {
+              result: {
+                timestamp: '12:00:00',
+                push: { total: 0, pushed: {} },
+                pull: { total: 1, pulled: { task_checkboxes: ['collapse fixture'] } },
+              },
+            },
+          }));
+        })()""")
+        await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"tasks\"]').click()")
+        await wait_until(
+            cdp,
+            "[...document.querySelectorAll('.task-title')]"
+            ".some(x => x.textContent.includes('Regular mock task'))",
+            timeout=4,
+        )
+        await cdp.eval(
+            "[...document.querySelectorAll('.task-title')]"
+            ".find(x => x.textContent.includes('Regular mock task')).click()"
+        )
+        await wait_until(
+            cdp,
+            "[...document.querySelectorAll('.tcb-text')]"
+            ".some(x => x.textContent.includes('OTA collapse child'))",
+            timeout=4,
+        )
+        await cdp.eval("""(() => {
+          const row = [...document.querySelectorAll('.tcb-item')]
+            .find(x => x.querySelector('.tcb-text')?.textContent.includes('OTA collapse parent'));
+          row?.querySelector('.tcb-arrow')?.click();
+        })()""")
+        await wait_until(
+            cdp,
+            "![...document.querySelectorAll('.tcb-text')]"
+            ".some(x => x.textContent.includes('OTA collapse child'))",
+            timeout=3,
+        )
+
+        await cdp.send('Page.reload', ignoreCache=True)
+        await wait_until(cdp, "!!document.querySelector('.tab-btn')", timeout=8)
+        await wait_until(cdp, "!!window.__TAURI__ && !!window.__TAURI__.core", timeout=5)
+        await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"tasks\"]').click()")
+        await wait_until(
+            cdp,
+            "[...document.querySelectorAll('.task-title')]"
+            ".some(x => x.textContent.includes('Regular mock task'))",
+            timeout=4,
+        )
+        await cdp.eval(
+            "[...document.querySelectorAll('.task-title')]"
+            ".find(x => x.textContent.includes('Regular mock task')).click()"
+        )
+        await wait_until(
+            cdp,
+            "[...document.querySelectorAll('.tcb-text')]"
+            ".some(x => x.textContent.includes('OTA collapse parent'))",
+            timeout=4,
+        )
+        child_visible = await cdp.eval(
+            "[...document.querySelectorAll('.tcb-text')]"
+            ".some(x => x.textContent.includes('OTA collapse child'))"
+        )
+        assert child_visible is False, 'collapsed child became visible after frontend reload'
+
+        await cdp.eval("""(() => {
+          const stamp = new Date().toISOString();
+          const settings = JSON.parse(localStorage.getItem('mock.settings') || '{}');
+          delete settings.tasks_collapsed_checkbox_ids;
+          localStorage.setItem('mock.settings', JSON.stringify(settings));
+          const restored = [
+            {
+              id: 1, task_id: 2, parent_id: null,
+              text: 'Regular todo visible', is_checked: false,
+              sort_order: 0, created_at: stamp, updated_at: stamp,
+              sync_status: 'synced', user_id: 'mock-user',
+            },
+            {
+              id: 2, task_id: 2, parent_id: null,
+              text: 'Regular done hidden', is_checked: true,
+              sort_order: 1, created_at: stamp, updated_at: stamp,
+              sync_status: 'synced', user_id: 'mock-user',
+            },
+          ];
+          const others = JSON.parse(localStorage.getItem('mock.task_checkboxes') || '[]')
+            .filter(x => x.task_id !== 2);
+          localStorage.setItem('mock.task_checkboxes', JSON.stringify([...others, ...restored]));
+          localStorage.setItem('mock.__seq.task_checkboxes', '2');
+          window.dispatchEvent(new CustomEvent('snippets:sync-complete', {
+            detail: {
+              result: {
+                timestamp: '12:00:00',
+                push: { total: 0, pushed: {} },
+                pull: { total: 1, pulled: { task_checkboxes: ['restore'] } },
+              },
+            },
+          }));
+        })()""")
+    await check('T15d Tasks checkbox collapse survives frontend reload', t15d_tasks_checkbox_collapse_survives_reload)
+
     # ── T16: Tasks Focus view layout/search/outside pinned ──
     async def t16_tasks_focus_view_layout_search_and_outside_pin():
         await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"tasks\"]').click()")

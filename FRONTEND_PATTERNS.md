@@ -227,7 +227,26 @@ editor without removing global filters.
 
 ---
 
-## §7 Derived key chips and clouds
+## §7 Persisted local UI state
+
+**Used in:** Tasks tab checkbox collapse state
+
+Use this pattern for user-visible local UI preferences that should survive
+frontend OTA WebView reloads and normal app restarts, but should not sync
+between devices.
+
+- Store the state via existing `get_setting` / `set_setting` commands with a
+  namespaced key such as `tasks_collapsed_checkbox_ids`.
+- Load the setting before the first render that depends on it.
+- Persist after each user action that changes the state.
+- Store compact JSON values for sets/lists, and tolerate invalid or stale data
+  by falling back to defaults.
+- Keep per-session transient state in memory only when losing it on OTA reload
+  is acceptable.
+
+---
+
+## §8 Derived key chips and clouds
 
 **Used in:** Snippets tab (Key Cloud, Related snippets)
 
