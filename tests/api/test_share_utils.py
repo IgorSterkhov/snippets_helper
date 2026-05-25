@@ -67,3 +67,24 @@ def test_render_share_html_escapes_user_content():
     assert "<script>" not in rendered
     assert "&lt;script&gt;x&lt;/script&gt;" in rendered
     assert "&lt;b&gt;hi&lt;/b&gt;" in rendered
+
+
+def test_render_share_html_renders_image_markdown_as_figure_card():
+    rendered = render_share_html(
+        {
+            "type": "note",
+            "title": "T",
+            "content": "Before\n![diagram](https://ister-app.ru/snippets-media/token.webp)\nAfter",
+        }
+    )
+    assert "figure-card" in rendered
+    assert "src='https://ister-app.ru/snippets-media/token.webp'" in rendered
+    assert "<figcaption>diagram</figcaption>" in rendered
+
+
+def test_render_share_html_rejects_unsafe_image_url_scheme():
+    rendered = render_share_html(
+        {"type": "note", "title": "T", "content": "![bad](javascript:alert(1))"}
+    )
+    assert "<figure" not in rendered
+    assert "<img" not in rendered

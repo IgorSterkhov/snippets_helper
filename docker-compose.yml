@@ -21,6 +21,8 @@ services:
       SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
     expose:
       - "8001"
+    volumes:
+      - /opt/isterapp/uploads/snippets-media:/opt/isterapp/uploads/snippets-media
     networks:
       - isterapp_net
     depends_on:

@@ -1,19 +1,24 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.auth import get_current_admin, get_current_user
 from api.database import get_db
-from api.models import User
+from api.models import MediaAsset, MediaAssetVariant, User
 from api.schemas import AdminMeResponse, AdminUserLimitsRequest, AdminUserSummary
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
 async def media_used_bytes(db: AsyncSession, user_id) -> int:
-    return 0
+    result = await db.execute(
+        select(func.coalesce(func.sum(MediaAssetVariant.size_bytes), 0))
+        .join(MediaAsset, MediaAsset.uuid == MediaAssetVariant.asset_uuid)
+        .where(MediaAsset.user_id == user_id, MediaAsset.is_deleted == False)  # noqa: E712
+    )
+    return int(result.scalar_one() or 0)
 
 
 async def user_summary(db: AsyncSession, user: User) -> AdminUserSummary:

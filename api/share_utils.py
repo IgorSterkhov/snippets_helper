@@ -1,5 +1,6 @@
 import html
 import json
+import re
 import secrets
 from urllib.parse import urlparse
 
@@ -62,8 +63,43 @@ def public_shortcut_payload(row) -> dict:
     }
 
 
-def _preserve_line_breaks(text: str) -> str:
-    return "<br>".join(html.escape(text or "").splitlines())
+IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)\)")
+
+
+def _is_safe_image_url(url: str) -> bool:
+    if url.startswith("/snippets-media/"):
+        return True
+    parsed = urlparse(url)
+    return parsed.scheme.lower() in {"http", "https"}
+
+
+def _figure_card(alt: str, url: str) -> str:
+    safe_alt = html.escape(alt or "image")
+    safe_url = html.escape(url, quote=True)
+    return (
+        "<figure class='figure-card'>"
+        f"<img src='{safe_url}' alt='{safe_alt}' loading='lazy'>"
+        f"<figcaption>{safe_alt}</figcaption>"
+        "</figure>"
+    )
+
+
+def _render_text_with_figures(text: str) -> str:
+    rendered_lines = []
+    for line in (text or "").splitlines():
+        pos = 0
+        parts = []
+        for match in IMAGE_RE.finditer(line):
+            parts.append(html.escape(line[pos:match.start()]))
+            alt, url = match.group(1), match.group(2)
+            if _is_safe_image_url(url):
+                parts.append(_figure_card(alt, url))
+            else:
+                parts.append(html.escape(match.group(0)))
+            pos = match.end()
+        parts.append(html.escape(line[pos:]))
+        rendered_lines.append("".join(parts))
+    return "<br>".join(rendered_lines)
 
 
 def render_share_html(payload: dict) -> str:
@@ -71,9 +107,15 @@ def render_share_html(payload: dict) -> str:
     safe_title = html.escape(title)
 
     if payload.get("type") == "shortcut":
+        value = payload.get("value", "")
+        rendered_value = _render_text_with_figures(value)
+        if IMAGE_RE.search(value or ""):
+            value_html = f"<article id='share-code'>{rendered_value}</article>"
+        else:
+            value_html = f"<pre><code id='share-code'>{html.escape(value)}</code></pre>"
         body = (
-            f"<p class='desc'>{_preserve_line_breaks(payload.get('description', ''))}</p>"
-            f"<pre><code id='share-code'>{html.escape(payload.get('value', ''))}</code></pre>"
+            f"<p class='desc'>{_render_text_with_figures(payload.get('description', ''))}</p>"
+            f"{value_html}"
             "<button type='button' onclick='navigator.clipboard.writeText("
             'document.getElementById("share-code").innerText)'
             "'>Copy</button>"
@@ -88,7 +130,7 @@ def render_share_html(payload: dict) -> str:
             )
             body += f"<ul>{items}</ul>"
     else:
-        body = f"<article>{_preserve_line_breaks(payload.get('content', ''))}</article>"
+        body = f"<article>{_render_text_with_figures(payload.get('content', ''))}</article>"
 
     return f"""<!doctype html>
 <html lang="en">
@@ -104,6 +146,9 @@ def render_share_html(payload: dict) -> str:
     button {{ background: #238636; color: white; border: 0; border-radius: 6px; padding: 8px 12px; font-weight: 600; }}
     a {{ color: #58a6ff; }}
     .desc {{ color: #8b949e; }}
+    .figure-card {{ margin: 14px 0; border: 1px solid #30363d; border-radius: 8px; overflow: hidden; background: #161b22; }}
+    .figure-card img {{ display: block; max-width: 100%; height: auto; margin: 0 auto; }}
+    .figure-card figcaption {{ border-top: 1px solid #30363d; padding: 8px 10px; color: #8b949e; font-size: 13px; }}
   </style>
 </head>
 <body><main><h1>{safe_title}</h1>{body}</main></body>

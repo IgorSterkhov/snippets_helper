@@ -284,6 +284,45 @@ class ShareLink(Base):
     )
 
 
+class MediaAsset(Base):
+    __tablename__ = "media_assets"
+
+    uuid: Mapped[uuid_mod.UUID] = mapped_column(Uuid, primary_key=True, default=uuid_mod.uuid4)
+    user_id: Mapped[uuid_mod.UUID] = mapped_column(Uuid, ForeignKey("users.id"), nullable=False)
+    original_file_name: Mapped[str] = mapped_column(Text, nullable=False)
+    selected_variant: Mapped[str] = mapped_column(String, nullable=False, default="balanced")
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    __table_args__ = (Index("idx_media_assets_user_created", "user_id", "created_at"),)
+
+
+class MediaAssetVariant(Base):
+    __tablename__ = "media_asset_variants"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    asset_uuid: Mapped[uuid_mod.UUID] = mapped_column(
+        Uuid,
+        ForeignKey("media_assets.uuid"),
+        nullable=False,
+    )
+    variant: Mapped[str] = mapped_column(String, nullable=False)
+    public_token: Mapped[str] = mapped_column(String(96), unique=True, nullable=False)
+    storage_path: Mapped[str] = mapped_column(Text, nullable=False)
+    mime_type: Mapped[str] = mapped_column(String, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    width: Mapped[int] = mapped_column(Integer, nullable=False)
+    height: Mapped[int] = mapped_column(Integer, nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_media_asset_variants_public_token", "public_token", unique=True),
+        Index("uq_media_asset_variants_asset_variant", "asset_uuid", "variant", unique=True),
+    )
+
+
 # Map table names to ORM models (used by sync routes)
 TABLE_MODELS = {
     "shortcuts": Shortcut,

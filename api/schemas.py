@@ -48,6 +48,52 @@ class AdminUserLimitsRequest(BaseModel):
     media_max_upload_bytes: int
 
 
+# ==================== Media ====================
+
+class MediaUploadResponse(BaseModel):
+    job_id: str
+    status: str
+
+
+class MediaVariantResponse(BaseModel):
+    variant: str
+    public_token: str
+    preview_url: str
+    mime_type: str
+    size_bytes: int
+    width: int
+    height: int
+    sha256: str
+
+
+class MediaJobResponse(BaseModel):
+    job_id: str
+    status: str
+    progress_current: int = 0
+    progress_total: int = 0
+    asset_uuid: Optional[str] = None
+    variants: list[MediaVariantResponse] = []
+    error: Optional[str] = None
+
+
+class MediaSelectRequest(BaseModel):
+    variant: str
+
+
+class MediaSelectResponse(BaseModel):
+    asset_uuid: str
+    variant: str
+    markdown: str
+    url: str
+    width: int
+    height: int
+    size_bytes: int
+
+
+class MediaDeleteResponse(BaseModel):
+    status: str = "ok"
+
+
 # ==================== Sync ====================
 
 class SyncRow(BaseModel):
