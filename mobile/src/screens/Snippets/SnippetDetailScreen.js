@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
+import MarkdownContent, { hasMarkdownImage } from '../../components/MarkdownContent';
 import ShareLinkSheet from '../../components/ShareLinkSheet';
 import { useTheme } from '../../theme/ThemeContext';
 
@@ -9,9 +10,10 @@ export default function SnippetDetailScreen({ route }) {
   const { colors } = useTheme();
   const [copied, setCopied] = useState(false);
   const [shareVisible, setShareVisible] = useState(false);
+  const valueHasImage = hasMarkdownImage(snippet.value);
 
   const copyToClipboard = () => {
-    Clipboard.setString(snippet.value);
+    Clipboard.setString(snippet.value || '');
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -21,11 +23,17 @@ export default function SnippetDetailScreen({ route }) {
       <Text style={[s.title, { color: colors.text }]}>{snippet.name}</Text>
 
       {snippet.description ? (
-        <Text style={[s.desc, { color: colors.textSecondary }]}>{snippet.description}</Text>
+        <View style={s.desc}>
+          <MarkdownContent colors={colors}>{snippet.description}</MarkdownContent>
+        </View>
       ) : null}
 
       <ScrollView style={[s.codeBox, { backgroundColor: colors.bgSecondary, borderColor: colors.border }]}>
-        <Text style={[s.code, { color: colors.text }]} selectable>{snippet.value}</Text>
+        {valueHasImage ? (
+          <MarkdownContent colors={colors}>{snippet.value}</MarkdownContent>
+        ) : (
+          <Text style={[s.code, { color: colors.text }]} selectable>{snippet.value}</Text>
+        )}
       </ScrollView>
 
       <View style={s.actions}>
@@ -53,7 +61,7 @@ export default function SnippetDetailScreen({ route }) {
 const s = StyleSheet.create({
   container: { flex: 1, padding: 16 },
   title: { fontSize: 20, fontWeight: 'bold', marginBottom: 8 },
-  desc: { fontSize: 14, marginBottom: 16 },
+  desc: { marginBottom: 16 },
   codeBox: { flex: 1, borderWidth: 1, borderRadius: 8, padding: 12, marginBottom: 16 },
   code: { fontSize: 14, fontFamily: 'monospace' },
   actions: { flexDirection: 'row', gap: 12 },

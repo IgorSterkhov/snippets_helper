@@ -310,6 +310,7 @@
   }
 
   const shareLinks = new Map();
+  const mediaJobs = new Map();
 
   function shareKey(itemType, itemUuid) {
     return `${itemType}:${itemUuid}`;
@@ -470,6 +471,56 @@
         if (value.token === token) shareLinks.delete(key);
       }
       return null;
+    },
+
+    // ── Media uploads ───────────────────────────────────
+    async pick_media_file() {
+      return '/tmp/mock-image.png';
+    },
+    async start_media_upload({ filePath }) {
+      const jobId = 'mock-media-job-' + Date.now();
+      mediaJobs.set(jobId, {
+        job_id: jobId,
+        status: 'ready',
+        progress_current: 4,
+        progress_total: 4,
+        asset_uuid: 'mock-media-asset',
+        variants: ['small', 'balanced', 'readable', 'original'].map((variant, index) => ({
+          variant,
+          public_token: 'mock-' + variant,
+          preview_url: 'data:image/svg+xml;utf8,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="#161b22"/><text x="40" y="190" fill="#58a6ff" font-size="42">${variant}</text></svg>`),
+          mime_type: 'image/webp',
+          size_bytes: (index + 1) * 10240,
+          width: 640,
+          height: 360,
+          sha256: 'x'.repeat(64),
+        })),
+        source_path: filePath,
+      });
+      window.dispatchEvent(new CustomEvent('media-upload-progress', {
+        detail: { phase: 'upload', bytes_done: 100, bytes_total: 100, finished: true },
+      }));
+      return { job_id: jobId, status: 'queued' };
+    },
+    async cancel_media_upload() {
+      return true;
+    },
+    async get_media_job({ jobId }) {
+      return mediaJobs.get(jobId) || { job_id: jobId, status: 'failed', error: 'mock job not found' };
+    },
+    async delete_media_asset() {
+      return null;
+    },
+    async select_media_variant({ assetUuid, variant }) {
+      return {
+        asset_uuid: assetUuid,
+        variant,
+        markdown: `![mock-image](https://ister-app.ru/snippets-media/mock-${variant}.webp)`,
+        url: `https://ister-app.ru/snippets-media/mock-${variant}.webp`,
+        width: 640,
+        height: 360,
+        size_bytes: 10240,
+      };
     },
 
     // ── Sync / Update ───────────────────────────────────

@@ -1360,6 +1360,122 @@ async def run_tests():
         assert caret == 4, f'caret: {caret}'
     await check('T21 Snippets toolbar inserts fenced code block', t21_snippets_toolbar_code_block_insert)
 
+    # ── T21b: Image upload modal inserts Markdown + figure ───
+    async def t21b_snippets_image_upload_modal_and_figure():
+        await cdp.eval("document.querySelector('.modal-overlay')?.remove()")
+        await open_shortcuts_tab()
+        await cdp.eval("document.querySelector('#panel-shortcuts button[title=\"Add shortcut\"]').click()")
+        await wait_until(cdp, "!!document.querySelector('.modal-overlay textarea[placeholder^=\"Value\"]')", timeout=3)
+        await wait_until(
+            cdp,
+            "[...document.querySelectorAll('.modal-overlay .md-toolbar button')].some(b => b.title === 'Image' || b.textContent.includes('🖼'))",
+            timeout=3,
+        )
+        await cdp.eval(
+            "const buttons=[...document.querySelectorAll('.modal-overlay .md-toolbar button')];"
+            "const btn=buttons.find(b => b.title === 'Image' || b.textContent.includes('🖼'));"
+            "if (!btn) throw new Error(buttons.map(b => `${b.title}:${b.textContent}`).join('|'));"
+            "btn.click();"
+        )
+        await wait_until(cdp, "!!document.querySelector('.image-upload-overlay')", timeout=3)
+        await cdp.eval(
+            "(() => {"
+            "const btn=document.querySelector('.image-upload-overlay .image-upload-picker button');"
+            "if (!btn) throw new Error(document.querySelector('.image-upload-overlay')?.innerHTML || 'missing image picker');"
+            "btn.click();"
+            "})()"
+        )
+        await wait_until(
+            cdp,
+            "[...document.querySelectorAll('.image-upload-overlay .image-upload-presets button')]"
+            ".some(b => b.textContent.trim() === 'Readable' && !b.disabled)",
+            timeout=3,
+        )
+        await cdp.eval(
+            "[...document.querySelectorAll('.image-upload-overlay .image-upload-presets button')]"
+            ".find(b => b.textContent.trim() === 'Readable').click()"
+        )
+        await wait_until(cdp, "!!document.querySelector('.image-upload-overlay .image-upload-preview img')", timeout=3)
+        await cdp.eval("document.querySelector('.image-upload-overlay .image-upload-preview img').click()")
+        await wait_until(cdp, "!!document.querySelector('.image-full-preview img')", timeout=3)
+        await cdp.eval("document.querySelector('.image-full-preview')?.remove()")
+        await wait_until(cdp, "!document.querySelector('.image-upload-footer button').disabled", timeout=3)
+        await cdp.eval(
+            "(() => {"
+            "const btn=document.querySelector('.image-upload-overlay .image-upload-footer button');"
+            "if (!btn) throw new Error(document.querySelector('.image-upload-overlay')?.innerHTML || 'missing insert button');"
+            "btn.click();"
+            "})()"
+        )
+        value = await wait_until(
+            cdp,
+            "document.querySelector('.modal-overlay textarea[placeholder^=\"Value\"]')?.value.includes('mock-readable.webp') && document.querySelector('.modal-overlay textarea[placeholder^=\"Value\"]').value",
+            timeout=3,
+        )
+        assert '![mock-image]' in value
+        assert 'mock-readable.webp' in value
+        await cdp.eval("""(() => {
+          const editor = [...document.querySelectorAll('.modal-overlay')]
+            .find(x => !x.classList.contains('image-upload-overlay') && x.querySelector('input[placeholder="Name"]'));
+          if (!editor) throw new Error('missing snippet editor modal');
+          const name = editor.querySelector('input[placeholder="Name"]');
+          name.value = 'Image markdown';
+          name.dispatchEvent(new Event('input', { bubbles: true }));
+          const confirm = [...editor.querySelectorAll('.modal-actions button')]
+            .find(x => x.textContent.trim() === 'Confirm');
+          if (!confirm) throw new Error('missing editor confirm button');
+          confirm.click();
+        })()""")
+        await wait_until(
+            cdp,
+            "[...document.querySelectorAll('#panel-shortcuts .shortcut-list-item .shortcut-list-name')].some(x => x.textContent.trim() === 'Image markdown')",
+            timeout=3,
+        )
+        await cdp.eval(
+            "[...document.querySelectorAll('#panel-shortcuts .shortcut-list-item .shortcut-list-name')]"
+            ".find(x => x.textContent.trim() === 'Image markdown').click()"
+        )
+        await wait_until(cdp, "!!document.querySelector('.markdown-figure-card')", timeout=3)
+    await check('T21b Snippets image upload modal and figure card', t21b_snippets_image_upload_modal_and_figure)
+
+    # ── T21c: Notes image upload toolbar renders Figure Card ─
+    async def t21c_notes_image_upload_modal_and_figure():
+        await close_modals()
+        await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"notes\"]').click()")
+        await wait_until(cdp, "!!document.querySelector('#panel-notes button')", timeout=5)
+        await cdp.eval(
+            "[...document.querySelectorAll('#panel-notes button')]"
+            ".find(b => b.textContent.includes('New Note')).click()"
+        )
+        await wait_until(cdp, "!!document.querySelector('#panel-notes .note-content-input')", timeout=3)
+        await wait_until(
+            cdp,
+            "[...document.querySelectorAll('#panel-notes .md-toolbar button')].some(b => b.title === 'Image')",
+            timeout=3,
+        )
+        await cdp.eval(
+            "[...document.querySelectorAll('#panel-notes .md-toolbar button')]"
+            ".find(b => b.title === 'Image').click()"
+        )
+        await wait_until(cdp, "!!document.querySelector('.image-upload-overlay')", timeout=3)
+        await cdp.eval(
+            "(() => {"
+            "const btn=document.querySelector('.image-upload-overlay .image-upload-picker button');"
+            "btn.click();"
+            "})()"
+        )
+        await wait_until(cdp, "!document.querySelector('.image-upload-footer button').disabled", timeout=3)
+        await cdp.eval("document.querySelector('.image-upload-footer button').click()")
+        note_value = await wait_until(
+            cdp,
+            "document.querySelector('#panel-notes .note-content-input')?.value.includes('mock-') && document.querySelector('#panel-notes .note-content-input').value",
+            timeout=3,
+        )
+        assert '![mock-image]' in note_value
+        await cdp.eval("[...document.querySelectorAll('#panel-notes .note-toolbar button')].find(b => b.textContent.trim() === 'Preview').click()")
+        await wait_until(cdp, "!!document.querySelector('#panel-notes .markdown-figure-card')", timeout=3)
+    await check('T21c Notes image upload modal and figure card', t21c_notes_image_upload_modal_and_figure)
+
     # ── T22: Snippets tab hover uses readable tint ───────────
     async def t22_snippets_tab_hover_css():
         hover_rule = await cdp.eval("""(() => {

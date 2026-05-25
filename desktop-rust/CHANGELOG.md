@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## v1.3.34 (2026-05-25)
+
+- **Images in Notes and Snippets:** desktop Markdown toolbars can upload an
+  image to the server, choose an optimized variant, and insert a portable
+  Markdown image link into note content, snippet value, or snippet description.
+- **Figure Card rendering:** desktop previews, public share pages, and mobile
+  note/snippet views render Markdown images as framed Figure Cards with safe
+  HTTP(S) image URLs and captions from alt text or file names.
+- **Server media storage:** the API stores optimized WebP variants under
+  persistent public media tokens and enforces the admin-managed per-user media
+  quota and max-upload limits added in v1.3.33.
+
 ## v1.3.33 (2026-05-25)
 
 - **Admin storage limits:** server users now have admin state, last-seen

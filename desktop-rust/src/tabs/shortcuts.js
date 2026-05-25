@@ -4,6 +4,7 @@ import { showModal } from '../components/modal.js';
 import { showToast } from '../components/toast.js';
 import { marked } from '../lib/marked.min.js';
 import { attachToolbar } from '../components/md-toolbar.js';
+import { enhanceMarkdownFigures } from '../components/markdown-figures.js';
 import { installWrappedChipDnd } from '../components/wrapped-chip-dnd.js';
 import { openShareLinkModal } from '../components/share-link-modal.js';
 
@@ -1041,6 +1042,7 @@ function renderCodeTab(shortcut) {
     valueEl.style.cssText = `font-size:${fontSize}px;padding:16px 18px;line-height:1.6`;
     valueEl.innerHTML = renderMarkdownHtml(shortcut.value);
     enhanceMarkdownCodeBlocks(valueEl);
+    enhanceMarkdownFigures(valueEl);
   } else {
     valueEl = document.createElement('pre');
     valueEl.className = 'snippet-tab-content';
@@ -1061,6 +1063,7 @@ function renderDescriptionTab(shortcut) {
     view.classList.add('markdown-body');
     view.innerHTML = renderMarkdownHtml(shortcut.description);
     enhanceMarkdownCodeBlocks(view);
+    enhanceMarkdownFigures(view);
   } else {
     view.style.whiteSpace = 'pre-wrap';
     view.style.wordBreak = 'break-word';
@@ -1212,6 +1215,7 @@ async function renderNoteView(shortcut) {
       contentArea.classList.add('markdown-body');
       contentArea.innerHTML = renderMarkdownHtml(md);
       enhanceMarkdownCodeBlocks(contentArea);
+      enhanceMarkdownFigures(contentArea);
     } catch (err) {
       contentArea.innerHTML = `<div style="color:var(--text-muted);text-align:center;margin-top:32px">
         <p>Cannot read note: ${err}</p>
@@ -2223,7 +2227,7 @@ function openEditor(shortcut) {
   valueInput.rows = 6;
   valueInput.value = isEdit ? shortcut.value : '';
   form.appendChild(valueInput);
-  attachToolbar(valueInput);
+  attachToolbar(valueInput, { enableImageUpload: true });
 
   let descExpanded = false;
 
@@ -2260,7 +2264,7 @@ function openEditor(shortcut) {
   descInput.rows = 3;
   descInput.value = isEdit ? shortcut.description : '';
   descBody.appendChild(descInput);
-  attachToolbar(descInput);
+  attachToolbar(descInput, { enableImageUpload: true });
 
   function renderDescCollapse() {
     descArrow.style.transform = descExpanded ? 'rotate(90deg)' : '';

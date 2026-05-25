@@ -3,6 +3,7 @@ import { showModal } from '../components/modal.js';
 import { showToast } from '../components/toast.js';
 import { marked } from '../lib/marked.min.js';
 import { attachToolbar } from '../components/md-toolbar.js';
+import { enhanceMarkdownFigures } from '../components/markdown-figures.js';
 import { installWrappedChipDnd } from '../components/wrapped-chip-dnd.js';
 import { openShareLinkModal } from '../components/share-link-modal.js';
 
@@ -495,6 +496,7 @@ function renderNotesList() {
         const mdDiv = el('div', { class: 'markdown-body' });
         mdDiv.style.fontSize = '13px';
         mdDiv.innerHTML = marked(n.content);
+        enhanceMarkdownFigures(mdDiv);
         expandContent.appendChild(mdDiv);
       } else {
         const pre = document.createElement('pre');
@@ -546,7 +548,7 @@ function onNewNote() {
 
 function hasMarkdownMarkers(text) {
   if (!text) return false;
-  return /^#{1,6}\s|^\*\*|^- |\*\*|```|^\|.*\|/m.test(text);
+  return /^#{1,6}\s|^\*\*|^- |\*\*|```|^\|.*\||!\[[^\]]*]\(/m.test(text);
 }
 
 function openEditor(note) {
@@ -635,6 +637,7 @@ function renderEditor() {
   if (previewMode) {
     const previewDiv = el('div', { class: 'note-preview markdown-body' });
     previewDiv.innerHTML = editingNote.content ? marked(editingNote.content) : '<p style="color:var(--text-muted)">(empty)</p>';
+    enhanceMarkdownFigures(previewDiv);
     previewDiv.title = 'Double-click to edit';
     previewDiv.addEventListener('dblclick', () => {
       previewMode = false;
@@ -648,7 +651,7 @@ function renderEditor() {
     textarea.value = editingNote.content;
     textarea.addEventListener('input', () => { editingNote.content = textarea.value; });
     right.appendChild(textarea);
-    attachToolbar(textarea);
+    attachToolbar(textarea, { enableImageUpload: true });
   }
 
   // Action buttons

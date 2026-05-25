@@ -11,7 +11,7 @@ import {
   Alert,
 } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
-import Markdown from 'react-native-markdown-display';
+import MarkdownContent from '../../components/MarkdownContent';
 import ShareLinkSheet from '../../components/ShareLinkSheet';
 import { useTheme } from '../../theme/ThemeContext';
 import { upsertNote } from '../../db/noteRepo';
@@ -75,18 +75,6 @@ export default function NoteEditorScreen({ route, navigation }) {
     });
   }, [navigation, save, saving, colors]);
 
-  const mdStyles = {
-    body: { color: colors.text, fontSize: 15, lineHeight: 22 },
-    heading1: { color: colors.text, fontSize: 24, fontWeight: '700', marginTop: 16, marginBottom: 8 },
-    heading2: { color: colors.text, fontSize: 20, fontWeight: '700', marginTop: 14, marginBottom: 6 },
-    heading3: { color: colors.text, fontSize: 17, fontWeight: '600', marginTop: 12, marginBottom: 4 },
-    code_block: { backgroundColor: colors.bgSecondary, color: colors.text, padding: 10, borderRadius: 6 },
-    code_inline: { backgroundColor: colors.bgSecondary, color: colors.text, paddingHorizontal: 4, borderRadius: 3 },
-    link: { color: colors.primary },
-    blockquote: { borderLeftWidth: 3, borderLeftColor: colors.primary, paddingLeft: 12, color: colors.textSecondary },
-    hr: { backgroundColor: colors.border, height: 1, marginVertical: 16 },
-  };
-
   return (
     <KeyboardAvoidingView
       style={[s.container, { backgroundColor: colors.bg }]}
@@ -120,7 +108,7 @@ export default function NoteEditorScreen({ route, navigation }) {
       {preview ? (
         <ScrollView style={s.body} contentContainerStyle={s.bodyContent}>
           {content.trim() ? (
-            <Markdown style={mdStyles}>{content}</Markdown>
+            <MarkdownContent colors={colors}>{content}</MarkdownContent>
           ) : (
             <Text style={[s.placeholder, { color: colors.textMuted }]}>
               Пусто — переключись во «Написать»

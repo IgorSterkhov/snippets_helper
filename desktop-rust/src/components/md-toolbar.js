@@ -7,6 +7,8 @@
  *   const toolbar = attachToolbar(myTextarea);
  */
 
+import { openImageUploadModal } from './image-upload-modal.js';
+
 // ── Core helpers ──────────────────────────────────────────────
 
 function wrapSelection(textarea, before, after = '') {
@@ -110,7 +112,7 @@ async function readUrlFromClipboard() {
 
 // ── Button definitions ────────────────────────────────────────
 
-function getButtons(textarea) {
+function getButtons(textarea, options = {}) {
   let headingLevel = 1;
 
   return [
@@ -160,6 +162,12 @@ function getButtons(textarea) {
     {
       label: '\uD83D\uDDBC', title: 'Image',
       action: () => {
+        if (options.enableImageUpload) {
+          openImageUploadModal({
+            onInsert: (markdown) => insertAtCursor(textarea, markdown),
+          });
+          return;
+        }
         const start = textarea.selectionStart;
         const end = textarea.selectionEnd;
         const selected = textarea.value.substring(start, end);
@@ -206,11 +214,11 @@ function getButtons(textarea) {
 
 // ── Public API ────────────────────────────────────────────────
 
-export function attachToolbar(textarea) {
+export function attachToolbar(textarea, options = {}) {
   const toolbar = document.createElement('div');
   toolbar.className = 'md-toolbar';
 
-  const buttons = getButtons(textarea);
+  const buttons = getButtons(textarea, options);
 
   for (const btn of buttons) {
     if (btn === 'sep') {
