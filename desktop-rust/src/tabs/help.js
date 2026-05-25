@@ -28,6 +28,9 @@ const i18n = {
     commits_name: 'Commits',
     commits_desc: 'Build structured commit messages with customizable tags. Maintain a history of past commit messages for quick reuse. Manage commit tags from Settings.',
 
+    settings_name: 'Settings',
+    settings_desc: 'Configure sync, updates, display preferences, and per-tool options. Server-appointed admins see an additional Users / Limits tab for checking user activity and storage usage, then adjusting each user media quota and max upload size. Admin assignment is intentionally not available in the UI and is done only by a server-side command.',
+
     exec_name: 'Exec',
     exec_desc: 'Run shell commands organised into Groups. Each group has a Slack-style auto-letter icon (colour from name) and a count of commands. Drag the ⋮⋮ grip on a command card to move it between groups (drop on the left panel) or reorder within the same group; click the grip without dragging for a "Move to…" popover. Click the command name to edit it (the modal also has a Group dropdown). Per-card flat green Run-button on the left, Delete on the right. Group header has a ▶ Run all button — runs every command sequentially with a progress bar + per-command collapsible sections in the bottom console; fail-fast on first error, single Stop aborts the whole sequence. Per-command Shell selector: Host (cmd / sh) or WSL (Windows). WSL mode wraps the command in `wsl.exe [-d distro] -- bash -lc`, so SSH, rsync, git etc. use WSL\'s own ~/.ssh/config and keys. Distinct terminal-style aesthetic (JetBrains Mono throughout, phosphor-green accent on near-black, breadcrumb header).',
 
@@ -76,6 +79,9 @@ const i18n = {
 
     commits_name: 'Коммиты',
     commits_desc: 'Составляйте структурированные сообщения коммитов с настраиваемыми тегами. Ведите историю сообщений для быстрого повторного использования. Управляйте тегами коммитов в Настройках.',
+
+    settings_name: 'Настройки',
+    settings_desc: 'Настройка синхронизации, обновлений, внешнего вида и параметров отдельных инструментов. Администраторы, назначенные на сервере, видят дополнительную вкладку Users / Limits: там отображаются пользователи, последняя активность, использование хранилища, квота и максимальный размер загрузки. Назначение админов намеренно не доступно в UI и выполняется только серверной командой.',
 
     exec_name: 'Выполнение',
     exec_desc: 'Запускайте shell-команды, организованные в Группы (Groups). У каждой группы — авто-иконка в стиле Slack (буква + цвет, выводимый из имени) и счётчик команд. Тяните ⋮⋮ слева на карточке команды, чтобы перенести её в другую группу (drop на левую панель) или поменять порядок в пределах группы; клик по grip без перетаскивания открывает popover «Move to…». Клик по имени команды — редактирование (в модалке также есть dropdown «Группа»). Слева на карточке — плоская зелёная кнопка Run, справа — Delete. На хедере группы — кнопка ▶ Run all, последовательно прогоняет все команды с прогресс-баром и collapsible-секциями вывода в нижней консоли; fail-fast при первой ошибке, единственная Stop останавливает всю последовательность. У каждой команды свой selector Shell: Host (cmd / sh) или WSL (на Windows). В режиме WSL команда оборачивается в `wsl.exe [-d distro] -- bash -lc`, так что SSH, rsync, git и пр. используют ssh-конфиг и ключи из WSL. Отдельный терминальный стиль вкладки (JetBrains Mono всюду, phosphor-green акцент на почти-чёрном, breadcrumb сверху).',
@@ -279,6 +285,7 @@ function renderFeatures(container, lang) {
     { name: t(lang, 'sql_name'),       desc: t(lang, 'sql_desc') },
     { name: t(lang, 'superset_name'),  desc: t(lang, 'superset_desc') },
     { name: t(lang, 'commits_name'),   desc: t(lang, 'commits_desc') },
+    { name: t(lang, 'settings_name'),  desc: t(lang, 'settings_desc') },
     { name: t(lang, 'exec_name'),      desc: t(lang, 'exec_desc') },
     { name: t(lang, 'search_name'),    desc: t(lang, 'search_desc') },
     { name: t(lang, 'vps_name'),       desc: t(lang, 'vps_desc') },

@@ -5,8 +5,9 @@ import { qrcode } from '../lib/qrcode.js';
 
 let root = null;
 let activeSubTab = 'general';
+let adminTabVisible = false;
 
-const SUB_TABS = [
+const BASE_SUB_TABS = [
   { id: 'general',    label: 'General' },
   { id: 'shortcuts',  label: 'Shortcuts' },
   { id: 'tasks',      label: 'Tasks' },
@@ -17,11 +18,14 @@ const SUB_TABS = [
   { id: 'updates',    label: 'Updates' },
 ];
 
+const ADMIN_TAB = { id: 'users', label: 'Users / Limits' };
+
 // ── Public API ────────────────────────────────────────────────
 
 export function openSettingsModal() {
   // Prevent duplicate modals
   if (document.querySelector('.settings-overlay')) return;
+  if (activeSubTab === 'users' && !adminTabVisible) activeSubTab = 'general';
 
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay settings-overlay';
@@ -39,25 +43,14 @@ export function openSettingsModal() {
 
   // Tab strip
   const tabStrip = el('div', { class: 'settings-tab-strip' });
-  for (const tab of SUB_TABS) {
-    const btn = el('button', {
-      text: tab.label,
-      class: 'settings-tab-btn' + (tab.id === activeSubTab ? ' active' : ''),
-    });
-    btn.dataset.tabId = tab.id;
-    btn.addEventListener('click', () => {
-      activeSubTab = tab.id;
-      tabStrip.querySelectorAll('.settings-tab-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      renderSubTab(body);
-    });
-    tabStrip.appendChild(btn);
-  }
   modal.appendChild(tabStrip);
 
   // Body
   const body = el('div', { class: 'settings-body' });
   modal.appendChild(body);
+  for (const tab of visibleSubTabs()) {
+    tabStrip.appendChild(makeTabButton(tab, tabStrip, body));
+  }
 
   overlay.appendChild(modal);
   document.body.appendChild(overlay);
@@ -81,6 +74,7 @@ export function openSettingsModal() {
   document.addEventListener('keydown', onKey, true);
 
   renderSubTab(body);
+  refreshAdminTab(tabStrip, body);
 }
 
 // ── Sub-tab rendering ─────────────────────────────────────────
@@ -97,10 +91,56 @@ async function renderSubTab(container) {
       case 'formatter': await renderFormatter(container);  break;
       case 'sync':      await renderSync(container);       break;
       case 'updates':   await renderUpdates(container);    break;
+      case 'users':     await renderUsers(container);      break;
     }
   } catch (err) {
     container.innerHTML = '';
     container.appendChild(el('p', { text: 'Error loading settings: ' + err }));
+  }
+}
+
+function visibleSubTabs() {
+  return adminTabVisible ? [...BASE_SUB_TABS, ADMIN_TAB] : BASE_SUB_TABS;
+}
+
+function makeTabButton(tab, tabStrip, body) {
+  const btn = el('button', {
+    text: tab.label,
+    class: 'settings-tab-btn' + (tab.id === activeSubTab ? ' active' : ''),
+  });
+  btn.dataset.tabId = tab.id;
+  btn.addEventListener('click', () => {
+    activeSubTab = tab.id;
+    tabStrip.querySelectorAll('.settings-tab-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    renderSubTab(body);
+  });
+  return btn;
+}
+
+async function refreshAdminTab(tabStrip, body) {
+  let me = null;
+  try {
+    me = await call('get_admin_me');
+  } catch {
+    me = null;
+  }
+  const shouldShow = !!me?.is_admin;
+  if (shouldShow === adminTabVisible) return;
+  adminTabVisible = shouldShow;
+  const existing = tabStrip.querySelector('[data-tab-id="users"]');
+  if (adminTabVisible && !existing) {
+    tabStrip.appendChild(makeTabButton(ADMIN_TAB, tabStrip, body));
+    return;
+  }
+  if (!adminTabVisible && existing) {
+    existing.remove();
+    if (activeSubTab === 'users') {
+      activeSubTab = 'general';
+      const generalBtn = tabStrip.querySelector('[data-tab-id="general"]');
+      generalBtn?.classList.add('active');
+      await renderSubTab(body);
+    }
   }
 }
 
@@ -793,6 +833,125 @@ async function renderUpdates(container) {
   checkBtn.click();
 }
 
+// ── Admin Users / Limits ─────────────────────────────────────
+
+async function renderUsers(container) {
+  container.innerHTML = '';
+
+  let me;
+  try {
+    me = await call('get_admin_me');
+  } catch (err) {
+    container.appendChild(el('p', { text: 'Admin status is unavailable: ' + err, class: 'settings-help' }));
+    return;
+  }
+
+  if (!me?.is_admin) {
+    container.appendChild(el('p', { text: 'Users / Limits is available only for server-appointed admins.', class: 'settings-help' }));
+    return;
+  }
+
+  const header = el('div', { class: 'admin-users-header' });
+  const title = el('div');
+  title.appendChild(el('h4', { text: 'Users / Limits' }));
+  title.appendChild(el('p', {
+    text: 'Admin assignment is managed only on the server. This panel edits media storage limits.',
+    class: 'settings-help',
+  }));
+  header.appendChild(title);
+  header.appendChild(el('div', {
+    text: `Your usage: ${formatBytes(me.media_used_bytes)} / ${formatBytes(me.media_quota_bytes)}`,
+    class: 'admin-current-usage',
+  }));
+  container.appendChild(header);
+
+  let users;
+  try {
+    users = await call('list_admin_users');
+  } catch (err) {
+    container.appendChild(el('p', { text: 'Failed to load users: ' + err, class: 'settings-help' }));
+    return;
+  }
+
+  const list = el('div', { class: 'admin-users-list' });
+  for (const user of users) {
+    list.appendChild(renderAdminUserRow(user));
+  }
+  container.appendChild(list);
+}
+
+function renderAdminUserRow(user) {
+  const row = el('div', { class: 'admin-user-row' });
+  row.dataset.userId = user.user_id;
+
+  const identity = el('div', { class: 'admin-user-identity' });
+  const nameLine = el('div', { class: 'admin-user-name' });
+  nameLine.appendChild(el('span', { text: user.name || 'Unnamed user' }));
+  if (user.is_admin) {
+    nameLine.appendChild(el('span', { text: 'Admin', class: 'admin-badge' }));
+  }
+  identity.appendChild(nameLine);
+  identity.appendChild(el('div', {
+    text: `ID ${shortId(user.user_id)} - created ${formatDate(user.created_at)} - last seen ${formatDate(user.last_seen_at)}`,
+    class: 'admin-user-meta',
+  }));
+  row.appendChild(identity);
+
+  const usage = el('div', { class: 'admin-usage-block' });
+  usage.appendChild(el('div', {
+    text: `${formatBytes(user.media_used_bytes)} / ${formatBytes(user.media_quota_bytes)}`,
+    class: 'admin-usage-label',
+  }));
+  const bar = el('div', { class: 'admin-usage-bar' });
+  const fill = el('div', { class: 'admin-usage-fill' });
+  const pct = user.media_quota_bytes > 0
+    ? Math.min(100, Math.round((user.media_used_bytes / user.media_quota_bytes) * 100))
+    : 0;
+  fill.style.width = `${pct}%`;
+  bar.appendChild(fill);
+  usage.appendChild(bar);
+  row.appendChild(usage);
+
+  const controls = el('div', { class: 'admin-limit-controls' });
+  const quotaInput = limitInput(bytesToMb(user.media_quota_bytes));
+  const maxInput = limitInput(bytesToMb(user.media_max_upload_bytes));
+  controls.appendChild(limitField('Quota MB', quotaInput));
+  controls.appendChild(limitField('Max upload MB', maxInput));
+
+  const saveBtn = el('button', { text: 'Save', class: 'btn-secondary admin-save-btn' });
+  saveBtn.addEventListener('click', async () => {
+    const quotaBytes = mbToBytes(quotaInput.value);
+    const maxBytes = mbToBytes(maxInput.value);
+    if (quotaBytes <= 0 || maxBytes <= 0) {
+      showToast('Limits must be positive', 'error');
+      return;
+    }
+    if (maxBytes > quotaBytes) {
+      showToast('Max upload cannot exceed quota', 'error');
+      return;
+    }
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving...';
+    try {
+      const updated = await call('update_admin_user_limits', {
+        userId: user.user_id,
+        mediaQuotaBytes: quotaBytes,
+        mediaMaxUploadBytes: maxBytes,
+      });
+      row.replaceWith(renderAdminUserRow(updated));
+      showToast('Limits updated', 'success');
+    } catch (err) {
+      showToast('Failed to update limits: ' + err, 'error');
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save';
+    }
+  });
+  controls.appendChild(saveBtn);
+  row.appendChild(controls);
+
+  return row;
+}
+
 // ── First-Run Dialog ──────────────────────────────────────────
 
 export async function checkFirstRun() {
@@ -967,6 +1126,52 @@ async function getComputerId() {
   return saved || 'default';
 }
 
+function shortId(value) {
+  return String(value || '').slice(0, 8) || '-';
+}
+
+function formatDate(value) {
+  if (!value) return 'never';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '-';
+  return d.toLocaleString();
+}
+
+function formatBytes(bytes) {
+  const n = Number(bytes) || 0;
+  if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(1)} GB`;
+  if (n >= 1024 ** 2) return `${Math.round(n / 1024 ** 2)} MB`;
+  if (n >= 1024) return `${Math.round(n / 1024)} KB`;
+  return `${n} B`;
+}
+
+function bytesToMb(bytes) {
+  return Math.max(1, Math.round((Number(bytes) || 0) / (1024 * 1024)));
+}
+
+function mbToBytes(value) {
+  const mb = Number(value);
+  if (!Number.isFinite(mb)) return 0;
+  return Math.round(mb * 1024 * 1024);
+}
+
+function limitInput(value) {
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.className = 'settings-input admin-limit-input';
+  input.min = '1';
+  input.step = '1';
+  input.value = String(value);
+  return input;
+}
+
+function limitField(label, input) {
+  const wrap = el('label', { class: 'admin-limit-field' });
+  wrap.appendChild(el('span', { text: label }));
+  wrap.appendChild(input);
+  return wrap;
+}
+
 function makeFormRow(labelText) {
   const row = el('div', { class: 'settings-form-row' });
   row.appendChild(el('label', { text: labelText, class: 'settings-label' }));
@@ -1120,6 +1325,94 @@ function injectStyles() {
   display: flex;
   gap: 8px;
   margin-top: 16px;
+}
+.admin-users-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+.admin-users-header h4 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+.admin-current-usage {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+.admin-users-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.admin-user-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.2fr) minmax(130px, 0.8fr) minmax(230px, 1fr);
+  gap: 12px;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--bg-secondary);
+}
+.admin-user-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  font-size: 13px;
+}
+.admin-user-meta,
+.admin-usage-label,
+.admin-limit-field span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.admin-badge {
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 600;
+}
+.admin-usage-block {
+  min-width: 0;
+}
+.admin-usage-bar {
+  height: 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-top: 6px;
+}
+.admin-usage-fill {
+  height: 100%;
+  background: var(--accent);
+}
+.admin-limit-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.admin-limit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.admin-limit-input {
+  width: 86px;
+}
+.admin-save-btn {
+  height: 31px;
+  min-width: 64px;
 }
 `;
   document.head.appendChild(style);

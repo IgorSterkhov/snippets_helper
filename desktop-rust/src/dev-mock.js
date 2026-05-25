@@ -213,6 +213,36 @@
       sync_api_url: 'https://ister-app.ru/snippets-api',
       sync_api_key: 'mock-key',
     });
+    storeSet('admin_me', {
+      user_id: 'mock-admin-user',
+      name: 'Mock Admin',
+      is_admin: false,
+      media_quota_bytes: 1073741824,
+      media_max_upload_bytes: 20971520,
+      media_used_bytes: 12 * 1024 * 1024,
+    });
+    storeSet('admin_users', [
+      {
+        user_id: 'mock-admin-user',
+        name: 'Mock Admin',
+        created_at: now(),
+        last_seen_at: now(),
+        is_admin: true,
+        media_quota_bytes: 1073741824,
+        media_max_upload_bytes: 20971520,
+        media_used_bytes: 12 * 1024 * 1024,
+      },
+      {
+        user_id: 'mock-phone-user',
+        name: 'Phone',
+        created_at: now(),
+        last_seen_at: null,
+        is_admin: false,
+        media_quota_bytes: 1073741824,
+        media_max_upload_bytes: 20971520,
+        media_used_bytes: 0,
+      },
+    ]);
 
     storeSet('task_categories', [
       { id: 1, name: 'Work', color: '#3b82f6', sort_order: 0, created_at: now(), updated_at: now() },
@@ -330,6 +360,23 @@
     },
     async set_always_on_top() { },
     async hide_and_sync() { console.log('[mock] hide_and_sync'); },
+    async get_admin_me() { return storeGet('admin_me', null); },
+    async list_admin_users() { return storeGet('admin_users', []); },
+    async update_admin_user_limits({ userId, mediaQuotaBytes, mediaMaxUploadBytes }) {
+      let updated = null;
+      const users = storeGet('admin_users', []).map(u => {
+        if (u.user_id !== userId) return u;
+        updated = {
+          ...u,
+          media_quota_bytes: mediaQuotaBytes,
+          media_max_upload_bytes: mediaMaxUploadBytes,
+        };
+        return updated;
+      });
+      storeSet('admin_users', users);
+      if (!updated) throw new Error('user not found');
+      return updated;
+    },
 
     // ── Shortcuts ───────────────────────────────────────
     async list_shortcuts() { return storeGet('shortcuts', []); },

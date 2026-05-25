@@ -21,6 +21,33 @@ class UserInfo(BaseModel):
     created_at: datetime
 
 
+# ==================== Admin ====================
+
+class AdminMeResponse(BaseModel):
+    user_id: str
+    name: Optional[str]
+    is_admin: bool
+    media_quota_bytes: int
+    media_max_upload_bytes: int
+    media_used_bytes: int = 0
+
+
+class AdminUserSummary(BaseModel):
+    user_id: str
+    name: Optional[str]
+    created_at: datetime
+    last_seen_at: Optional[datetime] = None
+    is_admin: bool
+    media_quota_bytes: int
+    media_max_upload_bytes: int
+    media_used_bytes: int = 0
+
+
+class AdminUserLimitsRequest(BaseModel):
+    media_quota_bytes: int
+    media_max_upload_bytes: int
+
+
 # ==================== Sync ====================
 
 class SyncRow(BaseModel):

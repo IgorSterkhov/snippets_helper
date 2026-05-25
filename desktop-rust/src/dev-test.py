@@ -213,6 +213,43 @@ async def run_tests():
         await wait_until(cdp, "!document.querySelector('.help-overlay')", timeout=3)
     await check('T2b Help changelog shows frontend OTA notes', t2b_help_changelog_shows_frontend_ota_notes)
 
+    # ── T2c: Settings admin tab is gated by server flag ──────
+    async def t2c_admin_settings_tab_visibility():
+        await cdp.eval("""
+          localStorage.setItem('mock.admin_me', JSON.stringify({
+            user_id: 'mock-admin-user', name: 'Mock Admin', is_admin: false,
+            media_quota_bytes: 1073741824, media_max_upload_bytes: 20971520,
+            media_used_bytes: 0
+          }));
+          document.querySelector('.settings-overlay')?.remove();
+          document.querySelector('.tab-btn[title="Settings"]').click();
+        """)
+        await wait_until(cdp, "!!document.querySelector('.settings-overlay')", timeout=3)
+        await asyncio.sleep(0.3)
+        hidden = await cdp.eval("![...document.querySelectorAll('.settings-tab-btn')].some(b => b.textContent.includes('Users / Limits'))")
+        assert hidden
+
+        await cdp.eval("""
+          document.querySelector('.settings-overlay')?.remove();
+          localStorage.setItem('mock.admin_me', JSON.stringify({
+            user_id: 'mock-admin-user', name: 'Mock Admin', is_admin: true,
+            media_quota_bytes: 1073741824, media_max_upload_bytes: 20971520,
+            media_used_bytes: 12582912
+          }));
+          localStorage.setItem('mock.admin_users', JSON.stringify([{
+            user_id: 'mock-admin-user', name: 'Mock Admin',
+            created_at: new Date().toISOString(), last_seen_at: new Date().toISOString(),
+            is_admin: true, media_quota_bytes: 1073741824,
+            media_max_upload_bytes: 20971520, media_used_bytes: 12582912
+          }]));
+          document.querySelector('.tab-btn[title="Settings"]').click();
+        """)
+        await wait_until(cdp, "[...document.querySelectorAll('.settings-tab-btn')].some(b => b.textContent.includes('Users / Limits'))", timeout=3)
+        await cdp.eval("[...document.querySelectorAll('.settings-tab-btn')].find(b => b.textContent.includes('Users / Limits')).click()")
+        await wait_until(cdp, "document.body.textContent.includes('Mock Admin') && document.body.textContent.includes('Quota MB')", timeout=3)
+        await cdp.eval("document.querySelector('.settings-overlay')?.remove()")
+    await check('T2c Settings admin limits tab visibility', t2c_admin_settings_tab_visibility)
+
     # ── T3: switch to Exec tab ────────────────────────────────
     async def t3():
         await cdp.eval(

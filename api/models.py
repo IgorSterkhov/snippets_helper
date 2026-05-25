@@ -1,6 +1,7 @@
 import uuid as uuid_mod
 from datetime import datetime
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -26,6 +27,25 @@ class User(Base):
     api_key: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     name: Mapped[str | None] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    is_admin: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false"),
+    )
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime)
+    media_quota_bytes: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        default=1073741824,
+        server_default="1073741824",
+    )
+    media_max_upload_bytes: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        default=20971520,
+        server_default="20971520",
+    )
 
 
 class Shortcut(Base):

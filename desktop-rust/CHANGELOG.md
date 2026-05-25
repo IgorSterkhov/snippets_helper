@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## v1.3.33 (2026-05-25)
+
+- **Admin storage limits:** server users now have admin state, last-seen
+  tracking, default media quota, and max upload limits, managed through a
+  command-only server admin assignment flow.
+- **Desktop Users / Limits:** Settings now shows an admin-only Users / Limits
+  tab with user activity, storage usage, quota editing, and read-only admin
+  badges.
+- **API test runner:** added an API unit-test venv runner that installs API
+  dependencies separately from post-release smoke tests.
+
 ## v1.3.32 (2026-05-24)
 
 - **Public share links:** Notes and Snippets can now be shared through live
