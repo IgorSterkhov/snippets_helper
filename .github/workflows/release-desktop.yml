@@ -1,8 +1,5 @@
 name: Release Desktop (Rust)
 
-env:
-  FORCED_MAIN_RELEASE_TAG: v1.3.36
-
 on:
   push:
     tags:
@@ -53,9 +50,7 @@ jobs:
         shell: bash
         run: |
           SHA=$(git rev-parse --short HEAD)
-          REF_NAME="$GITHUB_REF_NAME"
-          if [ "$REF_NAME" = "main" ]; then REF_NAME="$FORCED_MAIN_RELEASE_TAG"; fi
-          NATIVE="${REF_NAME#v}"
+          NATIVE="${GITHUB_REF_NAME#v}"
           VERSION="${NATIVE}-f${SHA}"
           printf '{\n  "version": "%s"\n}\n' "$VERSION" > desktop-rust/src/frontend-version.json
           cat desktop-rust/src/frontend-version.json
@@ -147,7 +142,7 @@ jobs:
       - name: Build and release
         # Skip on main-branch cache-seed pushes — only v-tags should
         # actually build the installer + publish the release.
-        if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main'
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -155,8 +150,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
         with:
           projectPath: desktop-rust
-          tagName: "${{ github.ref_name == 'main' && env.FORCED_MAIN_RELEASE_TAG || github.ref_name }}"
-          releaseName: "Keyboard Helper ${{ github.ref_name == 'main' && env.FORCED_MAIN_RELEASE_TAG || github.ref_name }}"
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Keyboard Helper ${{ github.ref_name }}'
           releaseBody: 'Download the installer for your platform from the assets below.'
           releaseDraft: false
           prerelease: false
@@ -174,7 +169,7 @@ jobs:
     # f-*). The earlier wording mentioned `always()` in the comment but the
     # expression was dropped in commit 683bac4 alongside the cache-seed
     # work, breaking f-* releases. Restored.
-    if: always() && (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/f-') || github.ref == 'refs/heads/main') && (needs.release.result == 'success' || needs.release.result == 'skipped')
+    if: always() && (startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/f-')) && (needs.release.result == 'success' || needs.release.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -187,25 +182,21 @@ jobs:
         id: meta
         run: |
           SHA=$(git rev-parse --short HEAD)
-          REF_NAME="$GITHUB_REF_NAME"
-          if [ "$REF_NAME" = "main" ]; then REF_NAME="$FORCED_MAIN_RELEASE_TAG"; fi
-          if [[ "$REF_NAME" == v* ]]; then
-            NATIVE="${REF_NAME#v}"
+          if [[ "$GITHUB_REF_NAME" == v* ]]; then
+            NATIVE="${GITHUB_REF_NAME#v}"
           else
             NATIVE=$(git tag --sort=-creatordate | grep -E '^v[0-9]' | head -n1 | sed 's/^v//')
             if [ -z "$NATIVE" ]; then NATIVE="0.0.0"; fi
           fi
           VERSION="${NATIVE}-f${SHA}"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "tag_name=$REF_NAME" >> $GITHUB_OUTPUT
-          echo "is_frontend_only=$([[ "$REF_NAME" == f-* ]] && echo true || echo false)" >> $GITHUB_OUTPUT
+          echo "is_frontend_only=$([[ "$GITHUB_REF_NAME" == f-* ]] && echo true || echo false)" >> $GITHUB_OUTPUT
 
       - name: Verify release history mentions current tag
         run: |
           set -e
-          TAG_NAME="${{ steps.meta.outputs.tag_name }}"
-          if ! grep -Fq "$TAG_NAME" desktop-rust/src/release-history.md; then
-            echo "::error file=desktop-rust/src/release-history.md::Release history does not mention ${TAG_NAME}"
+          if ! grep -Fq "$GITHUB_REF_NAME" desktop-rust/src/release-history.md; then
+            echo "::error file=desktop-rust/src/release-history.md::Release history does not mention ${GITHUB_REF_NAME}"
             exit 1
           fi
 
@@ -241,7 +232,7 @@ jobs:
       - name: Write manifest
         run: |
           VERSION="${{ steps.meta.outputs.version }}"
-          URL="https://github.com/${{ github.repository }}/releases/download/${{ steps.meta.outputs.tag_name }}/frontend-${VERSION}.zip"
+          URL="https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/frontend-${VERSION}.zip"
           SIG="${{ steps.sign.outputs.signature }}"
           SHA="${{ steps.pack.outputs.sha256 }}"
           cat > frontend-version.json <<EOF
@@ -280,8 +271,8 @@ jobs:
       - name: Upload assets
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.meta.outputs.tag_name }}
-          name: ${{ steps.meta.outputs.tag_name }}
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
           files: |
             frontend-${{ steps.meta.outputs.version }}.zip
             frontend-version.json
