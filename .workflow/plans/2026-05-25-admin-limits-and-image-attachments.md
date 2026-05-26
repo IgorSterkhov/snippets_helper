@@ -961,6 +961,7 @@ Add CDP smoke tests for:
 
 - presets: Small/Balanced/Readable/Original;
 - advanced quality controls;
+- file picker and clipboard screenshot upload entry points;
 - upload/server/preview progress states;
 - fit preview and click-to-100% preview;
 - insert/cancel actions.
@@ -973,12 +974,13 @@ handling remains in Rust and upload progress is reliable in WebView2:
 ```rust
 pick_media_file() -> Option<String>
 start_media_upload(file_path, requested_variants) -> MediaUploadStarted
+start_media_clipboard_upload(upload_id) -> MediaUploadStarted
 get_media_job(job_id) -> MediaJobStatus
 select_media_variant(asset_uuid, variant) -> MediaSelectResponse
 ```
 
-`start_media_upload` uses `reqwest` multipart/stream upload and emits window
-events:
+`start_media_upload` and `start_media_clipboard_upload` use `reqwest`
+multipart/stream upload and emit window events:
 
 - `media-upload-progress` with uploaded/total bytes;
 - `media-processing-progress` when server processing lasts longer than 1s;

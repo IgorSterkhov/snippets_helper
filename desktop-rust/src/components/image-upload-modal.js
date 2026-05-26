@@ -22,6 +22,7 @@ export function openImageUploadModal({ onInsert }) {
 
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay image-upload-overlay';
+  overlay.tabIndex = -1;
   const modal = el('div', 'modal image-upload-modal');
 
   const header = el('div', 'image-upload-header');
@@ -40,8 +41,10 @@ export function openImageUploadModal({ onInsert }) {
   const pickerRow = el('div', 'image-upload-picker');
   const fileLabel = el('div', 'image-upload-file', 'No image selected');
   const pickBtn = el('button', '', 'Choose image');
+  const pasteBtn = el('button', 'btn-secondary', 'Paste from clipboard');
   pickerRow.appendChild(fileLabel);
   pickerRow.appendChild(pickBtn);
+  pickerRow.appendChild(pasteBtn);
   modal.appendChild(pickerRow);
 
   const presetRow = el('div', 'image-upload-presets');
@@ -98,48 +101,34 @@ export function openImageUploadModal({ onInsert }) {
   });
   bindUploadProgress();
   updateCloseState();
+  setTimeout(() => overlay.focus(), 0);
 
   pickBtn.addEventListener('click', async () => {
+    if (isUploadBusy()) return;
     pickBtn.disabled = true;
-    clearReadyAsset();
+    pasteBtn.disabled = true;
     try {
       const filePath = await call('pick_media_file');
       if (!filePath || closed) return;
-      fileLabel.textContent = filePath.split(/[\\/]/).pop() || filePath;
-      activeUploadId = createUploadId();
-      updateCloseState();
-      setStep('upload', 5, 'starting');
-      const upload = await call('start_media_upload', {
-        filePath,
-        uploadId: activeUploadId,
+      await startUpload({
+        label: filePath.split(/[\\/]/).pop() || filePath,
+        command: 'start_media_upload',
+        args: { filePath },
       });
-      if (closed) return;
-      activeUploadId = null;
-      currentJob = upload.job_id;
-      setStep('upload', 100, 'done');
-      updateCloseState();
-      processingTimer = setTimeout(() => {
-        setStep('processing', 25, 'processing');
-      }, 1000);
-      pollJob();
     } catch (err) {
-      activeUploadId = null;
-      currentJob = null;
-      if (closed) return;
-      const message = String(err || '');
-      if (message.includes('upload cancelled')) {
-        setStep('upload', 0, 'cancelled');
-      } else {
-        showToast('Image upload failed: ' + err, 'error');
-        setStep('upload', 0, 'failed');
-      }
+      handleUploadError(err);
     } finally {
       if (!closed) {
-        pickBtn.disabled = false;
         updateCloseState();
       }
     }
   });
+
+  pasteBtn.addEventListener('click', () => {
+    startClipboardUpload();
+  });
+
+  document.addEventListener('paste', onPaste);
 
   insertBtn.addEventListener('click', async () => {
     if (!readyJob?.asset_uuid || !loadedPreviews.has(selectedVariant)) return;
@@ -157,6 +146,60 @@ export function openImageUploadModal({ onInsert }) {
       updateInsertState();
     }
   });
+
+  async function startClipboardUpload() {
+    if (isUploadBusy()) return;
+    try {
+      await startUpload({
+        label: 'Clipboard screenshot',
+        command: 'start_media_clipboard_upload',
+        args: {},
+      });
+    } catch (err) {
+      handleUploadError(err);
+    }
+  }
+
+  function onPaste(e) {
+    if (closed || isUploadBusy()) return;
+    e.preventDefault();
+    startClipboardUpload();
+  }
+
+  async function startUpload({ label, command, args }) {
+    clearReadyAsset();
+    fileLabel.textContent = label;
+    activeUploadId = createUploadId();
+    updateCloseState();
+    setStep('upload', 5, 'starting');
+    const upload = await call(command, {
+      ...args,
+      uploadId: activeUploadId,
+    });
+    if (closed) return;
+    activeUploadId = null;
+    currentJob = upload.job_id;
+    setStep('upload', 100, 'done');
+    updateCloseState();
+    processingTimer = setTimeout(() => {
+      setStep('processing', 25, 'processing');
+    }, 1000);
+    pollJob();
+  }
+
+  function handleUploadError(err) {
+    activeUploadId = null;
+    currentJob = null;
+    if (closed) return;
+    const message = String(err || '');
+    if (message.includes('upload cancelled')) {
+      setStep('upload', 0, 'cancelled');
+    } else {
+      showToast('Image upload failed: ' + err, 'error');
+      setStep('upload', 0, 'failed');
+    }
+    updateCloseState();
+  }
 
   async function pollJob() {
     if (!currentJob || closed) return;
@@ -216,16 +259,19 @@ export function openImageUploadModal({ onInsert }) {
           const pct = Math.round(done / total * 100);
           setStep('preview', pct, `${done} / ${total}`);
 
-          if (!loadedPreviews.has(selectedVariant)) {
-            const next = variants.find(v => loadedPreviews.has(v.variant));
-            if (next) selectedVariant = next.variant;
-          }
-
           updatePresetButtons();
           renderPreview();
           updateInsertState();
 
           if (done === total) {
+            if (!loadedPreviews.has(selectedVariant)) {
+              const next = variants.find(v => loadedPreviews.has(v.variant));
+              if (next) selectedVariant = next.variant;
+            }
+            updatePresetButtons();
+            renderPreview();
+            updateInsertState();
+
             if (loadedPreviews.size === 0) {
               setStep('preview', 100, 'failed');
               showToast('Image previews failed to load', 'error');
@@ -312,6 +358,7 @@ export function openImageUploadModal({ onInsert }) {
     closed = true;
     if (pollTimer) clearTimeout(pollTimer);
     if (processingTimer) clearTimeout(processingTimer);
+    document.removeEventListener('paste', onPaste);
     if (typeof uploadUnlisten === 'function') uploadUnlisten();
     if (activeUploadId) {
       call('cancel_media_upload', { uploadId: activeUploadId }).catch(() => {});
@@ -338,6 +385,7 @@ export function openImageUploadModal({ onInsert }) {
   }
 
   function updateCloseState() {
+    updatePickerState();
     if (activeUploadId) {
       closeBtn.disabled = false;
       closeBtn.textContent = 'Cancel';
@@ -350,6 +398,16 @@ export function openImageUploadModal({ onInsert }) {
     }
     closeBtn.disabled = false;
     closeBtn.textContent = 'Close';
+  }
+
+  function updatePickerState() {
+    const busy = isUploadBusy();
+    pickBtn.disabled = busy;
+    pasteBtn.disabled = busy;
+  }
+
+  function isUploadBusy() {
+    return !!activeUploadId || (!!currentJob && !readyJob);
   }
 
   function updatePresetButtons() {

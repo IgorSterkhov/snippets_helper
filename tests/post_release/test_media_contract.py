@@ -65,6 +65,13 @@ def test_media_upload_select_delete_contract(api_client):
     assert job["asset_uuid"]
     assert {v["variant"] for v in job["variants"]} >= {"small", "balanced", "readable", "original"}
 
+    balanced = next(v for v in job["variants"] if v["variant"] == "balanced")
+    with urllib.request.urlopen(balanced["preview_url"], timeout=30) as resp:
+        assert resp.status == 200
+        content_type = resp.headers.get("Content-Type", "")
+        assert "image/" in content_type, content_type
+        assert resp.read(16), "preview body is empty"
+
     status, selected = api_client.request_json(
         "POST",
         f"/v1/media/assets/{job['asset_uuid']}/select",

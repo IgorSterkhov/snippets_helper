@@ -236,6 +236,8 @@ Use modal design **C: Presets + Advanced**:
 - full-size preview shows the currently selected optimized result at 100%;
 - user can choose `Readable`, reduce compression/optimization, or save
   `Original` if optimized output is not readable.
+- desktop can start the same upload flow from an image file or from a
+  clipboard screenshot without writing the screenshot to user-visible disk.
 
 ### Progress States
 

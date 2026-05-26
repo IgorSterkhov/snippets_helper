@@ -1049,6 +1049,9 @@ button:hover, .btn:hover {
   justify-content: space-between;
   gap: 10px;
 }
+.image-upload-picker {
+  flex-wrap: wrap;
+}
 .image-upload-header h3 {
   margin: 0;
 }

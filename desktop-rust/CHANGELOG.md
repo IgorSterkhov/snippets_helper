@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## v1.3.35 (2026-05-26)
+
+- **Image preview fix:** desktop image-upload previews now load public HTTPS
+  media URLs inside the Tauri WebView instead of failing at the Preview step.
+- **Clipboard screenshots:** the image modal can upload screenshots directly
+  from the clipboard with the Paste from clipboard button or Ctrl+V, then uses
+  the same server optimization and variant picker as file uploads.
+- **Release smoke coverage:** post-release media smoke now downloads a
+  generated preview URL so media routing and stored preview files are checked
+  after release.
+
 ## v1.3.34 (2026-05-25)
 
 - **Images in Notes and Snippets:** desktop Markdown toolbars can upload an

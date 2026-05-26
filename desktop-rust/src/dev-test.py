@@ -250,6 +250,19 @@ async def run_tests():
         await cdp.eval("document.querySelector('.settings-overlay')?.remove()")
     await check('T2c Settings admin limits tab visibility', t2c_admin_settings_tab_visibility)
 
+    # ── T2d: Tauri CSP permits public media previews ────────
+    async def t2d_tauri_csp_allows_media_images():
+        config_path = os.path.join(SRC_DIR, '..', 'src-tauri', 'tauri.conf.json')
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+        csp = config['app']['security']['csp']
+        assert 'img-src' in csp, csp
+        img_directive = next((part.strip() for part in csp.split(';') if part.strip().startswith('img-src')), '')
+        assert 'https:' in img_directive, img_directive
+        assert 'data:' in img_directive, img_directive
+        assert 'blob:' in img_directive, img_directive
+    await check('T2d Tauri CSP allows media image previews', t2d_tauri_csp_allows_media_images)
+
     # ── T3: switch to Exec tab ────────────────────────────────
     async def t3():
         await cdp.eval(
@@ -1475,6 +1488,37 @@ async def run_tests():
         await cdp.eval("[...document.querySelectorAll('#panel-notes .note-toolbar button')].find(b => b.textContent.trim() === 'Preview').click()")
         await wait_until(cdp, "!!document.querySelector('#panel-notes .markdown-figure-card')", timeout=3)
     await check('T21c Notes image upload modal and figure card', t21c_notes_image_upload_modal_and_figure)
+
+    # ── T21d: Clipboard screenshot upload path works ─────────
+    async def t21d_snippets_image_upload_from_clipboard():
+        await close_modals()
+        await open_shortcuts_tab()
+        await cdp.eval("document.querySelector('#panel-shortcuts button[title=\"Add shortcut\"]').click()")
+        await wait_until(cdp, "!!document.querySelector('.modal-overlay textarea[placeholder^=\"Value\"]')", timeout=3)
+        await cdp.eval(
+            "[...document.querySelectorAll('.modal-overlay .md-toolbar button')]"
+            ".find(b => b.title === 'Image').click()"
+        )
+        await wait_until(cdp, "!!document.querySelector('.image-upload-overlay')", timeout=3)
+        await wait_until(
+            cdp,
+            "[...document.querySelectorAll('.image-upload-overlay button')]"
+            ".some(b => b.textContent.trim() === 'Paste from clipboard')",
+            timeout=3,
+        )
+        await cdp.eval(
+            "[...document.querySelectorAll('.image-upload-overlay button')]"
+            ".find(b => b.textContent.trim() === 'Paste from clipboard').click()"
+        )
+        await wait_until(cdp, "!document.querySelector('.image-upload-footer button').disabled", timeout=3)
+        await cdp.eval("document.querySelector('.image-upload-footer button').click()")
+        value = await wait_until(
+            cdp,
+            "document.querySelector('.modal-overlay textarea[placeholder^=\"Value\"]')?.value.includes('mock-clipboard-balanced.webp') && document.querySelector('.modal-overlay textarea[placeholder^=\"Value\"]').value",
+            timeout=3,
+        )
+        assert '![clipboard-screenshot]' in value
+    await check('T21d Snippets clipboard image upload modal', t21d_snippets_image_upload_from_clipboard)
 
     # ── T22: Snippets tab hover uses readable tint ───────────
     async def t22_snippets_tab_hover_css():

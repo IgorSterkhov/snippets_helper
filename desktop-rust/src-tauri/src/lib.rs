@@ -153,6 +153,7 @@ pub fn run() {
             commands::admin::update_admin_user_limits,
             commands::media::pick_media_file,
             commands::media::start_media_upload,
+            commands::media::start_media_clipboard_upload,
             commands::media::cancel_media_upload,
             commands::media::get_media_job,
             commands::media::delete_media_asset,

@@ -311,6 +311,7 @@
 
   const shareLinks = new Map();
   const mediaJobs = new Map();
+  const mediaAssets = new Map();
 
   function shareKey(itemType, itemUuid) {
     return `${itemType}:${itemUuid}`;
@@ -329,6 +330,34 @@
       updated_at: stamp,
       revoked_at: null,
     };
+  }
+
+  function mockMediaJob({ sourcePath, assetName = 'mock-image', tokenPrefix = 'mock' }) {
+    const jobId = 'mock-media-job-' + Date.now() + '-' + Math.random().toString(16).slice(2);
+    const assetUuid = 'mock-media-asset-' + Math.random().toString(16).slice(2);
+    mediaAssets.set(assetUuid, { assetName, tokenPrefix });
+    mediaJobs.set(jobId, {
+      job_id: jobId,
+      status: 'ready',
+      progress_current: 4,
+      progress_total: 4,
+      asset_uuid: assetUuid,
+      variants: ['small', 'balanced', 'readable', 'original'].map((variant, index) => ({
+        variant,
+        public_token: `${tokenPrefix}-${variant}`,
+        preview_url: 'data:image/svg+xml;utf8,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="#161b22"/><text x="40" y="190" fill="#58a6ff" font-size="42">${variant}</text></svg>`),
+        mime_type: 'image/webp',
+        size_bytes: (index + 1) * 10240,
+        width: 640,
+        height: 360,
+        sha256: 'x'.repeat(64),
+      })),
+      source_path: sourcePath,
+    });
+    window.dispatchEvent(new CustomEvent('media-upload-progress', {
+      detail: { phase: 'upload', bytes_done: 100, bytes_total: 100, finished: true },
+    }));
+    return { job_id: jobId, status: 'queued' };
   }
 
   // ----- whisper mocks -----
@@ -478,29 +507,14 @@
       return '/tmp/mock-image.png';
     },
     async start_media_upload({ filePath }) {
-      const jobId = 'mock-media-job-' + Date.now();
-      mediaJobs.set(jobId, {
-        job_id: jobId,
-        status: 'ready',
-        progress_current: 4,
-        progress_total: 4,
-        asset_uuid: 'mock-media-asset',
-        variants: ['small', 'balanced', 'readable', 'original'].map((variant, index) => ({
-          variant,
-          public_token: 'mock-' + variant,
-          preview_url: 'data:image/svg+xml;utf8,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="#161b22"/><text x="40" y="190" fill="#58a6ff" font-size="42">${variant}</text></svg>`),
-          mime_type: 'image/webp',
-          size_bytes: (index + 1) * 10240,
-          width: 640,
-          height: 360,
-          sha256: 'x'.repeat(64),
-        })),
-        source_path: filePath,
+      return mockMediaJob({ sourcePath: filePath });
+    },
+    async start_media_clipboard_upload() {
+      return mockMediaJob({
+        sourcePath: 'clipboard',
+        assetName: 'clipboard-screenshot',
+        tokenPrefix: 'mock-clipboard',
       });
-      window.dispatchEvent(new CustomEvent('media-upload-progress', {
-        detail: { phase: 'upload', bytes_done: 100, bytes_total: 100, finished: true },
-      }));
-      return { job_id: jobId, status: 'queued' };
     },
     async cancel_media_upload() {
       return true;
@@ -512,11 +526,12 @@
       return null;
     },
     async select_media_variant({ assetUuid, variant }) {
+      const asset = mediaAssets.get(assetUuid) || { assetName: 'mock-image', tokenPrefix: 'mock' };
       return {
         asset_uuid: assetUuid,
         variant,
-        markdown: `![mock-image](https://ister-app.ru/snippets-media/mock-${variant}.webp)`,
-        url: `https://ister-app.ru/snippets-media/mock-${variant}.webp`,
+        markdown: `![${asset.assetName}](https://ister-app.ru/snippets-media/${asset.tokenPrefix}-${variant}.webp)`,
+        url: `https://ister-app.ru/snippets-media/${asset.tokenPrefix}-${variant}.webp`,
         width: 640,
         height: 360,
         size_bytes: 10240,
