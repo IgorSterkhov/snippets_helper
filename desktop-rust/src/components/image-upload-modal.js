@@ -1,5 +1,5 @@
 import { call } from '../tauri-api.js';
-import { showToast } from './toast.js';
+import { showErrorDialog } from './error-dialog.js';
 
 const PRESETS = ['small', 'balanced', 'readable', 'original'];
 
@@ -18,7 +18,7 @@ export function openImageUploadModal({ onInsert }) {
   let previewRunId = 0;
 
   const loadedPreviews = new Set();
-  const failedPreviews = new Set();
+  const failedPreviews = new Map();
 
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay image-upload-overlay';
@@ -142,7 +142,12 @@ export function openImageUploadModal({ onInsert }) {
       onInsert(selected.markdown);
       cleanup();
     } catch (err) {
-      showToast('Failed to insert image: ' + err, 'error');
+      showImageError(
+        'Image insert failed',
+        'The optimized image was generated, but the desktop app could not insert it into the editor.',
+        err,
+        { stage: 'insert' }
+      );
       updateInsertState();
     }
   });
@@ -188,6 +193,7 @@ export function openImageUploadModal({ onInsert }) {
   }
 
   function handleUploadError(err) {
+    const uploadId = activeUploadId;
     activeUploadId = null;
     currentJob = null;
     if (closed) return;
@@ -195,7 +201,12 @@ export function openImageUploadModal({ onInsert }) {
     if (message.includes('upload cancelled')) {
       setStep('upload', 0, 'cancelled');
     } else {
-      showToast('Image upload failed: ' + err, 'error');
+      showImageError(
+        'Image upload failed',
+        'The image could not be sent to the server.',
+        err,
+        { stage: 'upload', upload_id: uploadId }
+      );
       setStep('upload', 0, 'failed');
     }
     updateCloseState();
@@ -211,7 +222,12 @@ export function openImageUploadModal({ onInsert }) {
         currentJob = null;
         updateCloseState();
         setStep('processing', 100, 'failed');
-        showToast(job.error || 'Image processing failed', 'error');
+        showImageError(
+          'Image processing failed',
+          job.error || 'The server could not prepare optimized image variants.',
+          job.error || 'job status failed',
+          { stage: 'processing', job }
+        );
         return;
       }
       if (job.status === 'ready') {
@@ -227,7 +243,17 @@ export function openImageUploadModal({ onInsert }) {
       setStep('processing', pct, `${job.progress_current || 1} / ${total}`);
       pollTimer = setTimeout(pollJob, 500);
     } catch (err) {
-      if (!closed) showToast('Image job polling failed: ' + err, 'error');
+      if (!closed) {
+        currentJob = null;
+        updateCloseState();
+        setStep('processing', 100, 'failed');
+        showImageError(
+          'Image processing status failed',
+          'The desktop app could not read the server image-processing status.',
+          err,
+          { stage: 'processing_poll' }
+        );
+      }
     }
   }
 
@@ -242,6 +268,12 @@ export function openImageUploadModal({ onInsert }) {
     if (!total) {
       setStep('preview', 100, 'failed');
       renderPreview();
+      showImageError(
+        'Image preview failed',
+        'The server processed the image, but did not return any preview variants.',
+        'no variants returned',
+        { stage: 'preview', total_variants: 0 }
+      );
       return;
     }
 
@@ -252,7 +284,10 @@ export function openImageUploadModal({ onInsert }) {
     for (const variant of variants) {
       preloadImage(variant.preview_url)
         .then(() => loadedPreviews.add(variant.variant))
-        .catch(() => failedPreviews.add(variant.variant))
+        .catch((err) => failedPreviews.set(variant.variant, {
+          preview_url: variant.preview_url,
+          reason: String(err?.message || err),
+        }))
         .finally(() => {
           if (closed || runId !== previewRunId) return;
           done += 1;
@@ -274,7 +309,12 @@ export function openImageUploadModal({ onInsert }) {
 
             if (loadedPreviews.size === 0) {
               setStep('preview', 100, 'failed');
-              showToast('Image previews failed to load', 'error');
+              showImageError(
+                'Image preview failed',
+                'The server processed the image, but the desktop app could not load any generated preview.',
+                'all preview variants failed to load',
+                { stage: 'preview', total_variants: total }
+              );
             } else {
               setStep('preview', 100, `${loadedPreviews.size} / ${total}`);
             }
@@ -291,7 +331,8 @@ export function openImageUploadModal({ onInsert }) {
       return;
     }
     if (failedPreviews.has(selectedVariant)) {
-      preview.appendChild(el('div', 'image-upload-empty', 'Preview failed for this variant.'));
+      const failure = failedPreviews.get(selectedVariant);
+      preview.appendChild(el('div', 'image-upload-empty', failure?.reason || 'Preview failed for this variant.'));
       return;
     }
     if (!loadedPreviews.has(selectedVariant)) {
@@ -424,6 +465,57 @@ export function openImageUploadModal({ onInsert }) {
   function assetTotalBytes() {
     return (readyJob?.variants || []).reduce((sum, variant) => sum + (Number(variant.size_bytes) || 0), 0);
   }
+
+  function showImageError(title, message, err, extra = {}) {
+    void (async () => {
+      const details = await buildImageErrorDetails(title, message, err, extra);
+      showErrorDialog({ title, message, details });
+    })();
+  }
+
+  async function buildImageErrorDetails(title, message, err, extra) {
+    const [frontendVersion, updateInfo] = await Promise.all([
+      safeCommand('get_frontend_version', {}, 800),
+      safeCommand('check_for_update', {}, 1200),
+    ]);
+    return {
+      title,
+      message,
+      timestamp: new Date().toISOString(),
+      frontend_version: frontendVersion.ok ? frontendVersion.value : `unavailable: ${frontendVersion.error}`,
+      native_version: updateInfo.ok ? (updateInfo.value?.current_version || null) : `unavailable: ${updateInfo.error}`,
+      latest_native_version: updateInfo.ok ? (updateInfo.value?.latest_version || null) : null,
+      update_build_in_progress: updateInfo.ok ? !!updateInfo.value?.build_in_progress : null,
+      error: String(err?.message || err || ''),
+      active_upload_id: activeUploadId,
+      current_job_id: currentJob,
+      selected_variant: selectedVariant,
+      ready_job: readyJob ? {
+        job_id: readyJob.job_id || null,
+        status: readyJob.status || null,
+        progress_current: readyJob.progress_current ?? null,
+        progress_total: readyJob.progress_total ?? null,
+        asset_uuid: readyJob.asset_uuid || null,
+        error: readyJob.error || null,
+      } : null,
+      variants: (readyJob?.variants || []).map((variant) => ({
+        variant: variant.variant,
+        preview_url: variant.preview_url,
+        public_token: variant.public_token || null,
+        mime_type: variant.mime_type || null,
+        size_bytes: variant.size_bytes ?? null,
+        width: variant.width ?? null,
+        height: variant.height ?? null,
+      })),
+      loaded_previews: Array.from(loadedPreviews),
+      failed_previews: Array.from(failedPreviews.entries()).map(([variant, failure]) => ({
+        variant,
+        preview_url: failure?.preview_url || null,
+        reason: failure?.reason || String(failure || ''),
+      })),
+      extra,
+    };
+  }
 }
 
 function openFullPreview(variant) {
@@ -436,13 +528,53 @@ function openFullPreview(variant) {
   document.body.appendChild(overlay);
 }
 
-function preloadImage(url) {
+function preloadImage(url, timeoutMs = 30000) {
   return new Promise((resolve, reject) => {
+    if (!url) {
+      reject(new Error('preview_url is empty'));
+      return;
+    }
     const img = new Image();
-    img.onload = () => resolve();
-    img.onerror = () => reject(new Error('preview failed'));
+    let settled = false;
+    const timer = setTimeout(() => fail(`preview timeout after ${timeoutMs}ms`), timeoutMs);
+
+    function cleanup() {
+      clearTimeout(timer);
+      img.onload = null;
+      img.onerror = null;
+    }
+
+    function done() {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve();
+    }
+
+    function fail(reason) {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error(`${reason}: ${url}`));
+    }
+
+    img.onload = done;
+    img.onerror = () => fail('image onerror');
     img.src = url;
   });
+}
+
+async function safeCommand(command, args = {}, timeoutMs = 1000) {
+  let timer = null;
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => resolve({ ok: false, error: `${command} timed out after ${timeoutMs}ms` }), timeoutMs);
+  });
+  const request = call(command, args)
+    .then((value) => ({ ok: true, value }))
+    .catch((err) => ({ ok: false, error: String(err?.message || err) }));
+  const result = await Promise.race([request, timeout]);
+  if (timer) clearTimeout(timer);
+  return result;
 }
 
 function createUploadId() {

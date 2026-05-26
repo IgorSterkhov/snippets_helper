@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## f-20260526-1 (2026-05-26)
+
+- **Image error diagnostics:** image upload, processing, insert, and preview
+  failures now open a persistent modal instead of disappearing as a toast.
+  The modal includes frontend/native version context, job IDs, preview URLs,
+  failed variant reasons, and a Copy error button for reporting the exact
+  failure.
+
 ## v1.3.35 (2026-05-26)
 
 - **Image preview fix:** desktop image-upload previews now load public HTTPS

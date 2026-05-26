@@ -464,6 +464,52 @@ button:hover, .btn:hover {
   margin-top: 2px;
 }
 
+.error-dialog-overlay {
+  z-index: 10020;
+}
+
+.error-dialog {
+  width: min(680px, 94vw);
+  max-width: 680px;
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+}
+
+.error-dialog h3 {
+  margin: 0;
+}
+
+.error-dialog-message {
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.error-dialog-details {
+  max-height: 42vh;
+  margin: 0;
+  padding: 10px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.error-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 /* ── Toast ────────────────────────────────────────────────── */
 
 .toast-container {

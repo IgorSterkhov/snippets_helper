@@ -1520,6 +1520,41 @@ async def run_tests():
         assert '![clipboard-screenshot]' in value
     await check('T21d Snippets clipboard image upload modal', t21d_snippets_image_upload_from_clipboard)
 
+    # ── T21e: Image preview failures show copyable diagnostics ─
+    async def t21e_snippets_image_preview_error_dialog():
+        await close_modals()
+        await open_shortcuts_tab()
+        await cdp.eval("window.__mockFailMediaPreviews = true; window.__mockClipboardText = '';")
+        await cdp.eval("document.querySelector('#panel-shortcuts button[title=\"Add shortcut\"]').click()")
+        await wait_until(cdp, "!!document.querySelector('.modal-overlay textarea[placeholder^=\"Value\"]')", timeout=3)
+        await cdp.eval(
+            "[...document.querySelectorAll('.modal-overlay .md-toolbar button')]"
+            ".find(b => b.title === 'Image').click()"
+        )
+        await wait_until(cdp, "!!document.querySelector('.image-upload-overlay')", timeout=3)
+        await cdp.eval("document.querySelector('.image-upload-overlay .image-upload-picker button').click()")
+        await wait_until(cdp, "!!document.querySelector('.error-dialog-overlay')", timeout=5)
+        title = await cdp.eval("document.querySelector('.error-dialog h3')?.textContent.trim()")
+        assert title == 'Image preview failed', f'title: {title!r}'
+        details = await cdp.eval("document.querySelector('.error-dialog-details')?.textContent || ''")
+        assert 'frontend_version' in details, f'details missing frontend_version: {details!r}'
+        assert 'native_version' in details, f'details missing native_version: {details!r}'
+        assert 'mock-balanced' in details, f'details missing failed preview url: {details!r}'
+        await cdp.eval(
+            "[...document.querySelectorAll('.error-dialog button')]"
+            ".find(b => b.textContent.trim() === 'Copy error').click()"
+        )
+        copied = await wait_until(cdp, "window.__mockClipboardText", timeout=3)
+        assert 'Image preview failed' in copied, f'copied: {copied!r}'
+        assert 'mock-balanced' in copied, f'copied missing preview url: {copied!r}'
+        await cdp.eval(
+            "[...document.querySelectorAll('.error-dialog button')]"
+            ".find(b => b.textContent.trim() === 'OK').click();"
+            "window.__mockFailMediaPreviews = false;"
+        )
+        await wait_until(cdp, "!document.querySelector('.error-dialog-overlay')", timeout=3)
+    await check('T21e Snippets image preview errors show diagnostics', t21e_snippets_image_preview_error_dialog)
+
     # ── T22: Snippets tab hover uses readable tint ───────────
     async def t22_snippets_tab_hover_css():
         hover_rule = await cdp.eval("""(() => {

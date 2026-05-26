@@ -319,3 +319,23 @@ changing backend APIs.
   the selected index after sorting if the item is still present.
 - Use deterministic tie-breakers. For modified-date sorting, sort by
   `updated_at` descending, then fall back to the same name comparator as A-Z.
+
+---
+
+## §10 Persistent error diagnostics
+
+**Used in:** Notes/Snippets image upload modal
+
+Use this pattern when an error is actionable, hard to reproduce, or needs
+technical context from the user.
+
+- Use `desktop-rust/src/components/error-dialog.js` instead of a transient
+  toast for upload, processing, sync, or preview failures that need reporting.
+- Keep the user-facing message short, then put technical context into the
+  scrollable details block.
+- Include versions, IDs, server/job status, URLs or affected record IDs, failed
+  step names, and the original exception text when available.
+- Provide a `Copy error` button that copies the full message and details via
+  the existing `copy_to_clipboard` command, with browser clipboard fallback.
+- Keep success feedback inside the button label so it remains visible while
+  the modal is open.

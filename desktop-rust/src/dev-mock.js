@@ -335,6 +335,7 @@
   function mockMediaJob({ sourcePath, assetName = 'mock-image', tokenPrefix = 'mock' }) {
     const jobId = 'mock-media-job-' + Date.now() + '-' + Math.random().toString(16).slice(2);
     const assetUuid = 'mock-media-asset-' + Math.random().toString(16).slice(2);
+    const failPreviews = !!window.__mockFailMediaPreviews;
     mediaAssets.set(assetUuid, { assetName, tokenPrefix });
     mediaJobs.set(jobId, {
       job_id: jobId,
@@ -342,16 +343,21 @@
       progress_current: 4,
       progress_total: 4,
       asset_uuid: assetUuid,
-      variants: ['small', 'balanced', 'readable', 'original'].map((variant, index) => ({
-        variant,
-        public_token: `${tokenPrefix}-${variant}`,
-        preview_url: 'data:image/svg+xml;utf8,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="#161b22"/><text x="40" y="190" fill="#58a6ff" font-size="42">${variant}</text></svg>`),
-        mime_type: 'image/webp',
-        size_bytes: (index + 1) * 10240,
-        width: 640,
-        height: 360,
-        sha256: 'x'.repeat(64),
-      })),
+      variants: ['small', 'balanced', 'readable', 'original'].map((variant, index) => {
+        const publicToken = `${tokenPrefix}-${variant}`;
+        return {
+          variant,
+          public_token: publicToken,
+          preview_url: failPreviews
+            ? `data:image/webp;variant=${publicToken};base64,bm90LWEtd2VicA==`
+            : 'data:image/svg+xml;utf8,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="#161b22"/><text x="40" y="190" fill="#58a6ff" font-size="42">${variant}</text></svg>`),
+          mime_type: 'image/webp',
+          size_bytes: (index + 1) * 10240,
+          width: 640,
+          height: 360,
+          sha256: 'x'.repeat(64),
+        };
+      }),
       source_path: sourcePath,
     });
     window.dispatchEvent(new CustomEvent('media-upload-progress', {
@@ -480,7 +486,10 @@
     },
 
     // ── Clipboard / URL ─────────────────────────────────
-    async copy_to_clipboard({ text }) { navigator.clipboard.writeText(text).catch(() => {}); },
+    async copy_to_clipboard({ text }) {
+      window.__mockClipboardText = text;
+      navigator.clipboard.writeText(text).catch(() => {});
+    },
     async read_clipboard() { try { return await navigator.clipboard.readText(); } catch { return ''; } },
     async open_url({ url }) { window.open(url, '_blank'); },
 
