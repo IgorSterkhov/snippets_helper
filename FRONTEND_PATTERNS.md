@@ -339,3 +339,22 @@ technical context from the user.
   the existing `copy_to_clipboard` command, with browser clipboard fallback.
 - Keep success feedback inside the button label so it remains visible while
   the modal is open.
+
+---
+
+## §11 Native media preview fallback
+
+**Used in:** Notes/Snippets image upload modal, desktop Markdown Figure Cards
+
+Use this pattern for server media URLs under `/snippets-media/`.
+
+- Keep saved Markdown portable: store the public HTTPS media URL, not a
+  `data:` URL.
+- For desktop display, load snippets-media URLs through
+  `get_media_preview_data_url` and set the rendered `<img>` source to the
+  returned local `data:` URL.
+- In upload preview flows, try the native fallback first for snippets-media
+  URLs; do not wait for a potentially stuck WebView remote-image request.
+- The native command must validate same-origin `/snippets-media/` URLs against
+  the configured sync API origin before downloading, so it cannot be used as a
+  generic URL fetcher.

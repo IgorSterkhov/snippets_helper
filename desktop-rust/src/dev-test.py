@@ -1555,6 +1555,66 @@ async def run_tests():
         await wait_until(cdp, "!document.querySelector('.error-dialog-overlay')", timeout=3)
     await check('T21e Snippets image preview errors show diagnostics', t21e_snippets_image_preview_error_dialog)
 
+    # ── T21f: Remote media previews use native data-url fallback ─
+    async def t21f_snippets_remote_media_preview_native_fallback():
+        await close_modals()
+        await open_shortcuts_tab()
+        await cdp.eval(
+            "window.__mockFailMediaPreviews = false;"
+            "window.__mockRemoteMediaPreviews = true;"
+            "window.__mockMediaPreviewDataCalls = 0;"
+        )
+        await cdp.eval("document.querySelector('#panel-shortcuts button[title=\"Add shortcut\"]').click()")
+        await wait_until(cdp, "!!document.querySelector('.modal-overlay textarea[placeholder^=\"Value\"]')", timeout=3)
+        await cdp.eval(
+            "[...document.querySelectorAll('.modal-overlay .md-toolbar button')]"
+            ".find(b => b.title === 'Image').click()"
+        )
+        await wait_until(cdp, "!!document.querySelector('.image-upload-overlay')", timeout=3)
+        await cdp.eval("document.querySelector('.image-upload-overlay .image-upload-picker button').click()")
+        preview_src = await wait_until(
+            cdp,
+            "document.querySelector('.image-upload-overlay .image-upload-preview img')?.src.startsWith('data:image/') && document.querySelector('.image-upload-overlay .image-upload-preview img').src",
+            timeout=5,
+        )
+        assert preview_src.startswith('data:image/'), f'preview src: {preview_src[:80]!r}'
+        calls = await cdp.eval("window.__mockMediaPreviewDataCalls || 0")
+        assert calls >= 1, f'native preview calls: {calls}'
+        await wait_until(cdp, "!document.querySelector('.image-upload-footer button').disabled", timeout=3)
+        await cdp.eval("document.querySelector('.image-upload-footer button').click()")
+        value = await wait_until(
+            cdp,
+            "document.querySelector('.modal-overlay textarea[placeholder^=\"Value\"]')?.value.includes('https://ister-app.ru/snippets-media/mock-balanced.webp') && document.querySelector('.modal-overlay textarea[placeholder^=\"Value\"]').value",
+            timeout=3,
+        )
+        assert 'data:image/' not in value, f'markdown should keep portable URL: {value!r}'
+        await cdp.eval("""(() => {
+          const editor = [...document.querySelectorAll('.modal-overlay')]
+            .find(x => !x.classList.contains('image-upload-overlay') && x.querySelector('input[placeholder="Name"]'));
+          const name = editor.querySelector('input[placeholder="Name"]');
+          name.value = 'Remote media fallback';
+          name.dispatchEvent(new Event('input', { bubbles: true }));
+          [...editor.querySelectorAll('.modal-actions button')]
+            .find(x => x.textContent.trim() === 'Confirm').click();
+        })()""")
+        await wait_until(
+            cdp,
+            "[...document.querySelectorAll('#panel-shortcuts .shortcut-list-item .shortcut-list-name')].some(x => x.textContent.trim() === 'Remote media fallback')",
+            timeout=3,
+        )
+        await cdp.eval(
+            "[...document.querySelectorAll('#panel-shortcuts .shortcut-list-item .shortcut-list-name')]"
+            ".find(x => x.textContent.trim() === 'Remote media fallback').click()"
+        )
+        figure_src = await wait_until(
+            cdp,
+            "document.querySelector('#panel-shortcuts .markdown-figure-card img')?.src.startsWith('data:image/') && document.querySelector('#panel-shortcuts .markdown-figure-card img').src",
+            timeout=5,
+        )
+        assert figure_src.startswith('data:image/'), f'figure src: {figure_src[:80]!r}'
+        await cdp.eval("window.__mockRemoteMediaPreviews = false;")
+    await check('T21f Snippets remote media previews use native fallback', t21f_snippets_remote_media_preview_native_fallback)
+
     # ── T22: Snippets tab hover uses readable tint ───────────
     async def t22_snippets_tab_hover_css():
         hover_rule = await cdp.eval("""(() => {

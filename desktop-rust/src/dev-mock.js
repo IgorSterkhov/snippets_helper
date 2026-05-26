@@ -336,6 +336,7 @@
     const jobId = 'mock-media-job-' + Date.now() + '-' + Math.random().toString(16).slice(2);
     const assetUuid = 'mock-media-asset-' + Math.random().toString(16).slice(2);
     const failPreviews = !!window.__mockFailMediaPreviews;
+    const remotePreviews = !!window.__mockRemoteMediaPreviews;
     mediaAssets.set(assetUuid, { assetName, tokenPrefix });
     mediaJobs.set(jobId, {
       job_id: jobId,
@@ -350,6 +351,8 @@
           public_token: publicToken,
           preview_url: failPreviews
             ? `data:image/webp;variant=${publicToken};base64,bm90LWEtd2VicA==`
+            : remotePreviews
+              ? `https://ister-app.ru/snippets-media/${publicToken}.webp`
             : 'data:image/svg+xml;utf8,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="#161b22"/><text x="40" y="190" fill="#58a6ff" font-size="42">${variant}</text></svg>`),
           mime_type: 'image/webp',
           size_bytes: (index + 1) * 10240,
@@ -530,6 +533,13 @@
     },
     async get_media_job({ jobId }) {
       return mediaJobs.get(jobId) || { job_id: jobId, status: 'failed', error: 'mock job not found' };
+    },
+    async get_media_preview_data_url({ previewUrl }) {
+      window.__mockMediaPreviewDataCalls = (window.__mockMediaPreviewDataCalls || 0) + 1;
+      const label = String(previewUrl || '').split('/').pop() || 'preview.webp';
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="#161b22"/><text x="40" y="190" fill="#7ee787" font-size="32">${label}</text></svg>`;
+      const dataUrl = 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+      return { data_url: dataUrl, mime_type: 'image/svg+xml', size_bytes: svg.length };
     },
     async delete_media_asset() {
       return null;

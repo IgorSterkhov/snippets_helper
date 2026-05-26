@@ -19,6 +19,7 @@ export function openImageUploadModal({ onInsert }) {
 
   const loadedPreviews = new Set();
   const failedPreviews = new Map();
+  const previewSources = new Map();
 
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay image-upload-overlay';
@@ -260,6 +261,7 @@ export function openImageUploadModal({ onInsert }) {
   function startPreviewLoading(variants) {
     loadedPreviews.clear();
     failedPreviews.clear();
+    previewSources.clear();
     updatePresetButtons();
     updateInsertState();
 
@@ -282,8 +284,11 @@ export function openImageUploadModal({ onInsert }) {
     renderPreview();
 
     for (const variant of variants) {
-      preloadImage(variant.preview_url)
-        .then(() => loadedPreviews.add(variant.variant))
+      loadPreviewVariant(variant)
+        .then((src) => {
+          loadedPreviews.add(variant.variant);
+          previewSources.set(variant.variant, src);
+        })
         .catch((err) => failedPreviews.set(variant.variant, {
           preview_url: variant.preview_url,
           reason: String(err?.message || err),
@@ -341,9 +346,9 @@ export function openImageUploadModal({ onInsert }) {
     }
 
     const img = document.createElement('img');
-    img.src = variant.preview_url;
+    img.src = previewSources.get(selectedVariant) || variant.preview_url;
     img.alt = selectedVariant;
-    img.addEventListener('click', () => openFullPreview(variant));
+    img.addEventListener('click', () => openFullPreview(variant, img.src));
     preview.appendChild(img);
     preview.appendChild(el(
       'div',
@@ -419,6 +424,7 @@ export function openImageUploadModal({ onInsert }) {
     readyJob = null;
     loadedPreviews.clear();
     failedPreviews.clear();
+    previewSources.clear();
     previewRunId += 1;
     inserted = false;
     for (const btn of presetButtons.values()) btn.disabled = true;
@@ -513,19 +519,62 @@ export function openImageUploadModal({ onInsert }) {
         preview_url: failure?.preview_url || null,
         reason: failure?.reason || String(failure || ''),
       })),
+      preview_sources: Array.from(previewSources.entries()).map(([variant, src]) => ({
+        variant,
+        source_kind: src.startsWith('data:') ? 'data_url' : 'remote_url',
+        source_prefix: src.slice(0, 80),
+      })),
       extra,
     };
   }
 }
 
-function openFullPreview(variant) {
+function openFullPreview(variant, src = variant.preview_url) {
   const overlay = el('div', 'modal-overlay image-full-preview');
   const img = document.createElement('img');
-  img.src = variant.preview_url;
+  img.src = src;
   img.alt = variant.variant;
   overlay.appendChild(img);
   overlay.addEventListener('click', () => overlay.remove());
   document.body.appendChild(overlay);
+}
+
+async function loadPreviewVariant(variant) {
+  if (isSnippetsMediaUrl(variant.preview_url)) {
+    try {
+      return await loadNativePreviewSource(variant.preview_url);
+    } catch (fallbackErr) {
+      try {
+        await preloadImage(variant.preview_url);
+        return variant.preview_url;
+      } catch (directErr) {
+        throw new Error(
+          `native preview fallback failed (${String(fallbackErr?.message || fallbackErr)}); direct preview failed (${String(directErr?.message || directErr)})`
+        );
+      }
+    }
+  }
+  try {
+    await preloadImage(variant.preview_url);
+    return variant.preview_url;
+  } catch (directErr) {
+    if (!isRemoteUrl(variant.preview_url)) throw directErr;
+    try {
+      return await loadNativePreviewSource(variant.preview_url);
+    } catch (fallbackErr) {
+      throw new Error(
+        `direct preview failed (${String(directErr?.message || directErr)}); native preview fallback failed (${String(fallbackErr?.message || fallbackErr)})`
+      );
+    }
+  }
+}
+
+async function loadNativePreviewSource(previewUrl) {
+  const fallback = await call('get_media_preview_data_url', { previewUrl });
+  const dataUrl = fallback?.data_url || '';
+  if (!dataUrl) throw new Error('native preview returned empty data_url');
+  await preloadImage(dataUrl);
+  return dataUrl;
 }
 
 function preloadImage(url, timeoutMs = 30000) {
@@ -562,6 +611,19 @@ function preloadImage(url, timeoutMs = 30000) {
     img.onerror = () => fail('image onerror');
     img.src = url;
   });
+}
+
+function isRemoteUrl(url) {
+  return /^https?:\/\//i.test(String(url || ''));
+}
+
+function isSnippetsMediaUrl(url) {
+  if (!isRemoteUrl(url)) return false;
+  try {
+    return new URL(url).pathname.startsWith('/snippets-media/');
+  } catch {
+    return false;
+  }
 }
 
 async function safeCommand(command, args = {}, timeoutMs = 1000) {

@@ -1,5 +1,7 @@
 use crate::db::{queries, DbState};
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use futures_util::{stream, TryStreamExt};
+use reqwest::header::{CONTENT_LENGTH, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::Cursor;
@@ -11,6 +13,8 @@ use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_dialog::DialogExt;
 use tokio_util::io::ReaderStream;
 use tokio_util::sync::CancellationToken;
+
+const MAX_MEDIA_PREVIEW_BYTES: u64 = 25 * 1024 * 1024;
 
 #[derive(Clone, Debug, Serialize)]
 struct ProgressPayload {
@@ -57,6 +61,13 @@ pub struct MediaSelectResponse {
     pub url: String,
     pub width: i64,
     pub height: i64,
+    pub size_bytes: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MediaPreviewDataResponse {
+    pub data_url: String,
+    pub mime_type: String,
     pub size_bytes: i64,
 }
 
@@ -136,6 +147,24 @@ async fn parse_json<T: for<'de> Deserialize<'de>>(resp: reqwest::Response) -> Re
     resp.json::<T>()
         .await
         .map_err(|e| format!("parse response: {e}"))
+}
+
+fn is_allowed_media_preview_url(api_url: &str, preview_url: &str) -> Result<bool, String> {
+    let api = reqwest::Url::parse(api_url).map_err(|e| format!("parse api url: {e}"))?;
+    let preview =
+        reqwest::Url::parse(preview_url).map_err(|e| format!("parse preview url: {e}"))?;
+    let same_origin = api.scheme() == preview.scheme()
+        && api.host_str() == preview.host_str()
+        && api.port_or_known_default() == preview.port_or_known_default();
+    Ok(same_origin && preview.path().starts_with("/snippets-media/"))
+}
+
+fn media_preview_data_url(mime_type: &str, bytes: &[u8]) -> String {
+    format!(
+        "data:{};base64,{}",
+        mime_type,
+        BASE64_STANDARD.encode(bytes)
+    )
 }
 
 #[tauri::command]
@@ -393,9 +422,65 @@ pub async fn get_media_job(
     parse_json(resp).await
 }
 
+#[tauri::command]
+pub async fn get_media_preview_data_url(
+    state: State<'_, DbState>,
+    preview_url: String,
+) -> Result<MediaPreviewDataResponse, String> {
+    let (api_url, _api_key, ca_cert) = sync_settings(&state)?;
+    if !is_allowed_media_preview_url(&api_url, &preview_url)? {
+        return Err("preview_url is not an allowed snippets-media URL".to_string());
+    }
+    let client = http_client(&api_url, ca_cert.as_deref())?;
+    let resp = client
+        .get(&preview_url)
+        .send()
+        .await
+        .map_err(|e| format!("request failed: {e}"))?;
+    let status = resp.status();
+    if !status.is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("HTTP {status}: {body}"));
+    }
+    if let Some(len) = resp
+        .headers()
+        .get(CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<u64>().ok())
+    {
+        if len > MAX_MEDIA_PREVIEW_BYTES {
+            return Err(format!("media preview is too large: {len} bytes"));
+        }
+    }
+    let mime_type = resp
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.split(';').next())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or("image/webp")
+        .to_string();
+    if !mime_type.starts_with("image/") {
+        return Err(format!("media preview is not an image: {mime_type}"));
+    }
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| format!("read preview body: {e}"))?;
+    if bytes.len() as u64 > MAX_MEDIA_PREVIEW_BYTES {
+        return Err(format!("media preview is too large: {} bytes", bytes.len()));
+    }
+    Ok(MediaPreviewDataResponse {
+        data_url: media_preview_data_url(&mime_type, &bytes),
+        mime_type,
+        size_bytes: bytes.len() as i64,
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::encode_rgba_png;
+    use super::{encode_rgba_png, is_allowed_media_preview_url, media_preview_data_url};
 
     #[test]
     fn encode_rgba_png_returns_png_bytes() {
@@ -407,6 +492,41 @@ mod tests {
     fn encode_rgba_png_rejects_bad_buffer_size() {
         let err = encode_rgba_png(2, 2, vec![0, 0, 0, 255]).unwrap_err();
         assert!(err.contains("buffer size mismatch"));
+    }
+
+    #[test]
+    fn media_preview_url_allows_same_origin_public_media_path() {
+        assert!(is_allowed_media_preview_url(
+            "https://ister-app.ru/snippets-api",
+            "https://ister-app.ru/snippets-media/token.webp",
+        )
+        .unwrap());
+    }
+
+    #[test]
+    fn media_preview_url_rejects_wrong_host() {
+        assert!(!is_allowed_media_preview_url(
+            "https://ister-app.ru/snippets-api",
+            "https://example.com/snippets-media/token.webp",
+        )
+        .unwrap());
+    }
+
+    #[test]
+    fn media_preview_url_rejects_non_media_path() {
+        assert!(!is_allowed_media_preview_url(
+            "https://ister-app.ru/snippets-api",
+            "https://ister-app.ru/private/token.webp",
+        )
+        .unwrap());
+    }
+
+    #[test]
+    fn media_preview_data_url_uses_mime_and_base64() {
+        assert_eq!(
+            media_preview_data_url("image/webp", b"abc"),
+            "data:image/webp;base64,YWJj",
+        );
     }
 }
 

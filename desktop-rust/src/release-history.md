@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## v1.3.36 (2026-05-26)
+
+- **Native media preview fallback:** desktop image previews and rendered
+  Figure Cards now load server media through a native snippets-media proxy and
+  display local `data:` URLs inside the WebView, while saved Markdown keeps the
+  portable public HTTPS image links.
+- **Preview timeout fix:** the image modal no longer waits for a stuck
+  WebView remote-image load before showing optimized variants.
+
 ## f-20260526-1 (2026-05-26)
 
 - **Image error diagnostics:** image upload, processing, insert, and preview

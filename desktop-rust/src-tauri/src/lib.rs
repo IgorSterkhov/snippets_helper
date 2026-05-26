@@ -156,6 +156,7 @@ pub fn run() {
             commands::media::start_media_clipboard_upload,
             commands::media::cancel_media_upload,
             commands::media::get_media_job,
+            commands::media::get_media_preview_data_url,
             commands::media::delete_media_asset,
             commands::media::select_media_variant,
             commands::notes::list_note_folders,
