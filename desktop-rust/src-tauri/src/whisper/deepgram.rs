@@ -128,43 +128,46 @@ impl DeepgramLiveService {
             );
         }
 
-        {
-            let g = self.inner.lock().await;
-            if !matches!(g.state, LiveState::Idle | LiveState::Error) {
-                return Ok(());
-            }
-        }
-
         let (audio_tx, audio_rx) =
             tokio::sync::mpsc::channel::<Vec<i16>>(LIVE_AUDIO_QUEUE_CAPACITY);
-        let recorder = SendLiveRecorder(LiveRecorder::start_with_level_event(
+
+        let session_id = {
+            let mut g = self.inner.lock().await;
+            let Some(session_id) = reserve_live_start(&mut g, &cfg) else {
+                return Ok(());
+            };
+            session_id
+        };
+        emit_live_state(&self.app, LiveState::Connecting, Some(cfg.model.clone()));
+
+        let recorder_result: Result<SendLiveRecorder, String> = LiveRecorder::start_with_level_event(
             self.app.clone(),
             cfg.mic_device.as_deref(),
             audio_tx,
             EVT_LIVE_LEVEL,
-        )?);
+        )
+        .map(SendLiveRecorder);
+        let recorder = match recorder_result {
+            Ok(recorder) => recorder,
+            Err(e) => {
+                let mut g = self.inner.lock().await;
+                let emit_error = clear_failed_start_reservation(&mut g, session_id);
+                let model = g.model.clone();
+                drop(g);
+                if emit_error {
+                    emit_live_state(&self.app, LiveState::Error, model);
+                }
+                return Err(e);
+            }
+        };
 
-        let session_id = {
+        {
             let mut g = self.inner.lock().await;
-            if !matches!(g.state, LiveState::Idle | LiveState::Error) {
+            if !is_start_reservation_current(&g, session_id) {
                 return Ok(());
             }
-            g.session_id = g.session_id.wrapping_add(1);
-            let session_id = g.session_id;
-            g.state = LiveState::Connecting;
             g.recorder = Some(recorder);
-            g.committed_text.clear();
-            g.model = Some(cfg.model.clone());
-            g.language = cfg
-                .language
-                .as_deref()
-                .map(str::trim)
-                .filter(|s| !s.is_empty() && *s != "auto")
-                .map(ToOwned::to_owned);
-            g.started_at = Some(Instant::now());
-            session_id
-        };
-        emit_live_state(&self.app, LiveState::Connecting, Some(cfg.model.clone()));
+        }
 
         let app = self.app.clone();
         let inner = self.inner.clone();
@@ -199,8 +202,10 @@ impl DeepgramLiveService {
         });
 
         let mut g = self.inner.lock().await;
-        if let Some(old) = g.task.replace(handle) {
-            old.abort();
+        if is_start_reservation_current(&g, session_id) {
+            g.task = Some(handle);
+        } else {
+            handle.abort();
         }
         Ok(())
     }
@@ -506,6 +511,46 @@ fn should_cleanup_completed_task(state: LiveState) -> bool {
     matches!(state, LiveState::Connecting | LiveState::Streaming)
 }
 
+fn reserve_live_start(inner: &mut LiveInner, cfg: &DeepgramConfig) -> Option<u64> {
+    if !matches!(inner.state, LiveState::Idle | LiveState::Error) {
+        return None;
+    }
+    if let Some(task) = inner.task.take() {
+        task.abort();
+    }
+    inner.session_id = inner.session_id.wrapping_add(1);
+    inner.state = LiveState::Connecting;
+    inner.recorder = None;
+    inner.committed_text.clear();
+    inner.model = Some(cfg.model.clone());
+    inner.language = cfg
+        .language
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty() && *s != "auto")
+        .map(ToOwned::to_owned);
+    inner.started_at = Some(Instant::now());
+    Some(inner.session_id)
+}
+
+fn is_start_reservation_current(inner: &LiveInner, session_id: u64) -> bool {
+    is_current_session(inner.session_id, session_id)
+        && matches!(inner.state, LiveState::Connecting | LiveState::Streaming)
+}
+
+fn clear_failed_start_reservation(inner: &mut LiveInner, session_id: u64) -> bool {
+    if !is_current_session(inner.session_id, session_id) || inner.state != LiveState::Connecting {
+        return false;
+    }
+    if let Some(task) = inner.task.take() {
+        task.abort();
+    }
+    inner.state = LiveState::Error;
+    inner.recorder = None;
+    inner.started_at = None;
+    true
+}
+
 fn emit_live_state(app: &AppHandle, state: LiveState, model: Option<String>) {
     let _ = app.emit(
         EVT_LIVE_STATE,
@@ -682,5 +727,70 @@ mod tests {
         assert!(!should_cleanup_completed_task(LiveState::Stopping));
         assert!(!should_cleanup_completed_task(LiveState::Idle));
         assert!(!should_cleanup_completed_task(LiveState::Error));
+    }
+
+    #[test]
+    fn live_start_reserves_connecting_session_before_recorder_creation() {
+        let mut inner = live_inner_for_tests(LiveState::Idle);
+        let cfg = test_config();
+
+        let session_id = reserve_live_start(&mut inner, &cfg).unwrap();
+
+        assert_eq!(session_id, 1);
+        assert_eq!(inner.session_id, 1);
+        assert_eq!(inner.state, LiveState::Connecting);
+        assert_eq!(inner.model.as_deref(), Some("nova-3"));
+        assert_eq!(inner.language.as_deref(), Some("ru"));
+        assert!(inner.started_at.is_some());
+    }
+
+    #[test]
+    fn stale_start_reservation_cannot_install_after_cancel() {
+        let mut inner = live_inner_for_tests(LiveState::Idle);
+        let cfg = test_config();
+        let session_id = reserve_live_start(&mut inner, &cfg).unwrap();
+
+        inner.state = LiveState::Idle;
+        inner.session_id = inner.session_id.wrapping_add(1);
+
+        assert!(!is_start_reservation_current(&inner, session_id));
+    }
+
+    #[test]
+    fn current_start_failure_clears_connecting_reservation() {
+        let mut inner = live_inner_for_tests(LiveState::Idle);
+        let cfg = test_config();
+        let session_id = reserve_live_start(&mut inner, &cfg).unwrap();
+
+        assert!(clear_failed_start_reservation(&mut inner, session_id));
+
+        assert_eq!(inner.state, LiveState::Error);
+        assert!(inner.recorder.is_none());
+        assert!(inner.task.is_none());
+        assert!(inner.started_at.is_none());
+    }
+
+    fn live_inner_for_tests(state: LiveState) -> LiveInner {
+        LiveInner {
+            state,
+            recorder: None,
+            task: None,
+            committed_text: String::new(),
+            model: None,
+            language: None,
+            started_at: None,
+            session_id: 0,
+        }
+    }
+
+    fn test_config() -> DeepgramConfig {
+        DeepgramConfig {
+            api_key: "secret".into(),
+            model: "nova-3".into(),
+            language: Some("ru".into()),
+            endpointing_ms: 300,
+            clipboard_restore_delay_ms: 200,
+            mic_device: None,
+        }
     }
 }
