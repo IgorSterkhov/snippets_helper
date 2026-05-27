@@ -1,6 +1,7 @@
 pub mod audio;
 pub mod bin_manager;
 pub mod catalog;
+pub mod deepgram;
 pub mod events;
 pub mod gpu_detect;
 pub mod inject;
