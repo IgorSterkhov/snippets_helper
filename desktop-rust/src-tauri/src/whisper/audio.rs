@@ -55,7 +55,7 @@ impl LiveRecorder {
     pub fn start(
         app: AppHandle,
         device_name: Option<&str>,
-        tx: tokio::sync::mpsc::UnboundedSender<Vec<i16>>,
+        tx: tokio::sync::mpsc::Sender<Vec<i16>>,
     ) -> Result<Self, String> {
         let host = cpal::default_host();
         let device = match device_name {
@@ -99,7 +99,7 @@ impl LiveRecorder {
                             &mut rms_sq,
                             &mut rms_n,
                         );
-                        let _ = tx_for_cb.send(samples);
+                        try_send_live_samples(&tx_for_cb, samples);
                     },
                     err_fn,
                     None,
@@ -125,7 +125,7 @@ impl LiveRecorder {
                             &mut rms_sq,
                             &mut rms_n,
                         );
-                        let _ = tx_for_cb.send(samples);
+                        try_send_live_samples(&tx_for_cb, samples);
                     },
                     err_fn,
                     None,
@@ -154,7 +154,7 @@ impl LiveRecorder {
                             &mut rms_sq,
                             &mut rms_n,
                         );
-                        let _ = tx_for_cb.send(samples);
+                        try_send_live_samples(&tx_for_cb, samples);
                     },
                     err_fn,
                     None,
@@ -352,6 +352,16 @@ pub fn pcm_i16_to_le_bytes(samples: &[i16]) -> Vec<u8> {
     out
 }
 
+fn try_send_live_samples(tx: &tokio::sync::mpsc::Sender<Vec<i16>>, samples: Vec<i16>) -> bool {
+    if samples.is_empty() {
+        return false;
+    }
+
+    // If the bounded queue is full, drop the newest frame; bounded memory is
+    // preferred over growing latency during network stalls.
+    tx.try_send(samples).is_ok()
+}
+
 fn convert_frames_f32_to_i16_16k(
     data: &[f32],
     in_sample_rate: u32,
@@ -514,5 +524,19 @@ mod tests {
         let samples = vec![0_i16, 1, -1, 256, -256];
         let bytes = pcm_i16_to_le_bytes(&samples);
         assert_eq!(bytes, vec![0, 0, 1, 0, 255, 255, 0, 1, 0, 255]);
+    }
+
+    #[test]
+    fn live_frame_sender_skips_empty_and_drops_when_full() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+
+        assert!(!try_send_live_samples(&tx, Vec::new()));
+        assert!(rx.try_recv().is_err());
+
+        assert!(try_send_live_samples(&tx, vec![1]));
+        assert!(!try_send_live_samples(&tx, vec![2]));
+
+        assert_eq!(rx.try_recv().unwrap(), vec![1]);
+        assert!(rx.try_recv().is_err());
     }
 }
