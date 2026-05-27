@@ -22,7 +22,7 @@ def test_share_links_live_note_and_shortcut(
                 {
                     "uuid": note_uuid,
                     "title": f"{unique_prefix}_note_v1",
-                    "content": "note content v1",
+                    "content": "note content v1\n\n## Shared Section\n\n**bold** <script>alert(1)</script>",
                     "updated_at": iso_timestamp(),
                     "is_deleted": False,
                 }
@@ -64,11 +64,17 @@ def test_share_links_live_note_and_shortcut(
     assert public_note == {
         "type": "note",
         "title": f"{unique_prefix}_note_v1",
-        "content": "note content v1",
+        "content": "note content v1\n\n## Shared Section\n\n**bold** <script>alert(1)</script>",
     }
     if smoke_config.api_base_url.startswith("https://"):
         assert note_link["public_url"].startswith("https://"), note_link
     assert public_http.head_or_get_status(note_link["public_url"]) == 200
+    status, public_note_html = public_http.request_text("GET", note_link["public_url"])
+    assert status == 200, public_note_html[:300]
+    assert "<h2>Shared Section</h2>" in public_note_html
+    assert "<strong>bold</strong>" in public_note_html
+    assert "<script>alert(1)</script>" not in public_note_html
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in public_note_html
 
     status, public_snippet = public_http.request_json(
         "GET",

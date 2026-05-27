@@ -82,6 +82,20 @@ def test_render_share_html_renders_image_markdown_as_figure_card():
     assert "<figcaption>diagram</figcaption>" in rendered
 
 
+def test_render_share_html_renders_note_content_as_safe_markdown():
+    rendered = render_share_html(
+        {
+            "type": "note",
+            "title": "Markdown note",
+            "content": "# Section\n\n**bold** and `code`\n\n```bash\necho hi\n```",
+        }
+    )
+    assert "<h1>Section</h1>" in rendered
+    assert "<strong>bold</strong>" in rendered
+    assert "<code>code</code>" in rendered
+    assert '<pre><code class="language-bash">echo hi\n</code></pre>' in rendered
+
+
 def test_render_share_html_rejects_unsafe_image_url_scheme():
     rendered = render_share_html(
         {"type": "note", "title": "T", "content": "![bad](javascript:alert(1))"}

@@ -100,6 +100,7 @@ export function openImageUploadModal({ onInsert }) {
     }
     cleanup();
   });
+  document.addEventListener('keydown', onKeyDown);
   bindUploadProgress();
   updateCloseState();
   setTimeout(() => overlay.focus(), 0);
@@ -335,13 +336,18 @@ export function openImageUploadModal({ onInsert }) {
       preview.appendChild(el('div', 'image-upload-empty', 'Preview will appear after processing.'));
       return;
     }
+
+    preview.appendChild(renderPreviewHeader(variant));
+    const body = el('div', 'image-upload-preview-body');
+    preview.appendChild(body);
+
     if (failedPreviews.has(selectedVariant)) {
       const failure = failedPreviews.get(selectedVariant);
-      preview.appendChild(el('div', 'image-upload-empty', failure?.reason || 'Preview failed for this variant.'));
+      body.appendChild(el('div', 'image-upload-empty', failure?.reason || 'Preview failed for this variant.'));
       return;
     }
     if (!loadedPreviews.has(selectedVariant)) {
-      preview.appendChild(el('div', 'image-upload-empty', 'Loading optimized preview...'));
+      body.appendChild(el('div', 'image-upload-empty', 'Loading optimized preview...'));
       return;
     }
 
@@ -349,12 +355,69 @@ export function openImageUploadModal({ onInsert }) {
     img.src = previewSources.get(selectedVariant) || variant.preview_url;
     img.alt = selectedVariant;
     img.addEventListener('click', () => openFullPreview(variant, img.src));
-    preview.appendChild(img);
-    preview.appendChild(el(
+    body.appendChild(img);
+    body.appendChild(el(
       'div',
       'image-upload-meta',
       `${labelPreset(selectedVariant)} · selected ${formatBytes(variant.size_bytes)} · stored ${formatBytes(assetTotalBytes())} · ${variant.width}x${variant.height}`
     ));
+  }
+
+  function renderPreviewHeader(variant) {
+    const bar = el('div', 'image-upload-preview-bar');
+    const title = el('div', 'image-upload-preview-title', previewTitle(variant));
+    const nav = el('div', 'image-upload-preview-navs');
+    const prev = el('button', 'btn-secondary image-upload-preview-nav image-upload-preview-prev', '<');
+    const next = el('button', 'btn-secondary image-upload-preview-nav image-upload-preview-next', '>');
+    const canMove = availablePreviewVariants().length > 1;
+    prev.title = 'Previous variant';
+    next.title = 'Next variant';
+    prev.disabled = !canMove;
+    next.disabled = !canMove;
+    prev.addEventListener('click', () => switchPreviewVariant(-1));
+    next.addEventListener('click', () => switchPreviewVariant(1));
+    nav.appendChild(prev);
+    nav.appendChild(next);
+    bar.appendChild(title);
+    bar.appendChild(nav);
+    return bar;
+  }
+
+  function previewTitle(variant) {
+    const index = PRESETS.indexOf(variant.variant);
+    const position = index >= 0 ? index + 1 : 1;
+    const total = readyJob?.variants?.length || PRESETS.length;
+    return `${labelPreset(variant.variant)} preview · ${position} / ${total}`;
+  }
+
+  function availablePreviewVariants() {
+    const variants = readyJob?.variants || [];
+    return PRESETS
+      .map(name => variants.find(v => v.variant === name))
+      .filter(variant => variant && loadedPreviews.has(variant.variant));
+  }
+
+  function switchPreviewVariant(direction) {
+    const variants = availablePreviewVariants();
+    if (variants.length < 2) return;
+    const current = variants.findIndex(v => v.variant === selectedVariant);
+    const start = current >= 0 ? current : 0;
+    const next = variants[(start + direction + variants.length) % variants.length];
+    selectedVariant = next.variant;
+    updatePresetButtons();
+    renderPreview();
+    updateInsertState();
+  }
+
+  function onKeyDown(event) {
+    if (closed || !document.querySelector('.image-upload-overlay')) return;
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      switchPreviewVariant(-1);
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      switchPreviewVariant(1);
+    }
   }
 
   function setStep(step, pct, label) {
@@ -405,6 +468,7 @@ export function openImageUploadModal({ onInsert }) {
     if (pollTimer) clearTimeout(pollTimer);
     if (processingTimer) clearTimeout(processingTimer);
     document.removeEventListener('paste', onPaste);
+    document.removeEventListener('keydown', onKeyDown);
     if (typeof uploadUnlisten === 'function') uploadUnlisten();
     if (activeUploadId) {
       call('cancel_media_upload', { uploadId: activeUploadId }).catch(() => {});

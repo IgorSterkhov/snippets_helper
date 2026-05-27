@@ -102,6 +102,30 @@ class HttpClient:
                 data = {"raw": raw}
             return exc.code, data
 
+    def request_text(
+        self,
+        method: str,
+        path_or_url: str,
+        headers: dict[str, str] | None = None,
+        timeout: int = 30,
+    ) -> tuple[int, str]:
+        request_headers = {"Accept": "text/html", "User-Agent": USER_AGENT}
+        if self.api_key:
+            request_headers["Authorization"] = f"Bearer {self.api_key}"
+        if headers:
+            request_headers.update(headers)
+
+        request = urllib.request.Request(
+            self.url(path_or_url),
+            method=method,
+            headers=request_headers,
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                return response.status, response.read().decode("utf-8", errors="replace")
+        except urllib.error.HTTPError as exc:
+            return exc.code, exc.read().decode("utf-8", errors="replace")
+
     def head_or_get_status(self, path_or_url: str, timeout: int = 30) -> int:
         url = self.url(path_or_url)
         request = urllib.request.Request(

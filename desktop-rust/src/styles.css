@@ -1167,9 +1167,48 @@ button:hover, .btn:hover {
   background: var(--bg-secondary);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+}
+.image-upload-preview-bar {
+  width: 100%;
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-tertiary);
+}
+.image-upload-preview-title {
+  min-width: 0;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.image-upload-preview-navs {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.image-upload-preview-nav {
+  width: 30px;
+  height: 26px;
+  padding: 0;
+  font-size: 15px;
+  line-height: 1;
+}
+.image-upload-preview-body {
+  width: 100%;
+  min-height: 198px;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
 }
 .image-upload-preview img {
   max-width: 100%;

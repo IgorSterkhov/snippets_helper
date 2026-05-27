@@ -1676,6 +1676,40 @@ async def run_tests():
         await cdp.eval("window.__mockRemoteMediaPreviews = false;")
     await check('T21f Snippets remote media previews use native fallback', t21f_snippets_remote_media_preview_native_fallback)
 
+    # ── T21g: Image preview shows variant title + arrows ─────
+    async def t21g_image_preview_variant_navigation():
+        await close_modals()
+        await open_shortcuts_tab()
+        await cdp.eval("window.__mockFailMediaPreviews = false; window.__mockRemoteMediaPreviews = false;")
+        await cdp.eval("document.querySelector('#panel-shortcuts button[title=\"Add shortcut\"]').click()")
+        await wait_until(cdp, "!!document.querySelector('.modal-overlay textarea[placeholder^=\"Value\"]')", timeout=3)
+        await cdp.eval(
+            "[...document.querySelectorAll('.modal-overlay .md-toolbar button')]"
+            ".find(b => b.title === 'Image').click()"
+        )
+        await wait_until(cdp, "!!document.querySelector('.image-upload-overlay')", timeout=3)
+        await cdp.eval("document.querySelector('.image-upload-overlay .image-upload-picker button').click()")
+        await wait_until(cdp, "!!document.querySelector('.image-upload-overlay .image-upload-preview img')", timeout=3)
+        title = await cdp.eval("document.querySelector('.image-upload-preview-title')?.textContent.trim() || ''")
+        assert 'Balanced' in title, f'title: {title!r}'
+        assert '2 / 4' in title, f'title: {title!r}'
+        await cdp.eval("document.querySelector('.image-upload-preview-next').click()")
+        title = await wait_until(
+            cdp,
+            "document.querySelector('.image-upload-preview-title')?.textContent.includes('Readable') && document.querySelector('.image-upload-preview-title').textContent",
+            timeout=3,
+        )
+        assert '3 / 4' in title, f'title: {title!r}'
+        await cdp.eval("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }))")
+        title = await wait_until(
+            cdp,
+            "document.querySelector('.image-upload-preview-title')?.textContent.includes('Balanced') && document.querySelector('.image-upload-preview-title').textContent",
+            timeout=3,
+        )
+        assert '2 / 4' in title, f'title: {title!r}'
+        await close_modals()
+    await check('T21g Image preview variant title and arrows', t21g_image_preview_variant_navigation)
+
     # ── T22: Snippets tab hover uses readable tint ───────────
     async def t22_snippets_tab_hover_css():
         hover_rule = await cdp.eval("""(() => {

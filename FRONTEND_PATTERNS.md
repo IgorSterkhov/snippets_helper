@@ -358,3 +358,21 @@ Use this pattern for server media URLs under `/snippets-media/`.
 - The native command must validate same-origin `/snippets-media/` URLs against
   the configured sync API origin before downloading, so it cannot be used as a
   generic URL fetcher.
+
+---
+
+## §12 Image upload variant preview
+
+**Used in:** Notes/Snippets Markdown image upload modal
+
+When a modal generates multiple image variants, keep the variant controls and
+preview connected:
+
+1. Default to `balanced`, but show a preview header with the current variant
+   name and its position, e.g. `Balanced preview · 2 / 4`.
+2. Keep preset buttons as direct selection controls.
+3. Add compact previous/next buttons inside the preview header and support
+   `ArrowLeft` / `ArrowRight` while the modal is open.
+4. Navigate only among variants whose previews are loaded successfully.
+5. Keep full-size preview on image click, using the same loaded preview source
+   as the modal.

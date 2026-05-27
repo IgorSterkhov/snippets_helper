@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## f-20260527-2 (2026-05-27)
+
+- **Public note Markdown:** note share pages now render note content as safe
+  Markdown, including headings, inline formatting, fenced code blocks, and
+  Figure Card images, while escaping raw HTML.
+- **Image preview navigation:** the image upload modal now shows the current
+  variant name and position, with previous/next buttons and keyboard arrow
+  navigation between generated variants.
+
 ## f-20260527-1 (2026-05-27)
 
 - **Note share autosave:** creating a public link for a note now saves the
