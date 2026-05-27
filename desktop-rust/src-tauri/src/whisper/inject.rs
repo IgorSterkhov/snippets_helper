@@ -113,4 +113,10 @@ mod tests {
     fn paste_chunk_method_name_is_stable() {
         assert_eq!(InjectMethod::Paste.as_str(), "paste");
     }
+
+    #[tokio::test]
+    async fn paste_chunk_ignores_empty_text() {
+        assert_eq!(paste_chunk("", 0).await.unwrap(), "paste");
+        assert_eq!(paste_chunk(" \n\t", 0).await.unwrap(), "paste");
+    }
 }
