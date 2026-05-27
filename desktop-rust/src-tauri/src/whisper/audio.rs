@@ -29,12 +29,12 @@ pub fn list_input_devices() -> Vec<InputDevice> {
         .collect()
 }
 
+use crate::whisper::events::{self, LevelPayload};
 use cpal::traits::StreamTrait;
 use cpal::{SampleFormat, StreamConfig};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tauri::{AppHandle, Emitter};
-use crate::whisper::events::{self, LevelPayload};
 
 pub const WAV_SAMPLE_RATE: u32 = 16_000;
 pub const WAV_CHANNELS: u16 = 1;
@@ -46,21 +46,154 @@ pub struct Recorder {
     started_at: Instant,
 }
 
+pub struct LiveRecorder {
+    _stream: cpal::Stream,
+    started_at: Instant,
+}
+
+impl LiveRecorder {
+    pub fn start(
+        app: AppHandle,
+        device_name: Option<&str>,
+        tx: tokio::sync::mpsc::UnboundedSender<Vec<i16>>,
+    ) -> Result<Self, String> {
+        let host = cpal::default_host();
+        let device = match device_name {
+            None => host
+                .default_input_device()
+                .ok_or_else(|| "no default input device".to_string())?,
+            Some(name) => host
+                .input_devices()
+                .map_err(|e| format!("enum: {e}"))?
+                .find(|d| d.name().ok().as_deref() == Some(name))
+                .ok_or_else(|| format!("device not found: {name}"))?,
+        };
+
+        let default_config = device
+            .default_input_config()
+            .map_err(|e| format!("default config: {e}"))?;
+        let sample_format = default_config.sample_format();
+        let sample_rate = default_config.sample_rate().0;
+        let channels = default_config.channels();
+        let config: StreamConfig = default_config.into();
+        let emit_every: usize = (sample_rate as usize / 20).max(100);
+        let err_fn = |e| eprintln!("[whisper live audio] stream error: {e}");
+
+        let stream = match sample_format {
+            SampleFormat::F32 => {
+                let app_for_cb = app.clone();
+                let tx_for_cb = tx.clone();
+                let mut since_emit: usize = 0;
+                let mut rms_sq: f64 = 0.0;
+                let mut rms_n: usize = 0;
+                device.build_input_stream(
+                    &config,
+                    move |data: &[f32], _| {
+                        let samples = convert_frames_f32_to_i16_16k(
+                            data,
+                            sample_rate,
+                            channels,
+                            &app_for_cb,
+                            &mut since_emit,
+                            emit_every,
+                            &mut rms_sq,
+                            &mut rms_n,
+                        );
+                        let _ = tx_for_cb.send(samples);
+                    },
+                    err_fn,
+                    None,
+                )
+            }
+            SampleFormat::I16 => {
+                let app_for_cb = app.clone();
+                let tx_for_cb = tx.clone();
+                let mut since_emit: usize = 0;
+                let mut rms_sq: f64 = 0.0;
+                let mut rms_n: usize = 0;
+                device.build_input_stream(
+                    &config,
+                    move |data: &[i16], _| {
+                        let f32_data: Vec<f32> = data.iter().map(|&s| s as f32 / 32768.0).collect();
+                        let samples = convert_frames_f32_to_i16_16k(
+                            &f32_data,
+                            sample_rate,
+                            channels,
+                            &app_for_cb,
+                            &mut since_emit,
+                            emit_every,
+                            &mut rms_sq,
+                            &mut rms_n,
+                        );
+                        let _ = tx_for_cb.send(samples);
+                    },
+                    err_fn,
+                    None,
+                )
+            }
+            SampleFormat::U16 => {
+                let app_for_cb = app.clone();
+                let tx_for_cb = tx.clone();
+                let mut since_emit: usize = 0;
+                let mut rms_sq: f64 = 0.0;
+                let mut rms_n: usize = 0;
+                device.build_input_stream(
+                    &config,
+                    move |data: &[u16], _| {
+                        let f32_data: Vec<f32> = data
+                            .iter()
+                            .map(|&s| (s as i32 - 32_768) as f32 / 32768.0)
+                            .collect();
+                        let samples = convert_frames_f32_to_i16_16k(
+                            &f32_data,
+                            sample_rate,
+                            channels,
+                            &app_for_cb,
+                            &mut since_emit,
+                            emit_every,
+                            &mut rms_sq,
+                            &mut rms_n,
+                        );
+                        let _ = tx_for_cb.send(samples);
+                    },
+                    err_fn,
+                    None,
+                )
+            }
+            other => return Err(format!("unsupported sample format: {:?}", other)),
+        }
+        .map_err(|e| format!("build_input_stream: {e}"))?;
+
+        stream.play().map_err(|e| format!("stream.play: {e}"))?;
+        Ok(Self {
+            _stream: stream,
+            started_at: Instant::now(),
+        })
+    }
+
+    pub fn duration_ms(&self) -> u64 {
+        self.started_at.elapsed().as_millis() as u64
+    }
+}
+
 impl Recorder {
     /// Start a new recorder bound to the given device (by name).
     /// Pass `None` to use the OS default. Emits `whisper:level` events.
     pub fn start(app: AppHandle, device_name: Option<&str>) -> Result<Self, String> {
         let host = cpal::default_host();
         let device = match device_name {
-            None => host.default_input_device()
+            None => host
+                .default_input_device()
                 .ok_or_else(|| "no default input device".to_string())?,
-            Some(name) => host.input_devices()
+            Some(name) => host
+                .input_devices()
                 .map_err(|e| format!("enum: {e}"))?
                 .find(|d| d.name().ok().as_deref() == Some(name))
                 .ok_or_else(|| format!("device not found: {name}"))?,
         };
 
-        let default_config = device.default_input_config()
+        let default_config = device
+            .default_input_config()
             .map_err(|e| format!("default config: {e}"))?;
         let sample_format = default_config.sample_format();
         let sample_rate = default_config.sample_rate().0;
@@ -85,10 +218,15 @@ impl Recorder {
                     &config,
                     move |data: &[f32], _| {
                         process_frames_f32(
-                            data, sample_rate, channels,
-                            &buf_for_cb, &app_for_cb,
-                            &mut since_emit, emit_every,
-                            &mut rms_sq, &mut rms_n,
+                            data,
+                            sample_rate,
+                            channels,
+                            &buf_for_cb,
+                            &app_for_cb,
+                            &mut since_emit,
+                            emit_every,
+                            &mut rms_sq,
+                            &mut rms_n,
                         );
                     },
                     err_fn,
@@ -105,10 +243,15 @@ impl Recorder {
                     &config,
                     move |data: &[i16], _| {
                         process_frames_i16(
-                            data, sample_rate, channels,
-                            &buf_for_cb, &app_for_cb,
-                            &mut since_emit, emit_every,
-                            &mut rms_sq, &mut rms_n,
+                            data,
+                            sample_rate,
+                            channels,
+                            &buf_for_cb,
+                            &app_for_cb,
+                            &mut since_emit,
+                            emit_every,
+                            &mut rms_sq,
+                            &mut rms_n,
                         );
                     },
                     err_fn,
@@ -124,14 +267,18 @@ impl Recorder {
                 device.build_input_stream(
                     &config,
                     move |data: &[u16], _| {
-                        let mapped: Vec<i16> = data.iter()
-                            .map(|&s| (s as i32 - 32_768) as i16)
-                            .collect();
+                        let mapped: Vec<i16> =
+                            data.iter().map(|&s| (s as i32 - 32_768) as i16).collect();
                         process_frames_i16(
-                            &mapped, sample_rate, channels,
-                            &buf_for_cb, &app_for_cb,
-                            &mut since_emit, emit_every,
-                            &mut rms_sq, &mut rms_n,
+                            &mapped,
+                            sample_rate,
+                            channels,
+                            &buf_for_cb,
+                            &app_for_cb,
+                            &mut since_emit,
+                            emit_every,
+                            &mut rms_sq,
+                            &mut rms_n,
                         );
                     },
                     err_fn,
@@ -139,7 +286,8 @@ impl Recorder {
                 )
             }
             other => return Err(format!("unsupported sample format: {:?}", other)),
-        }.map_err(|e| format!("build_input_stream: {e}"))?;
+        }
+        .map_err(|e| format!("build_input_stream: {e}"))?;
 
         stream.play().map_err(|e| format!("stream.play: {e}"))?;
 
@@ -163,7 +311,9 @@ impl Recorder {
     /// the samples out. Extra copy of the PCM vector is cheap next to the
     /// whisper inference that follows.
     pub fn finish_wav(self) -> Result<Vec<u8>, String> {
-        let Self { _stream, buffer, .. } = self;
+        let Self {
+            _stream, buffer, ..
+        } = self;
         drop(_stream);
         let samples = buffer
             .lock()
@@ -182,13 +332,61 @@ fn encode_wav(samples: &[i16]) -> Result<Vec<u8>, String> {
     };
     let mut out: Vec<u8> = Vec::with_capacity(samples.len() * 2 + 44);
     let cursor = std::io::Cursor::new(&mut out);
-    let mut writer = hound::WavWriter::new(cursor, spec)
-        .map_err(|e| format!("wav init: {e}"))?;
+    let mut writer = hound::WavWriter::new(cursor, spec).map_err(|e| format!("wav init: {e}"))?;
     for s in samples {
-        writer.write_sample(*s).map_err(|e| format!("wav write: {e}"))?;
+        writer
+            .write_sample(*s)
+            .map_err(|e| format!("wav write: {e}"))?;
     }
-    writer.finalize().map_err(|e| format!("wav finalize: {e}"))?;
+    writer
+        .finalize()
+        .map_err(|e| format!("wav finalize: {e}"))?;
     Ok(out)
+}
+
+pub fn pcm_i16_to_le_bytes(samples: &[i16]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(samples.len() * 2);
+    for sample in samples {
+        out.extend_from_slice(&sample.to_le_bytes());
+    }
+    out
+}
+
+fn convert_frames_f32_to_i16_16k(
+    data: &[f32],
+    in_sample_rate: u32,
+    in_channels: u16,
+    app: &AppHandle,
+    since_emit: &mut usize,
+    emit_every: usize,
+    rms_sq: &mut f64,
+    rms_n: &mut usize,
+) -> Vec<i16> {
+    let mono: Vec<f32> = if in_channels == 1 {
+        data.to_vec()
+    } else {
+        let c = in_channels as usize;
+        data.chunks_exact(c)
+            .map(|ch| ch.iter().sum::<f32>() / c as f32)
+            .collect()
+    };
+    let resampled = resample_linear_f32(&mono, in_sample_rate, WAV_SAMPLE_RATE);
+    for &s in &mono {
+        *rms_sq += (s as f64) * (s as f64);
+        *rms_n += 1;
+    }
+    *since_emit += mono.len();
+    if *since_emit >= emit_every && *rms_n > 0 {
+        let rms = ((*rms_sq / *rms_n as f64).sqrt() as f32).clamp(0.0, 1.0);
+        let _ = app.emit(events::EVT_LEVEL, LevelPayload { rms });
+        *since_emit = 0;
+        *rms_sq = 0.0;
+        *rms_n = 0;
+    }
+    resampled
+        .iter()
+        .map(|&s| (s.clamp(-1.0, 1.0) * 32767.0) as i16)
+        .collect()
 }
 
 fn process_frames_f32(
@@ -202,33 +400,16 @@ fn process_frames_f32(
     rms_sq: &mut f64,
     rms_n: &mut usize,
 ) {
-    // Mix-down to mono f32
-    let mono: Vec<f32> = if in_channels == 1 {
-        data.to_vec()
-    } else {
-        let c = in_channels as usize;
-        data.chunks_exact(c)
-            .map(|ch| ch.iter().sum::<f32>() / c as f32)
-            .collect()
-    };
-    // Resample to 16kHz by linear interpolation
-    let resampled = resample_linear_f32(&mono, in_sample_rate, WAV_SAMPLE_RATE);
-    let i16s: Vec<i16> = resampled.iter()
-        .map(|&s| (s.clamp(-1.0, 1.0) * 32767.0) as i16)
-        .collect();
-
-    for &s in &mono {
-        *rms_sq += (s as f64) * (s as f64);
-        *rms_n += 1;
-    }
-    *since_emit += mono.len();
-    if *since_emit >= emit_every && *rms_n > 0 {
-        let rms = ((*rms_sq / *rms_n as f64).sqrt() as f32).clamp(0.0, 1.0);
-        let _ = app.emit(events::EVT_LEVEL, LevelPayload { rms });
-        *since_emit = 0;
-        *rms_sq = 0.0;
-        *rms_n = 0;
-    }
+    let i16s = convert_frames_f32_to_i16_16k(
+        data,
+        in_sample_rate,
+        in_channels,
+        app,
+        since_emit,
+        emit_every,
+        rms_sq,
+        rms_n,
+    );
 
     if let Ok(mut buf) = buffer.lock() {
         buf.extend_from_slice(&i16s);
@@ -248,8 +429,15 @@ fn process_frames_i16(
 ) {
     let f32_data: Vec<f32> = data.iter().map(|&s| s as f32 / 32768.0).collect();
     process_frames_f32(
-        &f32_data, in_sample_rate, in_channels, buffer, app,
-        since_emit, emit_every, rms_sq, rms_n,
+        &f32_data,
+        in_sample_rate,
+        in_channels,
+        buffer,
+        app,
+        since_emit,
+        emit_every,
+        rms_sq,
+        rms_n,
     );
 }
 
@@ -314,7 +502,17 @@ mod tests {
         let spec = reader.spec();
         assert_eq!(spec.sample_rate, WAV_SAMPLE_RATE);
         assert_eq!(spec.channels, WAV_CHANNELS);
-        let decoded: Vec<i16> = reader.into_samples::<i16>().filter_map(|r| r.ok()).collect();
+        let decoded: Vec<i16> = reader
+            .into_samples::<i16>()
+            .filter_map(|r| r.ok())
+            .collect();
         assert_eq!(decoded, samples);
+    }
+
+    #[test]
+    fn pcm_i16_to_le_bytes_preserves_samples() {
+        let samples = vec![0_i16, 1, -1, 256, -256];
+        let bytes = pcm_i16_to_le_bytes(&samples);
+        assert_eq!(bytes, vec![0, 0, 1, 0, 255, 255, 0, 1, 0, 255]);
     }
 }
