@@ -52,6 +52,13 @@ pub async fn inject(text: &str, method: InjectMethod, clipboard_restore_delay_ms
     }
 }
 
+pub async fn paste_chunk(text: &str, clipboard_restore_delay_ms: u64) -> Result<&'static str, String> {
+    if text.trim().is_empty() {
+        return Ok("paste");
+    }
+    inject(text, InjectMethod::Paste, clipboard_restore_delay_ms).await
+}
+
 fn copy_to_clipboard(text: &str) -> Result<(), String> {
     let mut cb = Clipboard::new().map_err(|e| format!("clipboard: {e}"))?;
     cb.set_text(text.to_string()).map_err(|e| format!("clipboard set: {e}"))?;
@@ -100,5 +107,10 @@ mod tests {
         assert_eq!(InjectMethod::CopyOnly.as_str(), "copy");
         assert_eq!(InjectMethod::Paste.as_str(), "paste");
         assert_eq!(InjectMethod::Type.as_str(), "type");
+    }
+
+    #[test]
+    fn paste_chunk_method_name_is_stable() {
+        assert_eq!(InjectMethod::Paste.as_str(), "paste");
     }
 }
