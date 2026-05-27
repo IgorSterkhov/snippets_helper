@@ -523,6 +523,39 @@ mod tests {
     }
 
     #[test]
+    fn whisper_provider_migration_backfills_existing_history() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "
+            CREATE TABLE whisper_history (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                text            TEXT NOT NULL,
+                text_raw        TEXT,
+                model_name      TEXT NOT NULL,
+                duration_ms     INTEGER NOT NULL,
+                transcribe_ms   INTEGER NOT NULL,
+                language        TEXT,
+                injected_to     TEXT,
+                created_at      INTEGER NOT NULL
+            );
+
+            INSERT INTO whisper_history
+                (text, text_raw, model_name, duration_ms, transcribe_ms, language, injected_to, created_at)
+            VALUES
+                ('hello', NULL, 'ggml-small', 1000, 200, 'en', 'paste', 1710000000);
+            ",
+        )
+        .unwrap();
+
+        run_migrations(&conn).unwrap();
+
+        let rows = queries::whisper_list_history(&conn, 10).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].provider, "local");
+        assert_eq!(rows[0].provider_model.as_deref(), Some("ggml-small"));
+    }
+
+    #[test]
     fn test_task_defaults_seeded() {
         let conn = init_test_db();
         let cats: Vec<String> = conn
