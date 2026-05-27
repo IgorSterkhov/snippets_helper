@@ -57,6 +57,15 @@ impl LiveRecorder {
         device_name: Option<&str>,
         tx: tokio::sync::mpsc::Sender<Vec<i16>>,
     ) -> Result<Self, String> {
+        Self::start_with_level_event(app, device_name, tx, events::EVT_LEVEL)
+    }
+
+    pub fn start_with_level_event(
+        app: AppHandle,
+        device_name: Option<&str>,
+        tx: tokio::sync::mpsc::Sender<Vec<i16>>,
+        level_event: &'static str,
+    ) -> Result<Self, String> {
         let host = cpal::default_host();
         let device = match device_name {
             None => host
@@ -98,6 +107,7 @@ impl LiveRecorder {
                             emit_every,
                             &mut rms_sq,
                             &mut rms_n,
+                            level_event,
                         );
                         try_send_live_samples(&tx_for_cb, samples);
                     },
@@ -124,6 +134,7 @@ impl LiveRecorder {
                             emit_every,
                             &mut rms_sq,
                             &mut rms_n,
+                            level_event,
                         );
                         try_send_live_samples(&tx_for_cb, samples);
                     },
@@ -153,6 +164,7 @@ impl LiveRecorder {
                             emit_every,
                             &mut rms_sq,
                             &mut rms_n,
+                            level_event,
                         );
                         try_send_live_samples(&tx_for_cb, samples);
                     },
@@ -371,6 +383,7 @@ fn convert_frames_f32_to_i16_16k(
     emit_every: usize,
     rms_sq: &mut f64,
     rms_n: &mut usize,
+    level_event: &'static str,
 ) -> Vec<i16> {
     let mono: Vec<f32> = if in_channels == 1 {
         data.to_vec()
@@ -388,7 +401,7 @@ fn convert_frames_f32_to_i16_16k(
     *since_emit += mono.len();
     if *since_emit >= emit_every && *rms_n > 0 {
         let rms = ((*rms_sq / *rms_n as f64).sqrt() as f32).clamp(0.0, 1.0);
-        let _ = app.emit(events::EVT_LEVEL, LevelPayload { rms });
+        let _ = app.emit(level_event, LevelPayload { rms });
         *since_emit = 0;
         *rms_sq = 0.0;
         *rms_n = 0;
@@ -419,6 +432,7 @@ fn process_frames_f32(
         emit_every,
         rms_sq,
         rms_n,
+        events::EVT_LEVEL,
     );
 
     if let Ok(mut buf) = buffer.lock() {

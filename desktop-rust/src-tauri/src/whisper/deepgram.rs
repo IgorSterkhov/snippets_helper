@@ -11,6 +11,7 @@ use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
 
 const LIVE_AUDIO_QUEUE_CAPACITY: usize = 64;
 const FINALIZE_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
+const CLOSE_FRAME_TIMEOUT: Duration = Duration::from_secs(2);
 
 pub const EVT_LIVE_STATE: &str = "whisper:live-state-changed";
 pub const EVT_LIVE_LEVEL: &str = "whisper:live-level";
@@ -80,6 +81,7 @@ struct LiveInner {
     model: Option<String>,
     language: Option<String>,
     started_at: Option<Instant>,
+    session_id: u64,
 }
 
 struct SendLiveRecorder(LiveRecorder);
@@ -100,6 +102,7 @@ impl DeepgramLiveService {
                 model: None,
                 language: None,
                 started_at: None,
+                session_id: 0,
             })),
         }
     }
@@ -134,17 +137,20 @@ impl DeepgramLiveService {
 
         let (audio_tx, audio_rx) =
             tokio::sync::mpsc::channel::<Vec<i16>>(LIVE_AUDIO_QUEUE_CAPACITY);
-        let recorder = SendLiveRecorder(LiveRecorder::start(
+        let recorder = SendLiveRecorder(LiveRecorder::start_with_level_event(
             self.app.clone(),
             cfg.mic_device.as_deref(),
             audio_tx,
+            EVT_LIVE_LEVEL,
         )?);
 
-        {
+        let session_id = {
             let mut g = self.inner.lock().await;
             if !matches!(g.state, LiveState::Idle | LiveState::Error) {
                 return Ok(());
             }
+            g.session_id = g.session_id.wrapping_add(1);
+            let session_id = g.session_id;
             g.state = LiveState::Connecting;
             g.recorder = Some(recorder);
             g.committed_text.clear();
@@ -156,7 +162,8 @@ impl DeepgramLiveService {
                 .filter(|s| !s.is_empty() && *s != "auto")
                 .map(ToOwned::to_owned);
             g.started_at = Some(Instant::now());
-        }
+            session_id
+        };
         emit_live_state(&self.app, LiveState::Connecting, Some(cfg.model.clone()));
 
         let app = self.app.clone();
@@ -164,13 +171,30 @@ impl DeepgramLiveService {
         let task_cfg = cfg.clone();
         let handle = tokio::spawn(async move {
             if let Err(e) =
-                run_deepgram_stream(app.clone(), inner.clone(), task_cfg, audio_rx).await
+                run_deepgram_stream(app.clone(), inner.clone(), task_cfg, session_id, audio_rx).await
             {
                 let _ = app.emit(EVT_LIVE_ERROR, serde_json::json!({ "message": e }));
                 let mut g = inner.lock().await;
-                g.state = LiveState::Error;
-                g.recorder = None;
-                emit_live_state(&app, LiveState::Error, g.model.clone());
+                if is_current_session(g.session_id, session_id) {
+                    g.state = LiveState::Error;
+                    g.recorder = None;
+                    g.task = None;
+                    emit_live_state(&app, LiveState::Error, g.model.clone());
+                }
+            } else {
+                let mut g = inner.lock().await;
+                if is_current_session(g.session_id, session_id)
+                    && should_cleanup_completed_task(g.state)
+                {
+                    let _ = app.emit(
+                        EVT_LIVE_ERROR,
+                        serde_json::json!({ "message": "Deepgram stream ended unexpectedly" }),
+                    );
+                    g.state = LiveState::Error;
+                    g.recorder = None;
+                    g.task = None;
+                    emit_live_state(&app, LiveState::Error, g.model.clone());
+                }
             }
         });
 
@@ -182,7 +206,7 @@ impl DeepgramLiveService {
     }
 
     pub async fn stop_and_persist(&self, db: &crate::db::DbState) -> Result<String, String> {
-        let (task, model, language, duration_ms) = {
+        let (task, model, language, duration_ms, session_id) = {
             let mut g = self.inner.lock().await;
             if matches!(g.state, LiveState::Idle) {
                 return Ok(g.committed_text.clone());
@@ -199,11 +223,18 @@ impl DeepgramLiveService {
                 g.model.clone().unwrap_or_else(|| "nova-3".into()),
                 g.language.clone(),
                 duration_ms,
+                g.session_id,
             )
         };
 
-        if let Some(task) = task {
-            let _ = tokio::time::timeout(Duration::from_secs(8), task).await;
+        if let Some(mut task) = task {
+            if tokio::time::timeout(Duration::from_secs(8), &mut task)
+                .await
+                .is_err()
+            {
+                task.abort();
+                let _ = tokio::time::timeout(Duration::from_secs(1), &mut task).await;
+            }
         }
 
         let text = {
@@ -239,6 +270,9 @@ impl DeepgramLiveService {
             g.started_at = None;
             g.model = None;
             g.language = None;
+            if is_current_session(g.session_id, session_id) {
+                g.session_id = g.session_id.wrapping_add(1);
+            }
         }
         emit_live_state(&self.app, LiveState::Idle, None);
         Ok(text)
@@ -253,6 +287,7 @@ impl DeepgramLiveService {
             g.started_at = None;
             g.model = None;
             g.language = None;
+            g.session_id = g.session_id.wrapping_add(1);
             g.task.take()
         };
         if let Some(task) = task {
@@ -333,6 +368,7 @@ async fn run_deepgram_stream(
     app: AppHandle,
     inner: Arc<Mutex<LiveInner>>,
     cfg: DeepgramConfig,
+    session_id: u64,
     mut audio_rx: tokio::sync::mpsc::Receiver<Vec<i16>>,
 ) -> Result<(), String> {
     let url = build_deepgram_url(&cfg);
@@ -377,10 +413,10 @@ async fn run_deepgram_stream(
                 }
             }
             maybe_msg = stream.next() => {
-                let Some(msg) = maybe_msg else { return Ok(()); };
+                let Some(msg) = maybe_msg else { return classify_stream_eof(false); };
                 let msg = msg.map_err(|e| format!("deepgram receive: {e}"))?;
                 if let Message::Text(text) = msg {
-                    handle_deepgram_text_message(&app, &inner, &cfg, &text).await?;
+                    handle_deepgram_text_message(&app, &inner, &cfg, session_id, &text).await?;
                 }
             }
         }
@@ -389,13 +425,18 @@ async fn run_deepgram_stream(
     loop {
         match tokio::time::timeout(FINALIZE_DRAIN_TIMEOUT, stream.next()).await {
             Ok(Some(Ok(Message::Text(text)))) => {
-                handle_deepgram_text_message(&app, &inner, &cfg, &text).await?;
+                handle_deepgram_text_message(&app, &inner, &cfg, session_id, &text).await?;
             }
-            Ok(Some(Ok(Message::Close(_)))) | Ok(None) | Err(_) => break,
+            Ok(Some(Ok(Message::Close(_)))) | Err(_) => break,
+            Ok(None) => {
+                classify_stream_eof(true)?;
+                break;
+            }
             Ok(Some(Ok(_))) => {}
             Ok(Some(Err(e))) => return Err(format!("deepgram drain: {e}")),
         }
     }
+    let _ = tokio::time::timeout(CLOSE_FRAME_TIMEOUT, sink.close()).await;
     Ok(())
 }
 
@@ -403,6 +444,7 @@ async fn handle_deepgram_text_message(
     app: &AppHandle,
     inner: &Arc<Mutex<LiveInner>>,
     cfg: &DeepgramConfig,
+    session_id: u64,
     text: &str,
 ) -> Result<(), String> {
     let Some(parsed) = parse_deepgram_message(text)? else {
@@ -410,6 +452,9 @@ async fn handle_deepgram_text_message(
     };
 
     if !parsed.is_final {
+        if !is_current_session(inner.lock().await.session_id, session_id) {
+            return Ok(());
+        }
         let _ = app.emit(
             EVT_LIVE_INTERIM,
             serde_json::json!({
@@ -422,6 +467,9 @@ async fn handle_deepgram_text_message(
 
     let paste_text = {
         let mut g = inner.lock().await;
+        if !is_current_session(g.session_id, session_id) {
+            return Ok(());
+        }
         let chunk = build_paste_chunk(&g.committed_text, &parsed.transcript);
         g.committed_text.push_str(&chunk);
         chunk
@@ -440,6 +488,22 @@ async fn handle_deepgram_text_message(
         );
     }
     Ok(())
+}
+
+fn is_current_session(active_session_id: u64, task_session_id: u64) -> bool {
+    active_session_id == task_session_id
+}
+
+fn classify_stream_eof(finalizing: bool) -> Result<(), String> {
+    if finalizing {
+        Ok(())
+    } else {
+        Err("deepgram websocket closed unexpectedly".into())
+    }
+}
+
+fn should_cleanup_completed_task(state: LiveState) -> bool {
+    matches!(state, LiveState::Connecting | LiveState::Streaming)
 }
 
 fn emit_live_state(app: &AppHandle, state: LiveState, model: Option<String>) {
@@ -597,5 +661,26 @@ mod tests {
         };
         let url = build_deepgram_url(&cfg);
         assert!(!url.contains("language=auto"));
+    }
+
+    #[test]
+    fn session_guard_rejects_stale_stream_work() {
+        assert!(is_current_session(7, 7));
+        assert!(!is_current_session(8, 7));
+    }
+
+    #[test]
+    fn websocket_eof_before_stop_is_an_error() {
+        assert!(classify_stream_eof(false).is_err());
+        assert!(classify_stream_eof(true).is_ok());
+    }
+
+    #[test]
+    fn completed_task_cleanup_only_targets_active_stream_states() {
+        assert!(should_cleanup_completed_task(LiveState::Connecting));
+        assert!(should_cleanup_completed_task(LiveState::Streaming));
+        assert!(!should_cleanup_completed_task(LiveState::Stopping));
+        assert!(!should_cleanup_completed_task(LiveState::Idle));
+        assert!(!should_cleanup_completed_task(LiveState::Error));
     }
 }
