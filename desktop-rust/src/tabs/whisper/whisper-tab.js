@@ -19,6 +19,11 @@ export async function initTab(container) {
     whisperTimerId: null,
     whisperStartedAt: 0,
     gemmaProgressHideId: null,
+    liveDictate: false,
+    liveState: 'idle',
+    liveModel: 'nova-3',
+    liveCommittedText: '',
+    liveInterimText: '',
   };
 
   const header = document.createElement('div');
@@ -30,6 +35,10 @@ export async function initTab(container) {
     <select id="model-select" title="Active Whisper model (switching unloads the warmed server)" style="padding:3px 6px;background:var(--bg,#0d1117);color:var(--text,#c9d1d9);border:1px solid var(--border,#30363d);border-radius:4px;font-size:11px;cursor:pointer;max-width:220px"></select>
     <span style="color:var(--text-muted,#8b949e);font-size:11px">Gemma:</span>
     <select id="gemma-model-select" title="Gemma post-processing model" style="padding:3px 6px;background:var(--bg,#0d1117);color:var(--text,#c9d1d9);border:1px solid var(--border,#30363d);border-radius:4px;font-size:11px;cursor:pointer;max-width:220px"></select>
+    <label id="live-dictate-label" title="Live dictate streams audio through Deepgram and pastes finalized chunks into the active app" style="display:flex;align-items:center;gap:5px;padding:3px 8px;background:var(--bg,#0d1117);border:1px solid var(--border,#30363d);border-radius:4px;color:var(--text,#c9d1d9);font-size:11px;cursor:pointer;user-select:none">
+      <input id="live-dictate-toggle" type="checkbox" style="margin:0;accent-color:var(--accent,#388bfd)">
+      <span>Live dictate</span>
+    </label>
     <span style="flex:1"></span>
     <button id="cancel-btn" title="Cancel without transcribing (Esc)" style="padding:5px 10px;background:transparent;color:var(--red,#f85149);border:1px solid var(--red,#f85149);border-radius:4px;cursor:pointer;font-weight:500;display:none">✕ Cancel</button>
     <button id="record-btn" style="padding:5px 14px;background:var(--accent,#388bfd);color:#fff;border:0;border-radius:4px;cursor:pointer;font-weight:600">🎤 Record</button>
@@ -107,6 +116,8 @@ export async function initTab(container) {
   const chip = header.querySelector('#state-chip');
   const modelSelect = header.querySelector('#model-select');
   const gemmaSelect = header.querySelector('#gemma-model-select');
+  const liveToggle = header.querySelector('#live-dictate-toggle');
+  const liveLabel = header.querySelector('#live-dictate-label');
   const recordBtn = header.querySelector('#record-btn');
   const cancelBtn = header.querySelector('#cancel-btn');
 
@@ -117,9 +128,22 @@ export async function initTab(container) {
   let programmaticSelect = false;
   let committedGemmaDefault = null;
   let programmaticGemmaSelect = false;
+  let activeHistoryRef = null;
+  let ppBtnRef = null;
 
   function setChip(st) {
-    const stateMap = {
+    state.currentState = st;
+    renderControls();
+  }
+
+  function setLiveState(st, model) {
+    state.liveState = st || 'idle';
+    if (model) state.liveModel = model;
+    renderControls();
+  }
+
+  function renderControls() {
+    const localMap = {
       idle:         { label: '○ idle',           color: 'var(--text-muted,#8b949e)' },
       warming:      { label: '⏳ warming up',    color: 'var(--warn,#f0883e)' },
       ready:        { label: '● ready',          color: 'var(--green,#3fb950)' },
@@ -127,53 +151,88 @@ export async function initTab(container) {
       transcribing: { label: '💭 transcribing',  color: 'var(--blue,#58a6ff)' },
       unloading:    { label: '… unloading',      color: 'var(--text-muted,#8b949e)' },
     };
-    const m = stateMap[st] || stateMap.idle;
+    const liveMap = {
+      idle:       { label: '○ live idle',       color: 'var(--text-muted,#8b949e)' },
+      connecting: { label: '⏳ live connecting', color: 'var(--warn,#f0883e)' },
+      streaming:  { label: '● live streaming',  color: 'var(--green,#3fb950)' },
+      stopping:   { label: '… live stopping',   color: 'var(--blue,#58a6ff)' },
+      error:      { label: '⚠ live error',      color: 'var(--red,#f85149)' },
+    };
+    const localBusy = isLocalBusy();
+    const liveBusy = isLiveBusy();
+    const showLive = state.liveDictate || liveBusy;
+    const m = showLive ? (liveMap[state.liveState] || liveMap.idle) : (localMap[state.currentState] || localMap.idle);
     chip.textContent = m.label;
     chip.style.color = m.color;
-    state.currentState = st;
-    if (st === 'recording') {
-      recordBtn.textContent = '⏹ Stop';
-      recordBtn.dataset.mode = 'stop';
-      recordBtn.disabled = false;
-      recordBtn.style.opacity = '1';
-      recordBtn.style.cursor = 'pointer';
-    } else if (st === 'warming' || st === 'transcribing' || st === 'unloading') {
-      const label = st === 'warming' ? '⏳ Warming…'
-                  : st === 'transcribing' ? '💭 Transcribing…'
+
+    if (showLive) {
+      if (state.liveState === 'streaming') {
+        setRecordButton('⏹ Stop live', 'live-stop', false);
+      } else if (state.liveState === 'connecting') {
+        setRecordButton('⏳ Connecting…', 'noop', true);
+      } else if (state.liveState === 'stopping') {
+        setRecordButton('… Stopping…', 'noop', true);
+      } else {
+        setRecordButton('🎙 Start live', 'live-start', localBusy);
+      }
+    } else if (state.currentState === 'recording') {
+      setRecordButton('⏹ Stop', 'stop', false);
+    } else if (state.currentState === 'warming' || state.currentState === 'transcribing' || state.currentState === 'unloading') {
+      const label = state.currentState === 'warming' ? '⏳ Warming…'
+                  : state.currentState === 'transcribing' ? '💭 Transcribing…'
                   : '… Unloading';
-      recordBtn.textContent = label;
-      recordBtn.dataset.mode = 'noop';
-      recordBtn.disabled = true;
-      recordBtn.style.opacity = '0.55';
-      recordBtn.style.cursor = 'not-allowed';
-    } else { // idle, ready
-      recordBtn.textContent = '🎤 Record';
-      recordBtn.dataset.mode = 'start';
-      recordBtn.disabled = false;
-      recordBtn.style.opacity = '1';
-      recordBtn.style.cursor = 'pointer';
+      setRecordButton(label, 'noop', true);
+    } else {
+      setRecordButton('🎤 Record', 'start', false);
     }
 
-    const lock = st === 'warming' || st === 'recording'
-              || st === 'transcribing' || st === 'unloading';
+    const lock = localBusy || liveBusy;
     modelSelect.disabled = lock;
     modelSelect.style.opacity = lock ? '0.55' : '1';
     modelSelect.style.cursor = lock ? 'not-allowed' : 'pointer';
 
+    liveToggle.disabled = lock;
+    liveLabel.style.opacity = lock ? '0.55' : '1';
+    liveLabel.style.cursor = lock ? 'not-allowed' : 'pointer';
+
     cancelBtn.style.display = lock ? '' : 'none';
 
-    // Whisper status-strip: elapsed timer while transcribing.
-    if (st === 'transcribing') {
+    if (state.currentState === 'transcribing') {
       startWhisperElapsedTimer();
     } else {
       stopWhisperElapsedTimer();
     }
   }
 
+  function setRecordButton(label, mode, disabled) {
+    recordBtn.textContent = label;
+    recordBtn.dataset.mode = mode;
+    recordBtn.disabled = disabled;
+    recordBtn.style.opacity = disabled ? '0.55' : '1';
+    recordBtn.style.cursor = disabled ? 'not-allowed' : 'pointer';
+  }
+
+  function isLocalBusy(st = state.currentState) {
+    return st === 'warming' || st === 'recording' || st === 'transcribing' || st === 'unloading';
+  }
+
+  function isLiveBusy(st = state.liveState) {
+    return st === 'connecting' || st === 'streaming' || st === 'stopping';
+  }
+
   recordBtn.onclick = async () => {
     if (recordBtn.disabled || recordBtn.dataset.mode === 'noop') return;
     try {
-      if (recordBtn.dataset.mode === 'stop') {
+      if (recordBtn.dataset.mode === 'live-stop') {
+        await whisperApi.stopLive();
+        state.liveInterimText = '';
+        await reloadHistory();
+      } else if (recordBtn.dataset.mode === 'live-start') {
+        state.liveCommittedText = '';
+        state.liveInterimText = '';
+        renderLivePreview();
+        await whisperApi.startLive();
+      } else if (recordBtn.dataset.mode === 'stop') {
         await whisperApi.stopRecording();
         await reloadHistory();
       } else {
@@ -185,10 +244,30 @@ export async function initTab(container) {
   };
   cancelBtn.onclick = async () => {
     try {
-      await whisperApi.cancelRecording();
+      if (isLiveBusy()) {
+        await whisperApi.cancelLive();
+        state.liveCommittedText = '';
+        state.liveInterimText = '';
+        renderLivePreview();
+      } else {
+        await whisperApi.cancelRecording();
+      }
       toast('Cancelled');
     } catch (e) {
       toast(`Cancel failed: ${e}`, { kind: 'error' });
+    }
+  };
+  liveToggle.onchange = async () => {
+    const prev = state.liveDictate;
+    state.liveDictate = liveToggle.checked;
+    renderControls();
+    try {
+      await whisperApi.setSetting('whisper.live_dictate', state.liveDictate ? 'true' : 'false');
+    } catch (e) {
+      state.liveDictate = prev;
+      liveToggle.checked = prev;
+      renderControls();
+      toast(`Live dictate setting failed: ${e}`, { kind: 'error' });
     }
   };
   header.querySelector('#settings-btn').onclick = () => openSettingsModal();
@@ -387,7 +466,7 @@ export async function initTab(container) {
     }
   };
 
-  const onSettingsChanged = () => { refreshModelSelect(); refreshGemmaSelect(); };
+  const onSettingsChanged = () => { refreshModelSelect(); refreshGemmaSelect(); loadLiveDictateSetting().then(renderControls); };
   window.addEventListener('whisper:settings-changed', onSettingsChanged);
   state.cleanup.push(() => window.removeEventListener('whisper:settings-changed', onSettingsChanged));
 
@@ -402,6 +481,34 @@ export async function initTab(container) {
   });
   state.cleanup.push(offError);
 
+  const offLiveState = await onWhisperEvent('liveStateChanged', (p) => {
+    setLiveState(p.state, p.model);
+    if (p.state === 'idle') {
+      state.liveInterimText = '';
+    }
+  });
+  state.cleanup.push(offLiveState);
+
+  const offLiveInterim = await onWhisperEvent('liveInterim', (p) => {
+    state.liveInterimText = p.text || '';
+    renderLivePreview();
+  });
+  state.cleanup.push(offLiveInterim);
+
+  const offLiveFinal = await onWhisperEvent('liveFinal', (p) => {
+    state.liveCommittedText = p.committed_text || ((state.liveCommittedText || '') + (p.chunk || ''));
+    state.liveInterimText = '';
+    renderLivePreview();
+  });
+  state.cleanup.push(offLiveFinal);
+
+  const offLiveError = await onWhisperEvent('liveError', (p) => {
+    toast(`Deepgram: ${p.message || 'unknown error'}`, { kind: 'error' });
+    console.error('[whisper live error]', p);
+  });
+  state.cleanup.push(offLiveError);
+
+  await loadLiveDictateSetting();
   await refreshModelSelect();
   await refreshGemmaSelect();
   setChip('idle');
@@ -456,6 +563,37 @@ export async function initTab(container) {
     if (state.gemmaState !== 'busy') hideStatusStrip();
   }
 
+  async function loadLiveDictateSetting() {
+    try {
+      state.liveDictate = (await whisperApi.getSetting('whisper.live_dictate')) === 'true';
+      liveToggle.checked = state.liveDictate;
+    } catch {
+      state.liveDictate = false;
+      liveToggle.checked = false;
+    }
+  }
+
+  function renderLivePreview() {
+    const committed = state.liveCommittedText || '';
+    const interim = state.liveInterimText || '';
+    const glue = committed && interim && !/\s$/.test(committed) ? ' ' : '';
+    const text = committed + glue + interim;
+    activeHistoryRef = null;
+    actions.innerHTML = '';
+    ppBtnRef = null;
+    whisperTextarea.placeholder = state.liveState === 'streaming' ? 'Listening…' : '';
+    whisperTextarea.value = text;
+    postTextarea.value = '';
+    tabBar.querySelector('.pp-dot').style.display = 'none';
+    const committedWords = committed.trim().split(/\s+/).filter(Boolean).length;
+    const interimWords = interim.trim().split(/\s+/).filter(Boolean).length;
+    const parts = [`Deepgram live`, state.liveModel || 'nova-3'];
+    if (committedWords) parts.push(`${committedWords} committed words`);
+    if (interimWords) parts.push(`${interimWords} interim words`);
+    meta.textContent = parts.join(' · ');
+    setActiveTab('whisper');
+  }
+
   // ── History list ────────────────────────────────────────────────────────
   async function reloadHistory() {
     state.history = await whisperApi.getHistory(200);
@@ -487,6 +625,7 @@ export async function initTab(container) {
   function renderHistoryRow(h, onClick) {
     const row = document.createElement('div');
     row.dataset.id = String(h.id);
+    row.dataset.provider = h.provider || 'local';
     row.style.cssText = 'padding:8px 10px;border-bottom:1px solid var(--border,#30363d);cursor:pointer;position:relative';
     const when = formatRelativeTime(h.created_at);
     const text = (h.text || '').trim();
@@ -497,10 +636,11 @@ export async function initTab(container) {
     const display = isBlank ? '(empty / no speech)' : escapeHtml(h.text.slice(0, 120));
     const words = text.split(/\s+/).filter(Boolean).length;
     const ppMark = h.postprocessed_text ? ' <span title="Has post-processed text" style="color:var(--green,#3fb950);font-size:10px">●</span>' : '';
+    const provider = h.provider === 'deepgram' ? 'Deepgram' : 'Local';
     row.innerHTML = `
       <div style="padding-right:22px">
         <div style="${textStyle}">${display}</div>
-        <div style="color:var(--text-muted,#8b949e);font-size:10px;margin-top:2px">${when} · ${h.model_name} · ${words} words${ppMark}</div>
+        <div style="color:var(--text-muted,#8b949e);font-size:10px;margin-top:2px">${when} · ${provider} · ${h.model_name} · ${words} words${ppMark}</div>
       </div>
       <button class="row-del" title="Delete" style="position:absolute;top:6px;right:6px;width:22px;height:22px;padding:0;background:transparent;border:0;color:var(--text-muted,#8b949e);cursor:pointer;font-size:14px;line-height:1;opacity:0;transition:opacity 120ms ease">🗑</button>
     `;
@@ -524,8 +664,6 @@ export async function initTab(container) {
 
   // Re-rendered every time a row is selected; we keep refs so the action
   // handlers can read the live values without DOM re-mount.
-  let activeHistoryRef = null;
-  let ppBtnRef = null;
 
   function renderDetail(h) {
     activeHistoryRef = h;
@@ -551,7 +689,9 @@ export async function initTab(container) {
     if (h.gpu_peak_percent > 0) perfParts.push(`GPU ${h.gpu_peak_percent.toFixed(0)}%`);
     if (h.vram_peak_mb > 0)     perfParts.push(`VRAM ${h.vram_peak_mb} MB`);
     const perfStr = perfParts.length ? `  ·  ${perfParts.join(' · ')}` : '';
-    meta.innerHTML = `${formatRelativeTime(h.created_at)} · ${escapeHtml(h.model_name)} · ${h.language || 'auto'} · duration ${h.duration_ms}ms · transcribe <b>${h.transcribe_ms}ms</b>${perfStr}${h.injected_to ? ' · ' + h.injected_to : ''}`;
+    const provider = h.provider === 'deepgram' ? 'Deepgram' : 'Local';
+    const providerModel = h.provider_model || h.model_name;
+    meta.innerHTML = `${formatRelativeTime(h.created_at)} · ${provider} · ${escapeHtml(providerModel)} · ${h.language || 'auto'} · duration ${h.duration_ms}ms · transcribe <b>${h.transcribe_ms}ms</b>${perfStr}${h.injected_to ? ' · ' + h.injected_to : ''}`;
 
     actions.appendChild(btn('📋 Copy', async () => { await whisperApi.injectText(getActiveText(), 'copy'); toast('Скопировано'); }));
     actions.appendChild(btn('⎘ Paste', async () => { await whisperApi.injectText(getActiveText(), 'paste'); toast('Вставлено'); }));

@@ -12,6 +12,8 @@ const cancelBtn = document.getElementById('cancel');
 
 let startedAt = 0;
 let timerIv = null;
+let activeMode = 'local';
+let liveCommittedText = '';
 
 function setMode(state) {
   bars.style.display = 'none';
@@ -43,6 +45,40 @@ function setMode(state) {
   }
 }
 
+function setLiveMode(state) {
+  activeMode = state === 'idle' ? 'local' : 'live';
+  bars.style.display = 'none';
+  progress.style.display = 'none';
+  sub.textContent = '';
+  dot.classList.remove('rec');
+  if (state === 'connecting') {
+    titleEl.textContent = 'Connecting live…';
+    progress.style.display = 'block';
+    progressBar.style.width = '35%';
+  } else if (state === 'streaming') {
+    titleEl.textContent = 'Live dictation';
+    bars.style.display = 'flex';
+    dot.classList.add('rec');
+    progressBar.style.width = '0%';
+    startedAt = performance.now();
+    if (timerIv) clearInterval(timerIv);
+    timerIv = setInterval(updateTimer, 200);
+    updateTimer();
+  } else if (state === 'stopping') {
+    titleEl.textContent = 'Stopping live…';
+    progress.style.display = 'block';
+    progressBar.style.width = '80%';
+    if (timerIv) { clearInterval(timerIv); timerIv = null; }
+  } else if (state === 'error') {
+    titleEl.textContent = 'Live error';
+    if (timerIv) { clearInterval(timerIv); timerIv = null; }
+    timer.textContent = '';
+  } else {
+    activeMode = 'local';
+    setMode('idle');
+  }
+}
+
 function updateTimer() {
   const sec = Math.floor((performance.now() - startedAt) / 1000);
   const mm = String(Math.floor(sec / 60)).padStart(2, '0');
@@ -71,13 +107,37 @@ async function initEvents() {
     sub.textContent = `${words} words${perf.length ? ' · ' + perf.join(' · ') : ''}`;
     // Rust side will hide the window ~1s later
   });
+  await onWhisperEvent('liveStateChanged', (p) => setLiveMode(p.state));
+  await onWhisperEvent('liveLevel', (p) => {
+    const h = Math.max(10, Math.min(100, p.rms * 140));
+    barArr[barIdx % barArr.length].style.height = h + '%';
+    barIdx++;
+  });
+  await onWhisperEvent('liveInterim', (p) => {
+    sub.textContent = p.text || '';
+  });
+  await onWhisperEvent('liveFinal', (p) => {
+    liveCommittedText = p.committed_text || liveCommittedText;
+    const words = liveCommittedText.trim().split(/\s+/).filter(Boolean).length;
+    sub.textContent = `${words} committed words`;
+  });
+  await onWhisperEvent('liveError', (p) => {
+    titleEl.textContent = 'Live error';
+    sub.textContent = p.message || '';
+  });
 }
 
 stopBtn.onclick = async () => {
-  try { await whisperApi.stopRecording(); } catch (e) { console.error(e); }
+  try {
+    if (activeMode === 'live') await whisperApi.stopLive();
+    else await whisperApi.stopRecording();
+  } catch (e) { console.error(e); }
 };
 cancelBtn.onclick = async () => {
-  try { await whisperApi.cancelRecording(); } catch (e) { console.error(e); }
+  try {
+    if (activeMode === 'live') await whisperApi.cancelLive();
+    else await whisperApi.cancelRecording();
+  } catch (e) { console.error(e); }
 };
 
 initEvents();

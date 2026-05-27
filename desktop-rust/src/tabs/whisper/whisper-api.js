@@ -14,6 +14,10 @@ export const whisperApi = {
   startRecording: () => call('whisper_start_recording'),
   stopRecording: () => call('whisper_stop_recording'),
   cancelRecording: () => call('whisper_cancel_recording'),
+  startLive: () => call('whisper_live_start'),
+  stopLive: () => call('whisper_live_stop'),
+  cancelLive: () => call('whisper_live_cancel'),
+  liveStatus: () => call('whisper_live_status'),
   unloadNow: () => call('whisper_unload_now'),
   injectText: (text, method) => call('whisper_inject_text', { text, method }),
 
@@ -38,6 +42,11 @@ const EVENTS = {
   modelDownload: 'whisper:model-download',
   transcribed: 'whisper:transcribed',
   error: 'whisper:error',
+  liveStateChanged: 'whisper:live-state-changed',
+  liveLevel: 'whisper:live-level',
+  liveInterim: 'whisper:live-interim',
+  liveFinal: 'whisper:live-final',
+  liveError: 'whisper:live-error',
 };
 
 export async function onWhisperEvent(name, handler) {

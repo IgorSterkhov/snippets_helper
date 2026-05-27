@@ -383,6 +383,10 @@
     history: [],
     currentState: 'idle',
     levelTimer: null,
+    liveState: 'idle',
+    liveTimers: [],
+    liveCommittedText: '',
+    liveModel: 'nova-3',
   };
 
   const whisperCatalog = [
@@ -393,6 +397,27 @@
     { name: 'ggml-large-v3',      display_name: 'large-v3',             size_bytes: 3095018317, sha256: 'x', download_url: '', ru_quality: 5, recommended: false, notes: 'Best quality, GPU recommended' },
     { name: 'ggml-large-v3-q5_0', display_name: 'large-v3 (Q5)',        size_bytes: 1080000000, sha256: 'x', download_url: '', ru_quality: 5, recommended: false, notes: 'Quantized: large-quality at ~1GB' },
   ];
+
+  function clearWhisperLiveTimers() {
+    for (const timer of whisperMockState.liveTimers) clearTimeout(timer);
+    whisperMockState.liveTimers = [];
+    if (whisperMockState.levelTimer) clearInterval(whisperMockState.levelTimer);
+    whisperMockState.levelTimer = null;
+  }
+
+  function dispatchWhisperLiveState(state, model = whisperMockState.liveModel) {
+    whisperMockState.liveState = state;
+    window.dispatchEvent(new CustomEvent('whisper:live-state-changed', {
+      detail: { state, model: state === 'idle' ? null : model },
+    }));
+  }
+
+  function dispatchWhisperLiveFinal(text) {
+    whisperMockState.liveCommittedText = text;
+    window.dispatchEvent(new CustomEvent('whisper:live-final', {
+      detail: { chunk: text, committed_text: text, speech_final: true },
+    }));
+  }
 
   const handlers = {
     // ── Settings ────────────────────────────────────────
@@ -1048,6 +1073,7 @@
       const text = 'Mocked transcript: это тестовая запись, привет мир.';
       whisperMockState.history.unshift({
         id: Date.now(), text, text_raw: null, model_name: 'ggml-small',
+        provider: 'local', provider_model: 'ggml-small',
         duration_ms: 3000, transcribe_ms: 400, language: 'ru', injected_to: 'paste',
         created_at: Math.floor(Date.now() / 1000),
       });
@@ -1062,6 +1088,59 @@
       whisperMockState.currentState = 'idle';
       window.dispatchEvent(new CustomEvent('whisper:state-changed', { detail: { state: 'idle', model: null } }));
       return null;
+    },
+    whisper_live_start() {
+      const settings = storeGet('settings', {});
+      const apiKey = settings['whisper.deepgram_api_key'] || '';
+      if (!String(apiKey).trim()) throw new Error('Deepgram API key is missing');
+      clearWhisperLiveTimers();
+      whisperMockState.liveModel = settings['whisper.deepgram_model'] || 'nova-3';
+      whisperMockState.liveCommittedText = '';
+      dispatchWhisperLiveState('connecting');
+      whisperMockState.liveTimers.push(setTimeout(() => {
+        dispatchWhisperLiveState('streaming');
+        whisperMockState.levelTimer = setInterval(() => {
+          const rms = 0.2 + 0.5 * Math.abs(Math.sin(Date.now() / 140));
+          window.dispatchEvent(new CustomEvent('whisper:live-level', { detail: { rms } }));
+        }, 50);
+      }, 80));
+      whisperMockState.liveTimers.push(setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('whisper:live-interim', {
+          detail: { text: 'Live mock trans', speech_final: false },
+        }));
+      }, 180));
+      whisperMockState.liveTimers.push(setTimeout(() => {
+        dispatchWhisperLiveFinal('Live mock transcript.');
+      }, 320));
+      return null;
+    },
+    async whisper_live_stop() {
+      const text = whisperMockState.liveCommittedText || 'Live mock transcript.';
+      clearWhisperLiveTimers();
+      if (!whisperMockState.liveCommittedText) dispatchWhisperLiveFinal(text);
+      dispatchWhisperLiveState('stopping');
+      await new Promise(r => setTimeout(r, 80));
+      whisperMockState.history.unshift({
+        id: Date.now(), text, text_raw: null, model_name: whisperMockState.liveModel,
+        provider: 'deepgram', provider_model: whisperMockState.liveModel,
+        duration_ms: 2000, transcribe_ms: 0, language: 'ru', injected_to: 'paste',
+        created_at: Math.floor(Date.now() / 1000),
+      });
+      dispatchWhisperLiveState('idle', null);
+      return text;
+    },
+    whisper_live_cancel() {
+      clearWhisperLiveTimers();
+      whisperMockState.liveCommittedText = '';
+      dispatchWhisperLiveState('idle', null);
+      return null;
+    },
+    whisper_live_status() {
+      return {
+        state: whisperMockState.liveState,
+        model: whisperMockState.liveModel,
+        committed_text: whisperMockState.liveCommittedText,
+      };
     },
     whisper_unload_now() {
       whisperMockState.currentState = 'idle';

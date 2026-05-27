@@ -263,6 +263,50 @@ async def run_tests():
         assert 'blob:' in img_directive, img_directive
     await check('T2d Tauri CSP allows media image previews', t2d_tauri_csp_allows_media_images)
 
+    # ── T2e: Whisper live dictate UI + mock flow ──────────────
+    async def t2e_whisper_live_dictate_ui_and_mock_flow():
+        await cdp.eval("""(async () => {
+          await window.__TAURI__.core.invoke('whisper_install_model', { name: 'ggml-small' });
+          const settings = JSON.parse(localStorage.getItem('mock.settings') || '{}');
+          settings['whisper.deepgram_api_key'] = 'dg_mock_key';
+          settings['whisper.deepgram_model'] = 'nova-3';
+          settings['whisper.deepgram_endpointing_ms'] = '300';
+          localStorage.setItem('mock.settings', JSON.stringify(settings));
+          document.querySelector('.tab-btn[data-tab-id="whisper"]').click();
+        })()""")
+        await wait_until(cdp, "!!document.querySelector('#panel-whisper #live-dictate-toggle')", timeout=5)
+        label = await cdp.eval("document.querySelector('#panel-whisper #live-dictate-label')?.textContent || ''")
+        assert 'Live dictate' in label, label
+
+        await cdp.eval("document.querySelector('#panel-whisper #settings-btn').click()")
+        await wait_until(cdp, "document.body.textContent.includes('Deepgram live dictation')", timeout=3)
+        has_key = await cdp.eval("!!document.querySelector('.modal-overlay [data-key=\"whisper.deepgram_api_key\"]')")
+        assert has_key, 'Deepgram API key input missing'
+        await close_modals()
+        await wait_until(cdp, "!document.querySelector('.modal-overlay')", timeout=3)
+
+        await cdp.eval("""(() => {
+          document.querySelector('#panel-whisper #live-dictate-toggle').click();
+          document.querySelector('#panel-whisper #record-btn').click();
+        })()""")
+        await wait_until(
+            cdp,
+            "document.querySelector('#panel-whisper #state-chip')?.textContent.includes('live streaming')",
+            timeout=4,
+        )
+        await wait_until(
+            cdp,
+            "(document.querySelector('#panel-whisper textarea')?.value || '').includes('Live mock transcript')",
+            timeout=4,
+        )
+        await cdp.eval("document.querySelector('#panel-whisper #record-btn').click()")
+        await wait_until(
+            cdp,
+            "[...document.querySelectorAll('#panel-whisper [data-provider=\"deepgram\"]')].length >= 1",
+            timeout=4,
+        )
+    await check('T2e Whisper live dictate UI + mock flow', t2e_whisper_live_dictate_ui_and_mock_flow)
+
     # ── T3: switch to Exec tab ────────────────────────────────
     async def t3():
         await cdp.eval(
