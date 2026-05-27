@@ -288,6 +288,10 @@ pub fn run() {
             commands::whisper::whisper_start_recording,
             commands::whisper::whisper_stop_recording,
             commands::whisper::whisper_cancel_recording,
+            commands::whisper::whisper_live_start,
+            commands::whisper::whisper_live_stop,
+            commands::whisper::whisper_live_cancel,
+            commands::whisper::whisper_live_status,
             commands::whisper::whisper_unload_now,
             commands::whisper::whisper_inject_text,
             commands::whisper::whisper_get_history,
@@ -308,6 +312,8 @@ pub fn run() {
         .setup(|app| {
             let svc = crate::whisper::service::WhisperService::new(app.handle().clone());
             app.manage(svc);
+            let dsvc = crate::whisper::deepgram::DeepgramLiveService::new(app.handle().clone());
+            app.manage(dsvc);
             let gsvc = crate::gemma::service::GemmaService::new(app.handle().clone());
             app.manage(gsvc);
 

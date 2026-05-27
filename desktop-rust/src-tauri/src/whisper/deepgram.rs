@@ -1,4 +1,266 @@
+use crate::whisper::audio::{pcm_i16_to_le_bytes, LiveRecorder};
+use crate::whisper::inject;
+use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tauri::{AppHandle, Emitter};
+use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
+use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
+
+const LIVE_AUDIO_QUEUE_CAPACITY: usize = 64;
+const FINALIZE_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
+
+pub const EVT_LIVE_STATE: &str = "whisper:live-state-changed";
+pub const EVT_LIVE_LEVEL: &str = "whisper:live-level";
+pub const EVT_LIVE_INTERIM: &str = "whisper:live-interim";
+pub const EVT_LIVE_FINAL: &str = "whisper:live-final";
+pub const EVT_LIVE_ERROR: &str = "whisper:live-error";
+
+#[derive(Debug, Clone)]
+pub struct DeepgramConfig {
+    pub api_key: String,
+    pub model: String,
+    pub language: Option<String>,
+    pub endpointing_ms: u64,
+    pub clipboard_restore_delay_ms: u64,
+    pub mic_device: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LiveState {
+    Idle,
+    Connecting,
+    Streaming,
+    Stopping,
+    Error,
+}
+
+impl LiveState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LiveState::Idle => "idle",
+            LiveState::Connecting => "connecting",
+            LiveState::Streaming => "streaming",
+            LiveState::Stopping => "stopping",
+            LiveState::Error => "error",
+        }
+    }
+}
+
+pub fn build_deepgram_url(cfg: &DeepgramConfig) -> String {
+    let mut url = format!(
+        "wss://api.deepgram.com/v1/listen?model={}&encoding=linear16&sample_rate=16000&channels=1&interim_results=true&endpointing={}",
+        cfg.model,
+        cfg.endpointing_ms,
+    );
+    if let Some(lang) = cfg
+        .language
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty() && *s != "auto")
+    {
+        url.push_str("&language=");
+        url.push_str(lang);
+    }
+    url
+}
+
+pub struct DeepgramLiveService {
+    app: AppHandle,
+    inner: Arc<Mutex<LiveInner>>,
+}
+
+struct LiveInner {
+    state: LiveState,
+    recorder: Option<SendLiveRecorder>,
+    task: Option<JoinHandle<()>>,
+    committed_text: String,
+    model: Option<String>,
+    language: Option<String>,
+    started_at: Option<Instant>,
+}
+
+struct SendLiveRecorder(LiveRecorder);
+// SAFETY: the live recorder is only stored behind a tokio Mutex and is dropped
+// as a whole to stop the underlying cpal stream; no concurrent stream access is
+// exposed through this wrapper.
+unsafe impl Send for SendLiveRecorder {}
+
+impl DeepgramLiveService {
+    pub fn new(app: AppHandle) -> Self {
+        Self {
+            app,
+            inner: Arc::new(Mutex::new(LiveInner {
+                state: LiveState::Idle,
+                recorder: None,
+                task: None,
+                committed_text: String::new(),
+                model: None,
+                language: None,
+                started_at: None,
+            })),
+        }
+    }
+
+    pub async fn current_state(&self) -> LiveState {
+        self.inner.lock().await.state
+    }
+
+    pub async fn status(&self) -> serde_json::Value {
+        let g = self.inner.lock().await;
+        serde_json::json!({
+            "state": g.state.as_str(),
+            "model": g.model,
+            "committed_text": g.committed_text,
+        })
+    }
+
+    pub async fn start(&self, cfg: DeepgramConfig) -> Result<(), String> {
+        if cfg.api_key.trim().is_empty() {
+            return Err(
+                "Deepgram API key is missing. Open Whisper Settings and add a local Deepgram key."
+                    .into(),
+            );
+        }
+
+        {
+            let g = self.inner.lock().await;
+            if !matches!(g.state, LiveState::Idle | LiveState::Error) {
+                return Ok(());
+            }
+        }
+
+        let (audio_tx, audio_rx) =
+            tokio::sync::mpsc::channel::<Vec<i16>>(LIVE_AUDIO_QUEUE_CAPACITY);
+        let recorder = SendLiveRecorder(LiveRecorder::start(
+            self.app.clone(),
+            cfg.mic_device.as_deref(),
+            audio_tx,
+        )?);
+
+        {
+            let mut g = self.inner.lock().await;
+            if !matches!(g.state, LiveState::Idle | LiveState::Error) {
+                return Ok(());
+            }
+            g.state = LiveState::Connecting;
+            g.recorder = Some(recorder);
+            g.committed_text.clear();
+            g.model = Some(cfg.model.clone());
+            g.language = cfg
+                .language
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty() && *s != "auto")
+                .map(ToOwned::to_owned);
+            g.started_at = Some(Instant::now());
+        }
+        emit_live_state(&self.app, LiveState::Connecting, Some(cfg.model.clone()));
+
+        let app = self.app.clone();
+        let inner = self.inner.clone();
+        let task_cfg = cfg.clone();
+        let handle = tokio::spawn(async move {
+            if let Err(e) =
+                run_deepgram_stream(app.clone(), inner.clone(), task_cfg, audio_rx).await
+            {
+                let _ = app.emit(EVT_LIVE_ERROR, serde_json::json!({ "message": e }));
+                let mut g = inner.lock().await;
+                g.state = LiveState::Error;
+                g.recorder = None;
+                emit_live_state(&app, LiveState::Error, g.model.clone());
+            }
+        });
+
+        let mut g = self.inner.lock().await;
+        if let Some(old) = g.task.replace(handle) {
+            old.abort();
+        }
+        Ok(())
+    }
+
+    pub async fn stop_and_persist(&self, db: &crate::db::DbState) -> Result<String, String> {
+        let (task, model, language, duration_ms) = {
+            let mut g = self.inner.lock().await;
+            if matches!(g.state, LiveState::Idle) {
+                return Ok(g.committed_text.clone());
+            }
+            g.state = LiveState::Stopping;
+            emit_live_state(&self.app, LiveState::Stopping, g.model.clone());
+            g.recorder = None;
+            let duration_ms = g
+                .started_at
+                .map(|t| t.elapsed().as_millis() as i64)
+                .unwrap_or(0);
+            (
+                g.task.take(),
+                g.model.clone().unwrap_or_else(|| "nova-3".into()),
+                g.language.clone(),
+                duration_ms,
+            )
+        };
+
+        if let Some(task) = task {
+            let _ = tokio::time::timeout(Duration::from_secs(8), task).await;
+        }
+
+        let text = {
+            let g = self.inner.lock().await;
+            g.committed_text.clone()
+        };
+
+        if !text.trim().is_empty() {
+            let conn = db.lock_recover();
+            crate::db::queries::whisper_insert_history_with_provider(
+                &conn,
+                &text,
+                None,
+                &model,
+                "deepgram",
+                Some(&model),
+                duration_ms,
+                0,
+                language.as_deref(),
+                Some("paste"),
+                0.0,
+                0.0,
+                0,
+            )
+            .map_err(|e| e.to_string())?;
+        }
+
+        {
+            let mut g = self.inner.lock().await;
+            g.state = LiveState::Idle;
+            g.recorder = None;
+            g.task = None;
+            g.started_at = None;
+            g.model = None;
+            g.language = None;
+        }
+        emit_live_state(&self.app, LiveState::Idle, None);
+        Ok(text)
+    }
+
+    pub async fn cancel(&self) {
+        let task = {
+            let mut g = self.inner.lock().await;
+            g.recorder = None;
+            g.committed_text.clear();
+            g.state = LiveState::Idle;
+            g.started_at = None;
+            g.model = None;
+            g.language = None;
+            g.task.take()
+        };
+        if let Some(task) = task {
+            task.abort();
+        }
+        emit_live_state(&self.app, LiveState::Idle, None);
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeepgramTranscript {
@@ -65,6 +327,129 @@ pub fn build_paste_chunk(committed_text: &str, finalized_delta: &str) -> String 
     } else {
         format!(" {delta}")
     }
+}
+
+async fn run_deepgram_stream(
+    app: AppHandle,
+    inner: Arc<Mutex<LiveInner>>,
+    cfg: DeepgramConfig,
+    mut audio_rx: tokio::sync::mpsc::Receiver<Vec<i16>>,
+) -> Result<(), String> {
+    let url = build_deepgram_url(&cfg);
+    let mut request = url
+        .into_client_request()
+        .map_err(|e| format!("deepgram request: {e}"))?;
+    request.headers_mut().insert(
+        "Authorization",
+        format!("Token {}", cfg.api_key.trim())
+            .parse()
+            .map_err(|e| format!("deepgram auth header: {e}"))?,
+    );
+
+    let (ws, _) = tokio_tungstenite::connect_async(request)
+        .await
+        .map_err(|e| format!("deepgram websocket: {e}"))?;
+    let (mut sink, mut stream) = ws.split();
+
+    {
+        let mut g = inner.lock().await;
+        g.state = LiveState::Streaming;
+    }
+    emit_live_state(&app, LiveState::Streaming, Some(cfg.model.clone()));
+
+    loop {
+        tokio::select! {
+            maybe_samples = audio_rx.recv() => {
+                match maybe_samples {
+                    Some(samples) if !samples.is_empty() => {
+                        sink.send(Message::Binary(pcm_i16_to_le_bytes(&samples))).await
+                            .map_err(|e| format!("deepgram audio send: {e}"))?;
+                    }
+                    Some(_) => {}
+                    None => {
+                        // Deepgram's documented live-stream finalization message asks
+                        // the service to flush pending audio without immediately closing
+                        // the socket. We then drain briefly for final Results.
+                        sink.send(Message::Text(r#"{"type":"Finalize"}"#.to_string())).await
+                            .map_err(|e| format!("deepgram finalize: {e}"))?;
+                        break;
+                    }
+                }
+            }
+            maybe_msg = stream.next() => {
+                let Some(msg) = maybe_msg else { return Ok(()); };
+                let msg = msg.map_err(|e| format!("deepgram receive: {e}"))?;
+                if let Message::Text(text) = msg {
+                    handle_deepgram_text_message(&app, &inner, &cfg, &text).await?;
+                }
+            }
+        }
+    }
+
+    loop {
+        match tokio::time::timeout(FINALIZE_DRAIN_TIMEOUT, stream.next()).await {
+            Ok(Some(Ok(Message::Text(text)))) => {
+                handle_deepgram_text_message(&app, &inner, &cfg, &text).await?;
+            }
+            Ok(Some(Ok(Message::Close(_)))) | Ok(None) | Err(_) => break,
+            Ok(Some(Ok(_))) => {}
+            Ok(Some(Err(e))) => return Err(format!("deepgram drain: {e}")),
+        }
+    }
+    Ok(())
+}
+
+async fn handle_deepgram_text_message(
+    app: &AppHandle,
+    inner: &Arc<Mutex<LiveInner>>,
+    cfg: &DeepgramConfig,
+    text: &str,
+) -> Result<(), String> {
+    let Some(parsed) = parse_deepgram_message(text)? else {
+        return Ok(());
+    };
+
+    if !parsed.is_final {
+        let _ = app.emit(
+            EVT_LIVE_INTERIM,
+            serde_json::json!({
+                "text": parsed.transcript,
+                "speech_final": parsed.speech_final,
+            }),
+        );
+        return Ok(());
+    }
+
+    let paste_text = {
+        let mut g = inner.lock().await;
+        let chunk = build_paste_chunk(&g.committed_text, &parsed.transcript);
+        g.committed_text.push_str(&chunk);
+        chunk
+    };
+
+    if !paste_text.trim().is_empty() {
+        inject::paste_chunk(&paste_text, cfg.clipboard_restore_delay_ms).await?;
+        let committed = inner.lock().await.committed_text.clone();
+        let _ = app.emit(
+            EVT_LIVE_FINAL,
+            serde_json::json!({
+                "chunk": paste_text,
+                "committed_text": committed,
+                "speech_final": parsed.speech_final,
+            }),
+        );
+    }
+    Ok(())
+}
+
+fn emit_live_state(app: &AppHandle, state: LiveState, model: Option<String>) {
+    let _ = app.emit(
+        EVT_LIVE_STATE,
+        serde_json::json!({
+            "state": state.as_str(),
+            "model": model,
+        }),
+    );
 }
 
 #[cfg(test)]
@@ -168,5 +553,49 @@ mod tests {
         assert_eq!(build_paste_chunk("hello «", "мир"), "мир");
         assert_eq!(build_paste_chunk("hello “", "world"), "world");
         assert_eq!(build_paste_chunk("hello \"", "world"), "world");
+    }
+
+    #[test]
+    fn live_state_strings_match_frontend_contract() {
+        assert_eq!(LiveState::Idle.as_str(), "idle");
+        assert_eq!(LiveState::Connecting.as_str(), "connecting");
+        assert_eq!(LiveState::Streaming.as_str(), "streaming");
+        assert_eq!(LiveState::Stopping.as_str(), "stopping");
+        assert_eq!(LiveState::Error.as_str(), "error");
+    }
+
+    #[test]
+    fn build_deepgram_url_contains_required_streaming_params() {
+        let cfg = DeepgramConfig {
+            api_key: "secret".into(),
+            model: "nova-3".into(),
+            language: Some("ru".into()),
+            endpointing_ms: 300,
+            clipboard_restore_delay_ms: 200,
+            mic_device: None,
+        };
+        let url = build_deepgram_url(&cfg);
+        assert!(url.starts_with("wss://api.deepgram.com/v1/listen?"));
+        assert!(url.contains("model=nova-3"));
+        assert!(url.contains("encoding=linear16"));
+        assert!(url.contains("sample_rate=16000"));
+        assert!(url.contains("channels=1"));
+        assert!(url.contains("interim_results=true"));
+        assert!(url.contains("endpointing=300"));
+        assert!(url.contains("language=ru"));
+    }
+
+    #[test]
+    fn build_deepgram_url_omits_auto_language() {
+        let cfg = DeepgramConfig {
+            api_key: "secret".into(),
+            model: "nova-3".into(),
+            language: Some("auto".into()),
+            endpointing_ms: 300,
+            clipboard_restore_delay_ms: 200,
+            mic_device: None,
+        };
+        let url = build_deepgram_url(&cfg);
+        assert!(!url.contains("language=auto"));
     }
 }

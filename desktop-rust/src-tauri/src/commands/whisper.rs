@@ -7,6 +7,7 @@ use crate::db::queries::{
     WhisperHistoryRow, WhisperModelRow,
 };
 use crate::whisper::catalog::{self, ModelMeta};
+use crate::whisper::deepgram::{DeepgramConfig, DeepgramLiveService};
 use crate::whisper::events;
 use crate::whisper::gpu_detect::{self, HardwareInfo};
 use crate::whisper::bin_manager;
@@ -232,6 +233,61 @@ pub async fn hotkey_toggle(app: AppHandle) {
 pub async fn whisper_cancel_recording(svc: State<'_, WhisperService>) -> Result<(), String> {
     svc.cancel_recording().await;
     Ok(())
+}
+
+fn deepgram_config_from_settings(db: &DbState) -> Result<DeepgramConfig, String> {
+    let conn = db.lock_recover();
+    let cid = computer_id();
+    let api_key = queries::get_setting(&conn, &cid, "whisper.deepgram_api_key").ok().flatten().unwrap_or_default();
+    if api_key.trim().is_empty() {
+        return Err("Deepgram API key is missing. Open Whisper Settings and add a local Deepgram key.".into());
+    }
+    let model = queries::get_setting(&conn, &cid, "whisper.deepgram_model").ok().flatten()
+        .filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "nova-3".into());
+    let endpointing_ms = queries::get_setting(&conn, &cid, "whisper.deepgram_endpointing_ms").ok().flatten()
+        .and_then(|s| s.parse::<u64>().ok()).unwrap_or(300);
+    let restore = queries::get_setting(&conn, &cid, "whisper.clipboard_restore_delay_ms").ok().flatten()
+        .and_then(|s| s.parse::<u64>().ok()).unwrap_or(200);
+    let mic_device = queries::get_setting(&conn, &cid, "whisper.mic_device").ok().flatten()
+        .filter(|s| !s.is_empty());
+    let language = queries::get_setting(&conn, &cid, "whisper.language").ok().flatten()
+        .filter(|s| !s.is_empty());
+    Ok(DeepgramConfig {
+        api_key,
+        model,
+        language,
+        endpointing_ms,
+        clipboard_restore_delay_ms: restore,
+        mic_device,
+    })
+}
+
+#[tauri::command]
+pub async fn whisper_live_start(
+    db: State<'_, DbState>,
+    svc: State<'_, DeepgramLiveService>,
+) -> Result<(), String> {
+    let cfg = deepgram_config_from_settings(&db)?;
+    svc.start(cfg).await
+}
+
+#[tauri::command]
+pub async fn whisper_live_stop(
+    db: State<'_, DbState>,
+    svc: State<'_, DeepgramLiveService>,
+) -> Result<String, String> {
+    svc.stop_and_persist(&db).await
+}
+
+#[tauri::command]
+pub async fn whisper_live_cancel(svc: State<'_, DeepgramLiveService>) -> Result<(), String> {
+    svc.cancel().await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn whisper_live_status(svc: State<'_, DeepgramLiveService>) -> Result<serde_json::Value, String> {
+    Ok(svc.status().await)
 }
 
 #[tauri::command]
