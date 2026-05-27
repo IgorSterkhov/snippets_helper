@@ -106,7 +106,10 @@ The public HTML page should be simple, readable, and safe:
 
 - Dark theme by default.
 - Escape user-provided text before injecting into HTML.
-- Render note content and snippet description with preserved line breaks.
+- Render note content as safe Markdown, matching the rendered Markdown behavior
+  used for snippet text blocks, including fenced code blocks and Markdown image
+  Figure Cards where supported.
+- Render snippet description with safe Markdown or preserved line breaks.
 - Render snippet `value` in a code/preformatted block with a `Copy` button.
 - Render snippet `links` as a list of clickable links when they are valid
   URLs; invalid or malformed entries are shown as text or omitted safely.

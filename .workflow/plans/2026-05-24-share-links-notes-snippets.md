@@ -8,6 +8,12 @@
 
 **Tech Stack:** FastAPI, SQLAlchemy/Alembic/Postgres, Tauri/Rust `reqwest`, vanilla desktop JS, React Native, Jest, desktop CDP smoke tests, post-release pytest smoke.
 
+## Follow-Up Tasks
+
+- [ ] Public note share pages should render `notes.content` as safe Markdown,
+  matching the rendered Markdown behavior used for snippet text blocks,
+  including fenced code blocks and Markdown image Figure Cards where supported.
+
 ---
 
 ## Required Context

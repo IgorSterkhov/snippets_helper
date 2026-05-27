@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## f-20260527-1 (2026-05-27)
+
+- **Note share autosave:** creating a public link for a note now saves the
+  current editor content and runs sync before requesting the link, so newly
+  inserted images and other unsaved edits are present on the server instead of
+  returning `404 item not found`.
+
 ## v1.3.36 (2026-05-26)
 
 - **Native media preview fallback:** desktop image previews and rendered

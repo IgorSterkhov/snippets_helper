@@ -600,6 +600,7 @@ function renderEditor() {
     itemType: 'note',
     itemUuid: editingNote.uuid,
     title: editingNote.title || 'Shared note',
+    onBeforeCreate: saveEditingNoteForShare,
   }));
   toolbar.appendChild(shareBtn);
 
@@ -697,6 +698,36 @@ async function onSaveNote() {
   } catch (e) {
     showToast('Failed to save note: ' + e, 'error');
   }
+}
+
+async function saveEditingNoteForShare() {
+  if (!editingNote) return null;
+  const right = root.querySelector('#notes-right');
+  const titleInput = right?.querySelector('.note-title-input');
+  const textarea = right?.querySelector('.note-content-input');
+  if (titleInput) editingNote.title = titleInput.value;
+  if (textarea) editingNote.content = textarea.value;
+
+  if (editingNote.id) {
+    await call('update_note', {
+      id: editingNote.id,
+      title: editingNote.title,
+      content: editingNote.content || '',
+      isPinned: editingNote.is_pinned,
+    });
+    notes = notes.map(n => n.id === editingNote.id ? { ...n, ...editingNote } : n);
+    return { itemUuid: editingNote.uuid, title: editingNote.title || 'Shared note' };
+  }
+
+  const created = await call('create_note', {
+    folderId: selectedFolderId,
+    title: editingNote.title || '',
+    content: editingNote.content || '',
+  });
+  editingNote = { ...created };
+  notes = [created, ...notes.filter(n => n.id !== created.id)];
+  await loadPinnedNotes();
+  return { itemUuid: created.uuid, title: created.title || 'Shared note' };
 }
 
 async function onDeleteNote() {

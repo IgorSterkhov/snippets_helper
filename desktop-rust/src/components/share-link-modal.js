@@ -18,7 +18,14 @@ function makeButton(text, className, onClick) {
   return btn;
 }
 
-export async function openShareLinkModal({ itemType, itemUuid, title, onChange }) {
+export async function openShareLinkModal({
+  itemType,
+  itemUuid,
+  title,
+  onChange,
+  onBeforeCreate,
+  syncBeforeCreate = true,
+}) {
   if (!itemUuid) {
     showToast('Save item before sharing', 'error');
     return;
@@ -84,8 +91,20 @@ export async function openShareLinkModal({ itemType, itemUuid, title, onChange }
   });
 
   if (!link) {
-    actions.appendChild(makeButton('Create link', '', async () => {
+    actions.appendChild(makeButton('Create link', '', async (event) => {
+      const btn = event.currentTarget;
+      const originalText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Creating...';
       try {
+        if (onBeforeCreate) {
+          const updated = await onBeforeCreate();
+          if (updated?.itemUuid) itemUuid = updated.itemUuid;
+          if (updated?.title) title = updated.title;
+        }
+        if (syncBeforeCreate) {
+          await call('trigger_sync');
+        }
         link = await call('create_share_link', { itemType, itemUuid });
         await copyText(link.public_url);
         showToast('Public link created and copied', 'success');
@@ -93,6 +112,8 @@ export async function openShareLinkModal({ itemType, itemUuid, title, onChange }
         close();
       } catch (err) {
         showToast('Failed to create link: ' + err, 'error');
+        btn.disabled = false;
+        btn.textContent = originalText;
       }
     }));
   } else {

@@ -309,6 +309,14 @@
     return item;
   }
 
+  function recordMockCall(command, payload = {}) {
+    window.__mockCallSeq = (window.__mockCallSeq || 0) + 1;
+    if (!Array.isArray(window.__mockCommandLog)) window.__mockCommandLog = [];
+    const entry = { seq: window.__mockCallSeq, command, payload };
+    window.__mockCommandLog.push(entry);
+    return entry;
+  }
+
   const shareLinks = new Map();
   const mediaJobs = new Map();
   const mediaAssets = new Map();
@@ -501,6 +509,7 @@
       return shareLinks.get(shareKey(itemType, itemUuid)) || null;
     },
     async create_share_link({ itemType, itemUuid }) {
+      recordMockCall('create_share_link', { itemType, itemUuid });
       const key = shareKey(itemType, itemUuid);
       if (!shareLinks.has(key)) {
         shareLinks.set(key, mockShareLink(itemType, itemUuid));
@@ -559,6 +568,8 @@
 
     // ── Sync / Update ───────────────────────────────────
     async trigger_sync() {
+      const entry = recordMockCall('trigger_sync');
+      window.__mockLastSyncCall = entry.seq;
       if (typeof window.__mockTriggerSync === 'function') {
         return await window.__mockTriggerSync();
       }
@@ -599,7 +610,7 @@
         );
     },
     async create_note({ folderId, title, content }) {
-      return createItem('notes', {
+      const item = createItem('notes', {
         uuid: uuid(),
         folder_id: folderId,
         title,
@@ -607,6 +618,9 @@
         is_pinned: false,
         pinned_sort_order: 0,
       });
+      const entry = recordMockCall('create_note', { id: item.id, uuid: item.uuid, title, content: content || '' });
+      window.__mockLastNoteWriteCall = entry.seq;
+      return item;
     },
     async update_note({ id, isPinned, ...patch }) {
       const notes = storeGet('notes', []);
@@ -616,13 +630,16 @@
       const maxOrder = notes
         .filter(n => n.is_pinned && Number(n.id) !== targetId)
         .reduce((max, n) => Math.max(max, Number(n.pinned_sort_order) || 0), -1);
-      return updateItem('notes', id, {
+      const item = updateItem('notes', id, {
         ...patch,
         is_pinned: nextPinned,
         pinned_sort_order: nextPinned
           ? (current?.is_pinned ? (Number(current.pinned_sort_order) || 0) : maxOrder + 1)
           : 0,
       });
+      const entry = recordMockCall('update_note', { id: item.id, uuid: item.uuid, title: item.title, content: item.content || '' });
+      window.__mockLastNoteWriteCall = entry.seq;
+      return item;
     },
     async reorder_pinned_notes({ ids }) {
       const order = new Map((ids || []).map((id, index) => [Number(id), index]));

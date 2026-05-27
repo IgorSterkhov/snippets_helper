@@ -705,6 +705,67 @@ async def run_tests():
         await wait_until(cdp, "!document.body.innerText.includes('Share link')", timeout=3)
     await check('T14e Notes share link modal', t14e_notes_share_link_modal)
 
+    # ── T14f: Notes share saves draft and syncs before create ──
+    async def t14f_notes_share_autosaves_and_syncs_before_create():
+        await close_modals()
+        await cdp.eval("""window.__TAURI__.core.invoke('create_note', {
+          folderId: 1,
+          title: 'Share sync source',
+          content: 'Initial content'
+        })""")
+        await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"notes\"]').click()")
+        await wait_until(cdp, "!!document.querySelector('#panel-notes .notes-folder-item')", timeout=5)
+        await cdp.eval(
+            "[...document.querySelectorAll('#panel-notes .folder-name')]"
+            ".find(x => x.textContent.trim() === 'Inbox').click()"
+        )
+        await wait_until(
+            cdp,
+            "[...document.querySelectorAll('#panel-notes .note-card-title')]"
+            ".some(x => x.textContent.trim() === 'Share sync source')",
+            timeout=5,
+        )
+        await cdp.eval(
+            "[...document.querySelectorAll('#panel-notes .note-card-title')]"
+            ".find(x => x.textContent.trim() === 'Share sync source').click()"
+        )
+        await wait_until(cdp, "!!document.querySelector('#panel-notes .note-toolbar')", timeout=3)
+        await cdp.eval(
+            "[...document.querySelectorAll('#panel-notes .note-toolbar button')]"
+            ".find(b => b.textContent.trim() === 'Edit').click()"
+        )
+        await wait_until(cdp, "!!document.querySelector('#panel-notes .note-content-input')", timeout=3)
+        await cdp.eval("""(() => {
+          const title = document.querySelector('#panel-notes .note-title-input');
+          const textarea = document.querySelector('#panel-notes .note-content-input');
+          title.value = 'Share sync source edited';
+          title.dispatchEvent(new Event('input', { bubbles: true }));
+          textarea.value = 'Saved before share\\n\\n![share-image](https://ister-app.ru/snippets-media/mock-balanced.webp)';
+          textarea.dispatchEvent(new Event('input', { bubbles: true }));
+          window.__mockCommandLog = [];
+          window.__mockCallSeq = 0;
+          window.__mockLastNoteWriteCall = 0;
+          window.__mockLastSyncCall = 0;
+        })()""")
+        await cdp.eval(
+            "[...document.querySelectorAll('#panel-notes .note-toolbar button')]"
+            ".find(b => b.textContent.trim() === '🔗').click()"
+        )
+        await wait_until(cdp, "document.body.innerText.includes('Share link')", timeout=3)
+        await cdp.eval("[...document.querySelectorAll('.share-link-actions button')].find(b => b.textContent === 'Create link').click()")
+        await wait_until(cdp, "!document.body.innerText.includes('Share link')", timeout=3)
+        commands = await cdp.eval("window.__mockCommandLog.map(x => x.command)")
+        assert 'update_note' in commands, f'commands: {commands!r}'
+        assert 'trigger_sync' in commands, f'commands: {commands!r}'
+        assert 'create_share_link' in commands, f'commands: {commands!r}'
+        assert commands.index('update_note') < commands.index('trigger_sync') < commands.index('create_share_link'), commands
+        saved_content = await cdp.eval(
+            "JSON.parse(localStorage.getItem('mock.notes') || '[]')"
+            ".find(n => n.title === 'Share sync source edited')?.content || ''"
+        )
+        assert '![share-image]' in saved_content, f'saved content: {saved_content!r}'
+    await check('T14f Notes share autosaves and syncs before create', t14f_notes_share_autosaves_and_syncs_before_create)
+
     # ── T15: Tasks Pin updates pinned chip strip ─────────────
     async def t15_tasks_pin_updates_strip():
         await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"tasks\"]').click()")
