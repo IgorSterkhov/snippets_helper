@@ -18,7 +18,7 @@ struct DeepgramResponse {
 
 #[derive(Debug, Deserialize)]
 struct DeepgramChannel {
-    alternatives: Vec<DeepgramAlternative>,
+    alternatives: Option<Vec<DeepgramAlternative>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -34,7 +34,8 @@ pub fn parse_deepgram_message(raw: &str) -> Result<Option<DeepgramTranscript>, S
     }
     let transcript = parsed
         .channel
-        .and_then(|c| c.alternatives.into_iter().next())
+        .and_then(|c| c.alternatives)
+        .and_then(|alternatives| alternatives.into_iter().next())
         .and_then(|a| a.transcript)
         .unwrap_or_default()
         .trim()
@@ -56,6 +57,7 @@ pub fn build_paste_chunk(committed_text: &str, finalized_delta: &str) -> String 
     }
     if committed_text.is_empty()
         || committed_text.ends_with(char::is_whitespace)
+        || committed_text.ends_with(['(', '[', '{', '«', '“', '"'])
         || delta.starts_with(char::is_whitespace)
         || delta.starts_with([',', '.', '!', '?', ':', ';', ')', ']', '}'])
     {
@@ -112,11 +114,59 @@ mod tests {
     }
 
     #[test]
+    fn ignore_results_without_transcript_alternatives() {
+        assert!(
+            parse_deepgram_message(r#"{"type":"Results","is_final":true}"#)
+                .unwrap()
+                .is_none()
+        );
+        assert!(parse_deepgram_message(r#"{"type":"Results","channel":{}}"#)
+            .unwrap()
+            .is_none());
+        assert!(
+            parse_deepgram_message(r#"{"type":"Results","channel":{"alternatives":[]}}"#)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn missing_deepgram_booleans_default_to_false() {
+        let msg = parse_deepgram_message(
+            r#"{"type":"Results","channel":{"alternatives":[{"transcript":"hello"}]}}"#,
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(msg.transcript, "hello");
+        assert!(!msg.is_final);
+        assert!(!msg.speech_final);
+    }
+
+    #[test]
+    fn invalid_deepgram_json_or_type_mismatch_returns_error() {
+        assert!(parse_deepgram_message("{").is_err());
+        assert!(
+            parse_deepgram_message(r#"{"type":"Results","channel":{"alternatives":{}}}"#).is_err()
+        );
+    }
+
+    #[test]
     fn paste_chunk_adds_spaces_for_russian_and_latin_text() {
         assert_eq!(build_paste_chunk("", "привет"), "привет");
         assert_eq!(build_paste_chunk("привет", "мир"), " мир");
         assert_eq!(build_paste_chunk("hello", "world."), " world.");
         assert_eq!(build_paste_chunk("hello ", "world"), "world");
         assert_eq!(build_paste_chunk("hello", ", world"), ", world");
+    }
+
+    #[test]
+    fn paste_chunk_does_not_add_spaces_after_opening_delimiters() {
+        assert_eq!(build_paste_chunk("hello (", "world"), "world");
+        assert_eq!(build_paste_chunk("hello [", "world"), "world");
+        assert_eq!(build_paste_chunk("hello {", "world"), "world");
+        assert_eq!(build_paste_chunk("hello «", "мир"), "мир");
+        assert_eq!(build_paste_chunk("hello “", "world"), "world");
+        assert_eq!(build_paste_chunk("hello \"", "world"), "world");
     }
 }
