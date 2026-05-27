@@ -13,6 +13,9 @@
 - [x] Public note share pages should render `notes.content` as safe Markdown,
   matching the rendered Markdown behavior used for snippet text blocks,
   including fenced code blocks and Markdown image Figure Cards where supported.
+- [x] Public snippet share pages should render Markdown-like `value` and
+  `description` content as safe Markdown, including reference links, while
+  preserving plain code-only values in the existing copyable preformatted block.
 
 ---
 

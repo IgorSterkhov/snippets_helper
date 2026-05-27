@@ -109,8 +109,12 @@ The public HTML page should be simple, readable, and safe:
 - Render note content as safe Markdown, matching the rendered Markdown behavior
   used for snippet text blocks, including fenced code blocks and Markdown image
   Figure Cards where supported.
-- Render snippet description with safe Markdown or preserved line breaks.
-- Render snippet `value` in a code/preformatted block with a `Copy` button.
+- Render snippet description with safe Markdown.
+- Render snippet `value` as safe Markdown when it contains Markdown markers,
+  including headings, inline formatting, reference links, fenced code blocks,
+  and Markdown image Figure Cards where supported.
+- Preserve plain snippet `value` text in a code/preformatted block with a
+  `Copy` button so existing code-only public snippets stay copy-friendly.
 - Render snippet `links` as a list of clickable links when they are valid
   URLs; invalid or malformed entries are shown as text or omitted safely.
 - Do not execute arbitrary HTML or scripts from shared content.

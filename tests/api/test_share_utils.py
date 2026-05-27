@@ -96,6 +96,45 @@ def test_render_share_html_renders_note_content_as_safe_markdown():
     assert '<pre><code class="language-bash">echo hi\n</code></pre>' in rendered
 
 
+def test_render_share_html_renders_shortcut_value_and_description_as_safe_markdown():
+    rendered = render_share_html(
+        {
+            "type": "shortcut",
+            "name": "Markdown shortcut",
+            "value": (
+                "![screen](https://ister-app.ru/snippets-media/token.webp)\n"
+                "### Section\n\n"
+                "**bold** ([Cursor][1])\n\n"
+                "[1]: https://cursor.com \"Cursor\""
+            ),
+            "description": "Description with `code` and [Docs](https://example.com).",
+            "links": [],
+        }
+    )
+    assert "<article id='share-code' class='share-markdown share-value'>" in rendered
+    assert "figure-card" in rendered
+    assert "<h3>Section</h3>" in rendered
+    assert "<strong>bold</strong>" in rendered
+    assert "href='https://cursor.com'>Cursor</a>" in rendered
+    assert "[1]:" not in rendered
+    assert '<section class="desc share-markdown">' in rendered
+    assert "<code>code</code>" in rendered
+    assert "href='https://example.com'>Docs</a>" in rendered
+
+
+def test_render_share_html_preserves_plain_shortcut_value_as_code_block():
+    rendered = render_share_html(
+        {
+            "type": "shortcut",
+            "name": "Plain code",
+            "value": "kubectl apply -f deploy.yaml",
+            "description": "",
+            "links": [],
+        }
+    )
+    assert "<pre><code id='share-code'>kubectl apply -f deploy.yaml</code></pre>" in rendered
+
+
 def test_render_share_html_rejects_unsafe_image_url_scheme():
     rendered = render_share_html(
         {"type": "note", "title": "T", "content": "![bad](javascript:alert(1))"}

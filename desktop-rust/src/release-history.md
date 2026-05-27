@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## f-20260527-3 (2026-05-27)
+
+- **Public snippet Markdown:** snippet share pages now render Markdown-like
+  value and description content as safe Markdown, including headings, inline
+  formatting, reference links, code spans, and Figure Card images, while plain
+  code-only snippets remain in the copyable preformatted block.
+
 ## f-20260527-2 (2026-05-27)
 
 - **Public note Markdown:** note share pages now render note content as safe

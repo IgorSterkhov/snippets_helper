@@ -14,6 +14,13 @@ def test_share_links_live_note_and_shortcut(
 ):
     note_uuid = uuid_factory()
     shortcut_uuid = uuid_factory()
+    snippet_value_v1 = (
+        "snippet value v1\n\n"
+        "### Snippet Section\n\n"
+        "**snippet bold** ([DocsRef][1])\n\n"
+        "[1]: https://example.com/ref \"DocsRef\""
+    )
+    snippet_description_v1 = "snippet description with `code` and [Docs](https://example.com)"
 
     _push(
         api_client,
@@ -31,8 +38,8 @@ def test_share_links_live_note_and_shortcut(
                 {
                     "uuid": shortcut_uuid,
                     "name": f"{unique_prefix}_snippet_v1",
-                    "value": "snippet value v1",
-                    "description": "snippet description",
+                    "value": snippet_value_v1,
+                    "description": snippet_description_v1,
                     "links": '[{"label":"Docs","url":"https://example.com"}]',
                     "obsidian_note": "must not leak",
                     "updated_at": iso_timestamp(),
@@ -83,13 +90,20 @@ def test_share_links_live_note_and_shortcut(
     )
     assert status == 200, public_snippet
     assert public_snippet["name"] == f"{unique_prefix}_snippet_v1"
-    assert public_snippet["value"] == "snippet value v1"
-    assert public_snippet["description"] == "snippet description"
+    assert public_snippet["value"] == snippet_value_v1
+    assert public_snippet["description"] == snippet_description_v1
     assert public_snippet["links"] == [{"label": "Docs", "url": "https://example.com"}]
     assert "obsidian_note" not in public_snippet
     if smoke_config.api_base_url.startswith("https://"):
         assert snippet_link["public_url"].startswith("https://"), snippet_link
     assert public_http.head_or_get_status(snippet_link["public_url"]) == 200
+    status, public_snippet_html = public_http.request_text("GET", snippet_link["public_url"])
+    assert status == 200, public_snippet_html[:300]
+    assert "<h3>Snippet Section</h3>" in public_snippet_html
+    assert "<strong>snippet bold</strong>" in public_snippet_html
+    assert "href='https://example.com/ref'>DocsRef</a>" in public_snippet_html
+    assert "<code>code</code>" in public_snippet_html
+    assert "[1]:" not in public_snippet_html
 
     _push(
         api_client,

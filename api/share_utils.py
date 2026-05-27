@@ -66,10 +66,23 @@ def public_shortcut_payload(row) -> dict:
 IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)\)")
 LINK_RE = re.compile(r"(?<!!)\[([^\]]+)\]\(([^)\s]+)\)")
 CODE_SPAN_RE = re.compile(r"`([^`\n]+)`")
+REFERENCE_LINK_RE = re.compile(r"(?<!!)\[([^\]]+)\]\[([^\]]+)\]")
+REFERENCE_DEF_RE = re.compile(r"^[ \t]*\[([^\]]+)\]:[ \t]*(\S+)(?:[ \t]+[\"'(].*)?[ \t]*$")
 FENCE_RE = re.compile(r"^[ \t]*```([A-Za-z0-9_+.#-]*)[ \t]*$")
 HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.+?)\s*$")
 UNORDERED_LIST_RE = re.compile(r"^[ \t]*[-*][ \t]+(.+?)\s*$")
 SAFE_LANGUAGE_RE = re.compile(r"[^A-Za-z0-9_+.#-]")
+MARKDOWN_MARKER_RE = re.compile(
+    r"!\[[^\]]*\]\([^)]+\)"
+    r"|\[[^\]]+\]\([^)]+\)"
+    r"|\[[^\]]+\]\[[^\]]+\]"
+    r"|^[ \t]*\[([^\]]+)\]:[ \t]*\S+"
+    r"|^[ \t]{0,3}#{1,6}[ \t]+"
+    r"|^[ \t]*```"
+    r"|\*\*[^*\n]+\*\*"
+    r"|`[^`\n]+`",
+    re.MULTILINE,
+)
 
 
 def _is_safe_image_url(url: str) -> bool:
@@ -95,8 +108,9 @@ def _safe_link_url(url: str) -> bool:
     return parsed.scheme.lower() in {"http", "https"}
 
 
-def _render_inline_markdown(text: str) -> str:
+def _render_inline_markdown(text: str, references: dict[str, str] | None = None) -> str:
     tokens: list[str] = []
+    refs = references or {}
 
     def stash(value: str) -> str:
         token = f"SHAREINLINETOKEN{len(tokens)}END"
@@ -118,12 +132,23 @@ def _render_inline_markdown(text: str) -> str:
             f"href='{html.escape(url, quote=True)}'>{html.escape(label)}</a>"
         )
 
+    def reference_link_repl(match: re.Match) -> str:
+        label, key = match.group(1), match.group(2)
+        url = refs.get(key.strip().lower())
+        if not url or not _safe_link_url(url):
+            return stash(html.escape(match.group(0)))
+        return stash(
+            "<a rel='noopener noreferrer' target='_blank' "
+            f"href='{html.escape(url, quote=True)}'>{html.escape(label)}</a>"
+        )
+
     def code_repl(match: re.Match) -> str:
         return stash(f"<code>{html.escape(match.group(1))}</code>")
 
-    marked = IMAGE_RE.sub(image_repl, text or "")
+    marked = CODE_SPAN_RE.sub(code_repl, text or "")
+    marked = IMAGE_RE.sub(image_repl, marked)
+    marked = REFERENCE_LINK_RE.sub(reference_link_repl, marked)
     marked = LINK_RE.sub(link_repl, marked)
-    marked = CODE_SPAN_RE.sub(code_repl, marked)
     rendered = html.escape(marked)
     rendered = re.sub(r"\*\*([^*\n]+)\*\*", r"<strong>\1</strong>", rendered)
     rendered = re.sub(r"(?<!\*)\*([^*\n]+)\*(?!\*)", r"<em>\1</em>", rendered)
@@ -144,7 +169,30 @@ def _render_code_block(lines: list[str], language: str) -> str:
     return f"<pre><code{_language_class(language)}>{html.escape(code)}</code></pre>"
 
 
+def _extract_reference_definitions(text: str) -> tuple[str, dict[str, str]]:
+    refs: dict[str, str] = {}
+    output: list[str] = []
+    in_code = False
+    for line in (text or "").splitlines():
+        if FENCE_RE.match(line):
+            in_code = not in_code
+            output.append(line)
+            continue
+        if not in_code:
+            match = REFERENCE_DEF_RE.match(line)
+            if match:
+                refs[match.group(1).strip().lower()] = match.group(2).strip()
+                continue
+        output.append(line)
+    return "\n".join(output), refs
+
+
+def _is_markdown_like(text: str) -> bool:
+    return bool(MARKDOWN_MARKER_RE.search(text or ""))
+
+
 def _render_markdown(text: str) -> str:
+    text, references = _extract_reference_definitions(text or "")
     output: list[str] = []
     paragraph: list[str] = []
     list_items: list[str] = []
@@ -157,7 +205,7 @@ def _render_markdown(text: str) -> str:
             return
         output.append(
             "<p>"
-            + "<br>".join(_render_inline_markdown(line) for line in paragraph)
+            + "<br>".join(_render_inline_markdown(line, references) for line in paragraph)
             + "</p>"
         )
         paragraph.clear()
@@ -165,7 +213,7 @@ def _render_markdown(text: str) -> str:
     def flush_list() -> None:
         if not list_items:
             return
-        items = "".join(f"<li>{_render_inline_markdown(item)}</li>" for item in list_items)
+        items = "".join(f"<li>{_render_inline_markdown(item, references)}</li>" for item in list_items)
         output.append(f"<ul>{items}</ul>")
         list_items.clear()
 
@@ -199,7 +247,7 @@ def _render_markdown(text: str) -> str:
         if heading:
             flush_blocks()
             level = min(len(heading.group(1)), 6)
-            output.append(f"<h{level}>{_render_inline_markdown(heading.group(2))}</h{level}>")
+            output.append(f"<h{level}>{_render_inline_markdown(heading.group(2), references)}</h{level}>")
             continue
 
         unordered = UNORDERED_LIST_RE.match(line)
@@ -217,37 +265,28 @@ def _render_markdown(text: str) -> str:
     return "\n".join(output)
 
 
-def _render_text_with_figures(text: str) -> str:
-    rendered_lines = []
-    for line in (text or "").splitlines():
-        pos = 0
-        parts = []
-        for match in IMAGE_RE.finditer(line):
-            parts.append(html.escape(line[pos:match.start()]))
-            alt, url = match.group(1), match.group(2)
-            if _is_safe_image_url(url):
-                parts.append(_figure_card(alt, url))
-            else:
-                parts.append(html.escape(match.group(0)))
-            pos = match.end()
-        parts.append(html.escape(line[pos:]))
-        rendered_lines.append("".join(parts))
-    return "<br>".join(rendered_lines)
-
-
 def render_share_html(payload: dict) -> str:
     title = payload.get("title") or payload.get("name") or "Shared item"
     safe_title = html.escape(title)
 
     if payload.get("type") == "shortcut":
         value = payload.get("value", "")
-        rendered_value = _render_text_with_figures(value)
-        if IMAGE_RE.search(value or ""):
-            value_html = f"<article id='share-code'>{rendered_value}</article>"
+        description = payload.get("description", "")
+        description_html = (
+            f'<section class="desc share-markdown">{_render_markdown(description)}</section>'
+            if description
+            else ""
+        )
+        if _is_markdown_like(value):
+            value_html = (
+                "<article id='share-code' class='share-markdown share-value'>"
+                f"{_render_markdown(value)}"
+                "</article>"
+            )
         else:
             value_html = f"<pre><code id='share-code'>{html.escape(value)}</code></pre>"
         body = (
-            f"<p class='desc'>{_render_text_with_figures(payload.get('description', ''))}</p>"
+            f"{description_html}"
             f"{value_html}"
             "<button type='button' onclick='navigator.clipboard.writeText("
             'document.getElementById("share-code").innerText)'
