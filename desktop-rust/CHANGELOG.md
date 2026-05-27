@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## v1.3.37 (2026-05-27)
+
+- **Deepgram live dictation:** Whisper now has a `Live dictate` mode that
+  streams microphone audio to Deepgram Nova, shows interim transcript text in
+  the tab and overlay, and pastes only finalized chunks into the active app.
+- **Local Deepgram settings:** the Whisper settings modal stores a local-only
+  Deepgram API key, model, and endpointing value; the key is not synced.
+- **Whisper history metadata:** transcript history now records provider/model
+  metadata so local Whisper and Deepgram live sessions are distinguishable.
+
 ## f-20260527-3 (2026-05-27)
 
 - **Public snippet Markdown:** snippet share pages now render Markdown-like
