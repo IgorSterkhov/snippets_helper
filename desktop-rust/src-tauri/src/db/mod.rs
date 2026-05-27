@@ -323,6 +323,20 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     conn.execute_batch("ALTER TABLE whisper_history ADD COLUMN postprocessed_text TEXT")
         .ok();
 
+    // Migration (v1.3.37): provider metadata for local/cloud Whisper history rows.
+    conn.execute_batch(
+        "ALTER TABLE whisper_history ADD COLUMN provider TEXT NOT NULL DEFAULT 'local'",
+    )
+    .ok();
+    conn.execute_batch("ALTER TABLE whisper_history ADD COLUMN provider_model TEXT")
+        .ok();
+    conn.execute_batch(
+        "UPDATE whisper_history
+         SET provider_model = model_name
+         WHERE provider_model IS NULL OR provider_model = ''",
+    )
+    .ok();
+
     // Migration (v1.3.20): per-command shell selector for Exec tab.
     // 'host'  → cmd /c (Win) or sh -c (mac/linux)
     // 'wsl'   → wsl.exe [-d distro] -- bash -lc <cmd>  (Windows only)

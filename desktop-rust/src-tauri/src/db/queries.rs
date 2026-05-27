@@ -3135,6 +3135,8 @@ pub struct WhisperHistoryRow {
     pub gpu_peak_percent: f64,
     pub vram_peak_mb: i64,
     pub postprocessed_text: Option<String>,
+    pub provider: String,
+    pub provider_model: Option<String>,
 }
 
 pub fn whisper_insert_history(
@@ -3150,11 +3152,58 @@ pub fn whisper_insert_history(
     gpu_peak_percent: f64,
     vram_peak_mb: i64,
 ) -> Result<i64> {
+    whisper_insert_history_with_provider(
+        conn,
+        text,
+        text_raw,
+        model_name,
+        "local",
+        Some(model_name),
+        duration_ms,
+        transcribe_ms,
+        language,
+        injected_to,
+        cpu_peak_percent,
+        gpu_peak_percent,
+        vram_peak_mb,
+    )
+}
+
+pub fn whisper_insert_history_with_provider(
+    conn: &Connection,
+    text: &str,
+    text_raw: Option<&str>,
+    model_name: &str,
+    provider: &str,
+    provider_model: Option<&str>,
+    duration_ms: i64,
+    transcribe_ms: i64,
+    language: Option<&str>,
+    injected_to: Option<&str>,
+    cpu_peak_percent: f64,
+    gpu_peak_percent: f64,
+    vram_peak_mb: i64,
+) -> Result<i64> {
     let now = chrono::Utc::now().timestamp();
     conn.execute(
-        "INSERT INTO whisper_history (text, text_raw, model_name, duration_ms, transcribe_ms, language, injected_to, created_at, cpu_peak_percent, gpu_peak_percent, vram_peak_mb)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-        params![text, text_raw, model_name, duration_ms, transcribe_ms, language, injected_to, now, cpu_peak_percent, gpu_peak_percent, vram_peak_mb],
+        "INSERT INTO whisper_history
+            (text, text_raw, model_name, provider, provider_model, duration_ms, transcribe_ms, language, injected_to, created_at, cpu_peak_percent, gpu_peak_percent, vram_peak_mb)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+        params![
+            text,
+            text_raw,
+            model_name,
+            provider,
+            provider_model,
+            duration_ms,
+            transcribe_ms,
+            language,
+            injected_to,
+            now,
+            cpu_peak_percent,
+            gpu_peak_percent,
+            vram_peak_mb,
+        ],
     )?;
     // Trim to last 200 (by id — autoincrement ensures insertion order)
     conn.execute(
@@ -3168,7 +3217,7 @@ pub fn whisper_insert_history(
 pub fn whisper_list_history(conn: &Connection, limit: i64) -> Result<Vec<WhisperHistoryRow>> {
     let mut stmt = conn.prepare(
         "SELECT id, text, text_raw, model_name, duration_ms, transcribe_ms, language, injected_to, created_at,
-                cpu_peak_percent, gpu_peak_percent, vram_peak_mb, postprocessed_text
+                cpu_peak_percent, gpu_peak_percent, vram_peak_mb, postprocessed_text, provider, provider_model
          FROM whisper_history ORDER BY created_at DESC, id DESC LIMIT ?1",
     )?;
     let rows = stmt.query_map(params![limit], |r| {
@@ -3186,6 +3235,8 @@ pub fn whisper_list_history(conn: &Connection, limit: i64) -> Result<Vec<Whisper
             gpu_peak_percent: r.get(10)?,
             vram_peak_mb: r.get(11)?,
             postprocessed_text: r.get(12)?,
+            provider: r.get(13)?,
+            provider_model: r.get(14)?,
         })
     })?;
     rows.collect::<Result<Vec<_>>>()
@@ -3215,6 +3266,10 @@ pub fn whisper_delete_history(conn: &Connection, id: Option<i64>) -> Result<()> 
 mod whisper_crud_tests {
     use super::*;
     use crate::db::init_test_db;
+
+    fn setup() -> Connection {
+        init_test_db()
+    }
 
     #[test]
     fn model_insert_then_list_roundtrip() {
@@ -3272,6 +3327,55 @@ mod whisper_crud_tests {
         assert_eq!(rows.len(), 200);
         // Newest first
         assert_eq!(rows[0].text, "t249");
+    }
+
+    #[test]
+    fn whisper_history_defaults_to_local_provider() {
+        let conn = setup();
+        whisper_insert_history(
+            &conn,
+            "hello",
+            None,
+            "ggml-small",
+            1000,
+            200,
+            Some("en"),
+            Some("paste"),
+            0.0,
+            0.0,
+            0,
+        )
+        .unwrap();
+
+        let rows = whisper_list_history(&conn, 10).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].provider, "local");
+        assert_eq!(rows[0].provider_model.as_deref(), Some("ggml-small"));
+    }
+
+    #[test]
+    fn whisper_history_can_store_deepgram_provider() {
+        let conn = setup();
+        whisper_insert_history_with_provider(
+            &conn,
+            "привет мир",
+            None,
+            "nova-3",
+            "deepgram",
+            Some("nova-3"),
+            2500,
+            0,
+            Some("ru"),
+            Some("paste"),
+            0.0,
+            0.0,
+            0,
+        )
+        .unwrap();
+
+        let rows = whisper_list_history(&conn, 10).unwrap();
+        assert_eq!(rows[0].provider, "deepgram");
+        assert_eq!(rows[0].provider_model.as_deref(), Some("nova-3"));
     }
 
     #[test]
