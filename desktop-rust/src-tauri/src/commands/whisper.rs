@@ -110,6 +110,48 @@ fn decide_hotkey_action(
     }
 }
 
+fn decide_active_stop_action(
+    local_state: crate::whisper::service::State,
+    live_state: LiveState,
+) -> HotkeyAction {
+    use crate::whisper::service::State as WState;
+
+    match live_state {
+        LiveState::Connecting | LiveState::Streaming | LiveState::Stopping | LiveState::Error => {
+            return HotkeyAction::LiveStop
+        }
+        LiveState::Idle => {}
+    }
+
+    match local_state {
+        WState::Warming | WState::Recording => HotkeyAction::LocalStop,
+        WState::Idle | WState::Ready | WState::Transcribing | WState::Unloading => {
+            HotkeyAction::Ignore
+        }
+    }
+}
+
+fn decide_active_cancel_action(
+    local_state: crate::whisper::service::State,
+    live_state: LiveState,
+) -> HotkeyAction {
+    use crate::whisper::service::State as WState;
+
+    match live_state {
+        LiveState::Connecting | LiveState::Streaming | LiveState::Stopping | LiveState::Error => {
+            return HotkeyAction::LiveStop
+        }
+        LiveState::Idle => {}
+    }
+
+    match local_state {
+        WState::Warming | WState::Recording => HotkeyAction::LocalStop,
+        WState::Idle | WState::Ready | WState::Transcribing | WState::Unloading => {
+            HotkeyAction::Ignore
+        }
+    }
+}
+
 // --- model catalog / installation --------------------------------------------
 
 #[tauri::command]
@@ -388,6 +430,32 @@ pub async fn whisper_cancel_recording(svc: State<'_, WhisperService>) -> Result<
 }
 
 #[tauri::command]
+pub async fn whisper_stop_active(app: AppHandle) -> Result<String, String> {
+    let db = app.state::<DbState>();
+    let local = app.state::<WhisperService>();
+    let live = app.state::<DeepgramLiveService>();
+    match decide_active_stop_action(local.current_state().await, live.current_state().await) {
+        HotkeyAction::LocalStop => stop_recording_impl(&app).await,
+        HotkeyAction::LiveStop => live.stop_and_persist(&db).await,
+        HotkeyAction::Ignore | HotkeyAction::LocalStart | HotkeyAction::LiveStart => {
+            Ok(String::new())
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn whisper_cancel_active(app: AppHandle) -> Result<(), String> {
+    let local = app.state::<WhisperService>();
+    let live = app.state::<DeepgramLiveService>();
+    match decide_active_cancel_action(local.current_state().await, live.current_state().await) {
+        HotkeyAction::LocalStop => local.cancel_recording().await,
+        HotkeyAction::LiveStop => live.cancel().await,
+        HotkeyAction::Ignore | HotkeyAction::LocalStart | HotkeyAction::LiveStart => {}
+    }
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn whisper_status(svc: State<'_, WhisperService>) -> Result<serde_json::Value, String> {
     Ok(svc.status().await)
 }
@@ -606,5 +674,41 @@ mod tests {
         assert!(should_accept_hotkey_press(1_000, Some(100)));
         assert!(!should_accept_hotkey_press(1_100, Some(1_000)));
         assert!(should_accept_hotkey_press(1_900, Some(1_100)));
+    }
+
+    #[test]
+    fn overlay_stop_targets_active_live_before_local_ready() {
+        assert_eq!(
+            decide_active_stop_action(LocalState::Ready, LiveState::Streaming),
+            HotkeyAction::LiveStop
+        );
+        assert_eq!(
+            decide_active_stop_action(LocalState::Recording, LiveState::Connecting),
+            HotkeyAction::LiveStop
+        );
+    }
+
+    #[test]
+    fn overlay_stop_falls_back_to_local_recording() {
+        assert_eq!(
+            decide_active_stop_action(LocalState::Recording, LiveState::Idle),
+            HotkeyAction::LocalStop
+        );
+        assert_eq!(
+            decide_active_stop_action(LocalState::Warming, LiveState::Idle),
+            HotkeyAction::LocalStop
+        );
+    }
+
+    #[test]
+    fn overlay_stop_ignores_inactive_states() {
+        assert_eq!(
+            decide_active_stop_action(LocalState::Ready, LiveState::Idle),
+            HotkeyAction::Ignore
+        );
+        assert_eq!(
+            decide_active_stop_action(LocalState::Transcribing, LiveState::Idle),
+            HotkeyAction::Ignore
+        );
     }
 }

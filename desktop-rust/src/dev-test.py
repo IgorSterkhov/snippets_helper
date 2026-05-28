@@ -350,6 +350,21 @@ async def run_tests():
         await wait_until(cdp, "!document.querySelector('.error-dialog-overlay')", timeout=3)
     await check('T2f Whisper live errors show diagnostics', t2f_whisper_live_error_dialog)
 
+    # ── T2g: Whisper overlay has clickable active controls ───
+    async def t2g_whisper_overlay_static_contract():
+        overlay_html_path = os.path.join(SRC_DIR, 'tabs', 'whisper', 'whisper-overlay.html')
+        overlay_js_path = os.path.join(SRC_DIR, 'tabs', 'whisper', 'whisper-overlay.js')
+        with open(overlay_html_path, 'r', encoding='utf-8') as f:
+            overlay_html = f.read()
+        with open(overlay_js_path, 'r', encoding='utf-8') as f:
+            overlay_js = f.read()
+        assert 'id="status"' in overlay_html, 'overlay should show a persistent status line'
+        assert 'id="ticker"' in overlay_html, 'overlay should show recent recognized words'
+        assert 'pointerdown' in overlay_js, 'overlay buttons should react to pointer input'
+        assert 'stopActive' in overlay_js, 'overlay stop should use provider-agnostic stop command'
+        assert 'cancelActive' in overlay_js, 'overlay close should use provider-agnostic cancel command'
+    await check('T2g Whisper overlay active controls', t2g_whisper_overlay_static_contract)
+
     # ── T3: switch to Exec tab ────────────────────────────────
     async def t3():
         await cdp.eval(

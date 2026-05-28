@@ -5,35 +5,49 @@
   <title>Whisper</title>
   <style>
     html, body { margin:0; padding:0; height:100%; background:transparent; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; color:#c9d1d9; overflow:hidden; user-select:none; }
-    .card { box-sizing:border-box; width:100%; height:100%; background:#161b22; border:1px solid #30363d; border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,.4); padding:12px; display:flex; flex-direction:column; gap:8px; }
+    .card { box-sizing:border-box; width:100%; height:100%; background:#161b22; border:1px solid #30363d; border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,.45); padding:10px 12px; display:flex; flex-direction:column; gap:7px; }
     /* Only the top row is a drag-region; the rest stays clickable.
        Previous version set `-webkit-app-region:drag` on <body>, which in
        Tauri 2 / WebView2 swallowed clicks on nested buttons on Windows. */
-    .row { display:flex; align-items:center; gap:8px; }
-    .row.drag-handle { cursor:move; }
-    .dot { width:8px; height:8px; border-radius:50%; background:#8b949e; }
+    .row { display:flex; align-items:center; gap:8px; min-width:0; }
+    .row.drag-handle { cursor:move; min-height:26px; }
+    .dot { width:8px; height:8px; border-radius:50%; background:#8b949e; flex:0 0 auto; }
     .dot.rec { background:#f85149; animation:pulse 1s infinite; }
     @keyframes pulse { 0% { opacity:1 } 50% { opacity:.4 } 100% { opacity:1 } }
-    .title { font-weight:600; font-size:13px; }
+    .heading { min-width:0; flex:1; display:flex; flex-direction:column; gap:1px; }
+    .title { font-weight:600; font-size:13px; line-height:16px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .status { font-size:11px; line-height:13px; color:#8b949e; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .timer { margin-left:auto; font-family:ui-monospace,monospace; font-size:12px; color:#8b949e; }
+    .body { min-height:26px; display:flex; flex-direction:column; justify-content:center; gap:4px; }
     .bars { display:flex; gap:2px; align-items:end; height:24px; }
     .bars span { width:3px; background:#3fb950; transition:height 80ms linear; height:10%; }
-    .btnrow { display:flex; gap:6px; -webkit-app-region:no-drag; }
-    button { background:#21262d; border:1px solid #30363d; color:#c9d1d9; padding:6px 10px; border-radius:4px; font-size:11px; cursor:pointer; flex:1; }
-    button.x { flex:0 0 auto; padding:6px 10px; }
+    .btnrow { display:flex; gap:6px; height:28px; -webkit-app-region:no-drag; }
+    button { background:#21262d; border:1px solid #30363d; color:#c9d1d9; padding:0 10px; border-radius:5px; font-size:12px; cursor:pointer; flex:1; min-width:0; height:28px; }
+    button:hover { background:#30363d; border-color:#58a6ff; }
+    button:active { background:#1f6feb; border-color:#58a6ff; color:#f0f6fc; }
+    button:disabled { opacity:.55; cursor:default; }
+    button.x { flex:0 0 40px; padding:0; font-size:16px; line-height:26px; }
     .progress { height:3px; background:#30363d; border-radius:2px; overflow:hidden; }
     .progress > span { display:block; height:100%; width:0%; background:#58a6ff; transition:width 200ms linear; }
     .sub { font-size:11px; color:#8b949e; margin-top:-2px; }
+    .ticker { height:18px; line-height:18px; overflow:hidden; border:1px solid #30363d; border-radius:4px; background:#0d1117; color:#c9d1d9; font-size:11px; }
+    .ticker span { display:block; padding:0 6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .ticker span.marquee { display:inline-block; min-width:100%; padding-left:100%; animation:ticker 11s linear infinite; overflow:visible; text-overflow:clip; }
+    @keyframes ticker { from { transform:translateX(0); } to { transform:translateX(-100%); } }
+    .error { display:none; min-height:13px; font-size:11px; line-height:13px; color:#ff7b72; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   </style>
 </head>
 <body>
   <div class="card">
     <div class="row drag-handle" data-tauri-drag-region>
       <span id="dot" class="dot" data-tauri-drag-region></span>
-      <span id="title" class="title" data-tauri-drag-region>Whisper</span>
+      <span class="heading" data-tauri-drag-region>
+        <span id="title" class="title" data-tauri-drag-region>Whisper</span>
+        <span id="status" class="status" data-tauri-drag-region>Idle</span>
+      </span>
       <span id="timer" class="timer" data-tauri-drag-region></span>
     </div>
-    <div id="body">
+    <div id="body" class="body">
       <div id="bars" class="bars" style="display:none">
         <span></span><span></span><span></span><span></span><span></span><span></span>
         <span></span><span></span><span></span><span></span><span></span><span></span>
@@ -43,9 +57,11 @@
       <div id="progress" class="progress" style="display:none"><span></span></div>
       <div id="sub" class="sub"></div>
     </div>
+    <div id="ticker" class="ticker"><span id="tickerText">Ready</span></div>
+    <div id="error" class="error"></div>
     <div class="btnrow">
       <button id="stop">Stop ⏎</button>
-      <button id="cancel" class="x">✕</button>
+      <button id="cancel" class="x" aria-label="Cancel">X</button>
     </div>
   </div>
   <script type="module" src="khapp://localhost/tabs/whisper/whisper-overlay.js"></script>

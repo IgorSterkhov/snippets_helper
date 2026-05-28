@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## v1.3.42 (2026-05-28)
+
+- **Deepgram punctuation:** live dictation requests now enable Deepgram
+  punctuation and smart formatting, so finalized text can include normal
+  sentence punctuation and capitalization when the model supports it.
+- **Clickable Whisper overlay:** the floating overlay now has a larger status
+  layout with Recording/Stopping detail, a recent-words ticker, and
+  provider-agnostic Stop/Cancel controls that target the active local or live
+  session.
+
 ## v1.3.41 (2026-05-28)
 
 - **Whisper global hotkey fixes:** `Ctrl+Alt+Space` now follows the

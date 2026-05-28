@@ -52,7 +52,7 @@ impl LiveState {
 
 pub fn build_deepgram_url(cfg: &DeepgramConfig) -> String {
     let mut url = format!(
-        "wss://api.deepgram.com/v1/listen?model={}&encoding=linear16&sample_rate=16000&channels=1&interim_results=true&endpointing={}",
+        "wss://api.deepgram.com/v1/listen?model={}&encoding=linear16&sample_rate=16000&channels=1&interim_results=true&punctuate=true&smart_format=true&endpointing={}",
         cfg.model,
         cfg.endpointing_ms,
     );
@@ -697,6 +697,8 @@ mod tests {
         assert!(url.contains("sample_rate=16000"));
         assert!(url.contains("channels=1"));
         assert!(url.contains("interim_results=true"));
+        assert!(url.contains("punctuate=true"));
+        assert!(url.contains("smart_format=true"));
         assert!(url.contains("endpointing=300"));
         assert!(url.contains("language=ru"));
     }

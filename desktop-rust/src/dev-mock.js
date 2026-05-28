@@ -1089,6 +1089,24 @@
       window.dispatchEvent(new CustomEvent('whisper:state-changed', { detail: { state: 'idle', model: null } }));
       return null;
     },
+    async whisper_stop_active() {
+      if (['connecting', 'streaming', 'stopping', 'error'].includes(whisperMockState.liveState)) {
+        return handlers.whisper_live_stop();
+      }
+      if (['warming', 'recording'].includes(whisperMockState.currentState)) {
+        return handlers.whisper_stop_recording();
+      }
+      return '';
+    },
+    whisper_cancel_active() {
+      if (['connecting', 'streaming', 'stopping', 'error'].includes(whisperMockState.liveState)) {
+        return handlers.whisper_live_cancel();
+      }
+      if (['warming', 'recording'].includes(whisperMockState.currentState)) {
+        return handlers.whisper_cancel_recording();
+      }
+      return null;
+    },
     whisper_status() {
       const model = whisperMockState.installedModels.find(m => m.is_default)?.name || null;
       return { state: whisperMockState.currentState, model };

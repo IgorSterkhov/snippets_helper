@@ -288,6 +288,8 @@ pub fn run() {
             commands::whisper::whisper_start_recording,
             commands::whisper::whisper_stop_recording,
             commands::whisper::whisper_cancel_recording,
+            commands::whisper::whisper_stop_active,
+            commands::whisper::whisper_cancel_active,
             commands::whisper::whisper_status,
             commands::whisper::whisper_live_start,
             commands::whisper::whisper_live_stop,

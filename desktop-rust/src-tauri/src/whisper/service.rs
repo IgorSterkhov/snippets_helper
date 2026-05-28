@@ -428,8 +428,8 @@ pub(crate) fn position_overlay(app: &AppHandle, corner: &str) {
     };
     let size = mon.size();
     let scale = mon.scale_factor();
-    let w_w = (260.0 * scale) as i32;
-    let w_h = (90.0 * scale) as i32;
+    let w_w = (340.0 * scale) as i32;
+    let w_h = (166.0 * scale) as i32;
     let margin = (16.0 * scale) as i32;
     let (x, y) = match corner {
         "bottom-left" => (margin, (size.height as i32) - w_h - margin),
