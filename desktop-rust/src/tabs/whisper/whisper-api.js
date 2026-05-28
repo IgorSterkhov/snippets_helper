@@ -14,6 +14,7 @@ export const whisperApi = {
   startRecording: () => call('whisper_start_recording'),
   stopRecording: () => call('whisper_stop_recording'),
   cancelRecording: () => call('whisper_cancel_recording'),
+  status: () => call('whisper_status'),
   startLive: () => call('whisper_live_start'),
   stopLive: () => call('whisper_live_stop'),
   cancelLive: () => call('whisper_live_cancel'),

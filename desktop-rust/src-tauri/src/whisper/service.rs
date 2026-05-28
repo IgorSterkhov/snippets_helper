@@ -101,6 +101,14 @@ impl WhisperService {
         self.inner.lock().await.state
     }
 
+    pub async fn status(&self) -> serde_json::Value {
+        let g = self.inner.lock().await;
+        serde_json::json!({
+            "state": g.state.as_str(),
+            "model": g.model_name.clone(),
+        })
+    }
+
     /// Called by `whisper_start_recording` command.
     /// Starts cpal recorder immediately, lazy-starts whisper-server.
     pub async fn start_recording(
@@ -121,7 +129,9 @@ impl WhisperService {
         ) {
             return Ok(());
         }
-        if let Some(t) = g.idle_timer.take() { t.abort(); }
+        if let Some(t) = g.idle_timer.take() {
+            t.abort();
+        }
 
         let rec = Recorder::start(self.app.clone(), device_name.as_deref())?;
         g.recorder = Some(SendRecorder(rec));
@@ -166,7 +176,9 @@ impl WhisperService {
                                     if matches!(g.state, State::Ready) {
                                         g.state = State::Unloading;
                                         emit_state(&app_c, g.state, None);
-                                        if let Some(srv) = g.server.take() { srv.shutdown(); }
+                                        if let Some(srv) = g.server.take() {
+                                            srv.shutdown();
+                                        }
                                         g.state = State::Idle;
                                         g.model_path = None;
                                         g.model_name = None;
@@ -174,7 +186,9 @@ impl WhisperService {
                                         hide_overlay(&app_c);
                                     }
                                 });
-                                if let Some(old) = g.idle_timer.replace(handle) { old.abort(); }
+                                if let Some(old) = g.idle_timer.replace(handle) {
+                                    old.abort();
+                                }
                             } else if g.pending_stop {
                                 g.pending_stop = false;
                                 g.state = State::Transcribing;
@@ -185,10 +199,13 @@ impl WhisperService {
                             }
                         }
                         Err(e) => {
-                            let _ = app.emit(events::EVT_ERROR, events::ErrorPayload {
-                                code: "server_spawn_failed".into(),
-                                message: e,
-                            });
+                            let _ = app.emit(
+                                events::EVT_ERROR,
+                                events::ErrorPayload {
+                                    code: "server_spawn_failed".into(),
+                                    message: e,
+                                },
+                            );
                             g.state = State::Idle;
                             g.model_path = None;
                             g.model_name = None;
@@ -216,7 +233,11 @@ impl WhisperService {
         // Extract recorder data in a sync block before any await — Recorder is !Send.
         let (duration_ms, wav, model_name) = {
             let mut g = self.inner.lock().await;
-            let rec = g.recorder.take().ok_or_else(|| "not recording".to_string())?.0;
+            let rec = g
+                .recorder
+                .take()
+                .ok_or_else(|| "not recording".to_string())?
+                .0;
             let name = g.model_name.clone().unwrap_or_default();
             if matches!(g.state, State::Warming) {
                 g.pending_stop = true;
@@ -277,7 +298,9 @@ impl WhisperService {
                 if matches!(g.state, State::Ready) {
                     g.state = State::Unloading;
                     emit_state(&app_c, g.state, None);
-                    if let Some(srv) = g.server.take() { srv.shutdown(); }
+                    if let Some(srv) = g.server.take() {
+                        srv.shutdown();
+                    }
                     g.state = State::Idle;
                     g.model_path = None;
                     g.model_name = None;
@@ -285,7 +308,9 @@ impl WhisperService {
                     hide_overlay(&app_c);
                 }
             });
-            if let Some(old) = g.idle_timer.replace(handle) { old.abort(); }
+            if let Some(old) = g.idle_timer.replace(handle) {
+                old.abort();
+            }
         }
 
         let app_c = self.app.clone();
@@ -307,10 +332,14 @@ impl WhisperService {
 
     pub async fn unload_now(&self) {
         let mut g = self.inner.lock().await;
-        if let Some(t) = g.idle_timer.take() { t.abort(); }
+        if let Some(t) = g.idle_timer.take() {
+            t.abort();
+        }
         g.state = State::Unloading;
         emit_state(&self.app, g.state, None);
-        if let Some(srv) = g.server.take() { srv.shutdown(); }
+        if let Some(srv) = g.server.take() {
+            srv.shutdown();
+        }
         g.state = State::Idle;
         g.model_path = None;
         g.model_name = None;
@@ -342,7 +371,9 @@ impl WhisperService {
                     if matches!(g.state, State::Ready) {
                         g.state = State::Unloading;
                         emit_state(&app_c, g.state, None);
-                        if let Some(srv) = g.server.take() { srv.shutdown(); }
+                        if let Some(srv) = g.server.take() {
+                            srv.shutdown();
+                        }
                         g.state = State::Idle;
                         g.model_path = None;
                         g.model_name = None;
@@ -350,7 +381,9 @@ impl WhisperService {
                         hide_overlay(&app_c);
                     }
                 });
-                if let Some(old) = g.idle_timer.replace(handle) { old.abort(); }
+                if let Some(old) = g.idle_timer.replace(handle) {
+                    old.abort();
+                }
             }
             _ => {
                 // idle, ready, transcribing, unloading — nothing sensible to cancel
@@ -361,14 +394,18 @@ impl WhisperService {
 }
 
 fn emit_state(app: &AppHandle, state: State, model: Option<String>) {
-    let _ = app.emit(events::EVT_STATE_CHANGED, StatePayload {
-        state: state.as_str().to_string(),
-        model,
-    });
+    let _ = app.emit(
+        events::EVT_STATE_CHANGED,
+        StatePayload {
+            state: state.as_str().to_string(),
+            model,
+        },
+    );
 }
 
 fn app_data_dir(app: &AppHandle) -> PathBuf {
-    app.path().app_data_dir()
+    app.path()
+        .app_data_dir()
         .unwrap_or_else(|_| std::path::PathBuf::from("."))
 }
 
@@ -376,30 +413,37 @@ fn overlay_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
     app.get_webview_window("whisper-overlay")
 }
 
-fn show_overlay(app: &AppHandle) {
+pub(crate) fn show_overlay(app: &AppHandle) {
     if let Some(w) = overlay_window(app) {
         let _ = w.show();
     }
 }
 
-fn position_overlay(app: &AppHandle, corner: &str) {
-    let Some(w) = overlay_window(app) else { return; };
-    let Ok(Some(mon)) = w.current_monitor() else { return; };
+pub(crate) fn position_overlay(app: &AppHandle, corner: &str) {
+    let Some(w) = overlay_window(app) else {
+        return;
+    };
+    let Ok(Some(mon)) = w.current_monitor() else {
+        return;
+    };
     let size = mon.size();
     let scale = mon.scale_factor();
     let w_w = (260.0 * scale) as i32;
     let w_h = (90.0 * scale) as i32;
     let margin = (16.0 * scale) as i32;
     let (x, y) = match corner {
-        "bottom-left"  => (margin, (size.height as i32) - w_h - margin),
-        "top-right"    => ((size.width as i32) - w_w - margin, margin),
-        "top-left"     => (margin, margin),
-        _              => ((size.width as i32) - w_w - margin, (size.height as i32) - w_h - margin), // bottom-right (default)
+        "bottom-left" => (margin, (size.height as i32) - w_h - margin),
+        "top-right" => ((size.width as i32) - w_w - margin, margin),
+        "top-left" => (margin, margin),
+        _ => (
+            (size.width as i32) - w_w - margin,
+            (size.height as i32) - w_h - margin,
+        ), // bottom-right (default)
     };
     let _ = w.set_position(tauri::PhysicalPosition { x, y });
 }
 
-fn hide_overlay(app: &AppHandle) {
+pub(crate) fn hide_overlay(app: &AppHandle) {
     if let Some(w) = overlay_window(app) {
         let _ = w.hide();
     }

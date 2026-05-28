@@ -138,15 +138,18 @@ impl DeepgramLiveService {
             };
             session_id
         };
+        crate::whisper::service::position_overlay(&self.app, "bottom-right");
+        crate::whisper::service::show_overlay(&self.app);
         emit_live_state(&self.app, LiveState::Connecting, Some(cfg.model.clone()));
 
-        let recorder_result: Result<SendLiveRecorder, String> = LiveRecorder::start_with_level_event(
-            self.app.clone(),
-            cfg.mic_device.as_deref(),
-            audio_tx,
-            EVT_LIVE_LEVEL,
-        )
-        .map(SendLiveRecorder);
+        let recorder_result: Result<SendLiveRecorder, String> =
+            LiveRecorder::start_with_level_event(
+                self.app.clone(),
+                cfg.mic_device.as_deref(),
+                audio_tx,
+                EVT_LIVE_LEVEL,
+            )
+            .map(SendLiveRecorder);
         let recorder = match recorder_result {
             Ok(recorder) => recorder,
             Err(e) => {
@@ -157,6 +160,7 @@ impl DeepgramLiveService {
                 if emit_error {
                     emit_live_state(&self.app, LiveState::Error, model);
                 }
+                crate::whisper::service::hide_overlay(&self.app);
                 return Err(e);
             }
         };
@@ -174,7 +178,8 @@ impl DeepgramLiveService {
         let task_cfg = cfg.clone();
         let handle = tokio::spawn(async move {
             if let Err(e) =
-                run_deepgram_stream(app.clone(), inner.clone(), task_cfg, session_id, audio_rx).await
+                run_deepgram_stream(app.clone(), inner.clone(), task_cfg, session_id, audio_rx)
+                    .await
             {
                 let _ = app.emit(EVT_LIVE_ERROR, serde_json::json!({ "message": e }));
                 let mut g = inner.lock().await;
@@ -280,6 +285,7 @@ impl DeepgramLiveService {
             }
         }
         emit_live_state(&self.app, LiveState::Idle, None);
+        crate::whisper::service::hide_overlay(&self.app);
         Ok(text)
     }
 
@@ -299,6 +305,7 @@ impl DeepgramLiveService {
             task.abort();
         }
         emit_live_state(&self.app, LiveState::Idle, None);
+        crate::whisper::service::hide_overlay(&self.app);
     }
 }
 

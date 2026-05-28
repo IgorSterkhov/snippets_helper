@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## v1.3.41 (2026-05-28)
+
+- **Whisper global hotkey fixes:** `Ctrl+Alt+Space` now follows the
+  `Live dictate` setting, so it starts/stops Deepgram live dictation when
+  live mode is enabled instead of always falling back to local Whisper.
+- **Hotkey repeat guard:** duplicate global shortcut `Pressed` events within a
+  short interval are ignored, preventing a start immediately followed by an
+  unintended stop with an almost-empty recording.
+- **Overlay state recovery:** the floating Whisper overlay now bootstraps its
+  current local/live state and Deepgram live sessions show/hide the overlay,
+  so Stop/Cancel target the active recording mode even when launched by the
+  global hotkey.
+
 ## v1.3.40 (2026-05-28)
 
 - **Completed Whisper hotfix release:** includes the Windows live dictation

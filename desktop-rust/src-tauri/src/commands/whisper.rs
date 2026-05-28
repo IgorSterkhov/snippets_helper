@@ -1,20 +1,30 @@
 //! Tauri commands for the whisper voice-input feature.
 
-use tauri::{AppHandle, Emitter, Manager, State};
+use crate::db::queries::{self, WhisperHistoryRow, WhisperModelRow};
 use crate::db::DbState;
-use crate::db::queries::{
-    self,
-    WhisperHistoryRow, WhisperModelRow,
-};
+use crate::whisper::bin_manager;
 use crate::whisper::catalog::{self, ModelMeta};
-use crate::whisper::deepgram::{DeepgramConfig, DeepgramLiveService};
+use crate::whisper::deepgram::{DeepgramConfig, DeepgramLiveService, LiveState};
 use crate::whisper::events;
 use crate::whisper::gpu_detect::{self, HardwareInfo};
-use crate::whisper::bin_manager;
 use crate::whisper::inject::{self, InjectMethod};
 use crate::whisper::models;
 use crate::whisper::postprocess::{self, LlmConfig};
 use crate::whisper::service::WhisperService;
+use std::sync::atomic::{AtomicU64, Ordering};
+use tauri::{AppHandle, Emitter, Manager, State};
+
+const HOTKEY_DEBOUNCE_MS: u64 = 700;
+static LAST_WHISPER_HOTKEY_MS: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HotkeyAction {
+    LocalStart,
+    LocalStop,
+    LiveStart,
+    LiveStop,
+    Ignore,
+}
 
 // --- helpers -----------------------------------------------------------------
 
@@ -28,7 +38,76 @@ fn computer_id() -> String {
 }
 
 fn app_data(app: &AppHandle) -> std::path::PathBuf {
-    app.path().app_data_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+    app.path()
+        .app_data_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+}
+
+fn now_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
+fn should_accept_hotkey_press(now_ms: u64, last_ms: Option<u64>) -> bool {
+    match last_ms {
+        Some(last) => now_ms.saturating_sub(last) >= HOTKEY_DEBOUNCE_MS,
+        None => true,
+    }
+}
+
+fn claim_hotkey_press() -> bool {
+    let now = now_millis();
+    loop {
+        let last = LAST_WHISPER_HOTKEY_MS.load(Ordering::Relaxed);
+        let last_opt = if last == 0 { None } else { Some(last) };
+        if !should_accept_hotkey_press(now, last_opt) {
+            return false;
+        }
+        if LAST_WHISPER_HOTKEY_MS
+            .compare_exchange(last, now, Ordering::SeqCst, Ordering::Relaxed)
+            .is_ok()
+        {
+            return true;
+        }
+    }
+}
+
+fn live_dictate_enabled(db: &DbState) -> bool {
+    let conn = db.lock_recover();
+    let cid = computer_id();
+    queries::get_setting(&conn, &cid, "whisper.live_dictate")
+        .ok()
+        .flatten()
+        .map(|s| s == "true")
+        .unwrap_or(false)
+}
+
+fn decide_hotkey_action(
+    live_enabled: bool,
+    local_state: crate::whisper::service::State,
+    live_state: LiveState,
+) -> HotkeyAction {
+    use crate::whisper::service::State as WState;
+
+    match local_state {
+        WState::Warming | WState::Recording => return HotkeyAction::LocalStop,
+        WState::Transcribing | WState::Unloading => return HotkeyAction::Ignore,
+        WState::Idle | WState::Ready => {}
+    }
+
+    match live_state {
+        LiveState::Connecting | LiveState::Streaming => return HotkeyAction::LiveStop,
+        LiveState::Stopping => return HotkeyAction::Ignore,
+        LiveState::Idle | LiveState::Error => {}
+    }
+
+    if live_enabled {
+        HotkeyAction::LiveStart
+    } else {
+        HotkeyAction::LocalStart
+    }
 }
 
 // --- model catalog / installation --------------------------------------------
@@ -61,12 +140,14 @@ pub async fn whisper_install_model(
         &path.to_string_lossy(),
         meta.size_bytes as i64,
         meta.sha256,
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
     let all = queries::whisper_list_models(&conn).map_err(|e| e.to_string())?;
     if all.len() == 1 {
         queries::whisper_set_default_model(&mut conn, meta.name).map_err(|e| e.to_string())?;
     }
-    queries::whisper_list_models(&conn).map_err(|e| e.to_string())?
+    queries::whisper_list_models(&conn)
+        .map_err(|e| e.to_string())?
         .into_iter()
         .find(|m| m.name == meta.name)
         .ok_or_else(|| "install succeeded but model not found".into())
@@ -101,16 +182,25 @@ pub async fn start_recording_impl(app: &AppHandle) -> Result<(), String> {
     let svc = app.state::<WhisperService>();
     let (model_path, model_name, device_name, idle_timeout_sec) = {
         let conn = db.lock_recover();
-        let def = queries::whisper_get_default_model(&conn).map_err(|e| e.to_string())?
+        let def = queries::whisper_get_default_model(&conn)
+            .map_err(|e| e.to_string())?
             .ok_or_else(|| "no default model installed".to_string())?;
         let cid = computer_id();
-        let mic = queries::get_setting(&conn, &cid, "whisper.mic_device").ok().flatten().filter(|s| !s.is_empty());
-        let idle = queries::get_setting(&conn, &cid, "whisper.idle_timeout_sec").ok().flatten()
-            .and_then(|s| s.parse::<u64>().ok()).unwrap_or(300);
+        let mic = queries::get_setting(&conn, &cid, "whisper.mic_device")
+            .ok()
+            .flatten()
+            .filter(|s| !s.is_empty());
+        let idle = queries::get_setting(&conn, &cid, "whisper.idle_timeout_sec")
+            .ok()
+            .flatten()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(300);
         (std::path::PathBuf::from(def.file_path), def.name, mic, idle)
     };
-    svc.set_idle_timeout(std::time::Duration::from_secs(idle_timeout_sec)).await;
-    svc.start_recording(model_path, model_name, device_name).await
+    svc.set_idle_timeout(std::time::Duration::from_secs(idle_timeout_sec))
+        .await;
+    svc.start_recording(model_path, model_name, device_name)
+        .await
 }
 
 #[tauri::command]
@@ -127,23 +217,52 @@ pub async fn stop_recording_impl(app: &AppHandle) -> Result<String, String> {
     let (inject_method_str, restore_delay_ms, rules_on, llm_cfg_opt, lang) = {
         let conn = db.lock_recover();
         let cid = computer_id();
-        let inj = queries::get_setting(&conn, &cid, "whisper.inject_method").ok().flatten().unwrap_or_else(|| "paste".into());
-        let delay = queries::get_setting(&conn, &cid, "whisper.clipboard_restore_delay_ms").ok().flatten()
-            .and_then(|s| s.parse::<u64>().ok()).unwrap_or(200);
-        let rules = queries::get_setting(&conn, &cid, "whisper.postprocess_rules").ok().flatten()
-            .map(|s| s == "true").unwrap_or(true);
-        let llm_enabled = queries::get_setting(&conn, &cid, "whisper.llm_enabled").ok().flatten()
-            .map(|s| s == "true").unwrap_or(false);
+        let inj = queries::get_setting(&conn, &cid, "whisper.inject_method")
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| "paste".into());
+        let delay = queries::get_setting(&conn, &cid, "whisper.clipboard_restore_delay_ms")
+            .ok()
+            .flatten()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(200);
+        let rules = queries::get_setting(&conn, &cid, "whisper.postprocess_rules")
+            .ok()
+            .flatten()
+            .map(|s| s == "true")
+            .unwrap_or(true);
+        let llm_enabled = queries::get_setting(&conn, &cid, "whisper.llm_enabled")
+            .ok()
+            .flatten()
+            .map(|s| s == "true")
+            .unwrap_or(false);
         let llm_cfg = if llm_enabled {
             Some(LlmConfig {
-                endpoint: queries::get_setting(&conn, &cid, "whisper.llm_endpoint").ok().flatten().unwrap_or_default(),
-                api_key: queries::get_setting(&conn, &cid, "whisper.llm_api_key").ok().flatten().unwrap_or_default(),
-                model: queries::get_setting(&conn, &cid, "whisper.llm_model").ok().flatten().unwrap_or_else(|| "gpt-4o-mini".into()),
-                prompt: queries::get_setting(&conn, &cid, "whisper.llm_prompt").ok().flatten()
-                    .unwrap_or_else(|| "Clean up filler words; fix punctuation. Keep language.".into()),
+                endpoint: queries::get_setting(&conn, &cid, "whisper.llm_endpoint")
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default(),
+                api_key: queries::get_setting(&conn, &cid, "whisper.llm_api_key")
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default(),
+                model: queries::get_setting(&conn, &cid, "whisper.llm_model")
+                    .ok()
+                    .flatten()
+                    .unwrap_or_else(|| "gpt-4o-mini".into()),
+                prompt: queries::get_setting(&conn, &cid, "whisper.llm_prompt")
+                    .ok()
+                    .flatten()
+                    .unwrap_or_else(|| {
+                        "Clean up filler words; fix punctuation. Keep language.".into()
+                    }),
             })
-        } else { None };
-        let lang = queries::get_setting(&conn, &cid, "whisper.language").ok().flatten();
+        } else {
+            None
+        };
+        let lang = queries::get_setting(&conn, &cid, "whisper.language")
+            .ok()
+            .flatten();
         (inj, delay, rules, llm_cfg, lang)
     };
 
@@ -159,33 +278,47 @@ pub async fn stop_recording_impl(app: &AppHandle) -> Result<String, String> {
 
     // Postprocess
     let raw = result.text.clone();
-    let mut text = if rules_on { postprocess::apply_rules(&raw) } else { raw.clone() };
-    if let Some(cfg) = llm_cfg_opt { text = postprocess::apply_llm(&text, &cfg).await; }
+    let mut text = if rules_on {
+        postprocess::apply_rules(&raw)
+    } else {
+        raw.clone()
+    };
+    if let Some(cfg) = llm_cfg_opt {
+        text = postprocess::apply_llm(&text, &cfg).await;
+    }
 
     // Inject
     let method = InjectMethod::from_setting(&inject_method_str);
-    let injected = inject::inject(&text, method, restore_delay_ms).await
+    let injected = inject::inject(&text, method, restore_delay_ms)
+        .await
         .unwrap_or_else(|e| {
             eprintln!("[whisper inject] fallback: {e}");
             "copy"
         });
 
     // F4: emit real durations + metrics
-    let _ = app.emit(events::EVT_TRANSCRIBED, events::TranscribedPayload {
-        text: text.clone(),
-        duration_ms,
-        transcribe_ms,
-        model: model_name.clone(),
-        language: result.language.clone(),
-        cpu_peak_percent: cpu_peak,
-        gpu_peak_percent: gpu_peak,
-        vram_peak_mb: vram_peak,
-    });
+    let _ = app.emit(
+        events::EVT_TRANSCRIBED,
+        events::TranscribedPayload {
+            text: text.clone(),
+            duration_ms,
+            transcribe_ms,
+            model: model_name.clone(),
+            language: result.language.clone(),
+            cpu_peak_percent: cpu_peak,
+            gpu_peak_percent: gpu_peak,
+            vram_peak_mb: vram_peak,
+        },
+    );
 
     // F4: persist real durations
     {
         let conn = db.lock_recover();
-        let text_raw_opt = if raw != text { Some(raw.as_str()) } else { None };
+        let text_raw_opt = if raw != text {
+            Some(raw.as_str())
+        } else {
+            None
+        };
         let _ = queries::whisper_insert_history(
             &conn,
             &text,
@@ -198,7 +331,8 @@ pub async fn stop_recording_impl(app: &AppHandle) -> Result<String, String> {
             cpu_peak,
             gpu_peak,
             vram_peak,
-        ).map_err(|e| e.to_string());
+        )
+        .map_err(|e| e.to_string());
     }
 
     Ok(text)
@@ -209,23 +343,41 @@ pub async fn whisper_stop_recording(app: AppHandle) -> Result<String, String> {
     stop_recording_impl(&app).await
 }
 
-/// Toggle entry used by the global hotkey: start if idle/ready, stop if
-/// warming/recording. Errors are emitted as `whisper:error` events rather
-/// than returned (the hotkey fires asynchronously, nothing awaits it).
+/// Toggle entry used by the global hotkey. It mirrors the main-window Record
+/// button: active local/live sessions stop first; otherwise the persisted
+/// `whisper.live_dictate` setting chooses the provider to start.
 pub async fn hotkey_toggle(app: AppHandle) {
-    use crate::whisper::service::State as WState;
-    let svc = app.state::<WhisperService>();
-    let st = svc.current_state().await;
-    let res = match st {
-        WState::Idle | WState::Ready => start_recording_impl(&app).await.map(|_| ()),
-        WState::Warming | WState::Recording => stop_recording_impl(&app).await.map(|_| ()),
-        WState::Transcribing | WState::Unloading => Ok(()), // ignore
+    if !claim_hotkey_press() {
+        return;
+    }
+
+    let db = app.state::<DbState>();
+    let local = app.state::<WhisperService>();
+    let live = app.state::<DeepgramLiveService>();
+    let action = decide_hotkey_action(
+        live_dictate_enabled(&db),
+        local.current_state().await,
+        live.current_state().await,
+    );
+
+    let res = match action {
+        HotkeyAction::LocalStart => start_recording_impl(&app).await.map(|_| ()),
+        HotkeyAction::LocalStop => stop_recording_impl(&app).await.map(|_| ()),
+        HotkeyAction::LiveStart => match deepgram_config_from_settings(&db) {
+            Ok(cfg) => live.start(cfg).await,
+            Err(e) => Err(e),
+        },
+        HotkeyAction::LiveStop => live.stop_and_persist(&db).await.map(|_| ()),
+        HotkeyAction::Ignore => Ok(()),
     };
     if let Err(e) = res {
-        let _ = app.emit(events::EVT_ERROR, events::ErrorPayload {
-            code: "hotkey_toggle_failed".into(),
-            message: e,
-        });
+        let _ = app.emit(
+            events::EVT_ERROR,
+            events::ErrorPayload {
+                code: "hotkey_toggle_failed".into(),
+                message: e,
+            },
+        );
     }
 }
 
@@ -235,22 +387,46 @@ pub async fn whisper_cancel_recording(svc: State<'_, WhisperService>) -> Result<
     Ok(())
 }
 
+#[tauri::command]
+pub async fn whisper_status(svc: State<'_, WhisperService>) -> Result<serde_json::Value, String> {
+    Ok(svc.status().await)
+}
+
 fn deepgram_config_from_settings(db: &DbState) -> Result<DeepgramConfig, String> {
     let conn = db.lock_recover();
     let cid = computer_id();
-    let api_key = queries::get_setting(&conn, &cid, "whisper.deepgram_api_key").ok().flatten().unwrap_or_default();
+    let api_key = queries::get_setting(&conn, &cid, "whisper.deepgram_api_key")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
     if api_key.trim().is_empty() {
-        return Err("Deepgram API key is missing. Open Whisper Settings and add a local Deepgram key.".into());
+        return Err(
+            "Deepgram API key is missing. Open Whisper Settings and add a local Deepgram key."
+                .into(),
+        );
     }
-    let model = queries::get_setting(&conn, &cid, "whisper.deepgram_model").ok().flatten()
-        .filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "nova-3".into());
-    let endpointing_ms = queries::get_setting(&conn, &cid, "whisper.deepgram_endpointing_ms").ok().flatten()
-        .and_then(|s| s.parse::<u64>().ok()).unwrap_or(300);
-    let restore = queries::get_setting(&conn, &cid, "whisper.clipboard_restore_delay_ms").ok().flatten()
-        .and_then(|s| s.parse::<u64>().ok()).unwrap_or(200);
-    let mic_device = queries::get_setting(&conn, &cid, "whisper.mic_device").ok().flatten()
+    let model = queries::get_setting(&conn, &cid, "whisper.deepgram_model")
+        .ok()
+        .flatten()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "nova-3".into());
+    let endpointing_ms = queries::get_setting(&conn, &cid, "whisper.deepgram_endpointing_ms")
+        .ok()
+        .flatten()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(300);
+    let restore = queries::get_setting(&conn, &cid, "whisper.clipboard_restore_delay_ms")
+        .ok()
+        .flatten()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(200);
+    let mic_device = queries::get_setting(&conn, &cid, "whisper.mic_device")
+        .ok()
+        .flatten()
         .filter(|s| !s.is_empty());
-    let language = queries::get_setting(&conn, &cid, "whisper.language").ok().flatten()
+    let language = queries::get_setting(&conn, &cid, "whisper.language")
+        .ok()
+        .flatten()
         .filter(|s| !s.is_empty());
     Ok(DeepgramConfig {
         api_key,
@@ -286,7 +462,9 @@ pub async fn whisper_live_cancel(svc: State<'_, DeepgramLiveService>) -> Result<
 }
 
 #[tauri::command]
-pub async fn whisper_live_status(svc: State<'_, DeepgramLiveService>) -> Result<serde_json::Value, String> {
+pub async fn whisper_live_status(
+    svc: State<'_, DeepgramLiveService>,
+) -> Result<serde_json::Value, String> {
     Ok(svc.status().await)
 }
 
@@ -305,8 +483,11 @@ pub async fn whisper_inject_text(
     let delay = {
         let conn = db.lock_recover();
         let cid = computer_id();
-        queries::get_setting(&conn, &cid, "whisper.clipboard_restore_delay_ms").ok().flatten()
-            .and_then(|s| s.parse::<u64>().ok()).unwrap_or(200)
+        queries::get_setting(&conn, &cid, "whisper.clipboard_restore_delay_ms")
+            .ok()
+            .flatten()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(200)
     };
     inject::inject(&text, InjectMethod::from_setting(&method), delay).await
 }
@@ -314,7 +495,10 @@ pub async fn whisper_inject_text(
 // --- history -----------------------------------------------------------------
 
 #[tauri::command]
-pub fn whisper_get_history(db: State<DbState>, limit: Option<i64>) -> Result<Vec<WhisperHistoryRow>, String> {
+pub fn whisper_get_history(
+    db: State<DbState>,
+    limit: Option<i64>,
+) -> Result<Vec<WhisperHistoryRow>, String> {
     let conn = db.lock_recover();
     queries::whisper_list_history(&conn, limit.unwrap_or(200)).map_err(|e| e.to_string())
 }
@@ -326,11 +510,7 @@ pub fn whisper_delete_history(db: State<DbState>, id: Option<i64>) -> Result<(),
 }
 
 #[tauri::command]
-pub fn whisper_set_postprocessed(
-    db: State<DbState>,
-    id: i64,
-    text: String,
-) -> Result<(), String> {
+pub fn whisper_set_postprocessed(db: State<DbState>, id: i64, text: String) -> Result<(), String> {
     let conn = db.lock_recover();
     queries::whisper_set_postprocessed(&conn, id, &text).map_err(|e| e.to_string())
 }
@@ -361,12 +541,17 @@ pub fn whisper_detect_whisper_bin(app: AppHandle) -> WhisperBinInfo {
     let data = app_data(&app);
     if let Some(p) = bin_manager::downloaded_gpu_bin(&data) {
         return WhisperBinInfo {
-            variant: if p.to_string_lossy().contains("cuda") { "cuda" }
-                else if p.to_string_lossy().contains("vulkan") { "vulkan" }
-                else { "metal" },
+            variant: if p.to_string_lossy().contains("cuda") {
+                "cuda"
+            } else if p.to_string_lossy().contains("vulkan") {
+                "vulkan"
+            } else {
+                "metal"
+            },
             installed: true,
             path: Some(p.to_string_lossy().to_string()),
-            dl_url: None, dl_size_bytes: None,
+            dl_url: None,
+            dl_size_bytes: None,
         };
     }
     WhisperBinInfo {
@@ -375,5 +560,51 @@ pub fn whisper_detect_whisper_bin(app: AppHandle) -> WhisperBinInfo {
         path: None,
         dl_url: None,
         dl_size_bytes: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::whisper::deepgram::LiveState;
+    use crate::whisper::service::State as LocalState;
+
+    #[test]
+    fn hotkey_uses_live_service_when_live_dictate_is_enabled() {
+        assert_eq!(
+            decide_hotkey_action(true, LocalState::Idle, LiveState::Idle),
+            HotkeyAction::LiveStart
+        );
+        assert_eq!(
+            decide_hotkey_action(true, LocalState::Ready, LiveState::Streaming),
+            HotkeyAction::LiveStop
+        );
+    }
+
+    #[test]
+    fn hotkey_stops_active_local_recording_before_starting_live() {
+        assert_eq!(
+            decide_hotkey_action(true, LocalState::Recording, LiveState::Idle),
+            HotkeyAction::LocalStop
+        );
+        assert_eq!(
+            decide_hotkey_action(true, LocalState::Warming, LiveState::Idle),
+            HotkeyAction::LocalStop
+        );
+    }
+
+    #[test]
+    fn hotkey_stops_active_live_stream_even_when_live_setting_is_off() {
+        assert_eq!(
+            decide_hotkey_action(false, LocalState::Idle, LiveState::Streaming),
+            HotkeyAction::LiveStop
+        );
+    }
+
+    #[test]
+    fn hotkey_debounce_rejects_auto_repeat_pressed_events() {
+        assert!(should_accept_hotkey_press(1_000, Some(100)));
+        assert!(!should_accept_hotkey_press(1_100, Some(1_000)));
+        assert!(should_accept_hotkey_press(1_900, Some(1_100)));
     }
 }

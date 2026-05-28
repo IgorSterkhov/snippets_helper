@@ -1089,6 +1089,10 @@
       window.dispatchEvent(new CustomEvent('whisper:state-changed', { detail: { state: 'idle', model: null } }));
       return null;
     },
+    whisper_status() {
+      const model = whisperMockState.installedModels.find(m => m.is_default)?.name || null;
+      return { state: whisperMockState.currentState, model };
+    },
     whisper_live_start() {
       const settings = storeGet('settings', {});
       const apiKey = settings['whisper.deepgram_api_key'] || '';

@@ -13,9 +13,11 @@ const cancelBtn = document.getElementById('cancel');
 let startedAt = 0;
 let timerIv = null;
 let activeMode = 'local';
+let currentLiveState = 'idle';
 let liveCommittedText = '';
 
 function setMode(state) {
+  activeMode = 'local';
   bars.style.display = 'none';
   progress.style.display = 'none';
   sub.textContent = '';
@@ -46,6 +48,7 @@ function setMode(state) {
 }
 
 function setLiveMode(state) {
+  currentLiveState = state || 'idle';
   activeMode = state === 'idle' ? 'local' : 'live';
   bars.style.display = 'none';
   progress.style.display = 'none';
@@ -89,7 +92,10 @@ function updateTimer() {
 const barArr = Array.from(bars.querySelectorAll('span'));
 let barIdx = 0;
 async function initEvents() {
-  await onWhisperEvent('stateChanged', (p) => setMode(p.state));
+  await onWhisperEvent('stateChanged', (p) => {
+    if (currentLiveState !== 'idle') return;
+    setMode(p.state);
+  });
   await onWhisperEvent('level', (p) => {
     const h = Math.max(10, Math.min(100, p.rms * 140));
     barArr[barIdx % barArr.length].style.height = h + '%';
@@ -127,6 +133,27 @@ async function initEvents() {
   });
 }
 
+async function bootstrapState() {
+  try {
+    const live = await whisperApi.liveStatus();
+    if (live && live.state && live.state !== 'idle') {
+      liveCommittedText = live.committed_text || '';
+      setLiveMode(live.state);
+      return;
+    }
+  } catch (e) {
+    console.warn('[whisper-overlay] live status bootstrap failed', e);
+  }
+
+  try {
+    const local = await whisperApi.status();
+    setMode((local && local.state) || 'idle');
+  } catch (e) {
+    console.warn('[whisper-overlay] local status bootstrap failed', e);
+    setMode('idle');
+  }
+}
+
 stopBtn.onclick = async () => {
   try {
     if (activeMode === 'live') await whisperApi.stopLive();
@@ -140,5 +167,9 @@ cancelBtn.onclick = async () => {
   } catch (e) { console.error(e); }
 };
 
-initEvents();
-setMode('idle');
+initEvents()
+  .then(bootstrapState)
+  .catch((e) => {
+    console.error('[whisper-overlay] init failed', e);
+    setMode('idle');
+  });
