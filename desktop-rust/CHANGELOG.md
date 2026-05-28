@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## v1.3.44 (2026-05-28)
+
+- **Whisper overlay hit-test fix:** the floating overlay now stays explicitly
+  focusable/clickable without stealing focus from the dictation target, accepts
+  the first inactive-window click where supported, and disables click-through
+  before it is shown.
+- **Auto-hide taskbar clearance:** bottom-corner overlay placement now uses an
+  extra safe margin so the Stop/Cancel row is not covered by auto-hide taskbars.
+
 ## v1.3.43 (2026-05-28)
 
 - **Whisper overlay bridge fix:** the floating overlay now waits for Tauri IPC

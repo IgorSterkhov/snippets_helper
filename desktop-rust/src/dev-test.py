@@ -387,6 +387,26 @@ async def run_tests():
         assert 'Overlay JS ready' in overlay_js, 'Overlay should visibly prove that its JS initialized'
     await check('T2h Whisper overlay bridge contract', t2h_whisper_overlay_bridge_contract)
 
+    # ── T2i: Whisper overlay remains hit-testable when inactive ─
+    async def t2i_whisper_overlay_window_contract():
+        config_path = os.path.join(SRC_DIR, '..', 'src-tauri', 'tauri.conf.json')
+        service_rs_path = os.path.join(SRC_DIR, '..', 'src-tauri', 'src', 'whisper', 'service.rs')
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+        overlay = next(
+            (w for w in config.get('app', {}).get('windows', []) if w.get('label') == 'whisper-overlay'),
+            None,
+        )
+        assert overlay is not None, 'whisper-overlay window config should exist'
+        assert overlay.get('focus') is False, 'overlay should not steal focus from the dictation target on show'
+        assert overlay.get('focusable') is True, 'overlay must remain focusable/clickable when the user clicks controls'
+        assert overlay.get('acceptFirstMouse') is True, 'inactive overlay should pass the first mouse click through to controls'
+        with open(service_rs_path, 'r', encoding='utf-8') as f:
+            service_rs = f.read()
+        assert 'set_ignore_cursor_events(false)' in service_rs, 'show_overlay should explicitly keep overlay hit-testable'
+        assert 'OVERLAY_BOTTOM_SAFE_MARGIN_LOGICAL' in service_rs, 'bottom overlay placement should avoid auto-hide taskbars'
+    await check('T2i Whisper overlay hit-test contract', t2i_whisper_overlay_window_contract)
+
     # ── T3: switch to Exec tab ────────────────────────────────
     async def t3():
         await cdp.eval(

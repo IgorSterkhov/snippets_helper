@@ -12,6 +12,11 @@ use tauri::{AppHandle, Manager};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
+const OVERLAY_WIDTH_LOGICAL: f64 = 340.0;
+const OVERLAY_HEIGHT_LOGICAL: f64 = 166.0;
+const OVERLAY_EDGE_MARGIN_LOGICAL: f64 = 16.0;
+const OVERLAY_BOTTOM_SAFE_MARGIN_LOGICAL: f64 = 72.0;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum State {
     Idle,
@@ -417,6 +422,8 @@ fn overlay_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
 
 pub(crate) fn show_overlay(app: &AppHandle) {
     if let Some(w) = overlay_window(app) {
+        let _ = w.set_ignore_cursor_events(false);
+        let _ = w.set_always_on_top(true);
         let _ = w.show();
     }
 }
@@ -430,13 +437,14 @@ pub(crate) fn position_overlay(app: &AppHandle, corner: &str) {
     };
     let area = mon.work_area();
     let scale = mon.scale_factor();
-    let w_w = (340.0 * scale) as i32;
-    let w_h = (166.0 * scale) as i32;
-    let margin = (16.0 * scale) as i32;
+    let w_w = (OVERLAY_WIDTH_LOGICAL * scale) as i32;
+    let w_h = (OVERLAY_HEIGHT_LOGICAL * scale) as i32;
+    let margin = (OVERLAY_EDGE_MARGIN_LOGICAL * scale) as i32;
+    let bottom_margin = (OVERLAY_BOTTOM_SAFE_MARGIN_LOGICAL * scale) as i32;
     let (x, y) = match corner {
         "bottom-left" => (
             area.position.x + margin,
-            area.position.y + (area.size.height as i32) - w_h - margin,
+            area.position.y + (area.size.height as i32) - w_h - bottom_margin,
         ),
         "top-right" => (
             area.position.x + (area.size.width as i32) - w_w - margin,
@@ -445,7 +453,7 @@ pub(crate) fn position_overlay(app: &AppHandle, corner: &str) {
         "top-left" => (area.position.x + margin, area.position.y + margin),
         _ => (
             area.position.x + (area.size.width as i32) - w_w - margin,
-            area.position.y + (area.size.height as i32) - w_h - margin,
+            area.position.y + (area.size.height as i32) - w_h - bottom_margin,
         ), // bottom-right (default)
     };
     let _ = w.set_position(tauri::PhysicalPosition { x, y });
