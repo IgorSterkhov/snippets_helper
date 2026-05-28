@@ -1,4 +1,58 @@
-import { whisperApi, onWhisperEvent } from './whisper-api.js';
+'use strict';
+
+async function waitForTauriInvoke(timeoutMs = 2500) {
+  const started = Date.now();
+  while (Date.now() - started <= timeoutMs) {
+    const invoke = window.__TAURI__?.core?.invoke;
+    if (typeof invoke === 'function') return invoke;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error('Tauri IPC bridge is not available in this window');
+}
+
+async function call(command, args = {}) {
+  const invoke = await waitForTauriInvoke();
+  return await invoke(command, args);
+}
+
+const whisperApi = {
+  status: () => call('whisper_status'),
+  stopActive: () => call('whisper_stop_active'),
+  cancelActive: () => call('whisper_cancel_active'),
+  liveStatus: () => call('whisper_live_status'),
+};
+
+const EVENTS = {
+  stateChanged: 'whisper:state-changed',
+  level: 'whisper:level',
+  transcribed: 'whisper:transcribed',
+  liveStateChanged: 'whisper:live-state-changed',
+  liveLevel: 'whisper:live-level',
+  liveInterim: 'whisper:live-interim',
+  liveFinal: 'whisper:live-final',
+  liveError: 'whisper:live-error',
+};
+
+async function waitForEventListen(timeoutMs = 2500) {
+  const started = Date.now();
+  while (Date.now() - started <= timeoutMs) {
+    const listen = window.__TAURI__?.event?.listen;
+    if (typeof listen === 'function') return listen;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  return null;
+}
+
+async function onWhisperEvent(name, handler) {
+  const listen = await waitForEventListen();
+  if (!listen) {
+    console.warn('[whisper-overlay] no event listener available');
+    return () => {};
+  }
+  const event = EVENTS[name] || name;
+  const unlisten = await listen(event, (e) => handler(e.payload));
+  return unlisten;
+}
 
 const dot = document.getElementById('dot');
 const titleEl = document.getElementById('title');
@@ -260,6 +314,7 @@ function bindOverlayButton(btn, action) {
 bindOverlayButton(stopBtn, 'stop');
 bindOverlayButton(cancelBtn, 'cancel');
 
+window.__WHISPER_OVERLAY_READY__ = true;
 setStatus('Overlay JS ready');
 setTicker('', 'Overlay JS ready');
 

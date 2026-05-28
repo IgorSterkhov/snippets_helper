@@ -407,6 +407,22 @@ async def run_tests():
         assert 'OVERLAY_BOTTOM_SAFE_MARGIN_LOGICAL' in service_rs, 'bottom overlay placement should avoid auto-hide taskbars'
     await check('T2i Whisper overlay hit-test contract', t2i_whisper_overlay_window_contract)
 
+    # ── T2j: Whisper overlay boot does not depend on module imports ─
+    async def t2j_whisper_overlay_boot_contract():
+        overlay_html_path = os.path.join(SRC_DIR, 'tabs', 'whisper', 'whisper-overlay.html')
+        overlay_js_path = os.path.join(SRC_DIR, 'tabs', 'whisper', 'whisper-overlay.js')
+        with open(overlay_html_path, 'r', encoding='utf-8') as f:
+            overlay_html = f.read()
+        with open(overlay_js_path, 'r', encoding='utf-8') as f:
+            overlay_js = f.read()
+        assert 'src="whisper-overlay.js"' in overlay_html, 'overlay should load its script as a relative asset'
+        assert 'type="module"' not in overlay_html, 'overlay boot should not depend on module loading in the secondary window'
+        assert 'import ' not in overlay_js, 'overlay script should be self-contained so import failures cannot leave static Ready UI'
+        assert 'waitForTauriInvoke' in overlay_js, 'overlay script should own its IPC bridge'
+        assert 'waitForEventListen' in overlay_js, 'overlay script should own its event bridge'
+        assert 'Overlay booting' in overlay_html, 'static fallback should reveal script boot failures instead of saying Ready'
+    await check('T2j Whisper overlay boot contract', t2j_whisper_overlay_boot_contract)
+
     # ── T3: switch to Exec tab ────────────────────────────────
     async def t3():
         await cdp.eval(

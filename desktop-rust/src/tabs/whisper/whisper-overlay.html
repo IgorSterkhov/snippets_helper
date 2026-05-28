@@ -43,7 +43,7 @@
       <span id="dot" class="dot" data-tauri-drag-region></span>
       <span class="heading" data-tauri-drag-region>
         <span id="title" class="title" data-tauri-drag-region>Whisper</span>
-        <span id="status" class="status" data-tauri-drag-region>Idle</span>
+        <span id="status" class="status" data-tauri-drag-region>Overlay booting</span>
       </span>
       <span id="timer" class="timer" data-tauri-drag-region></span>
     </div>
@@ -57,13 +57,13 @@
       <div id="progress" class="progress" style="display:none"><span></span></div>
       <div id="sub" class="sub"></div>
     </div>
-    <div id="ticker" class="ticker"><span id="tickerText">Ready</span></div>
+    <div id="ticker" class="ticker"><span id="tickerText">Overlay booting</span></div>
     <div id="error" class="error"></div>
     <div class="btnrow">
       <button id="stop">Stop ⏎</button>
       <button id="cancel" class="x" aria-label="Cancel">X</button>
     </div>
   </div>
-  <script type="module" src="khapp://localhost/tabs/whisper/whisper-overlay.js"></script>
+  <script src="whisper-overlay.js"></script>
 </body>
 </html>

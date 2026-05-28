@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## f-20260528-1 (2026-05-28)
+
+- **Whisper overlay boot fix:** the floating overlay now loads a standalone
+  relative script instead of relying on the secondary window's module chain, so
+  the Stop/X buttons can invoke the active local or live recording instead of
+  leaving the static `Ready` fallback on screen.
+
 ## v1.3.44 (2026-05-28)
 
 - **Whisper overlay hit-test fix:** the floating overlay now stays explicitly
