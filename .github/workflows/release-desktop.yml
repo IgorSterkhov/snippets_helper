@@ -26,10 +26,38 @@ on:
       - '.github/workflows/release-desktop.yml'
 
 jobs:
+  create-release:
+    # Create the GitHub Release once before the platform matrix starts.
+    # tauri-action can upload assets to an existing releaseId; without this,
+    # macOS and Windows can race and the second job fails with
+    # "Release already_exists".
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      release_id: ${{ steps.release.outputs.release_id }}
+    steps:
+      - name: Create or reuse GitHub release
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          TAG="$GITHUB_REF_NAME"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --title "Keyboard Helper $TAG" \
+              --notes "Download the installer for your platform from the assets below."
+          fi
+          RELEASE_ID=$(gh release view "$TAG" --json databaseId --jq '.databaseId')
+          echo "release_id=$RELEASE_ID" >> "$GITHUB_OUTPUT"
+
   release:
     # Runs on v-tag (full release) AND on main pushes (cache-seed only,
     # "Build and release" step is skipped below).
-    if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main'
+    needs: create-release
+    if: always() && (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main') && (github.ref == 'refs/heads/main' || needs.create-release.result == 'success')
     permissions:
       contents: write
     strategy:
@@ -150,6 +178,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
         with:
           projectPath: desktop-rust
+          releaseId: ${{ needs.create-release.outputs.release_id }}
           tagName: ${{ github.ref_name }}
           releaseName: 'Keyboard Helper ${{ github.ref_name }}'
           releaseBody: 'Download the installer for your platform from the assets below.'

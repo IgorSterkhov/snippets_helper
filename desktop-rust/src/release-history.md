@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## v1.3.39 (2026-05-28)
+
+- **Completed Whisper hotfix release:** includes the Windows live dictation
+  paste fix and persistent Whisper diagnostics from v1.3.38 in a full
+  Windows + macOS native release.
+- **Release reliability:** the desktop release workflow now creates the
+  GitHub release once before the platform matrix uploads assets, preventing
+  Windows/macOS jobs from racing on `Release already_exists`.
+
 ## v1.3.38 (2026-05-28)
 
 - **Whisper live paste fix:** Windows live dictation now sends a
