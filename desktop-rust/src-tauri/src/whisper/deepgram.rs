@@ -4,7 +4,7 @@ use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
@@ -181,7 +181,11 @@ impl DeepgramLiveService {
                 run_deepgram_stream(app.clone(), inner.clone(), task_cfg, session_id, audio_rx)
                     .await
             {
-                let _ = app.emit(EVT_LIVE_ERROR, serde_json::json!({ "message": e }));
+                crate::whisper::events::emit_to_whisper_windows(
+                    &app,
+                    EVT_LIVE_ERROR,
+                    serde_json::json!({ "message": e }),
+                );
                 let mut g = inner.lock().await;
                 if is_current_session(g.session_id, session_id) {
                     g.state = LiveState::Error;
@@ -194,7 +198,8 @@ impl DeepgramLiveService {
                 if is_current_session(g.session_id, session_id)
                     && should_cleanup_completed_task(g.state)
                 {
-                    let _ = app.emit(
+                    crate::whisper::events::emit_to_whisper_windows(
+                        &app,
                         EVT_LIVE_ERROR,
                         serde_json::json!({ "message": "Deepgram stream ended unexpectedly" }),
                     );
@@ -467,7 +472,8 @@ async fn handle_deepgram_text_message(
         if !is_current_session(inner.lock().await.session_id, session_id) {
             return Ok(());
         }
-        let _ = app.emit(
+        crate::whisper::events::emit_to_whisper_windows(
+            app,
             EVT_LIVE_INTERIM,
             serde_json::json!({
                 "text": parsed.transcript,
@@ -490,7 +496,8 @@ async fn handle_deepgram_text_message(
     if !paste_text.trim().is_empty() {
         inject::paste_chunk(&paste_text, cfg.clipboard_restore_delay_ms).await?;
         let committed = inner.lock().await.committed_text.clone();
-        let _ = app.emit(
+        crate::whisper::events::emit_to_whisper_windows(
+            app,
             EVT_LIVE_FINAL,
             serde_json::json!({
                 "chunk": paste_text,
@@ -559,7 +566,8 @@ fn clear_failed_start_reservation(inner: &mut LiveInner, session_id: u64) -> boo
 }
 
 fn emit_live_state(app: &AppHandle, state: LiveState, model: Option<String>) {
-    let _ = app.emit(
+    crate::whisper::events::emit_to_whisper_windows(
+        app,
         EVT_LIVE_STATE,
         serde_json::json!({
             "state": state.as_str(),

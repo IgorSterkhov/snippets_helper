@@ -12,7 +12,7 @@ use crate::whisper::models;
 use crate::whisper::postprocess::{self, LlmConfig};
 use crate::whisper::service::WhisperService;
 use std::sync::atomic::{AtomicU64, Ordering};
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Manager, State};
 
 const HOTKEY_DEBOUNCE_MS: u64 = 700;
 static LAST_WHISPER_HOTKEY_MS: AtomicU64 = AtomicU64::new(0);
@@ -339,7 +339,8 @@ pub async fn stop_recording_impl(app: &AppHandle) -> Result<String, String> {
         });
 
     // F4: emit real durations + metrics
-    let _ = app.emit(
+    events::emit_to_whisper_windows(
+        app,
         events::EVT_TRANSCRIBED,
         events::TranscribedPayload {
             text: text.clone(),
@@ -413,7 +414,8 @@ pub async fn hotkey_toggle(app: AppHandle) {
         HotkeyAction::Ignore => Ok(()),
     };
     if let Err(e) = res {
-        let _ = app.emit(
+        events::emit_to_whisper_windows(
+            &app,
             events::EVT_ERROR,
             events::ErrorPayload {
                 code: "hotkey_toggle_failed".into(),

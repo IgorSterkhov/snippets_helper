@@ -365,6 +365,28 @@ async def run_tests():
         assert 'cancelActive' in overlay_js, 'overlay close should use provider-agnostic cancel command'
     await check('T2g Whisper overlay active controls', t2g_whisper_overlay_static_contract)
 
+    # ── T2h: Whisper overlay bridge is robust in its own window ─
+    async def t2h_whisper_overlay_bridge_contract():
+        tauri_api_path = os.path.join(SRC_DIR, 'tauri-api.js')
+        events_rs_path = os.path.join(SRC_DIR, '..', 'src-tauri', 'src', 'whisper', 'events.rs')
+        service_rs_path = os.path.join(SRC_DIR, '..', 'src-tauri', 'src', 'whisper', 'service.rs')
+        overlay_js_path = os.path.join(SRC_DIR, 'tabs', 'whisper', 'whisper-overlay.js')
+        with open(tauri_api_path, 'r', encoding='utf-8') as f:
+            tauri_api = f.read()
+        with open(events_rs_path, 'r', encoding='utf-8') as f:
+            events_rs = f.read()
+        with open(service_rs_path, 'r', encoding='utf-8') as f:
+            service_rs = f.read()
+        with open(overlay_js_path, 'r', encoding='utf-8') as f:
+            overlay_js = f.read()
+        assert 'const { invoke } = window.__TAURI__.core' not in tauri_api, 'IPC bridge must not crash at module load when __TAURI__ is late'
+        assert 'waitForTauriInvoke' in tauri_api, 'IPC bridge should wait briefly for Tauri injection'
+        assert 'emit_to_whisper_windows' in events_rs, 'Whisper events should explicitly target main + overlay windows'
+        assert 'emit_to(\"whisper-overlay\"' in events_rs, 'Overlay window must receive targeted events'
+        assert '.work_area()' in service_rs, 'Overlay should be positioned inside monitor work area, not behind taskbar'
+        assert 'Overlay JS ready' in overlay_js, 'Overlay should visibly prove that its JS initialized'
+    await check('T2h Whisper overlay bridge contract', t2h_whisper_overlay_bridge_contract)
+
     # ── T3: switch to Exec tab ────────────────────────────────
     async def t3():
         await cdp.eval(

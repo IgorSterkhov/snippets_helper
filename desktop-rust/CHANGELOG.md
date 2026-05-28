@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## v1.3.43 (2026-05-28)
+
+- **Whisper overlay bridge fix:** the floating overlay now waits for Tauri IPC
+  injection, receives Whisper events explicitly in its own window, and shows an
+  initialization marker instead of silently staying on static HTML.
+- **Overlay taskbar positioning:** the overlay is now placed inside the
+  monitor work area, so its Stop/Cancel controls are not hidden behind the
+  Windows taskbar.
+
 ## v1.3.42 (2026-05-28)
 
 - **Deepgram punctuation:** live dictation requests now enable Deepgram

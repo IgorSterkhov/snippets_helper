@@ -34,7 +34,7 @@ use cpal::traits::StreamTrait;
 use cpal::{SampleFormat, StreamConfig};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
 
 pub const WAV_SAMPLE_RATE: u32 = 16_000;
 pub const WAV_CHANNELS: u16 = 1;
@@ -401,7 +401,7 @@ fn convert_frames_f32_to_i16_16k(
     *since_emit += mono.len();
     if *since_emit >= emit_every && *rms_n > 0 {
         let rms = ((*rms_sq / *rms_n as f64).sqrt() as f32).clamp(0.0, 1.0);
-        let _ = app.emit(level_event, LevelPayload { rms });
+        crate::whisper::events::emit_to_whisper_windows(app, level_event, LevelPayload { rms });
         *since_emit = 0;
         *rms_sq = 0.0;
         *rms_n = 0;

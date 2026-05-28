@@ -260,6 +260,9 @@ function bindOverlayButton(btn, action) {
 bindOverlayButton(stopBtn, 'stop');
 bindOverlayButton(cancelBtn, 'cancel');
 
+setStatus('Overlay JS ready');
+setTicker('', 'Overlay JS ready');
+
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     runOverlayAction('cancel');
@@ -273,4 +276,5 @@ initEvents()
   .catch((e) => {
     console.error('[whisper-overlay] init failed', e);
     setMode('idle');
+    setOverlayError(formatError(e));
   });

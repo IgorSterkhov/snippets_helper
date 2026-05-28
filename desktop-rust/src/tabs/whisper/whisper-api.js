@@ -52,8 +52,18 @@ const EVENTS = {
   liveError: 'whisper:live-error',
 };
 
+async function waitForEventListen(timeoutMs = 2500) {
+  const started = Date.now();
+  while (Date.now() - started <= timeoutMs) {
+    const listen = window.__TAURI__?.event?.listen;
+    if (typeof listen === 'function') return listen;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  return null;
+}
+
 export async function onWhisperEvent(name, handler) {
-  const listen = window.__TAURI__?.event?.listen;
+  const listen = await waitForEventListen();
   if (!listen) {
     console.warn('[whisper-api] no event listener available');
     return () => {};

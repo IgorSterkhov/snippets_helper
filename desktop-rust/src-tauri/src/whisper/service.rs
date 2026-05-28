@@ -8,7 +8,7 @@ use crate::whisper::server::{InferenceResult, WhisperServer};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
@@ -199,7 +199,8 @@ impl WhisperService {
                             }
                         }
                         Err(e) => {
-                            let _ = app.emit(
+                            events::emit_to_whisper_windows(
+                                &app,
                                 events::EVT_ERROR,
                                 events::ErrorPayload {
                                     code: "server_spawn_failed".into(),
@@ -394,7 +395,8 @@ impl WhisperService {
 }
 
 fn emit_state(app: &AppHandle, state: State, model: Option<String>) {
-    let _ = app.emit(
+    events::emit_to_whisper_windows(
+        app,
         events::EVT_STATE_CHANGED,
         StatePayload {
             state: state.as_str().to_string(),
@@ -426,18 +428,24 @@ pub(crate) fn position_overlay(app: &AppHandle, corner: &str) {
     let Ok(Some(mon)) = w.current_monitor() else {
         return;
     };
-    let size = mon.size();
+    let area = mon.work_area();
     let scale = mon.scale_factor();
     let w_w = (340.0 * scale) as i32;
     let w_h = (166.0 * scale) as i32;
     let margin = (16.0 * scale) as i32;
     let (x, y) = match corner {
-        "bottom-left" => (margin, (size.height as i32) - w_h - margin),
-        "top-right" => ((size.width as i32) - w_w - margin, margin),
-        "top-left" => (margin, margin),
+        "bottom-left" => (
+            area.position.x + margin,
+            area.position.y + (area.size.height as i32) - w_h - margin,
+        ),
+        "top-right" => (
+            area.position.x + (area.size.width as i32) - w_w - margin,
+            area.position.y + margin,
+        ),
+        "top-left" => (area.position.x + margin, area.position.y + margin),
         _ => (
-            (size.width as i32) - w_w - margin,
-            (size.height as i32) - w_h - margin,
+            area.position.x + (area.size.width as i32) - w_w - margin,
+            area.position.y + (area.size.height as i32) - w_h - margin,
         ), // bottom-right (default)
     };
     let _ = w.set_position(tauri::PhysicalPosition { x, y });

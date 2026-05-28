@@ -1,12 +1,21 @@
 //! Typed event payloads for whisper — emitted to the frontend via Tauri events.
 
 use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Emitter};
 
 pub const EVT_STATE_CHANGED: &str = "whisper:state-changed";
 pub const EVT_LEVEL: &str = "whisper:level";
 pub const EVT_MODEL_DOWNLOAD: &str = "whisper:model-download";
 pub const EVT_TRANSCRIBED: &str = "whisper:transcribed";
 pub const EVT_ERROR: &str = "whisper:error";
+
+pub fn emit_to_whisper_windows<P>(app: &AppHandle, event: &str, payload: P)
+where
+    P: Serialize + Clone,
+{
+    let _ = app.emit_to("main", event, payload.clone());
+    let _ = app.emit_to("whisper-overlay", event, payload);
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelDownloadPayload {
