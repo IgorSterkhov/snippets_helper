@@ -420,8 +420,13 @@ fn overlay_window(app: &AppHandle) -> Option<tauri::WebviewWindow> {
     app.get_webview_window("whisper-overlay")
 }
 
+fn reload_overlay_document(w: &tauri::WebviewWindow) {
+    let _ = w.reload();
+}
+
 pub(crate) fn show_overlay(app: &AppHandle) {
     if let Some(w) = overlay_window(app) {
+        reload_overlay_document(&w);
         let _ = w.set_ignore_cursor_events(false);
         let _ = w.set_always_on_top(true);
         let _ = w.show();

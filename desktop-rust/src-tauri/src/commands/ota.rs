@@ -240,10 +240,17 @@ pub async fn apply_frontend_update(app: AppHandle, version: String) -> Result<()
 
     cleanup_old_frontends(&root, &version)?;
 
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.eval("window.location.reload()");
-    }
+    reload_frontend_windows(&app);
     Ok(())
+}
+
+fn reload_frontend_windows(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.reload();
+    }
+    if let Some(window) = app.get_webview_window("whisper-overlay") {
+        let _ = window.reload();
+    }
 }
 
 /// Called by the frontend once it has successfully booted. Clears the

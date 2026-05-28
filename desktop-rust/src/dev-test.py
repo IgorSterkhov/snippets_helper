@@ -423,6 +423,20 @@ async def run_tests():
         assert 'Overlay booting' in overlay_html, 'static fallback should reveal script boot failures instead of saying Ready'
     await check('T2j Whisper overlay boot contract', t2j_whisper_overlay_boot_contract)
 
+    # ── T2k: Whisper overlay is reloaded after frontend OTA ─
+    async def t2k_whisper_overlay_reload_contract():
+        ota_rs_path = os.path.join(SRC_DIR, '..', 'src-tauri', 'src', 'commands', 'ota.rs')
+        service_rs_path = os.path.join(SRC_DIR, '..', 'src-tauri', 'src', 'whisper', 'service.rs')
+        with open(ota_rs_path, 'r', encoding='utf-8') as f:
+            ota_rs = f.read()
+        with open(service_rs_path, 'r', encoding='utf-8') as f:
+            service_rs = f.read()
+        assert 'reload_frontend_windows' in ota_rs, 'frontend OTA should reload all frontend windows, not only main'
+        assert 'get_webview_window("whisper-overlay")' in ota_rs, 'frontend OTA should explicitly reload the hidden overlay window'
+        assert 'reload_overlay_document' in service_rs, 'show_overlay should refresh a stale hidden overlay document before showing it'
+        assert '.reload()' in service_rs, 'overlay refresh should use the native WebView reload API'
+    await check('T2k Whisper overlay OTA reload contract', t2k_whisper_overlay_reload_contract)
+
     # ── T3: switch to Exec tab ────────────────────────────────
     async def t3():
         await cdp.eval(

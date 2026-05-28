@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## v1.3.45 (2026-05-28)
+
+- **Whisper overlay OTA reload:** applying a frontend OTA now reloads the hidden
+  Whisper overlay window as well as the main window, so stale overlay HTML/JS
+  cannot keep showing `Ready` after an update.
+- **Overlay refresh on show:** every overlay display refreshes its WebView
+  document before showing Stop/X, so the controls use the current frontend
+  bundle even if the hidden window was created before the update.
+
 ## f-20260528-1 (2026-05-28)
 
 - **Whisper overlay boot fix:** the floating overlay now loads a standalone
