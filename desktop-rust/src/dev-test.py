@@ -307,6 +307,49 @@ async def run_tests():
         )
     await check('T2e Whisper live dictate UI + mock flow', t2e_whisper_live_dictate_ui_and_mock_flow)
 
+    # ── T2f: Whisper errors show persistent copyable dialog ──
+    async def t2f_whisper_live_error_dialog():
+        await close_modals()
+        await cdp.eval("""(() => {
+          const settings = JSON.parse(localStorage.getItem('mock.settings') || '{}');
+          delete settings['whisper.deepgram_api_key'];
+          settings['whisper.live_dictate'] = 'true';
+          localStorage.setItem('mock.settings', JSON.stringify(settings));
+          window.__mockClipboardText = '';
+          document.querySelector('.tab-btn[data-tab-id="whisper"]').click();
+        })()""")
+        await wait_until(cdp, "!!document.querySelector('#panel-whisper #live-dictate-toggle')", timeout=5)
+        await cdp.eval("""(() => {
+          const toggle = document.querySelector('#panel-whisper #live-dictate-toggle');
+          if (!toggle.checked) toggle.click();
+          document.querySelector('#panel-whisper #record-btn').click();
+        })()""")
+        await wait_until(cdp, "!!document.querySelector('.error-dialog-overlay')", timeout=5)
+        title = await cdp.eval("document.querySelector('.error-dialog h3')?.textContent.trim()")
+        assert title == 'Whisper action failed', f'title: {title!r}'
+        message = await cdp.eval("document.querySelector('.error-dialog-message')?.textContent || ''")
+        assert 'Deepgram API key is missing' in message, f'message: {message!r}'
+        details = await cdp.eval("document.querySelector('.error-dialog-details')?.textContent || ''")
+        assert 'frontend_version' in details, f'details missing frontend_version: {details!r}'
+        assert 'live_dictate' in details, f'details missing live_dictate: {details!r}'
+        assert 'Deepgram API key is missing' in details, f'details missing error: {details!r}'
+        await cdp.eval(
+            "[...document.querySelectorAll('.error-dialog button')]"
+            ".find(b => b.textContent.trim() === 'Copy error').click()"
+        )
+        copied = await wait_until(cdp, "window.__mockClipboardText", timeout=3)
+        assert 'Whisper action failed' in copied, f'copied: {copied!r}'
+        assert 'Deepgram API key is missing' in copied, f'copied missing error: {copied!r}'
+        await cdp.eval("""(() => {
+          [...document.querySelectorAll('.error-dialog button')]
+            .find(b => b.textContent.trim() === 'OK').click();
+          const settings = JSON.parse(localStorage.getItem('mock.settings') || '{}');
+          settings['whisper.deepgram_api_key'] = 'dg_mock_key';
+          localStorage.setItem('mock.settings', JSON.stringify(settings));
+        })()""")
+        await wait_until(cdp, "!document.querySelector('.error-dialog-overlay')", timeout=3)
+    await check('T2f Whisper live errors show diagnostics', t2f_whisper_live_error_dialog)
+
     # ── T3: switch to Exec tab ────────────────────────────────
     async def t3():
         await cdp.eval(

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## v1.3.38 (2026-05-28)
+
+- **Whisper live paste fix:** Windows live dictation now sends a
+  layout-independent Ctrl+V shortcut and releases the modifier even if key
+  simulation fails, fixing the Deepgram `key state could not be converted to
+  u32` paste error.
+- **Whisper error diagnostics:** Whisper, Deepgram, and transcript action
+  failures now open a persistent modal with frontend/native version context
+  and a Copy error button instead of disappearing as a toast.
+
 ## v1.3.37 (2026-05-27)
 
 - **Deepgram live dictation:** Whisper now has a `Live dictate` mode that

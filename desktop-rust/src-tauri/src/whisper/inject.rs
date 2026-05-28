@@ -29,7 +29,11 @@ impl InjectMethod {
     }
 }
 
-pub async fn inject(text: &str, method: InjectMethod, clipboard_restore_delay_ms: u64) -> Result<&'static str, String> {
+pub async fn inject(
+    text: &str,
+    method: InjectMethod,
+    clipboard_restore_delay_ms: u64,
+) -> Result<&'static str, String> {
     match method {
         InjectMethod::CopyOnly => {
             copy_to_clipboard(text)?;
@@ -52,16 +56,27 @@ pub async fn inject(text: &str, method: InjectMethod, clipboard_restore_delay_ms
     }
 }
 
-pub async fn paste_chunk(text: &str, clipboard_restore_delay_ms: u64) -> Result<&'static str, String> {
+pub async fn paste_chunk(
+    text: &str,
+    clipboard_restore_delay_ms: u64,
+) -> Result<&'static str, String> {
     if text.trim().is_empty() {
         return Ok("paste");
     }
     inject(text, InjectMethod::Paste, clipboard_restore_delay_ms).await
 }
 
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PasteShortcutKeyKind {
+    UnicodeV,
+    VirtualV,
+}
+
 fn copy_to_clipboard(text: &str) -> Result<(), String> {
     let mut cb = Clipboard::new().map_err(|e| format!("clipboard: {e}"))?;
-    cb.set_text(text.to_string()).map_err(|e| format!("clipboard set: {e}"))?;
+    cb.set_text(text.to_string())
+        .map_err(|e| format!("clipboard set: {e}"))?;
     Ok(())
 }
 
@@ -78,10 +93,39 @@ fn simulate_paste() -> Result<(), String> {
     #[cfg(not(target_os = "macos"))]
     let modifier = Key::Control;
 
-    enigo.key(modifier, Direction::Press).map_err(|e| format!("mod down: {e}"))?;
-    enigo.key(Key::Unicode('v'), Direction::Click).map_err(|e| format!("v: {e}"))?;
-    enigo.key(modifier, Direction::Release).map_err(|e| format!("mod up: {e}"))?;
+    enigo
+        .key(modifier, Direction::Press)
+        .map_err(|e| format!("mod down: {e}"))?;
+    let key_result = send_paste_shortcut_key(&mut enigo);
+    let release_result = enigo.key(modifier, Direction::Release);
+    key_result?;
+    release_result.map_err(|e| format!("mod up: {e}"))?;
     Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn send_paste_shortcut_key(enigo: &mut enigo::Enigo) -> Result<(), String> {
+    use enigo::{Direction, Key, Keyboard};
+    enigo
+        .key(Key::V, Direction::Click)
+        .map_err(|e| format!("v: {e}"))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn send_paste_shortcut_key(enigo: &mut enigo::Enigo) -> Result<(), String> {
+    use enigo::{Direction, Key, Keyboard};
+    enigo
+        .key(Key::Unicode('v'), Direction::Click)
+        .map_err(|e| format!("v: {e}"))
+}
+
+#[cfg(test)]
+fn paste_shortcut_key_kind_for_os(os: &str) -> PasteShortcutKeyKind {
+    if os == "windows" {
+        PasteShortcutKeyKind::VirtualV
+    } else {
+        PasteShortcutKeyKind::UnicodeV
+    }
 }
 
 fn type_text(text: &str) -> Result<(), String> {
@@ -96,10 +140,22 @@ mod tests {
 
     #[test]
     fn from_setting_parses_known_values() {
-        assert!(matches!(InjectMethod::from_setting("copy"), InjectMethod::CopyOnly));
-        assert!(matches!(InjectMethod::from_setting("paste"), InjectMethod::Paste));
-        assert!(matches!(InjectMethod::from_setting("type"), InjectMethod::Type));
-        assert!(matches!(InjectMethod::from_setting("garbage"), InjectMethod::Paste));
+        assert!(matches!(
+            InjectMethod::from_setting("copy"),
+            InjectMethod::CopyOnly
+        ));
+        assert!(matches!(
+            InjectMethod::from_setting("paste"),
+            InjectMethod::Paste
+        ));
+        assert!(matches!(
+            InjectMethod::from_setting("type"),
+            InjectMethod::Type
+        ));
+        assert!(matches!(
+            InjectMethod::from_setting("garbage"),
+            InjectMethod::Paste
+        ));
     }
 
     #[test]
@@ -112,6 +168,26 @@ mod tests {
     #[test]
     fn paste_chunk_method_name_is_stable() {
         assert_eq!(InjectMethod::Paste.as_str(), "paste");
+    }
+
+    #[test]
+    fn windows_paste_shortcut_uses_virtual_v_key() {
+        assert_eq!(
+            paste_shortcut_key_kind_for_os("windows"),
+            PasteShortcutKeyKind::VirtualV
+        );
+    }
+
+    #[test]
+    fn non_windows_paste_shortcut_keeps_unicode_v_key() {
+        assert_eq!(
+            paste_shortcut_key_kind_for_os("linux"),
+            PasteShortcutKeyKind::UnicodeV
+        );
+        assert_eq!(
+            paste_shortcut_key_kind_for_os("macos"),
+            PasteShortcutKeyKind::UnicodeV
+        );
     }
 
     #[tokio::test]

@@ -1,6 +1,8 @@
 import { whisperApi, onWhisperEvent } from './whisper-api.js';
 import { gemmaApi, onGemmaEvent } from './gemma-api.js';
 import { openSettingsModal } from './whisper-settings.js';
+import { showErrorDialog } from '../../components/error-dialog.js';
+import { call } from '../../tauri-api.js';
 
 const GEMMA_NO_MODELS_VALUE = '__open_settings__';
 
@@ -239,7 +241,12 @@ export async function initTab(container) {
         await whisperApi.startRecording();
       }
     } catch (e) {
-      alert(`Whisper error: ${e}`);
+      showWhisperError(
+        'Whisper action failed',
+        formatErrorMessage(e, 'The requested Whisper action failed.'),
+        e,
+        { action: recordBtn.dataset.mode || null }
+      );
     }
   };
   cancelBtn.onclick = async () => {
@@ -254,7 +261,9 @@ export async function initTab(container) {
       }
       toast('Cancelled');
     } catch (e) {
-      toast(`Cancel failed: ${e}`, { kind: 'error' });
+      showWhisperError('Whisper cancel failed', formatErrorMessage(e, 'The active Whisper action could not be cancelled.'), e, {
+        action: isLiveBusy() ? 'live_cancel' : 'local_cancel',
+      });
     }
   };
   liveToggle.onchange = async () => {
@@ -267,7 +276,10 @@ export async function initTab(container) {
       state.liveDictate = prev;
       liveToggle.checked = prev;
       renderControls();
-      toast(`Live dictate setting failed: ${e}`, { kind: 'error' });
+      showWhisperError('Live dictate setting failed', formatErrorMessage(e, 'The Live dictate setting could not be saved.'), e, {
+        setting: 'whisper.live_dictate',
+        attempted_value: state.liveDictate,
+      });
     }
   };
   header.querySelector('#settings-btn').onclick = () => openSettingsModal();
@@ -390,7 +402,10 @@ export async function initTab(container) {
       window.dispatchEvent(new CustomEvent('whisper:settings-changed'));
       toast(`Whisper: ${newName}`);
     } catch (e) {
-      toast(`Switch failed: ${e}`, { kind: 'error' });
+      showWhisperError('Whisper model switch failed', formatErrorMessage(e, 'The default Whisper model could not be changed.'), e, {
+        previous_model: prev,
+        requested_model: newName,
+      });
       selectModelInDropdown(prev);
     } finally {
       setChip(state.currentState);
@@ -455,7 +470,10 @@ export async function initTab(container) {
       committedGemmaDefault = v;
       toast(`Gemma: ${v}`);
     } catch (e) {
-      toast(`Gemma switch failed: ${e}`, { kind: 'error' });
+      showWhisperError('Gemma model switch failed', formatErrorMessage(e, 'The default Gemma model could not be changed.'), e, {
+        previous_model: prev,
+        requested_model: v,
+      });
       programmaticGemmaSelect = true;
       gemmaSelect.value = prev;
       programmaticGemmaSelect = false;
@@ -476,7 +494,12 @@ export async function initTab(container) {
   state.cleanup.push(offTranscribed);
 
   const offError = await onWhisperEvent('error', (p) => {
-    toast(`Whisper: ${p.message || p.code || 'unknown error'}`, { kind: 'error' });
+    showWhisperError(
+      'Whisper error',
+      p.message || p.code || 'Unknown Whisper error.',
+      p.message || p.code || 'unknown error',
+      { event: 'whisper:error', payload: p }
+    );
     console.error('[whisper error]', p);
   });
   state.cleanup.push(offError);
@@ -503,7 +526,12 @@ export async function initTab(container) {
   state.cleanup.push(offLiveFinal);
 
   const offLiveError = await onWhisperEvent('liveError', (p) => {
-    toast(`Deepgram: ${p.message || 'unknown error'}`, { kind: 'error' });
+    showWhisperError(
+      'Deepgram live dictation failed',
+      p.message || 'Unknown Deepgram live dictation error.',
+      p.message || 'unknown error',
+      { event: 'whisper:live-error', payload: p }
+    );
     console.error('[whisper live error]', p);
   });
   state.cleanup.push(offLiveError);
@@ -652,7 +680,9 @@ export async function initTab(container) {
         await whisperApi.deleteHistory(h.id);
         await reloadHistory();
       } catch (err) {
-        toast(`Delete failed: ${err}`, { kind: 'error' });
+        showWhisperError('Whisper history delete failed', formatErrorMessage(err, 'The history entry could not be deleted.'), err, {
+          history_id: h.id,
+        });
       }
     };
     row.onclick = (e) => {
@@ -733,7 +763,10 @@ export async function initTab(container) {
         }
         toast('Post-processed');
       } catch (e) {
-        toast(`Post-process failed: ${e}`, { kind: 'error' });
+        showWhisperError('Post-process failed', formatErrorMessage(e, 'Gemma could not post-process this transcript.'), e, {
+          history_id: h.id,
+          source_chars: src.length,
+        });
         // Make sure the strip doesn't get stuck if backend errored before
         // emitting `done:true`.
         hideStatusStrip();
@@ -766,7 +799,16 @@ export async function initTab(container) {
     const b = document.createElement('button');
     b.textContent = label;
     b.style.cssText = `padding:5px 10px;background:var(--bg-secondary,#161b22);border:1px solid var(--border,#30363d);color:${danger ? 'var(--red,#f85149)' : 'var(--text,#c9d1d9)'};border-radius:4px;cursor:pointer;font-size:12px`;
-    b.onclick = onClick;
+    b.onclick = async () => {
+      try {
+        await onClick();
+      } catch (err) {
+        showWhisperError(`${label.replace(/^[^\p{L}\p{N}]+/u, '').trim() || 'Action'} failed`, formatErrorMessage(err), err, {
+          action_label: label,
+          history_id: activeHistoryRef?.id ?? null,
+        });
+      }
+    };
     return b;
   }
 
@@ -785,7 +827,58 @@ export async function initTab(container) {
     if (ms > 0) setTimeout(() => t.remove(), ms);
   }
 
+  function showWhisperError(title, message, err, extra = {}) {
+    void (async () => {
+      const details = await buildWhisperErrorDetails(title, message, err, extra);
+      showErrorDialog({ title, message, details });
+    })();
+  }
+
+  async function buildWhisperErrorDetails(title, message, err, extra) {
+    const [frontendVersion, updateInfo, liveStatus] = await Promise.all([
+      safeCommand('get_frontend_version', {}, 800),
+      safeCommand('check_for_update', {}, 1200),
+      safeCommand('whisper_live_status', {}, 800),
+    ]);
+    return {
+      title,
+      message,
+      timestamp: new Date().toISOString(),
+      frontend_version: frontendVersion.ok ? frontendVersion.value : `unavailable: ${frontendVersion.error}`,
+      native_version: updateInfo.ok ? (updateInfo.value?.current_version || null) : `unavailable: ${updateInfo.error}`,
+      latest_native_version: updateInfo.ok ? (updateInfo.value?.latest_version || null) : null,
+      update_build_in_progress: updateInfo.ok ? !!updateInfo.value?.build_in_progress : null,
+      error: formatErrorMessage(err),
+      current_state: state.currentState,
+      live_dictate: state.liveDictate,
+      live_state: state.liveState,
+      live_model: state.liveModel,
+      active_tab: state.activeTab,
+      selected_history_id: activeHistoryRef?.id ?? state.selectedId ?? null,
+      live_status: liveStatus.ok ? liveStatus.value : `unavailable: ${liveStatus.error}`,
+      extra,
+    };
+  }
+
+  async function safeCommand(command, args = {}, timeoutMs = 1000) {
+    let timer = null;
+    const timeout = new Promise((resolve) => {
+      timer = setTimeout(() => resolve({ ok: false, error: `${command} timed out after ${timeoutMs}ms` }), timeoutMs);
+    });
+    const request = call(command, args)
+      .then((value) => ({ ok: true, value }))
+      .catch((err) => ({ ok: false, error: formatErrorMessage(err) }));
+    const result = await Promise.race([request, timeout]);
+    if (timer) clearTimeout(timer);
+    return result;
+  }
+
   await reloadHistory();
+}
+
+function formatErrorMessage(err, fallback = 'Unknown error.') {
+  const msg = String(err?.message || err || '').trim();
+  return msg || fallback;
 }
 
 function formatRelativeTime(unixSec) {
