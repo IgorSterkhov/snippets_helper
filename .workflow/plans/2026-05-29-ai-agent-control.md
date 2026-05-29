@@ -369,12 +369,12 @@ message explaining that Whisper/Deepgram must be configured.
 - Create: `mobile/src/screens/AI/AIScreen.js`
 - Create: `mobile/src/api/ai.js`
 
-- [ ] **Step 1: Add failing Jest/snapshot-level test if current mobile test setup supports navigation tests**
+- [x] **Step 1: Add failing Jest/snapshot-level test if current mobile test setup supports navigation tests**
 
 If no suitable navigation test harness exists, add isolated tests for the AI API
 client and command dispatcher instead.
 
-- [ ] **Step 2: Add AI tab**
+- [x] **Step 2: Add AI tab**
 
 Add `AI` to bottom tabs with dark-theme compatible UI.
 
@@ -384,11 +384,11 @@ Add `AI` to bottom tabs with dark-theme compatible UI.
 - Create: `mobile/src/ai/commandDispatcher.js`
 - Modify: `mobile/src/screens/AI/AIScreen.js`
 
-- [ ] **Step 1: Implement client**
+- [x] **Step 1: Implement client**
 
 Call `/v1/ai/chat` through existing API client.
 
-- [ ] **Step 2: Implement local command execution**
+- [x] **Step 2: Implement local command execution**
 
 Commands:
 
@@ -399,7 +399,7 @@ Commands:
 - `complete_task_checkbox` -> write through `taskRepo`;
 - `create_task` -> write through `taskRepo`.
 
-- [ ] **Step 3: Trigger sync**
+- [x] **Step 3: Trigger sync**
 
 After writes, call existing sync service or mark changes so the existing sync
 cycle pushes them.

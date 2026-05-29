@@ -16,6 +16,7 @@ import NoteEditorScreen from '../screens/Notes/NoteEditorScreen';
 import TaskListScreen from '../screens/Tasks/TaskListScreen';
 import TaskEditorScreen from '../screens/Tasks/TaskEditorScreen';
 import TaskManageScreen from '../screens/Tasks/TaskManageScreen';
+import AIScreen from '../screens/AI/AIScreen';
 import SettingsScreen from '../screens/Settings/SettingsScreen';
 import UpdateBanner from '../components/UpdateBanner';
 
@@ -81,6 +82,7 @@ function MainTabs() {
         <Tab.Screen name="Snippets" component={SnippetsNavigator} />
         <Tab.Screen name="Notes" component={NotesNavigator} />
         <Tab.Screen name="Tasks" component={TasksNavigator} />
+        <Tab.Screen name="AI" component={AIScreen} />
         <Tab.Screen name="Settings" component={SettingsScreen} />
       </Tab.Navigator>
     </View>
