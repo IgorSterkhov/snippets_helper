@@ -40,8 +40,8 @@ async def ai_chat(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    if req.channel not in {"client", "telegram"}:
-        raise HTTPException(status_code=400, detail="unsupported ai channel")
+    if req.channel != "client":
+        raise HTTPException(status_code=400, detail="public ai route accepts client channel only")
 
     try:
         reply, commands = await DeepSeekClient().chat(

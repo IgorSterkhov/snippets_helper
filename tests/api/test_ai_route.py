@@ -1,5 +1,10 @@
 import asyncio
+from types import SimpleNamespace
 
+import pytest
+from fastapi import HTTPException
+
+from api.routes.ai import ai_chat
 from api.routes.ai import build_ai_response
 from api.schemas import AiChatRequest, AiCommandCall, AiContext
 
@@ -56,3 +61,15 @@ def test_telegram_channel_executes_server_side():
     assert repo.created == 1
     assert response.results[0].status == "executed"
     assert response.results[0].item_uuid == "server-task"
+
+
+def test_public_ai_route_rejects_telegram_channel_before_provider_call():
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(ai_chat(
+            AiChatRequest(channel="telegram", message="создай задачу", context=AiContext()),
+            user=SimpleNamespace(id="user-1"),
+            db=None,
+        ))
+
+    assert exc.value.status_code == 400
+    assert "client channel" in exc.value.detail
