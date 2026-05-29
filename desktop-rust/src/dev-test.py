@@ -1327,6 +1327,243 @@ async def run_tests():
         })()""")
     await check('T15d Tasks checkbox collapse survives frontend reload', t15d_tasks_checkbox_collapse_survives_reload)
 
+    # ── T15e: Enter inserts checkbox after current sibling ───
+    async def t15e_tasks_checkbox_enter_inserts_after_current():
+        async def restore_task2_checkboxes():
+            await cdp.eval("""(() => {
+              const stamp = new Date().toISOString();
+              const restored = [
+                {
+                  id: 1, task_id: 2, parent_id: null,
+                  text: 'Regular todo visible', is_checked: false,
+                  sort_order: 0, created_at: stamp, updated_at: stamp,
+                  sync_status: 'synced', user_id: 'mock-user',
+                },
+                {
+                  id: 2, task_id: 2, parent_id: null,
+                  text: 'Regular done hidden', is_checked: true,
+                  sort_order: 1, created_at: stamp, updated_at: stamp,
+                  sync_status: 'synced', user_id: 'mock-user',
+                },
+              ];
+              const others = JSON.parse(localStorage.getItem('mock.task_checkboxes') || '[]')
+                .filter(x => x.task_id !== 2);
+              localStorage.setItem('mock.task_checkboxes', JSON.stringify([...others, ...restored]));
+              localStorage.setItem('mock.__seq.task_checkboxes', '2');
+              window.dispatchEvent(new CustomEvent('snippets:sync-complete', {
+                detail: {
+                  result: {
+                    timestamp: '12:00:00',
+                    push: { total: 0, pushed: {} },
+                    pull: { total: 1, pulled: { task_checkboxes: ['restore'] } },
+                  },
+                },
+              }));
+            })()""")
+
+        try:
+            await cdp.eval("""(() => {
+              const stamp = new Date().toISOString();
+              const settings = JSON.parse(localStorage.getItem('mock.settings') || '{}');
+              settings.last_active_tab = 'tasks';
+              delete settings.tasks_collapsed_checkbox_ids;
+              localStorage.setItem('mock.settings', JSON.stringify(settings));
+              const rows = [
+                {
+                  id: 40, task_id: 2, parent_id: null,
+                  text: 'Enter root before', is_checked: false,
+                  sort_order: 0, created_at: stamp, updated_at: stamp,
+                  sync_status: 'synced', user_id: 'mock-user',
+                },
+                {
+                  id: 41, task_id: 2, parent_id: null,
+                  text: 'Enter root current', is_checked: false,
+                  sort_order: 1, created_at: stamp, updated_at: stamp,
+                  sync_status: 'synced', user_id: 'mock-user',
+                },
+                {
+                  id: 42, task_id: 2, parent_id: null,
+                  text: 'Enter hidden completed root', is_checked: true,
+                  sort_order: 2, created_at: stamp, updated_at: stamp,
+                  sync_status: 'synced', user_id: 'mock-user',
+                },
+                {
+                  id: 43, task_id: 2, parent_id: null,
+                  text: 'Enter root after', is_checked: false,
+                  sort_order: 3, created_at: stamp, updated_at: stamp,
+                  sync_status: 'synced', user_id: 'mock-user',
+                },
+                {
+                  id: 44, task_id: 2, parent_id: 41,
+                  text: 'Enter child current', is_checked: false,
+                  sort_order: 0, created_at: stamp, updated_at: stamp,
+                  sync_status: 'synced', user_id: 'mock-user',
+                },
+                {
+                  id: 45, task_id: 2, parent_id: 41,
+                  text: 'Enter child after', is_checked: false,
+                  sort_order: 1, created_at: stamp, updated_at: stamp,
+                  sync_status: 'synced', user_id: 'mock-user',
+                },
+                {
+                  id: 46, task_id: 2, parent_id: 44,
+                  text: 'Enter grandchild current', is_checked: false,
+                  sort_order: 0, created_at: stamp, updated_at: stamp,
+                  sync_status: 'synced', user_id: 'mock-user',
+                },
+                {
+                  id: 47, task_id: 2, parent_id: 44,
+                  text: 'Enter grandchild after', is_checked: false,
+                  sort_order: 1, created_at: stamp, updated_at: stamp,
+                  sync_status: 'synced', user_id: 'mock-user',
+                },
+              ];
+              const others = JSON.parse(localStorage.getItem('mock.task_checkboxes') || '[]')
+                .filter(x => x.task_id !== 2);
+              localStorage.setItem('mock.task_checkboxes', JSON.stringify([...others, ...rows]));
+              localStorage.setItem('mock.__seq.task_checkboxes', '47');
+              window.dispatchEvent(new CustomEvent('snippets:sync-complete', {
+                detail: {
+                  result: {
+                    timestamp: '12:00:00',
+                    push: { total: 0, pushed: {} },
+                    pull: { total: 1, pulled: { task_checkboxes: ['enter fixture'] } },
+                  },
+                },
+              }));
+            })()""")
+            await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"tasks\"]').click()")
+            await wait_until(
+                cdp,
+                "[...document.querySelectorAll('.task-title')]"
+                ".some(x => x.textContent.includes('Regular mock task'))",
+                timeout=4,
+            )
+            await cdp.eval(
+                "[...document.querySelectorAll('.task-title')]"
+                ".find(x => x.textContent.includes('Regular mock task')).click()"
+            )
+            await wait_until(
+                cdp,
+                "[...document.querySelectorAll('.tcb-text')]"
+                ".some(x => x.textContent.includes('Enter grandchild after'))",
+                timeout=4,
+            )
+            hidden_visible = await cdp.eval(
+                "[...document.querySelectorAll('.tcb-text')]"
+                ".some(x => x.textContent.includes('Enter hidden completed root'))"
+            )
+            assert hidden_visible is False, 'completed root fixture should be hidden in the UI'
+
+            await cdp.eval("""(() => {
+              const row = [...document.querySelectorAll('.tcb-item')]
+                .find(x => x.querySelector('.tcb-text')?.textContent.includes('Enter root current'));
+              const text = row?.querySelector('.tcb-text');
+              text?.dispatchEvent(new KeyboardEvent('keydown', {
+                key: 'Enter',
+                bubbles: true,
+                cancelable: true,
+              }));
+            })()""")
+            await wait_until(
+                cdp,
+                "JSON.parse(localStorage.getItem('mock.task_checkboxes') || '[]')"
+                ".some(x => x.task_id === 2 && x.id > 47)",
+                timeout=3,
+            )
+            root_created_id = await cdp.eval("""(() => {
+              return JSON.parse(localStorage.getItem('mock.task_checkboxes') || '[]')
+                .filter(x => x.task_id === 2 && x.parent_id == null && x.id > 47 && x.text === '')
+                .sort((a, b) => a.id - b.id)[0]?.id || null;
+            })()""")
+            root_order = await cdp.eval("""(() => {
+              return JSON.parse(localStorage.getItem('mock.task_checkboxes') || '[]')
+                .filter(x => x.task_id === 2 && x.parent_id == null && x.sync_status !== 'deleted')
+                .sort((a, b) => a.sort_order - b.sort_order || a.id - b.id)
+                .map(x => x.text || `new:${x.id}`);
+            })()""")
+            assert root_order == [
+                'Enter root before',
+                'Enter root current',
+                f'new:{root_created_id}',
+                'Enter hidden completed root',
+                'Enter root after',
+            ], f'root order after Enter: {root_order!r}'
+
+            await wait_until(
+                cdp,
+                f"document.querySelector('[data-cb-id=\"{root_created_id}\"] .tcb-text[contenteditable=\"true\"]') === document.activeElement",
+                timeout=3,
+            )
+            await cdp.eval("""(() => {
+              const row = [...document.querySelectorAll('.tcb-item')]
+                .find(x => x.querySelector('.tcb-text')?.textContent.includes('Enter child current'));
+              const text = row?.querySelector('.tcb-text');
+              text?.dispatchEvent(new KeyboardEvent('keydown', {
+                key: 'Enter',
+                bubbles: true,
+                cancelable: true,
+              }));
+            })()""")
+            await wait_until(
+                cdp,
+                f"JSON.parse(localStorage.getItem('mock.task_checkboxes') || '[]')"
+                f".some(x => x.task_id === 2 && x.id > {root_created_id})",
+                timeout=3,
+            )
+            child_created_id = await cdp.eval(f"""(() => {{
+              return JSON.parse(localStorage.getItem('mock.task_checkboxes') || '[]')
+                .filter(x => x.task_id === 2 && x.parent_id === 41 && x.id > {root_created_id} && x.text === '')
+                .sort((a, b) => a.id - b.id)[0]?.id || null;
+            }})()""")
+            child_order = await cdp.eval("""(() => {
+              return JSON.parse(localStorage.getItem('mock.task_checkboxes') || '[]')
+                .filter(x => x.task_id === 2 && x.parent_id === 41 && x.sync_status !== 'deleted')
+                .sort((a, b) => a.sort_order - b.sort_order || a.id - b.id)
+                .map(x => x.text || `new:${x.id}`);
+            })()""")
+            assert child_order == [
+                'Enter child current',
+                f'new:{child_created_id}',
+                'Enter child after',
+            ], f'child order after Enter: {child_order!r}'
+
+            await cdp.eval("""(() => {
+              const row = [...document.querySelectorAll('.tcb-item')]
+                .find(x => x.querySelector('.tcb-text')?.textContent.includes('Enter grandchild current'));
+              const text = row?.querySelector('.tcb-text');
+              text?.dispatchEvent(new KeyboardEvent('keydown', {
+                key: 'Enter',
+                bubbles: true,
+                cancelable: true,
+              }));
+            })()""")
+            await wait_until(
+                cdp,
+                f"JSON.parse(localStorage.getItem('mock.task_checkboxes') || '[]')"
+                f".some(x => x.task_id === 2 && x.id > {child_created_id})",
+                timeout=3,
+            )
+            grandchild_created_id = await cdp.eval(f"""(() => {{
+              return JSON.parse(localStorage.getItem('mock.task_checkboxes') || '[]')
+                .filter(x => x.task_id === 2 && x.parent_id === 44 && x.id > {child_created_id} && x.text === '')
+                .sort((a, b) => a.id - b.id)[0]?.id || null;
+            }})()""")
+            grandchild_order = await cdp.eval("""(() => {
+              return JSON.parse(localStorage.getItem('mock.task_checkboxes') || '[]')
+                .filter(x => x.task_id === 2 && x.parent_id === 44 && x.sync_status !== 'deleted')
+                .sort((a, b) => a.sort_order - b.sort_order || a.id - b.id)
+                .map(x => x.text || `new:${x.id}`);
+            })()""")
+            assert grandchild_order == [
+                'Enter grandchild current',
+                f'new:{grandchild_created_id}',
+                'Enter grandchild after',
+            ], f'grandchild order after Enter: {grandchild_order!r}'
+        finally:
+            await restore_task2_checkboxes()
+    await check('T15e Tasks checkbox Enter inserts after current sibling', t15e_tasks_checkbox_enter_inserts_after_current)
+
     # ── T16: Tasks Focus view layout/search/outside pinned ──
     async def t16_tasks_focus_view_layout_search_and_outside_pin():
         await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"tasks\"]').click()")

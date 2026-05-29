@@ -471,12 +471,7 @@ function buildCheckboxRow(node, task, ctx, depth, { editable }) {
         e.preventDefault();
         await commit();
         try {
-          const created = await call('create_task_checkbox', {
-            taskId: task.id,
-            parentId: node.parent_id,
-            text: '',
-          });
-          invalidateCheckboxCache(task.id);
+          const created = await createCheckboxSiblingAfter(task, node);
           ctx.onTaskReload && ctx.onTaskReload();
           // Focus new row after async re-render.
           focusAfterReload(`[data-cb-id="${created.id}"] .tcb-text[contenteditable="true"]`);
@@ -554,6 +549,56 @@ function buildCheckboxRow(node, task, ctx, depth, { editable }) {
   }
 
   return row;
+}
+
+async function createCheckboxSiblingAfter(task, node) {
+  const parentId = node.parent_id ?? null;
+  const created = await call('create_task_checkbox', {
+    taskId: task.id,
+    parentId,
+    text: '',
+  });
+
+  let items = await loadCheckboxes(task.id, true);
+  const createdId = Number(created.id);
+  const currentId = Number(node.id);
+  if (!items.some(x => Number(x.id) === createdId)) {
+    items = [
+      ...items,
+      {
+        ...created,
+        task_id: task.id,
+        parent_id: parentId,
+        sort_order: Number(created.sort_order) || 0,
+      },
+    ];
+  }
+
+  const sameParent = (item) => (item.parent_id ?? null) === parentId;
+  const siblings = items
+    .filter(x => sameParent(x) && x.sync_status !== 'deleted')
+    .sort((a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0) || Number(a.id) - Number(b.id));
+  const ordered = siblings.filter(x => Number(x.id) !== createdId);
+  const currentIdx = ordered.findIndex(x => Number(x.id) === currentId);
+
+  if (currentIdx >= 0) {
+    ordered.splice(currentIdx + 1, 0, {
+      ...created,
+      id: createdId,
+      parent_id: parentId,
+    });
+    await call('reorder_task_checkboxes', {
+      taskId: task.id,
+      entries: ordered.map((item, index) => ({
+        id: Number(item.id),
+        parent_id: parentId,
+        sort_order: index,
+      })),
+    });
+  }
+
+  invalidateCheckboxCache(task.id);
+  return created;
 }
 
 async function nestUnderPrev(task, node, ctx) {

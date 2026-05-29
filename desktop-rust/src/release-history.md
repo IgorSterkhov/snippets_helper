@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## f-20260529-1 (2026-05-29)
+
+- **Task checkbox Enter placement:** pressing Enter while editing a task
+  checkbox now creates the new checkbox at the same hierarchy level directly
+  after the current checkbox instead of appending it to the end of the sibling
+  list. Hidden completed siblings keep their relative order.
+
 ## v1.3.46 (2026-05-29)
 
 - **Detached module windows:** right-click a main sidebar module to open it in

@@ -726,6 +726,22 @@
     async list_task_checkboxes({ taskId }) {
       return storeGet('task_checkboxes', []).filter(x => x.task_id === taskId && x.sync_status !== 'deleted');
     },
+    async create_task_checkbox({ taskId, parentId, text }) {
+      const pid = parentId ?? null;
+      const siblings = storeGet('task_checkboxes', [])
+        .filter(x => Number(x.task_id) === Number(taskId) && (x.parent_id ?? null) === pid && x.sync_status !== 'deleted');
+      const sortOrder = siblings.reduce((max, x) => Math.max(max, Number(x.sort_order) || 0), -1) + 1;
+      return createItem('task_checkboxes', {
+        uuid: uuid(),
+        task_id: Number(taskId),
+        parent_id: pid,
+        text: text || '',
+        is_checked: false,
+        sort_order: sortOrder,
+        sync_status: 'pending',
+        user_id: 'mock-user',
+      });
+    },
     async reorder_task_checkboxes({ taskId, entries }) {
       const updates = new Map((entries || []).map(e => [Number(e.id), e]));
       const items = storeGet('task_checkboxes', []).map(x => {
