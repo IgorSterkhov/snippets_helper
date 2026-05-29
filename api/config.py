@@ -18,3 +18,8 @@ DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 DEEPSEEK_TIMEOUT_SECONDS = float(os.getenv("DEEPSEEK_TIMEOUT_SECONDS", "30"))
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_ALLOWED_CHAT_IDS = {
+    x.strip()
+    for x in os.getenv("TELEGRAM_ALLOWED_CHAT_IDS", "").split(",")
+    if x.strip()
+}

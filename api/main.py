@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from api.routes import admin, ai, auth, media, share_links, sync
+from api.routes import admin, ai, auth, media, share_links, sync, telegram
 
 app = FastAPI(title="Snippets Helper Sync API", version="1.0.0")
 
@@ -9,6 +9,7 @@ app.include_router(sync.router, prefix="/v1")
 app.include_router(share_links.router, prefix="/v1")
 app.include_router(admin.router, prefix="/v1")
 app.include_router(media.router, prefix="/v1")
+app.include_router(telegram.router, prefix="/v1")
 app.include_router(share_links.public_router)
 
 

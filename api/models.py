@@ -10,6 +10,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     Uuid,
     text,
 )
@@ -320,6 +321,41 @@ class MediaAssetVariant(Base):
     __table_args__ = (
         Index("idx_media_asset_variants_public_token", "public_token", unique=True),
         Index("uq_media_asset_variants_asset_variant", "asset_uuid", "variant", unique=True),
+    )
+
+
+class TelegramChatBinding(Base):
+    __tablename__ = "telegram_chat_bindings"
+
+    chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    user_id: Mapped[uuid_mod.UUID] = mapped_column(Uuid, ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=text("true"),
+    )
+
+    __table_args__ = (
+        Index("idx_telegram_chat_bindings_user", "user_id"),
+        Index("idx_telegram_chat_bindings_active", "is_active"),
+    )
+
+
+class TelegramProcessedMessage(Base):
+    __tablename__ = "telegram_processed_messages"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    message_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    update_id: Mapped[int | None] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("chat_id", "message_id", name="uq_telegram_processed_chat_message"),
+        Index("idx_telegram_processed_update", "update_id"),
     )
 
 

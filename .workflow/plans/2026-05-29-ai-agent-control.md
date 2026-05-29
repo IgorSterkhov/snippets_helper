@@ -429,7 +429,7 @@ on a local setting.
 - Modify: `api/models.py`
 - Create migration: `api/alembic/versions/011_add_telegram_ai_tables.py`
 
-- [ ] **Step 1: Add durable mapping and processed-message models**
+- [x] **Step 1: Add durable mapping and processed-message models**
 
 Add tables:
 
@@ -438,11 +438,11 @@ Add tables:
 - `telegram_processed_messages`: `chat_id`, `message_id`, `update_id`,
   `created_at`, unique on `(chat_id, message_id)`.
 
-- [ ] **Step 2: Migration**
+- [x] **Step 2: Migration**
 
 Create Alembic migration with snake_case names and indexes.
 
-- [ ] **Step 3: Tests**
+- [x] **Step 3: Tests**
 
 Add tests proving:
 
@@ -471,7 +471,7 @@ Use `sendMessage` with command execution summary.
 - Create: `api/routes/telegram.py`
 - Modify: `api/main.py`
 
-- [ ] **Step 1: Add health/status endpoints**
+- [x] **Step 1: Add health/status endpoints**
 
 Expose admin-only status:
 
