@@ -24,13 +24,18 @@ Before planning or editing, read the relevant existing guidance:
    options when asking questions.
 2. Do not implement until the user confirms the direction.
 3. Put new requirement specs in `.workflow/specs`.
-4. After writing a spec, present it in the browser visual companion for review
-   when a local web review session is available. Use port `8765` when the user
-   asks for a stable review URL.
-5. Put implementation plans in `.workflow/plans`.
-6. Preserve existing user and Claude changes. Do not revert unrelated files.
-7. Keep commits short and one-line when commits are requested or required.
-8. For every desktop release with user-facing changes, update Help and release
+4. Do not stop for user approval of the written spec or implementation plan
+   unless the user explicitly asks to review them. Instead, run an additional
+   reviewer agent for the spec/plan and apply blocking or important feedback
+   before implementation.
+5. After writing a spec, present it in the browser visual companion for review
+   when the user explicitly asks for visual review or when visual design choices
+   are the active deliverable. Use port `8765` when the user asks for a stable
+   review URL.
+6. Put implementation plans in `.workflow/plans`.
+7. Preserve existing user and Claude changes. Do not revert unrelated files.
+8. Keep commits short and one-line when commits are requested or required.
+9. For every desktop release with user-facing changes, update Help and release
    history before tagging. Treat `desktop-rust/src/tabs/help.js`,
    `desktop-rust/src/release-history.md`, and `desktop-rust/CHANGELOG.md` as a
    mandatory release gate, not an optional cleanup.
