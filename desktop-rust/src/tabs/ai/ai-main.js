@@ -1,4 +1,6 @@
 import { showToast } from '../../components/toast.js';
+import { showErrorDialog } from '../../components/error-dialog.js';
+import { whisperApi } from '../whisper/whisper-api.js';
 import { aiCSS } from './ai-css.js';
 import { sendAiChat } from './ai-api.js';
 import { executeAiCommands } from './ai-dispatcher.js';
@@ -7,6 +9,8 @@ const state = {
   root: null,
   mode: 'command',
   busy: false,
+  voiceBusy: false,
+  voiceRecording: false,
   reply: '',
   logs: [],
 };
@@ -89,7 +93,7 @@ function buildComposer() {
   micBtn.className = 'ai-mic-btn';
   micBtn.title = 'Voice input';
   micBtn.textContent = 'Mic';
-  micBtn.addEventListener('click', () => showToast('Voice input will use the Whisper module in the next pass', 'info'));
+  micBtn.addEventListener('click', toggleVoiceRecording);
   inputRow.appendChild(micBtn);
 
   const sendBtn = document.createElement('button');
@@ -151,8 +155,26 @@ function setBusy(nextBusy) {
   const mic = state.root?.querySelector('.ai-mic-btn');
   if (input) input.disabled = nextBusy;
   if (send) send.disabled = nextBusy;
-  if (mic) mic.disabled = nextBusy;
+  if (mic) mic.disabled = (nextBusy && !state.voiceRecording) || state.voiceBusy;
+  renderVoiceButton();
   renderResponse();
+}
+
+function renderVoiceButton() {
+  const mic = state.root?.querySelector('.ai-mic-btn');
+  if (!mic) return;
+  mic.classList.toggle('recording', state.voiceRecording);
+  if (state.voiceBusy) {
+    mic.textContent = state.voiceRecording ? 'Stopping...' : 'Starting...';
+    mic.title = 'Voice input is changing state';
+  } else if (state.voiceRecording) {
+    mic.textContent = 'Stop';
+    mic.title = 'Stop voice input';
+  } else {
+    mic.textContent = 'Mic';
+    mic.title = 'Voice input';
+  }
+  mic.disabled = (state.busy && !state.voiceRecording) || state.voiceBusy;
 }
 
 function buildContext() {
@@ -167,6 +189,10 @@ function buildContext() {
 
 async function sendCurrentMessage() {
   if (state.busy) return;
+  if (state.voiceRecording) {
+    showToast('Stop voice input first', 'error');
+    return;
+  }
   const input = state.root?.querySelector('.ai-input');
   const message = String(input?.value || '').trim();
   if (!message) return;
@@ -205,6 +231,48 @@ async function sendCurrentMessage() {
     renderResponse();
     renderLog();
   }
+}
+
+async function toggleVoiceRecording() {
+  if (state.voiceBusy) return;
+  if (state.busy && !state.voiceRecording) return;
+  const stopping = state.voiceRecording;
+  state.voiceBusy = true;
+  renderVoiceButton();
+  try {
+    if (!state.voiceRecording) {
+      await whisperApi.startRecording();
+      state.voiceRecording = true;
+      return;
+    }
+
+    const text = await whisperApi.stopRecording();
+    state.voiceRecording = false;
+    insertVoiceTranscript(text);
+  } catch (err) {
+    state.voiceRecording = false;
+    showErrorDialog({
+      title: 'AI voice input failed',
+      message: 'The AI tab could not record or transcribe voice input.',
+      details: {
+        error: String(err),
+        stage: stopping ? 'stop' : 'start',
+      },
+    });
+  } finally {
+    state.voiceBusy = false;
+    renderVoiceButton();
+  }
+}
+
+function insertVoiceTranscript(text) {
+  const input = state.root?.querySelector('.ai-input');
+  const transcript = String(text || '').trim();
+  if (!input || !transcript) return;
+  const current = String(input.value || '').trim();
+  input.value = current ? `${current}\n${transcript}` : transcript;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  input.focus();
 }
 
 function el(tag, opts = {}) {

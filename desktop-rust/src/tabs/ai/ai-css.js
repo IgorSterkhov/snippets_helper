@@ -151,6 +151,11 @@ export function aiCSS() {
   background: var(--bg-tertiary);
   color: var(--text);
 }
+.ai-mic-btn.recording {
+  width: 54px;
+  border-color: var(--danger, #f85149);
+  color: var(--danger, #f85149);
+}
 .ai-send-btn:disabled,
 .ai-mic-btn:disabled {
   opacity: 0.55;

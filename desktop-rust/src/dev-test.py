@@ -491,6 +491,21 @@ async def run_tests():
         await wait_until(cdp, "!!document.querySelector('.tab-btn[data-tab-id=\"shortcuts\"]')", timeout=8)
     await check('T2m AI command creates task locally', t2m_ai_command_creates_task_locally)
 
+    # ── T2n: AI mic records into prompt input ─────────────────
+    async def t2n_ai_mic_records_into_prompt():
+        await close_modals()
+        await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"ai\"]').click()")
+        await wait_until(cdp, "!!document.querySelector('#panel-ai .ai-mic-btn')", timeout=4)
+        await cdp.eval("document.querySelector('#panel-ai .ai-mic-btn').click()")
+        await wait_until(cdp, "document.querySelector('#panel-ai .ai-mic-btn')?.textContent.includes('Stop')", timeout=3)
+        await cdp.eval("document.querySelector('#panel-ai .ai-mic-btn').click()")
+        await wait_until(
+            cdp,
+            "(document.querySelector('#panel-ai textarea.ai-input')?.value || '').includes('Mocked transcript')",
+            timeout=4,
+        )
+    await check('T2n AI mic records into prompt', t2n_ai_mic_records_into_prompt)
+
     # ── T3: switch to Exec tab ────────────────────────────────
     async def t3():
         await cdp.eval(

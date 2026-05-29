@@ -349,13 +349,13 @@ Add browser smoke tests for:
 - Modify: `desktop-rust/src/tabs/ai/ai-main.js`
 - Reuse existing `desktop-rust/src/tabs/whisper/*` APIs where possible.
 
-- [ ] **Step 1: Add microphone button**
+- [x] **Step 1: Add microphone button**
 
 Desktop microphone button should invoke existing local/Deepgram transcription
 flow where available, then place transcript into the AI input and optionally
 send it.
 
-- [ ] **Step 2: Fallback**
+- [x] **Step 2: Fallback**
 
 If no voice engine is configured, show a persistent error/dialog or inline
 message explaining that Whisper/Deepgram must be configured.
