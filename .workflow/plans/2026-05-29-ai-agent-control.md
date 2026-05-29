@@ -500,16 +500,18 @@ command.
 - Modify: `desktop-rust/src/release-history.md`
 - Modify: `desktop-rust/CHANGELOG.md`
 
-- [ ] **Step 1: Update Help**
+- [x] **Step 1: Update Help**
 
 Document AI tab, DeepSeek server-managed token, command mode, and Telegram
 server bot.
 
-- [ ] **Step 2: Release type**
+- [x] **Step 2: Release type**
 
 If desktop native commands changed, bump native version and publish `v*`. If
 desktop only changed frontend and API/mobile are released separately, publish
 `f-*` only for desktop frontend changes.
+
+Release note: desktop native command `ai_chat` requires full `v1.3.47`.
 
 ### Task 19: Mobile Release
 

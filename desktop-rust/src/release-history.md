@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## v1.3.47 (2026-05-29)
+
+- **AI Agent tab:** added a desktop AI module backed by the server-managed
+  DeepSeek gateway. Chat mode answers in the tab; Command mode returns a
+  validated safe command plan that can open Tasks, Notes, and Snippets, create
+  tasks, and add or complete task checkboxes locally so normal sync carries the
+  change.
+- **Voice prompts:** desktop AI can reuse the configured Whisper/Deepgram
+  transcription flow, and mobile AI now has Android speech recognition with
+  microphone permission for spoken prompts.
+- **Mobile AI tab:** added text AI chat/command support with local safe command
+  execution and sync notification.
+- **Telegram AI safety:** added deny-by-default Telegram bot plumbing with
+  durable chat-to-user bindings, idempotent processed message tracking,
+  admin-only poll/status controls, and a server console command for binding a
+  Telegram chat to an app user by API-key prefix.
+
 ## f-20260529-1 (2026-05-29)
 
 - **Task checkbox Enter placement:** pressing Enter while editing a task
