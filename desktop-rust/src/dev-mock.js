@@ -449,6 +449,44 @@
       if (!updated) throw new Error('user not found');
       return updated;
     },
+    async ai_chat({ request }) {
+      const mode = request?.mode === 'chat' ? 'chat' : 'command';
+      const message = String(request?.message || '');
+      if (mode === 'chat') {
+        return {
+          mode,
+          reply: `Mock AI answer: ${message}`,
+          commands: [],
+          results: [],
+        };
+      }
+      const tasks = storeGet('tasks', []).filter(t => t.sync_status !== 'deleted');
+      const regular = tasks.find(t => /regular/i.test(t.title)) || tasks[0] || null;
+      const commands = [];
+      const lower = message.toLowerCase();
+      if (lower.includes('create')) {
+        commands.push({
+          name: 'create_task',
+          args: { title: 'AI created mock task', checkboxes: ['First AI checkbox'] },
+        });
+      } else if (lower.includes('add') && regular) {
+        commands.push({
+          name: 'add_task_checkbox',
+          args: { task_uuid: regular.uuid, text: 'AI added checkbox' },
+        });
+      } else if (regular) {
+        commands.push({
+          name: 'open_task',
+          args: { task_uuid: regular.uuid },
+        });
+      }
+      return {
+        mode,
+        reply: commands.length ? 'Mock AI command plan is ready.' : 'Mock AI did not find a command.',
+        commands,
+        results: [],
+      };
+    },
 
     // ── Shortcuts ───────────────────────────────────────
     async list_shortcuts() { return storeGet('shortcuts', []); },
@@ -703,6 +741,24 @@
         .filter(t => t.sync_status !== 'deleted' && t.is_pinned)
         .sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
     },
+    async create_task({ title, categoryId, statusId }) {
+      const sortOrder = storeGet('tasks', [])
+        .filter(t => t.sync_status !== 'deleted')
+        .reduce((max, t) => Math.max(max, Number(t.sort_order) || 0), -1) + 1;
+      return createItem('tasks', {
+        uuid: uuid(),
+        title: title || 'New task',
+        category_id: categoryId ?? null,
+        status_id: statusId ?? null,
+        is_pinned: false,
+        bg_color: null,
+        tracker_url: null,
+        notes_md: '',
+        sort_order: sortOrder,
+        sync_status: 'pending',
+        user_id: 'mock-user',
+      });
+    },
     async update_task({ id, title, categoryId, statusId, isPinned, bgColor, trackerUrl, notesMd }) {
       return updateItem('tasks', id, {
         title,
@@ -722,6 +778,9 @@
           : t
       ));
       storeSet('tasks', tasks);
+    },
+    async delete_task({ id }) {
+      updateItem('tasks', id, { sync_status: 'deleted' });
     },
     async list_task_checkboxes({ taskId }) {
       return storeGet('task_checkboxes', []).filter(x => x.task_id === taskId && x.sync_status !== 'deleted');

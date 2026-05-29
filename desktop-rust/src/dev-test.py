@@ -439,6 +439,58 @@ async def run_tests():
         assert '.reload()' in service_rs, 'overlay refresh should use the native WebView reload API'
     await check('T2k Whisper overlay OTA reload contract', t2k_whisper_overlay_reload_contract)
 
+    # ── T2l: AI tab renders command/chat shell ────────────────
+    async def t2l_ai_tab_shell():
+        await close_modals()
+        await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"ai\"]').click()")
+        await wait_until(cdp, "!!document.querySelector('#panel-ai .ai-agent-wrap')", timeout=4)
+        mode_labels = await cdp.eval(
+            "[...document.querySelectorAll('#panel-ai .ai-mode-btn')].map(x => x.textContent.trim())"
+        )
+        assert mode_labels == ['Chat', 'Command'], mode_labels
+        has_input = await cdp.eval("!!document.querySelector('#panel-ai textarea.ai-input')")
+        assert has_input, 'AI input missing'
+        send_text = await cdp.eval("document.querySelector('#panel-ai .ai-send-btn')?.textContent.trim() || ''")
+        assert 'Send' in send_text, f'send button text: {send_text!r}'
+        has_log = await cdp.eval("!!document.querySelector('#panel-ai .ai-execution-log')")
+        assert has_log, 'execution log missing'
+    await check('T2l AI tab renders shell', t2l_ai_tab_shell)
+
+    # ── T2m: AI command plan executes locally ────────────────
+    async def t2m_ai_command_creates_task_locally():
+        await close_modals()
+        await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"ai\"]').click()")
+        await wait_until(cdp, "!!document.querySelector('#panel-ai textarea.ai-input')", timeout=4)
+        await cdp.eval("""(() => {
+          const input = document.querySelector('#panel-ai textarea.ai-input');
+          input.value = 'create task from ai';
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          document.querySelector('#panel-ai .ai-send-btn').click();
+        })()""")
+        await wait_until(
+            cdp,
+            "document.querySelector('.tab-btn[data-tab-id=\"tasks\"]')?.classList.contains('active')",
+            timeout=6,
+        )
+        created = await wait_until(cdp, """(async () => {
+          const tasks = await window.__TAURI__.core.invoke('list_tasks', { category: null, status: null });
+          const task = tasks.find(t => t.title === 'AI created mock task');
+          if (!task) return null;
+          const boxes = await window.__TAURI__.core.invoke('list_task_checkboxes', { taskId: task.id });
+          return { title: task.title, boxes: boxes.map(b => b.text) };
+        })()""", timeout=4)
+        assert created['title'] == 'AI created mock task', created
+        assert 'First AI checkbox' in created['boxes'], created
+        await cdp.eval("""(async () => {
+          const tasks = await window.__TAURI__.core.invoke('list_tasks', { category: null, status: null });
+          const task = tasks.find(t => t.title === 'AI created mock task');
+          if (task) await window.__TAURI__.core.invoke('delete_task', { id: task.id });
+          await window.__TAURI__.core.invoke('set_setting', { key: 'last_active_tab', value: 'shortcuts' });
+        })()""")
+        await cdp.send('Page.reload', ignoreCache=True)
+        await wait_until(cdp, "!!document.querySelector('.tab-btn[data-tab-id=\"shortcuts\"]')", timeout=8)
+    await check('T2m AI command creates task locally', t2m_ai_command_creates_task_locally)
+
     # ── T3: switch to Exec tab ────────────────────────────────
     async def t3():
         await cdp.eval(

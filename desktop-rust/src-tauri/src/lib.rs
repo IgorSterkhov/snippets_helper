@@ -152,6 +152,7 @@ pub fn run() {
             commands::admin::get_admin_me,
             commands::admin::list_admin_users,
             commands::admin::update_admin_user_limits,
+            commands::ai::ai_chat,
             commands::media::pick_media_file,
             commands::media::start_media_upload,
             commands::media::start_media_clipboard_upload,

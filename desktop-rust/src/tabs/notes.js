@@ -17,6 +17,7 @@ let previewMode = false;
 let expandedFolderIds = new Set();
 let expandedNoteIdx = null;
 let expandMultiplier = 4;
+let aiNoteListenerInstalled = false;
 
 export async function init(container) {
   root = container;
@@ -28,6 +29,7 @@ export async function init(container) {
     if (em) expandMultiplier = parseInt(em) || 4;
   } catch {}
 
+  installAiNoteListener();
   loadFolders();
 }
 
@@ -437,6 +439,70 @@ async function loadNotes() {
   } catch (e) {
     showToast('Failed to load notes: ' + e, 'error');
   }
+}
+
+function installAiNoteListener() {
+  if (aiNoteListenerInstalled) return;
+  aiNoteListenerInstalled = true;
+  window.addEventListener('ai:notes-open', async (event) => {
+    if (!root) return;
+    try {
+      await openNoteFromAi(event.detail || {});
+    } catch (err) {
+      showToast('Failed to open AI note target: ' + err, 'error');
+    }
+  });
+  window.addEventListener('ai:notes-search', async (event) => {
+    if (!root) return;
+    try {
+      const target = await findNoteForAi(event.detail || {});
+      if (target) {
+        selectedFolderId = target.folder_id;
+        editingNote = null;
+        previewMode = false;
+        notes = await call('list_notes', { folderId: selectedFolderId });
+        renderFolders();
+        renderNotesList();
+      }
+    } catch (err) {
+      showToast('Failed to search notes from AI: ' + err, 'error');
+    }
+  });
+}
+
+async function collectAllNotesForAi() {
+  if (!folders.length) await loadFolders();
+  const result = [];
+  for (const folder of folders) {
+    const rows = await call('list_notes', { folderId: folder.id }).catch(() => []);
+    result.push(...rows);
+  }
+  return result;
+}
+
+async function findNoteForAi(detail) {
+  const allNotes = await collectAllNotesForAi();
+  if (detail.noteUuid) {
+    return allNotes.find(n => n.uuid === detail.noteUuid) || null;
+  }
+  const query = String(detail.query || '').trim().toLowerCase();
+  if (!query) return null;
+  return allNotes.find(n => (
+    String(n.title || '').toLowerCase().includes(query)
+    || String(n.content || '').toLowerCase().includes(query)
+  )) || null;
+}
+
+async function openNoteFromAi(detail) {
+  const target = await findNoteForAi(detail);
+  if (!target) {
+    showToast('AI note target not found', 'error');
+    return;
+  }
+  selectedFolderId = target.folder_id;
+  notes = await call('list_notes', { folderId: selectedFolderId });
+  renderFolders();
+  openEditor(target);
 }
 
 function renderRightEmpty() {

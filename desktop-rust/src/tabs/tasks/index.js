@@ -41,6 +41,7 @@ const TASK_SYNC_TABLES = new Set([
 ]);
 
 let syncRefreshListenerInstalled = false;
+let aiTaskListenerInstalled = false;
 
 // ── Public init ─────────────────────────────────────────────
 
@@ -81,6 +82,7 @@ export async function init(container) {
   await resetCollapseState();
   await renderAll();
   installSyncRefreshListener();
+  installAiTaskListener();
 
   // Pointer-based DnD: card → dropdown item / card → card / checkbox → row.
   // New model (v1.3.23): the DOM is reordered live during drag; on drop
@@ -116,6 +118,31 @@ function installSyncRefreshListener() {
     if (!state.root) return;
     invalidateAllCheckboxCache();
     await reloadAll();
+  });
+}
+
+function installAiTaskListener() {
+  if (aiTaskListenerInstalled) return;
+  aiTaskListenerInstalled = true;
+  window.addEventListener('ai:tasks-open', async (event) => {
+    if (!state.root) return;
+    const detail = event.detail || {};
+    try {
+      const all = await call('list_tasks', { category: null, status: null });
+      const target = all.find(t => (
+        (detail.taskUuid && t.uuid === detail.taskUuid)
+        || (detail.taskId != null && Number(t.id) === Number(detail.taskId))
+        || (detail.title && String(t.title || '').toLowerCase().includes(String(detail.title).toLowerCase()))
+      ));
+      if (!target) {
+        showToast('AI task target not found', 'error');
+        return;
+      }
+      localStorage.setItem('ai.recent_task_uuid', target.uuid);
+      await showSelectedTaskInList(target);
+    } catch (err) {
+      showToast('Failed to open AI task target: ' + err, 'error');
+    }
   });
 }
 
@@ -588,6 +615,7 @@ async function toggleExpanded(id) {
 export async function openExpanded(id, taskSnapshot = null) {
   state.expandedTaskId = id;
   if (taskSnapshot) state.selectedTask = taskSnapshot;
+  if (taskSnapshot?.uuid) localStorage.setItem('ai.recent_task_uuid', taskSnapshot.uuid);
   if (state.layoutMode === 'focus') {
     state.focusCardExpanded = false;
     await renderTaskList();

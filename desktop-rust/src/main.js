@@ -15,6 +15,7 @@ const TABS = [
   { id: 'repo-search', label: 'Search', icon: '\uD83D\uDD0D', loader: (el) => import('./tabs/repo-search.js').then(m => m.init(el)) },
   { id: 'vps', label: 'VPS', icon: '\uD83D\uDDA5', loader: (el) => import('./tabs/vps.js').then(m => m.init(el)) },
   { id: 'whisper', label: 'Whisper', icon: '🎤', loader: (el) => import('./tabs/whisper/whisper-main.js').then(m => m.init(el)) },
+  { id: 'ai', label: 'AI', icon: 'AI', loader: (el) => import('./tabs/ai/ai-main.js').then(m => m.init(el)) },
 ];
 
 function getStandaloneRequest() {
@@ -154,6 +155,7 @@ async function main() {
   } catch {}
 
   await tabContainer.activate(lastTab);
+  window.__keyboardHelperActiveTab = tabContainer.activeTabId || lastTab;
 
   let repoSearchTimer = null;
   const origActivate = tabContainer.activate.bind(tabContainer);
@@ -177,8 +179,22 @@ async function main() {
       repoSearchTimer = null;
     }
     await origActivate(tabId);
+    window.__keyboardHelperActiveTab = tabId;
     call('set_setting', { key: 'last_active_tab', value: tabId }).catch(() => {});
   };
+
+  window.addEventListener('ai:activate-tab', async (event) => {
+    const detail = event.detail || {};
+    const tabId = detail.tabId;
+    if (!tabId || !tabContainer.buttons[tabId]) return;
+    await tabContainer.activate(tabId);
+    if (detail.afterEvent) {
+      window.dispatchEvent(new CustomEvent(detail.afterEvent, { detail: detail.afterDetail || {} }));
+    }
+    window.dispatchEvent(new CustomEvent('ai:navigation-complete', {
+      detail: { requestId: detail.requestId || null, tabId },
+    }));
+  });
 }
 
 document.addEventListener('keydown', async (e) => {

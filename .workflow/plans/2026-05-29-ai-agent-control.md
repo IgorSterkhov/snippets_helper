@@ -17,7 +17,7 @@
 **Files:**
 - Modify: `api/config.py`
 
-- [ ] **Step 1: Add config constants**
+- [x] **Step 1: Add config constants**
 
 Add:
 
@@ -35,7 +35,7 @@ TELEGRAM_ALLOWED_CHAT_IDS = {
 }
 ```
 
-- [ ] **Step 2: Syntax check**
+- [x] **Step 2: Syntax check**
 
 Run:
 
@@ -50,7 +50,7 @@ Expected: exit 0.
 **Files:**
 - Modify: `api/schemas.py`
 
-- [ ] **Step 1: Add Pydantic models**
+- [x] **Step 1: Add Pydantic models**
 
 Add models for:
 
@@ -93,7 +93,7 @@ class AiChatResponse(BaseModel):
     results: list[AiCommandResult] = []
 ```
 
-- [ ] **Step 2: Validate schema import**
+- [x] **Step 2: Validate schema import**
 
 Run:
 
@@ -108,7 +108,7 @@ Expected: exit 0.
 **Files:**
 - Create: `api/ai_commands.py`
 
-- [ ] **Step 1: Implement command definitions**
+- [x] **Step 1: Implement command definitions**
 
 Create a module that exposes:
 
@@ -128,7 +128,7 @@ The first tool schemas must include only:
 - `search_snippets`;
 - `open_snippet`.
 
-- [ ] **Step 2: Unit-level smoke**
+- [x] **Step 2: Unit-level smoke**
 
 Run:
 
@@ -144,7 +144,7 @@ Expected: exit 0.
 - Create: `api/deepseek_client.py`
 - Modify: `api/requirements.txt`
 
-- [ ] **Step 1: Ensure HTTP client dependency**
+- [x] **Step 1: Ensure HTTP client dependency**
 
 If `httpx` is missing, add:
 
@@ -152,7 +152,7 @@ If `httpx` is missing, add:
 httpx>=0.27.0
 ```
 
-- [ ] **Step 2: Implement request wrapper**
+- [x] **Step 2: Implement request wrapper**
 
 Create `DeepSeekClient` with:
 
@@ -162,7 +162,7 @@ Create `DeepSeekClient` with:
 - clear error messages when API key is missing;
 - parser for `message.content` and `message.tool_calls`.
 
-- [ ] **Step 3: Mockable boundary**
+- [x] **Step 3: Mockable boundary**
 
 Make the client accept an optional async HTTP client/session so tests can stub
 DeepSeek without network.
@@ -172,7 +172,7 @@ DeepSeek without network.
 **Files:**
 - Create: `api/ai_runtime.py`
 
-- [ ] **Step 1: Implement search helpers**
+- [x] **Step 1: Implement search helpers**
 
 Search by `ilike` over:
 
@@ -182,7 +182,7 @@ Search by `ilike` over:
 
 Limit each result set to 5 candidates.
 
-- [ ] **Step 2: Implement command executor**
+- [x] **Step 2: Implement command executor**
 
 Implement `execute_command(db, user, command, context)` for the first command
 set. Rules:
@@ -194,7 +194,7 @@ set. Rules:
 - every write sets `updated_at = datetime.utcnow()`;
 - no destructive commands.
 
-- [ ] **Step 3: Compile**
+- [x] **Step 3: Compile**
 
 Run:
 
@@ -210,7 +210,7 @@ Expected: exit 0.
 - Create: `api/routes/ai.py`
 - Modify: `api/main.py`
 
-- [ ] **Step 1: Add route**
+- [x] **Step 1: Add route**
 
 Add:
 
@@ -234,7 +234,7 @@ Behavior:
   Telegram chat has been mapped to a user;
 - return reply + command plan/execution log.
 
-- [ ] **Step 2: Register router**
+- [x] **Step 2: Register router**
 
 In `api/main.py` import and include `ai.router` under `/v1`.
 
@@ -243,7 +243,7 @@ In `api/main.py` import and include `ai.router` under `/v1`.
 **Files:**
 - Create: `tests/api/test_ai_runtime.py` or use the existing server test layout if one exists after inspection.
 
-- [ ] **Step 1: Test command validation**
+- [x] **Step 1: Test command validation**
 
 Cover:
 
@@ -251,11 +251,11 @@ Cover:
 - invalid unknown command rejected;
 - destructive command not accepted.
 
-- [ ] **Step 2: Test runtime ambiguity**
+- [x] **Step 2: Test runtime ambiguity**
 
 Seed two tasks with similar names and assert `needs_clarification`.
 
-- [ ] **Step 3: Test create task with checkboxes**
+- [x] **Step 3: Test create task with checkboxes**
 
 Assert rows are created with UUID relationships and updated timestamps.
 
@@ -270,7 +270,7 @@ Assert rows are created with UUID relationships and updated timestamps.
 - Modify: `desktop-rust/src/dev-mock.js`
 - Modify: `desktop-rust/src/dev-test.py`
 
-- [ ] **Step 1: Add failing browser test**
+- [x] **Step 1: Add failing browser test**
 
 In `dev-test.py`, add a smoke test that clicks the AI tab and asserts:
 
@@ -279,11 +279,11 @@ In `dev-test.py`, add a smoke test that clicks the AI tab and asserts:
 - Send button exists;
 - execution log exists.
 
-- [ ] **Step 2: Implement AI tab shell**
+- [x] **Step 2: Implement AI tab shell**
 
 Add `AI` to `TABS` and render a compact dark operational layout.
 
-- [ ] **Step 3: Add mock route**
+- [x] **Step 3: Add mock route**
 
 In `dev-mock.js`, mock `ai_chat` or the API client boundary used by the tab.
 
@@ -292,13 +292,17 @@ In `dev-mock.js`, mock `ai_chat` or the API client boundary used by the tab.
 **Files:**
 - Create: `desktop-rust/src/tabs/ai/ai-api.js`
 - Modify: `desktop-rust/src/tabs/ai/ai-main.js`
+- Create: `desktop-rust/src-tauri/src/commands/ai.rs`
+- Modify: `desktop-rust/src-tauri/src/commands/mod.rs`
+- Modify: `desktop-rust/src-tauri/src/lib.rs`
 
-- [ ] **Step 1: Reuse sync settings**
+- [x] **Step 1: Reuse sync settings**
 
-Use existing server base URL and API key settings. Do not store DeepSeek token
-on desktop.
+Use existing server base URL and API key settings through a native Tauri
+`ai_chat` proxy. Do not store DeepSeek token on desktop. The native proxy must
+force `channel="client"` before sending to the server.
 
-- [ ] **Step 2: Implement send**
+- [x] **Step 2: Implement send**
 
 Post to `/v1/ai/chat` with:
 
@@ -314,23 +318,23 @@ Post to `/v1/ai/chat` with:
 - Modify: Tasks/Notes/Snippets modules only where needed to expose lightweight
   open/select helpers.
 
-- [ ] **Step 1: Add navigation bus**
+- [x] **Step 1: Add navigation bus**
 
 Create browser custom events:
 
-- `ai:open-task`;
-- `ai:open-note`;
-- `ai:open-snippet`;
-- `ai:add-task-checkbox`;
-- `ai:complete-task-checkbox`;
-- `ai:create-task`.
+- `ai:activate-tab`;
+- `ai:tasks-open`;
+- `ai:notes-open`;
+- `ai:notes-search`;
+- `ai:snippets-open`;
+- `ai:snippets-search`.
 
-- [ ] **Step 2: Wire modules**
+- [x] **Step 2: Wire modules**
 
 Tasks, Notes, and Snippets listen for events and reuse existing list/detail
 loading code to open the target item.
 
-- [ ] **Step 3: Test**
+- [x] **Step 3: Test**
 
 Add browser smoke tests for:
 

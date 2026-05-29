@@ -45,6 +45,7 @@ let keyCloudBuildFingerprint = '';
 let keyCloudBuildSeq = 0;
 let keyCloudProgress = { status: 'idle', percent: 0, message: '' };
 const keyCloudProgressListeners = new Set();
+let aiSnippetListenerInstalled = false;
 
 export async function init(container) {
   container.innerHTML = '';
@@ -132,6 +133,7 @@ export async function init(container) {
 
   // Keyboard navigation
   document.addEventListener('keydown', onKeydown);
+  installAiSnippetListener();
 
   loadShortcuts();
 }
@@ -193,6 +195,52 @@ async function loadShortcuts() {
   } catch (err) {
     showToast('Failed to load shortcuts: ' + err, 'error');
   }
+}
+
+function installAiSnippetListener() {
+  if (aiSnippetListenerInstalled) return;
+  aiSnippetListenerInstalled = true;
+  window.addEventListener('ai:snippets-open', async (event) => {
+    try {
+      await openSnippetFromAi(event.detail || {});
+    } catch (err) {
+      showToast('Failed to open AI snippet target: ' + err, 'error');
+    }
+  });
+  window.addEventListener('ai:snippets-search', async (event) => {
+    const query = String(event.detail?.query || '').trim();
+    currentQuery = query;
+    selectedTagId = null;
+    selectedIndex = -1;
+    detailTab = 'code';
+    if (searchInputEl) searchInputEl.value = query;
+    await loadShortcuts();
+  });
+}
+
+async function ensureShortcutsForAi() {
+  if (!allShortcuts.length) await loadShortcuts();
+}
+
+async function openSnippetFromAi(detail) {
+  await ensureShortcutsForAi();
+  let target = null;
+  if (detail.snippetUuid) {
+    target = allShortcuts.find(s => s.uuid === detail.snippetUuid);
+  }
+  const query = String(detail.query || '').trim().toLowerCase();
+  if (!target && query) {
+    target = allShortcuts.find(s => (
+      String(s.name || '').toLowerCase().includes(query)
+      || String(s.value || '').toLowerCase().includes(query)
+      || String(s.description || '').toLowerCase().includes(query)
+    ));
+  }
+  if (!target) {
+    showToast('AI snippet target not found', 'error');
+    return;
+  }
+  await openShortcutById(target.id);
 }
 
 function renderList() {
@@ -1500,8 +1548,12 @@ function renderPinnedSnippetPanel() {
 }
 
 async function openPinnedSnippet(shortcutId) {
+  await openShortcutById(shortcutId);
+}
+
+async function openShortcutById(shortcutId) {
   const shortcut = allShortcuts.find(s => Number(s.id) === Number(shortcutId));
-  if (!shortcut) return;
+  if (!shortcut) return false;
   selectedTagId = null;
   currentQuery = '';
   if (searchInputEl) searchInputEl.value = '';
@@ -1510,6 +1562,7 @@ async function openPinnedSnippet(shortcutId) {
   detailTab = 'code';
   renderList();
   renderDetail();
+  return true;
 }
 
 function renderTagPanel() {

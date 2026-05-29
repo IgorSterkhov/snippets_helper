@@ -1,4 +1,5 @@
 pub mod admin;
+pub mod ai;
 pub mod notes;
 pub mod settings;
 pub mod shortcuts;
