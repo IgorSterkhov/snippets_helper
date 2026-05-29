@@ -19,6 +19,12 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://snippets_sync:${POSTGRES_PASSWORD}@isterapp_db:5432/snippets_sync
       SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
+      DEEPSEEK_TIMEOUT_SECONDS: ${DEEPSEEK_TIMEOUT_SECONDS:-30}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_ALLOWED_CHAT_IDS: ${TELEGRAM_ALLOWED_CHAT_IDS:-}
     expose:
       - "8001"
     volumes:
