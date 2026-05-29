@@ -455,13 +455,13 @@ Add tests proving:
 - Create: `api/telegram_bot.py`
 - Modify: `api/config.py`
 
-- [ ] **Step 1: Implement polling worker**
+- [x] **Step 1: Implement polling worker**
 
 Use Telegram `getUpdates` with durable offset/message tracking. Deny unknown
 chats before calling DeepSeek. Resolve every accepted chat to exactly one app
 `User` before calling server-side command execution.
 
-- [ ] **Step 2: Implement replies**
+- [x] **Step 2: Implement replies**
 
 Use `sendMessage` with command execution summary.
 
@@ -480,7 +480,7 @@ Expose admin-only status:
 - last error;
 - polling enabled state.
 
-- [ ] **Step 2: Start polling safely**
+- [x] **Step 2: Start polling safely**
 
 Do not start polling automatically in test mode. For production, either start
 from app lifespan when token is configured or run via a separate process
