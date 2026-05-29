@@ -42,6 +42,11 @@ body {
   overflow: hidden;
 }
 
+body.standalone-module-window #app {
+  width: 100vw;
+  height: 100vh;
+}
+
 /* ── Sidebar / Tab Bar ────────────────────────────────────── */
 
 .tab-bar {
@@ -105,6 +110,39 @@ body {
   padding: 16px;
   display: flex;
   flex-direction: column;
+}
+
+.standalone-module-panel {
+  width: 100%;
+  height: 100%;
+}
+
+.module-context-menu {
+  position: fixed;
+  z-index: 10000;
+  min-width: 190px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.36);
+}
+
+.module-context-menu button {
+  width: 100%;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 7px 9px;
+  text-align: left;
+}
+
+.module-context-menu button:hover {
+  background: var(--bg-tertiary);
 }
 
 /* ── Inputs ───────────────────────────────────────────────── */

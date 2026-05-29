@@ -10,6 +10,7 @@ pub mod commits;
 pub mod exec;
 pub mod help;
 pub mod media;
+pub mod module_windows;
 pub mod repo_search;
 pub mod vps;
 pub mod ota;

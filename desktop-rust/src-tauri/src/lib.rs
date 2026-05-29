@@ -130,6 +130,7 @@ pub fn run() {
             commands::shortcuts::delete_snippet_tag,
             commands::shortcuts::filter_shortcuts,
             commands::shortcuts::open_link_window,
+            commands::module_windows::open_module_window,
             commands::shortcuts::list_obsidian_vaults,
             commands::shortcuts::list_obsidian_folders,
             commands::shortcuts::list_obsidian_files,

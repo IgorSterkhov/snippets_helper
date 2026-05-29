@@ -245,11 +245,10 @@ pub async fn apply_frontend_update(app: AppHandle, version: String) -> Result<()
 }
 
 fn reload_frontend_windows(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.reload();
-    }
-    if let Some(window) = app.get_webview_window("whisper-overlay") {
-        let _ = window.reload();
+    for (label, window) in app.webview_windows() {
+        if label == "main" || label == "whisper-overlay" || label.starts_with("module_") {
+            let _ = window.reload();
+        }
     }
 }
 
@@ -296,9 +295,7 @@ pub fn spawn_boot_watchdog(app: AppHandle) {
                 if let Ok(p) = pointer_path(&app) {
                     let _ = fs::remove_file(&p);
                 }
-                if let Some(w) = app.get_webview_window("main") {
-                    let _ = w.eval("window.location.reload()");
-                }
+                reload_frontend_windows(&app);
                 return;
             }
         };
@@ -308,15 +305,11 @@ pub fn spawn_boot_watchdog(app: AppHandle) {
                 let _ = fs::write(&pp, &prev);
             }
             let _ = fs::remove_file(&root.join("frontend-prev.txt"));
-            if let Some(w) = app.get_webview_window("main") {
-                let _ = w.eval("window.location.reload()");
-            }
+            reload_frontend_windows(&app);
         } else if let Ok(pp) = pointer_path(&app) {
             // Previous folder gone too — drop override to fall back to bundled.
             let _ = fs::remove_file(&pp);
-            if let Some(w) = app.get_webview_window("main") {
-                let _ = w.eval("window.location.reload()");
-            }
+            reload_frontend_windows(&app);
         }
     });
 }
@@ -350,9 +343,7 @@ pub async fn revert_frontend(app: AppHandle) -> Result<String, String> {
     }
     fs::write(pointer_path(&app)?, &prev).map_err(|e| e.to_string())?;
     fs::remove_file(prev_pointer_path(&app)?).ok();
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.eval("window.location.reload()");
-    }
+    reload_frontend_windows(&app);
     Ok(prev)
 }
 
@@ -366,8 +357,6 @@ pub async fn drop_frontend_override(app: AppHandle) -> Result<(), String> {
     if prev.exists() {
         fs::remove_file(&prev).map_err(|e| e.to_string())?;
     }
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.eval("window.location.reload()");
-    }
+    reload_frontend_windows(&app);
     Ok(())
 }

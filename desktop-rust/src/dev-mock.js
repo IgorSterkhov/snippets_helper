@@ -510,6 +510,10 @@
     async update_snippet_tag({ id, ...patch }) { return updateItem('snippet_tags', id, patch); },
     async delete_snippet_tag({ id }) { deleteItem('snippet_tags', id); },
     async open_link_window({ url }) { console.log('[mock] open_link_window', url); window.open(url, '_blank'); },
+    async open_module_window({ moduleId }) {
+      window.__mockOpenedModuleWindows = window.__mockOpenedModuleWindows || [];
+      window.__mockOpenedModuleWindows.push(moduleId);
+    },
 
     // ── Obsidian ────────────────────────────────────────
     async list_obsidian_vaults() { return []; },

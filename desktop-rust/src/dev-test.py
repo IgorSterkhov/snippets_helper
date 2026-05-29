@@ -432,7 +432,9 @@ async def run_tests():
         with open(service_rs_path, 'r', encoding='utf-8') as f:
             service_rs = f.read()
         assert 'reload_frontend_windows' in ota_rs, 'frontend OTA should reload all frontend windows, not only main'
-        assert 'get_webview_window("whisper-overlay")' in ota_rs, 'frontend OTA should explicitly reload the hidden overlay window'
+        assert 'webview_windows()' in ota_rs, 'frontend OTA should iterate every open WebView window'
+        assert 'label == "whisper-overlay"' in ota_rs, 'frontend OTA should explicitly reload the hidden overlay window'
+        assert 'label.starts_with("module_")' in ota_rs, 'frontend OTA should reload detached module windows'
         assert 'reload_overlay_document' in service_rs, 'show_overlay should refresh a stale hidden overlay document before showing it'
         assert '.reload()' in service_rs, 'overlay refresh should use the native WebView reload API'
     await check('T2k Whisper overlay OTA reload contract', t2k_whisper_overlay_reload_contract)
@@ -2172,6 +2174,75 @@ async def run_tests():
         )
         assert reloaded_names == ['SELECT all', 'sql_guide'], f'reloaded modified order: {reloaded_names!r}'
     await check('T26 Snippets left panel sort mode', t26_snippets_left_panel_sort_mode)
+
+    # ── T27: Detached module windows ───────────────────────
+    async def t27_detached_module_context_menu_and_standalone_boot():
+        await cdp.send('Page.navigate', url=TEST_URL)
+        await asyncio.sleep(0.8)
+        await wait_until(cdp, "!!document.querySelector('.tab-btn')", timeout=8)
+        await wait_until(cdp, "!!window.__TAURI__ && !!window.__TAURI__.core", timeout=5)
+        await cdp.eval("""(() => {
+          const settings = JSON.parse(localStorage.getItem('mock.settings') || '{}');
+          settings.last_active_tab = 'notes';
+          localStorage.setItem('mock.settings', JSON.stringify(settings));
+        })()""")
+
+        await cdp.eval("window.__mockOpenedModuleWindows = []")
+        await cdp.eval("""(() => {
+          const btn = document.querySelector('.tab-btn[data-tab-id="tasks"]');
+          btn.dispatchEvent(new MouseEvent('contextmenu', {
+            bubbles: true, cancelable: true, clientX: 40, clientY: 120
+          }));
+        })()""")
+        await wait_until(cdp, "!!document.querySelector('.module-context-menu')", timeout=3)
+        menu_text = await cdp.eval("document.querySelector('.module-context-menu').textContent")
+        assert 'Open in separate window' in menu_text, menu_text
+        await cdp.eval("document.querySelector('.module-context-menu [data-action=\"open-module-window\"]').click()")
+        opened = await wait_until(
+            cdp,
+            "window.__mockOpenedModuleWindows && window.__mockOpenedModuleWindows[0] === 'tasks'",
+            timeout=3,
+        )
+        assert opened is True
+
+        await cdp.send('Page.navigate', url=f'{TEST_URL}?standalone=1&module=tasks')
+        await asyncio.sleep(0.8)
+        await wait_until(cdp, "document.body.classList.contains('standalone-module-window')", timeout=8)
+        has_sidebar = await cdp.eval("!!document.querySelector('.tab-bar')")
+        assert has_sidebar is False, 'standalone window rendered the main sidebar'
+        has_status_bar = await cdp.eval("!!document.querySelector('#status-bar')")
+        assert has_status_bar is False, 'standalone window rendered main status bar'
+        panel_id = await cdp.eval("document.querySelector('.tab-panel')?.id")
+        assert panel_id == 'panel-tasks', panel_id
+        has_task_text = await wait_until(
+            cdp,
+            "document.body.innerText.includes('Regular mock task') || document.body.innerText.includes('Tasks')",
+            timeout=5,
+        )
+        assert has_task_text is True
+        stored_tab = await cdp.eval(
+            "JSON.parse(localStorage.getItem('mock.settings') || '{}').last_active_tab"
+        )
+        assert stored_tab == 'notes', f'standalone changed last_active_tab: {stored_tab!r}'
+
+        await cdp.send('Page.navigate', url=f'{TEST_URL}?standalone=1&module=unknown')
+        await asyncio.sleep(0.8)
+        await wait_until(cdp, "document.body.classList.contains('standalone-module-window')", timeout=8)
+        invalid_has_sidebar = await cdp.eval("!!document.querySelector('.tab-bar')")
+        assert invalid_has_sidebar is False, 'invalid standalone URL rendered the main sidebar'
+        invalid_text = await cdp.eval("document.body.innerText")
+        assert 'Unsupported module window' in invalid_text, invalid_text
+
+        await cdp.send('Page.navigate', url=TEST_URL)
+        await asyncio.sleep(0.8)
+        await wait_until(cdp, "!!document.querySelector('.tab-btn')", timeout=8)
+        active_tab = await wait_until(
+            cdp,
+            "document.querySelector('.tab-btn.active')?.dataset.tabId",
+            timeout=4,
+        )
+        assert active_tab == 'notes', f'main window did not keep last_active_tab: {active_tab!r}'
+    await check('T27 Detached module windows', t27_detached_module_context_menu_and_standalone_boot)
 
     # Summary
     print()

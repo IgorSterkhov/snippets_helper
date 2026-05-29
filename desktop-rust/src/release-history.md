@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v1.3.46 (2026-05-29)
+
+- **Detached module windows:** right-click a main sidebar module to open it in
+  its own focused window without the main left sidebar. Reopening the same
+  module focuses the existing detached window, and frontend OTA reloads now
+  include detached `module_*` windows.
+
 ## v1.3.45 (2026-05-28)
 
 - **Whisper overlay OTA reload:** applying a frontend OTA now reloads the hidden
