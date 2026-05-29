@@ -410,16 +410,21 @@ cycle pushes them.
 - Inspect and then modify `mobile/package.json`, `mobile/android/**`, and
   `mobile/src/screens/AI/AIScreen.js` only if native audio capture is needed.
 
-- [ ] **Step 1: Choose implementation after inspection**
+- [x] **Step 1: Choose implementation after inspection**
 
 If an existing speech/audio module is not available, add a native-capable speech
 or recording dependency and Android microphone permission. This makes the mobile
 release an APK release.
 
-- [ ] **Step 2: Implement press-to-record**
+- [x] **Step 2: Implement press-to-record**
 
 Send transcript text into the AI input and let the user send or auto-send based
 on a local setting.
+
+Implementation note: mobile voice uses a small Android `SpeechRecognizer`
+native module and `RECORD_AUDIO`, so this part requires an APK release. Local
+Gradle verification could not run in the current environment because no JDK is
+installed.
 
 ## Phase 4: Telegram Bot
 
@@ -512,7 +517,7 @@ desktop only changed frontend and API/mobile are released separately, publish
 - Modify: `mobile/package.json`
 - Possibly modify: `mobile/android/**`
 
-- [ ] **Step 1: Determine release type**
+- [x] **Step 1: Determine release type**
 
 If mobile voice adds permissions/dependencies, cut APK release. If AI tab is JS
 only, cut mobile OTA.

@@ -16,6 +16,7 @@ import { useTheme } from '../../theme/ThemeContext';
 import { useAuth } from '../../auth/AuthContext';
 import { sendAiChat } from '../../api/ai';
 import { executeMobileAiCommands } from '../../ai/commandDispatcher';
+import { startMobileSpeechRecognition, stopMobileSpeechRecognition } from '../../ai/speechRecognition';
 
 export default function AIScreen({ navigation }) {
   const { colors } = useTheme();
@@ -25,7 +26,9 @@ export default function AIScreen({ navigation }) {
   const [reply, setReply] = useState('');
   const [logs, setLogs] = useState([]);
   const [busy, setBusy] = useState(false);
+  const [voiceState, setVoiceState] = useState('idle');
   const [recentTaskUuid, setRecentTaskUuid] = useState(null);
+  const voiceBusy = voiceState === 'listening' || voiceState === 'stopping';
 
   const send = async () => {
     const text = message.trim();
@@ -66,6 +69,39 @@ export default function AIScreen({ navigation }) {
     }
   };
 
+  const toggleVoice = async () => {
+    if (busy) return;
+    if (voiceBusy) {
+      setVoiceState('stopping');
+      try {
+        await stopMobileSpeechRecognition();
+      } catch (e) {
+        const errorText = String(e);
+        setReply(errorText);
+        Alert.alert('Voice error', errorText);
+        setVoiceState('idle');
+      }
+      return;
+    }
+
+    setVoiceState('listening');
+    setReply('Listening...');
+    try {
+      const transcript = await startMobileSpeechRecognition({ locale: 'ru-RU' });
+      setMessage((prev) => {
+        const base = prev.trim();
+        return base ? `${base} ${transcript}` : transcript;
+      });
+      setReply(`Heard: ${transcript}`);
+    } catch (e) {
+      const errorText = String(e);
+      setReply(errorText);
+      Alert.alert('Voice error', errorText);
+    } finally {
+      setVoiceState('idle');
+    }
+  };
+
   const renderLog = ({ item }) => (
     <View style={[s.logItem, { borderColor: statusColor(item.status, colors), backgroundColor: colors.card }]}>
       <Text style={[s.logName, { color: colors.text }]}>{item.name || 'command'}</Text>
@@ -89,7 +125,7 @@ export default function AIScreen({ navigation }) {
     >
       <View style={[s.header, { borderBottomColor: colors.border, backgroundColor: colors.bgSecondary }]}>
         <Text style={[s.heading, { color: colors.text }]}>AI</Text>
-        <Text style={[s.status, { color: colors.textMuted }]}>DeepSeek</Text>
+        <Text style={[s.status, { color: colors.textMuted }]}>{voiceStatus(voiceState)}</Text>
       </View>
 
       <View style={s.modeRow}>
@@ -122,8 +158,21 @@ export default function AIScreen({ navigation }) {
           editable={!busy}
         />
         <View style={s.actionRow}>
-          <TouchableOpacity disabled style={[s.micButton, { borderColor: colors.border, opacity: 0.45 }]}>
-            <Text style={[s.micText, { color: colors.textMuted }]}>Mic</Text>
+          <TouchableOpacity
+            onPress={toggleVoice}
+            disabled={busy}
+            style={[
+              s.micButton,
+              {
+                borderColor: voiceBusy ? colors.primary : colors.border,
+                backgroundColor: voiceBusy ? `${colors.primary}22` : 'transparent',
+                opacity: busy ? 0.55 : 1,
+              },
+            ]}
+          >
+            <Text style={[s.micText, { color: voiceBusy ? colors.primary : colors.textSecondary }]}>
+              {voiceBusy ? 'Stop' : 'Mic'}
+            </Text>
           </TouchableOpacity>
           <TouchableOpacity
             onPress={send}
@@ -157,6 +206,12 @@ function statusColor(status, colors) {
   if (status === 'needs_clarification') return '#d29922';
   if (status === 'failed') return colors.danger || '#f85149';
   return colors.border;
+}
+
+function voiceStatus(state) {
+  if (state === 'listening') return 'Listening';
+  if (state === 'stopping') return 'Stopping';
+  return 'DeepSeek';
 }
 
 const s = StyleSheet.create({
