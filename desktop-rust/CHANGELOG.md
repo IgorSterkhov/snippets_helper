@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v1.3.48 (2026-05-29)
+
+- **Per-user DeepSeek keys:** AI no longer depends on a single server-wide
+  DeepSeek token. Each sync API user can save or clear their own DeepSeek key in
+  Settings -> AI; the key is stored on the server, never shown back in the app,
+  and is used for both desktop AI requests and that user's Telegram AI binding.
+
 ## v1.3.47 (2026-05-29)
 
 - **AI Agent tab:** added a desktop AI module backed by the server-managed

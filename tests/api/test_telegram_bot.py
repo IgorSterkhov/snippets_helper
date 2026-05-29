@@ -1,13 +1,14 @@
 import asyncio
 from dataclasses import dataclass
 
-from api.telegram_bot import process_telegram_text_update
+from api.telegram_bot import process_telegram_text_update, run_telegram_ai
 from api.models import TelegramChatBinding, TelegramProcessedMessage
 
 
 @dataclass
 class FakeUser:
     id: str = "user-1"
+    deepseek_api_key: str | None = None
 
 
 class FakeTelegramRepo:
@@ -77,3 +78,25 @@ def test_duplicate_telegram_message_does_not_execute_twice():
     assert first["status"] == "processed"
     assert second["status"] == "duplicate"
     assert len(calls) == 1
+
+
+def test_run_telegram_ai_uses_bound_user_deepseek_key(monkeypatch):
+    seen = {}
+
+    class FakeDeepSeekClient:
+        def __init__(self, *, api_key=None, **kwargs):
+            seen["api_key"] = api_key
+
+        async def chat(self, *, messages, tools):
+            return "Готово.", []
+
+    monkeypatch.setattr("api.telegram_bot.DeepSeekClient", FakeDeepSeekClient)
+
+    response = asyncio.run(run_telegram_ai(
+        db=None,
+        user=FakeUser(deepseek_api_key="sk-bound-user"),
+        text="покажи задачу Аптека",
+    ))
+
+    assert seen["api_key"] == "sk-bound-user"
+    assert response.reply == "Готово."

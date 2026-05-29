@@ -250,6 +250,42 @@ async def run_tests():
         await cdp.eval("document.querySelector('.settings-overlay')?.remove()")
     await check('T2c Settings admin limits tab visibility', t2c_admin_settings_tab_visibility)
 
+    # ── T2c2: Settings AI provider key is server-side ────────
+    async def t2c2_ai_provider_settings_tab():
+        await cdp.eval("""
+          document.querySelector('.settings-overlay')?.remove();
+          localStorage.removeItem('mock.ai_provider_deepseek_key');
+          localStorage.removeItem('mock.ai_provider_deepseek_updated_at');
+          document.querySelector('.tab-btn[title="Settings"]').click();
+        """)
+        await wait_until(cdp, "!!document.querySelector('.settings-overlay')", timeout=3)
+        await wait_until(
+            cdp,
+            "[...document.querySelectorAll('.settings-tab-btn')].some(b => b.textContent.trim() === 'AI')",
+            timeout=3,
+        )
+        await cdp.eval("[...document.querySelectorAll('.settings-tab-btn')].find(b => b.textContent.trim() === 'AI').click()")
+        await wait_until(cdp, "document.querySelector('.ai-provider-status')?.textContent.includes('Not configured')", timeout=3)
+        has_input = await cdp.eval("document.querySelector('.ai-provider-key-input')?.type === 'password'")
+        assert has_input, 'DeepSeek key password input missing'
+
+        await cdp.eval("""(() => {
+          const input = document.querySelector('.ai-provider-key-input');
+          input.value = 'sk-test-secret';
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          document.querySelector('.ai-provider-save-btn').click();
+        })()""")
+        await wait_until(cdp, "document.querySelector('.ai-provider-status')?.textContent.includes('Configured')", timeout=3)
+        input_value = await cdp.eval("document.querySelector('.ai-provider-key-input')?.value || ''")
+        assert input_value == '', 'saved secret should not stay visible in the input'
+        body_text = await cdp.eval("document.querySelector('.settings-overlay')?.textContent || ''")
+        assert 'sk-test-secret' not in body_text, 'raw DeepSeek key leaked into Settings text'
+
+        await cdp.eval("document.querySelector('.ai-provider-clear-btn').click()")
+        await wait_until(cdp, "document.querySelector('.ai-provider-status')?.textContent.includes('Not configured')", timeout=3)
+        await cdp.eval("document.querySelector('.settings-overlay')?.remove()")
+    await check('T2c2 Settings AI provider key tab', t2c2_ai_provider_settings_tab)
+
     # ── T2d: Tauri CSP permits public media previews ────────
     async def t2d_tauri_csp_allows_media_images():
         config_path = os.path.join(SRC_DIR, '..', 'src-tauri', 'tauri.conf.json')

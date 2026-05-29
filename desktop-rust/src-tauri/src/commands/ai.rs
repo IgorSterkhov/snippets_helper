@@ -1,6 +1,18 @@
 use crate::db::{queries, DbState};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::State;
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AiProviderSettings {
+    pub deepseek_configured: bool,
+    pub deepseek_updated_at: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct AiProviderSettingsRequest {
+    deepseek_api_key: String,
+}
 
 fn sync_settings(state: &State<'_, DbState>) -> Result<(String, String, Option<String>), String> {
     let computer_id = hostname::get()
@@ -46,13 +58,21 @@ fn ai_chat_url(api_url: &str) -> String {
     }
 }
 
-async fn parse_json(resp: reqwest::Response) -> Result<Value, String> {
+fn ai_provider_settings_url(api_url: &str) -> String {
+    if api_url.ends_with("/v1") {
+        format!("{api_url}/ai/provider-settings")
+    } else {
+        format!("{api_url}/v1/ai/provider-settings")
+    }
+}
+
+async fn parse_json<T: for<'de> Deserialize<'de>>(resp: reqwest::Response) -> Result<T, String> {
     let status = resp.status();
     if !status.is_success() {
         let body = resp.text().await.unwrap_or_default();
         return Err(format!("HTTP {status}: {body}"));
     }
-    resp.json::<Value>()
+    resp.json::<T>()
         .await
         .map_err(|e| format!("parse response: {e}"))
 }
@@ -72,12 +92,59 @@ pub async fn ai_chat(state: State<'_, DbState>, request: Value) -> Result<Value,
         .send()
         .await
         .map_err(|e| format!("request failed: {e}"))?;
-    parse_json(resp).await
+    parse_json::<Value>(resp).await
+}
+
+#[tauri::command]
+pub async fn get_ai_provider_settings(
+    state: State<'_, DbState>,
+) -> Result<AiProviderSettings, String> {
+    let (api_url, api_key, ca_cert) = sync_settings(&state)?;
+    let client = http_client(&api_url, ca_cert.as_deref())?;
+    let resp = client
+        .get(ai_provider_settings_url(&api_url))
+        .bearer_auth(api_key)
+        .send()
+        .await
+        .map_err(|e| format!("request failed: {e}"))?;
+    parse_json::<AiProviderSettings>(resp).await
+}
+
+#[tauri::command]
+pub async fn save_ai_provider_settings(
+    state: State<'_, DbState>,
+    deepseek_api_key: String,
+) -> Result<AiProviderSettings, String> {
+    let (api_url, api_key, ca_cert) = sync_settings(&state)?;
+    let client = http_client(&api_url, ca_cert.as_deref())?;
+    let resp = client
+        .put(ai_provider_settings_url(&api_url))
+        .bearer_auth(api_key)
+        .json(&AiProviderSettingsRequest { deepseek_api_key })
+        .send()
+        .await
+        .map_err(|e| format!("request failed: {e}"))?;
+    parse_json::<AiProviderSettings>(resp).await
+}
+
+#[tauri::command]
+pub async fn clear_ai_provider_settings(
+    state: State<'_, DbState>,
+) -> Result<AiProviderSettings, String> {
+    let (api_url, api_key, ca_cert) = sync_settings(&state)?;
+    let client = http_client(&api_url, ca_cert.as_deref())?;
+    let resp = client
+        .delete(ai_provider_settings_url(&api_url))
+        .bearer_auth(api_key)
+        .send()
+        .await
+        .map_err(|e| format!("request failed: {e}"))?;
+    parse_json::<AiProviderSettings>(resp).await
 }
 
 #[cfg(test)]
 mod tests {
-    use super::ai_chat_url;
+    use super::{ai_chat_url, ai_provider_settings_url};
 
     #[test]
     fn ai_chat_url_accepts_plain_and_v1_bases() {
@@ -88,6 +155,18 @@ mod tests {
         assert_eq!(
             ai_chat_url("https://example.test/snippets-api/v1"),
             "https://example.test/snippets-api/v1/ai/chat"
+        );
+    }
+
+    #[test]
+    fn ai_provider_settings_url_accepts_plain_and_v1_bases() {
+        assert_eq!(
+            ai_provider_settings_url("https://example.test/snippets-api"),
+            "https://example.test/snippets-api/v1/ai/provider-settings"
+        );
+        assert_eq!(
+            ai_provider_settings_url("https://example.test/snippets-api/v1"),
+            "https://example.test/snippets-api/v1/ai/provider-settings"
         );
     }
 }

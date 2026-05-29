@@ -449,6 +449,32 @@
       if (!updated) throw new Error('user not found');
       return updated;
     },
+    async get_ai_provider_settings() {
+      return {
+        deepseek_configured: !!storeGet('ai_provider_deepseek_key', ''),
+        deepseek_updated_at: storeGet('ai_provider_deepseek_updated_at', null),
+      };
+    },
+    async save_ai_provider_settings({ deepseekApiKey, deepseek_api_key }) {
+      const key = String(deepseekApiKey ?? deepseek_api_key ?? '').trim();
+      if (!key) throw new Error('DeepSeek API key is empty');
+      const updatedAt = now();
+      storeSet('ai_provider_deepseek_key', key);
+      storeSet('ai_provider_deepseek_updated_at', updatedAt);
+      return {
+        deepseek_configured: true,
+        deepseek_updated_at: updatedAt,
+      };
+    },
+    async clear_ai_provider_settings() {
+      const updatedAt = now();
+      localStorage.removeItem(LS_PREFIX + 'ai_provider_deepseek_key');
+      storeSet('ai_provider_deepseek_updated_at', updatedAt);
+      return {
+        deepseek_configured: false,
+        deepseek_updated_at: updatedAt,
+      };
+    },
     async ai_chat({ request }) {
       const mode = request?.mode === 'chat' ? 'chat' : 'command';
       const message = String(request?.message || '');

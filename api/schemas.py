@@ -155,6 +155,15 @@ class ShareLinkStatusResponse(BaseModel):
 
 # ==================== AI Agent ====================
 
+class AiProviderSettingsRequest(BaseModel):
+    deepseek_api_key: str
+
+
+class AiProviderSettingsResponse(BaseModel):
+    deepseek_configured: bool
+    deepseek_updated_at: Optional[datetime] = None
+
+
 class AiContext(BaseModel):
     module: Optional[str] = None
     current_task_uuid: Optional[str] = None

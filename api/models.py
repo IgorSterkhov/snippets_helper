@@ -47,6 +47,8 @@ class User(Base):
         default=20971520,
         server_default="20971520",
     )
+    deepseek_api_key: Mapped[str | None] = mapped_column(Text)
+    deepseek_updated_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 class Shortcut(Base):

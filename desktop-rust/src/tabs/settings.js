@@ -14,6 +14,7 @@ const BASE_SUB_TABS = [
   { id: 'analyzer',   label: 'SQL Analyzer' },
   { id: 'commits',    label: 'Commits' },
   { id: 'formatter',  label: 'SQL Formatter' },
+  { id: 'ai',         label: 'AI' },
   { id: 'sync',       label: 'Sync' },
   { id: 'updates',    label: 'Updates' },
 ];
@@ -89,6 +90,7 @@ async function renderSubTab(container) {
       case 'analyzer':  await renderAnalyzer(container);   break;
       case 'commits':   await renderCommits(container);    break;
       case 'formatter': await renderFormatter(container);  break;
+      case 'ai':        await renderAi(container);         break;
       case 'sync':      await renderSync(container);       break;
       case 'updates':   await renderUpdates(container);    break;
       case 'users':     await renderUsers(container);      break;
@@ -613,6 +615,117 @@ async function renderSync(container) {
   actions.appendChild(registerBtn);
 
   container.appendChild(actions);
+}
+
+// ── AI ───────────────────────────────────────────────────────
+
+async function renderAi(container) {
+  container.innerHTML = '';
+
+  const title = el('div', { class: 'settings-section-title' });
+  title.appendChild(el('h4', { text: 'AI provider' }));
+  title.appendChild(el('p', {
+    text: 'DeepSeek key is stored on the sync server for the current API account. The saved key is never shown again.',
+    class: 'settings-help',
+  }));
+  container.appendChild(title);
+
+  const statusBox = el('div', { class: 'ai-provider-box' });
+  const status = el('div', { class: 'ai-provider-status', text: 'Loading...' });
+  const meta = el('div', { class: 'ai-provider-meta', text: '' });
+  statusBox.appendChild(status);
+  statusBox.appendChild(meta);
+  container.appendChild(statusBox);
+
+  const keyRow = makeFormRow('DeepSeek key:');
+  const keyInput = document.createElement('input');
+  keyInput.type = 'password';
+  keyInput.className = 'settings-input ai-provider-key-input';
+  keyInput.placeholder = 'sk-...';
+  keyInput.autocomplete = 'off';
+  keyInput.style.flex = '1';
+  keyRow.appendChild(keyInput);
+  container.appendChild(keyRow);
+
+  const actions = el('div', { class: 'settings-actions' });
+  const saveBtn = el('button', { text: 'Save', class: 'ai-provider-save-btn' });
+  const clearBtn = el('button', { text: 'Clear', class: 'btn-secondary ai-provider-clear-btn' });
+  const refreshBtn = el('button', { text: 'Refresh', class: 'btn-secondary ai-provider-refresh-btn' });
+  actions.appendChild(saveBtn);
+  actions.appendChild(clearBtn);
+  actions.appendChild(refreshBtn);
+  container.appendChild(actions);
+
+  async function refreshStatus(data = null) {
+    status.classList.remove('configured', 'missing', 'error');
+    meta.textContent = '';
+    try {
+      const info = data || await call('get_ai_provider_settings');
+      if (info.deepseek_configured) {
+        status.textContent = 'Configured';
+        status.classList.add('configured');
+        meta.textContent = info.deepseek_updated_at ? `Last updated: ${formatDate(info.deepseek_updated_at)}` : '';
+        clearBtn.disabled = false;
+      } else {
+        status.textContent = 'Not configured';
+        status.classList.add('missing');
+        meta.textContent = 'AI chat and Telegram AI will ask you to save a DeepSeek key first.';
+        clearBtn.disabled = true;
+      }
+    } catch (err) {
+      status.textContent = 'Unavailable';
+      status.classList.add('error');
+      meta.textContent = String(err);
+      clearBtn.disabled = true;
+    }
+  }
+
+  saveBtn.addEventListener('click', async () => {
+    const key = keyInput.value.trim();
+    if (!key) {
+      showToast('DeepSeek API key is empty', 'error');
+      return;
+    }
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving...';
+    try {
+      const info = await call('save_ai_provider_settings', { deepseekApiKey: key });
+      keyInput.value = '';
+      await refreshStatus(info);
+      showToast('DeepSeek key saved', 'success');
+    } catch (err) {
+      showToast('Failed to save DeepSeek key: ' + err, 'error');
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save';
+    }
+  });
+
+  clearBtn.addEventListener('click', async () => {
+    clearBtn.disabled = true;
+    clearBtn.textContent = 'Clearing...';
+    try {
+      const info = await call('clear_ai_provider_settings');
+      keyInput.value = '';
+      await refreshStatus(info);
+      showToast('DeepSeek key cleared', 'success');
+    } catch (err) {
+      showToast('Failed to clear DeepSeek key: ' + err, 'error');
+      clearBtn.disabled = false;
+    } finally {
+      clearBtn.textContent = 'Clear';
+    }
+  });
+
+  refreshBtn.addEventListener('click', async () => {
+    refreshBtn.disabled = true;
+    refreshBtn.textContent = 'Refreshing...';
+    await refreshStatus();
+    refreshBtn.disabled = false;
+    refreshBtn.textContent = 'Refresh';
+  });
+
+  await refreshStatus();
 }
 
 // ── Updates ──────────────────────────────────────────────────
@@ -1325,6 +1438,39 @@ function injectStyles() {
   display: flex;
   gap: 8px;
   margin-top: 16px;
+}
+.settings-section-title h4 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+.settings-help {
+  margin: 0 0 12px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.ai-provider-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  margin: 4px 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+}
+.ai-provider-status {
+  flex-shrink: 0;
+  font-weight: 700;
+  font-size: 13px;
+}
+.ai-provider-status.configured { color: #3fb950; }
+.ai-provider-status.missing { color: #f0b429; }
+.ai-provider-status.error { color: #f85149; }
+.ai-provider-meta {
+  color: var(--text-muted);
+  font-size: 12px;
+  min-width: 0;
 }
 .admin-users-header {
   display: flex;

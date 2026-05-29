@@ -12,7 +12,7 @@ from api.ai_prompt import build_messages
 from api.ai_runtime import SqlAlchemyAiRepository
 from api.deepseek_client import DeepSeekClient
 from api.models import TelegramChatBinding, TelegramProcessedMessage, User
-from api.routes.ai import build_ai_response
+from api.routes.ai import build_ai_response, user_deepseek_api_key
 from api.schemas import AiChatRequest, AiContext
 
 
@@ -130,13 +130,16 @@ def telegram_message_fields(update: dict[str, Any]) -> tuple[int | None, int | N
 
 
 async def run_telegram_ai(db: AsyncSession, user: User, text: str):
+    api_key = user_deepseek_api_key(user)
+    if not api_key:
+        raise RuntimeError("DeepSeek API key is not configured for this user")
     req = AiChatRequest(
         mode="command",
         channel="telegram",
         message=text,
         context=AiContext(module="telegram", locale="ru"),
     )
-    reply, commands = await DeepSeekClient().chat(
+    reply, commands = await DeepSeekClient(api_key=api_key).chat(
         messages=build_messages(req.message, req.context),
         tools=deepseek_tools(),
     )
