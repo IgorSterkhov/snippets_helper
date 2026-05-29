@@ -151,3 +151,43 @@ class ShareLinkResponse(BaseModel):
 
 class ShareLinkStatusResponse(BaseModel):
     link: Optional[ShareLinkResponse] = None
+
+
+# ==================== AI Agent ====================
+
+class AiContext(BaseModel):
+    module: Optional[str] = None
+    current_task_uuid: Optional[str] = None
+    current_note_uuid: Optional[str] = None
+    current_snippet_uuid: Optional[str] = None
+    recent_task_uuid: Optional[str] = None
+    locale: Optional[str] = None
+
+
+class AiChatRequest(BaseModel):
+    mode: str = "command"
+    channel: str = "client"
+    message: str
+    context: AiContext = AiContext()
+
+
+class AiCommandCall(BaseModel):
+    name: str
+    args: dict = {}
+
+
+class AiCommandResult(BaseModel):
+    name: str
+    args: dict = {}
+    status: str
+    message: str
+    item_type: Optional[str] = None
+    item_uuid: Optional[str] = None
+    choices: list[dict] = []
+
+
+class AiChatResponse(BaseModel):
+    mode: str
+    reply: str
+    commands: list[AiCommandCall] = []
+    results: list[AiCommandResult] = []
