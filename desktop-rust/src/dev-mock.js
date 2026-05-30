@@ -495,6 +495,85 @@
         ],
       };
     },
+    async get_ai_agent_settings() {
+      return {
+        custom_instructions: storeGet('ai_agent_custom_instructions', ''),
+        updated_at: storeGet('ai_agent_custom_instructions_updated_at', null),
+        core_instructions: [
+          'You are an AI controller for Snippets Helper.',
+          'Never invent UUIDs.',
+          'Do not request destructive actions; deletion and bulk edits are unavailable.',
+        ].join('\n'),
+      };
+    },
+    async save_ai_agent_settings({ customInstructions, custom_instructions }) {
+      const custom = String(customInstructions ?? custom_instructions ?? '').trim();
+      const updatedAt = now();
+      storeSet('ai_agent_custom_instructions', custom);
+      storeSet('ai_agent_custom_instructions_updated_at', updatedAt);
+      return {
+        custom_instructions: custom,
+        updated_at: updatedAt,
+        core_instructions: [
+          'You are an AI controller for Snippets Helper.',
+          'Never invent UUIDs.',
+          'Do not request destructive actions; deletion and bulk edits are unavailable.',
+        ].join('\n'),
+      };
+    },
+    async get_ai_capabilities() {
+      return {
+        tools: [
+          {
+            name: 'search_tasks',
+            description: 'Search user tasks by title.',
+            parameters: [{ name: 'query', required: true }],
+          },
+          {
+            name: 'open_task',
+            description: 'Open one task in the desktop UI.',
+            parameters: [{ name: 'query', required: false }],
+          },
+          {
+            name: 'show_task',
+            description: 'Return a readable task summary.',
+            parameters: [{ name: 'query', required: false }],
+          },
+          {
+            name: 'complete_task_checkbox',
+            description: 'Mark a task checkbox completed by text query.',
+            parameters: [{ name: 'task_query', required: false }, { name: 'checkbox_query', required: false }],
+          },
+        ],
+        context_fields: [
+          { name: 'module', description: 'Current app module.' },
+          { name: 'current_task_uuid', description: 'Current task UUID.' },
+          { name: 'recent_task_uuid', description: 'Last task used by AI.' },
+          { name: 'locale', description: 'Preferred language.' },
+        ],
+        safety_rules: [
+          'Never invent UUIDs.',
+          'Do not request destructive actions; deletion and bulk edits are unavailable.',
+        ],
+        telegram_notes: [
+          'Telegram show task replies with task details instead of navigating UI.',
+        ],
+      };
+    },
+    async preview_ai_prompt({ request }) {
+      const message = String(request?.message || '');
+      recordMockCall('preview_ai_prompt', { mode: request?.mode || 'command', message });
+      const lower = message.toLowerCase();
+      const command = lower.includes('покажи') || lower.includes('show')
+        ? { name: 'show_task', args: { query: 'Аптека' } }
+        : { name: 'create_task', args: { title: 'Preview task' } };
+      return {
+        mode: request?.mode || 'command',
+        reply: 'Preview plan only.',
+        commands: [command],
+        results: [],
+      };
+    },
     async save_ai_telegram_bot_settings({ telegramBotToken, telegram_bot_token }) {
       const token = String(telegramBotToken ?? telegram_bot_token ?? '').trim();
       if (!token) throw new Error('Telegram bot token is empty');

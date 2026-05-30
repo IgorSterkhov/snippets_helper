@@ -7,7 +7,7 @@ from typing import Any, Protocol
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.models import Note, Shortcut, Task, TaskCheckbox, User
+from api.models import Note, Shortcut, Task, TaskCategory, TaskCheckbox, TaskStatus, User
 from api.schemas import AiCommandCall, AiCommandResult, AiContext
 
 
@@ -17,6 +17,7 @@ class AiRepository(Protocol):
     async def search_snippets(self, query: str, limit: int = 5) -> list[dict[str, Any]]: ...
     async def create_task(self, title: str) -> dict[str, Any]: ...
     async def create_task_checkbox(self, task_uuid: str, text: str, parent_uuid: str | None = None) -> dict[str, Any]: ...
+    async def get_task_details(self, task_uuid: str) -> dict[str, Any] | None: ...
     async def complete_task_checkbox(
         self,
         task_uuid: str,
@@ -43,6 +44,66 @@ class SqlAlchemyAiRepository:
         )
         rows = (await self.db.execute(stmt)).scalars().all()
         return [{"uuid": str(row.uuid), "title": row.title} for row in rows]
+
+    async def get_task_details(self, task_uuid: str) -> dict[str, Any] | None:
+        task_id = uuid.UUID(task_uuid)
+        task_stmt = select(Task).where(
+            Task.user_id == self.user.id,
+            Task.uuid == task_id,
+            Task.is_deleted == False,  # noqa: E712
+        )
+        task = (await self.db.execute(task_stmt)).scalar_one_or_none()
+        if task is None:
+            return None
+
+        category = None
+        if task.category_uuid:
+            category_stmt = select(TaskCategory).where(
+                TaskCategory.user_id == self.user.id,
+                TaskCategory.uuid == task.category_uuid,
+                TaskCategory.is_deleted == False,  # noqa: E712
+            )
+            category_row = (await self.db.execute(category_stmt)).scalar_one_or_none()
+            category = category_row.name if category_row else None
+
+        status = None
+        if task.status_uuid:
+            status_stmt = select(TaskStatus).where(
+                TaskStatus.user_id == self.user.id,
+                TaskStatus.uuid == task.status_uuid,
+                TaskStatus.is_deleted == False,  # noqa: E712
+            )
+            status_row = (await self.db.execute(status_stmt)).scalar_one_or_none()
+            status = status_row.name if status_row else None
+
+        boxes_stmt = (
+            select(TaskCheckbox)
+            .where(
+                TaskCheckbox.user_id == self.user.id,
+                TaskCheckbox.task_uuid == task_id,
+                TaskCheckbox.is_deleted == False,  # noqa: E712
+            )
+            .order_by(TaskCheckbox.parent_uuid.isnot(None), TaskCheckbox.sort_order, TaskCheckbox.created_at)
+        )
+        boxes = (await self.db.execute(boxes_stmt)).scalars().all()
+        return {
+            "uuid": str(task.uuid),
+            "title": task.title,
+            "category": category,
+            "status": status,
+            "tracker_url": task.tracker_url,
+            "notes_md": task.notes_md or "",
+            "checkboxes": [
+                {
+                    "uuid": str(row.uuid),
+                    "parent_uuid": str(row.parent_uuid) if row.parent_uuid else None,
+                    "text": row.text,
+                    "is_checked": row.is_checked,
+                    "sort_order": row.sort_order,
+                }
+                for row in boxes
+            ],
+        }
 
     async def search_notes(self, query: str, limit: int = 5) -> list[dict[str, Any]]:
         pattern = f"%{query}%"
@@ -199,6 +260,53 @@ def _result(
     )
 
 
+def format_task_summary(details: dict[str, Any]) -> str:
+    lines = [f"Task: {details.get('title') or '(untitled)'}"]
+    if details.get("category"):
+        lines.append(f"Category: {details['category']}")
+    if details.get("status"):
+        lines.append(f"Status: {details['status']}")
+    if details.get("tracker_url"):
+        lines.append(f"Tracker: {details['tracker_url']}")
+    if (details.get("notes_md") or "").strip():
+        lines.append("Notes: present")
+
+    boxes = list(details.get("checkboxes") or [])
+    if not boxes:
+        lines.append("Checkboxes: none")
+        return "\n".join(lines)
+
+    children: dict[str | None, list[dict[str, Any]]] = {}
+    by_uuid = {str(box.get("uuid")): box for box in boxes if box.get("uuid")}
+    for box in boxes:
+        parent_uuid = box.get("parent_uuid")
+        if parent_uuid is not None:
+            parent_uuid = str(parent_uuid)
+        if parent_uuid not in by_uuid:
+            parent_uuid = None
+        children.setdefault(parent_uuid, []).append(box)
+    for bucket in children.values():
+        bucket.sort(key=lambda item: (int(item.get("sort_order") or 0), str(item.get("text") or "")))
+
+    lines.append("Checkboxes:")
+    visited: set[str] = set()
+
+    def append_box(box: dict[str, Any], level: int) -> None:
+        box_uuid = str(box.get("uuid") or "")
+        if box_uuid in visited:
+            return
+        visited.add(box_uuid)
+        marker = "[x]" if int(box.get("is_checked") or 0) else "[ ]"
+        indent = "  " * level
+        lines.append(f"{indent}- {marker} {box.get('text') or ''}")
+        for child in children.get(box_uuid, []):
+            append_box(child, level + 1)
+
+    for root in children.get(None, []):
+        append_box(root, 0)
+    return "\n".join(lines)
+
+
 async def _resolve_task_uuid(repo: AiRepository, command: AiCommandCall, context: AiContext) -> tuple[str | None, AiCommandResult | None]:
     args = command.args
     task_uuid = args.get("task_uuid")
@@ -270,6 +378,21 @@ async def execute_command(repo: AiRepository, command: AiCommandCall, context: A
 
     if command.name == "open_task":
         return await _open_by_search(repo.search_tasks, command, "task_uuid", "task", "title")
+
+    if command.name == "show_task":
+        task_uuid, error = await _resolve_task_uuid(repo, command, context)
+        if error:
+            return error
+        details = await repo.get_task_details(task_uuid)
+        if details is None:
+            return _result(command, "failed", "Task not found.")
+        return _result(
+            command,
+            "executed",
+            format_task_summary(details),
+            item_type="task",
+            item_uuid=str(details["uuid"]),
+        )
 
     if command.name == "add_task_checkbox":
         text = str(command.args.get("text") or "").strip()

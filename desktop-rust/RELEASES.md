@@ -36,6 +36,27 @@ Tag convention: `f-YYYYMMDD-N` where `N` is a sequence counter for the day
 - For `f-*` releases the `latest.json` from the last `v*` release is
   carried forward, so the native updater never 404s.
 
+### Semver bump policy
+
+Pick the semantic version before choosing the tag channel:
+
+- **Patch** (`X.Y.Z+1`) — bug fixes, small UI polish, copy/help updates, and
+  narrow behavior fixes that do not add a new workflow or IPC/API surface.
+- **Minor** (`X.Y+1.0`) — new modules, new visible workflows, new provider
+  integrations, new API/Tauri command surface, synced data features, or
+  substantial cross-module behavior. Example: adding the AI Agent module and
+  DeepSeek/Telegram control surface is a minor release, not a hotfix.
+- **Major** (`X+1.0.0`) — incompatible local DB/API/sync protocol changes,
+  removed workflows, breaking migrations, or changes that require explicit
+  user data migration planning.
+
+The tag channel is still a delivery mechanism:
+
+- A frontend-only change may use `f-*` only if it does not require a native
+  version bump and does not change IPC signatures.
+- A minor/major bump, or any change in `desktop-rust/src-tauri/`, must use
+  `vX.Y.Z`.
+
 ---
 
 ## 2. Cutting a release — step by step

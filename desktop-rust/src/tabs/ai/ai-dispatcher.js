@@ -311,6 +311,7 @@ async function searchSnippets(command) {
 const HANDLERS = {
   search_tasks: searchTasks,
   open_task: openTask,
+  show_task: openTask,
   add_task_checkbox: addTaskCheckbox,
   complete_task_checkbox: completeTaskCheckbox,
   create_task: createTask,

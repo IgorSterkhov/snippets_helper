@@ -51,6 +51,8 @@ class User(Base):
     deepseek_updated_at: Mapped[datetime | None] = mapped_column(DateTime)
     telegram_bot_token: Mapped[str | None] = mapped_column(Text)
     telegram_bot_updated_at: Mapped[datetime | None] = mapped_column(DateTime)
+    ai_custom_instructions: Mapped[str | None] = mapped_column(Text)
+    ai_custom_instructions_updated_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 class Shortcut(Base):

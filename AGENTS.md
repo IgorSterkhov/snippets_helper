@@ -42,6 +42,10 @@ Before planning or editing, read the relevant existing guidance:
    history before tagging. Treat `desktop-rust/src/tabs/help.js`,
    `desktop-rust/src/release-history.md`, and `desktop-rust/CHANGELOG.md` as a
    mandatory release gate, not an optional cleanup.
+10. Before tagging a desktop release, choose the semver bump from
+    `desktop-rust/RELEASES.md`: patch for fixes/small polish, minor for new
+    modules/workflows/provider integrations/API or Tauri command surface, and
+    major for incompatible DB/API/sync or removed-workflow changes.
 
 ## Desktop App Notes
 

@@ -528,6 +528,8 @@ async def run_tests():
         assert has_log, 'execution log missing'
         has_help = await cdp.eval("!!document.querySelector('#panel-ai .ai-help-btn')")
         assert has_help, 'AI tab help button missing'
+        has_settings = await cdp.eval("!!document.querySelector('#panel-ai .ai-agent-settings-btn')")
+        assert has_settings, 'AI agent settings gear button missing'
         await cdp.eval("document.querySelector('#panel-ai .ai-help-btn').click()")
         await wait_until(cdp, "!!document.querySelector('.ai-help-modal')", timeout=3)
         help_text = await cdp.eval("document.querySelector('.ai-help-modal')?.textContent || ''")
@@ -536,6 +538,50 @@ async def run_tests():
         assert 'Покажи задачу Аптека' in help_text, help_text
         await cdp.eval("document.querySelector('.ai-help-modal .ai-help-close')?.click()")
     await check('T2l AI tab renders shell', t2l_ai_tab_shell)
+
+    # ── T2l2: AI agent settings modal ───────────────────────
+    async def t2l2_ai_agent_settings_modal():
+        await close_modals()
+        await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"ai\"]').click()")
+        await wait_until(cdp, "!!document.querySelector('#panel-ai .ai-agent-settings-btn')", timeout=4)
+        await cdp.eval("document.querySelector('#panel-ai .ai-agent-settings-btn').click()")
+        await wait_until(cdp, "!!document.querySelector('.ai-agent-settings-modal')", timeout=3)
+        modal_text = await cdp.eval("document.querySelector('.ai-agent-settings-modal')?.textContent || ''")
+        assert 'AI Agent Settings' in modal_text, modal_text
+        assert 'show_task' in modal_text, modal_text
+        assert 'Never invent UUIDs' in modal_text, modal_text
+        await cdp.eval("""(() => {
+          const input = document.querySelector('.ai-agent-settings-modal .ai-agent-instructions-input');
+          input.value = 'Отвечай кратко на русском.';
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          document.querySelector('.ai-agent-settings-modal .ai-agent-save-btn').click();
+        })()""")
+        await wait_until(
+            cdp,
+            "(document.querySelector('.ai-agent-settings-modal .ai-agent-settings-status')?.textContent || '').includes('Saved')",
+            timeout=3,
+        )
+        await cdp.eval("document.querySelector('.ai-agent-settings-modal .ai-agent-reset-btn').click()")
+        await wait_until(
+            cdp,
+            "(document.querySelector('.ai-agent-settings-modal .ai-agent-instructions-input')?.value || '') === ''",
+            timeout=3,
+        )
+        await cdp.eval("""(() => {
+          const input = document.querySelector('.ai-agent-settings-modal .ai-agent-preview-input');
+          input.value = 'Покажи задачу Аптека';
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          document.querySelector('.ai-agent-settings-modal .ai-agent-preview-btn').click();
+        })()""")
+        await wait_until(
+            cdp,
+            "(document.querySelector('.ai-agent-settings-modal .ai-agent-preview-output')?.textContent || '').includes('show_task')",
+            timeout=4,
+        )
+        const_active = await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"tasks\"]')?.classList.contains('active')")
+        assert const_active is False, 'Preview must not navigate to Tasks'
+        await cdp.eval("document.querySelector('.ai-agent-settings-modal .ai-agent-settings-close')?.click()")
+    await check('T2l2 AI agent settings modal', t2l2_ai_agent_settings_modal)
 
     # ── T2m: AI command plan executes locally ────────────────
     async def t2m_ai_command_creates_task_locally():

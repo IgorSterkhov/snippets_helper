@@ -47,6 +47,12 @@ class FakeAiRepo:
         self.completed_checkboxes.append(checkbox)
         return checkbox
 
+    async def get_task_details(self, task_uuid):
+        for task in self.tasks:
+            if task["uuid"] == task_uuid:
+                return task
+        return None
+
 
 def run(coro):
     return asyncio.run(coro)
@@ -159,3 +165,49 @@ def test_complete_task_checkbox_resolves_task_query_and_checkbox_query_separatel
         "text": "Купить уголь",
         "is_checked": 1,
     }]
+
+
+def test_show_task_returns_readable_summary_with_nested_checkboxes():
+    repo = FakeAiRepo()
+    repo.tasks = [{
+        "uuid": "task-apteka",
+        "title": "Аптека",
+        "category": "Дом",
+        "status": "Open",
+        "tracker_url": "https://tracker.example/APT",
+        "notes_md": "Взять список",
+        "checkboxes": [
+            {
+                "uuid": "box-1",
+                "parent_uuid": None,
+                "text": "Купить аспирин",
+                "is_checked": 0,
+                "sort_order": 0,
+            },
+            {
+                "uuid": "box-2",
+                "parent_uuid": "box-1",
+                "text": "Активированный уголь",
+                "is_checked": 1,
+                "sort_order": 0,
+            },
+        ],
+    }]
+
+    result = run(execute_command(
+        repo,
+        AiCommandCall(name="show_task", args={"query": "аптека"}),
+        AiContext(),
+    ))
+
+    assert result.status == "executed"
+    assert result.item_type == "task"
+    assert result.item_uuid == "task-apteka"
+    assert "Task: Аптека" in result.message
+    assert "Category: Дом" in result.message
+    assert "Status: Open" in result.message
+    assert "- [ ] Купить аспирин" in result.message
+    assert "  - [x] Активированный уголь" in result.message
+    assert repo.created_tasks == []
+    assert repo.created_checkboxes == []
+    assert repo.completed_checkboxes == []

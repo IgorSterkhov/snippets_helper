@@ -8,10 +8,12 @@ from sqlalchemy import UniqueConstraint
 from api.telegram_bot import (
     SqlAlchemyTelegramRepository,
     TelegramBotApi,
+    format_telegram_ai_response,
     process_telegram_text_update,
     run_telegram_ai,
 )
 from api.models import TelegramChatBinding, TelegramProcessedMessage
+from api.schemas import AiChatResponse, AiCommandResult
 
 
 @dataclass
@@ -281,3 +283,27 @@ def test_try_mark_processed_is_scoped_by_owner_user():
     assert inserted is True
     assert "telegram_processed_messages.user_id" in db.statements[0]
     assert db.added[0].user_id == user_id
+
+
+def test_telegram_response_renders_show_task_details_as_message_body():
+    response = AiChatResponse(
+        mode="command",
+        reply="Вот задача.",
+        commands=[],
+        results=[
+            AiCommandResult(
+                name="show_task",
+                args={"query": "Аптека"},
+                status="executed",
+                message="Task: Аптека\nStatus: Open\n- [ ] Купить аспирин",
+                item_type="task",
+                item_uuid="task-apteka",
+            )
+        ],
+    )
+
+    text = format_telegram_ai_response(response)
+
+    assert text.startswith("Вот задача.")
+    assert "Task: Аптека" in text
+    assert "- [ ] Купить аспирин" in text

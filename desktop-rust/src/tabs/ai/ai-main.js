@@ -2,7 +2,13 @@ import { showToast } from '../../components/toast.js';
 import { showErrorDialog } from '../../components/error-dialog.js';
 import { whisperApi } from '../whisper/whisper-api.js';
 import { aiCSS } from './ai-css.js';
-import { sendAiChat } from './ai-api.js';
+import {
+  getAiAgentSettings,
+  getAiCapabilities,
+  previewAiPrompt,
+  saveAiAgentSettings,
+  sendAiChat,
+} from './ai-api.js';
 import { executeAiCommands } from './ai-dispatcher.js';
 
 const state = {
@@ -43,6 +49,13 @@ function buildLayout() {
   helpBtn.textContent = '?';
   helpBtn.addEventListener('click', showAiHelp);
   header.appendChild(helpBtn);
+  const settingsBtn = document.createElement('button');
+  settingsBtn.type = 'button';
+  settingsBtn.className = 'ai-agent-settings-btn';
+  settingsBtn.title = 'AI agent settings';
+  settingsBtn.textContent = '⚙';
+  settingsBtn.addEventListener('click', showAiAgentSettings);
+  header.appendChild(settingsBtn);
   header.appendChild(el('div', {
     class: 'ai-status-pill',
     text: 'DeepSeek via server',
@@ -458,6 +471,229 @@ function showAiHelp() {
   overlay.addEventListener('click', (event) => {
     if (event.target === overlay) overlay.remove();
   });
+}
+
+function showAiAgentSettings() {
+  if (document.querySelector('.ai-agent-settings-overlay')) return;
+  const overlay = el('div', { class: 'modal-overlay ai-agent-settings-overlay' });
+  const modal = el('div', { class: 'modal ai-agent-settings-modal' });
+
+  const header = el('div', { class: 'ai-agent-settings-header' });
+  header.appendChild(el('h3', { text: 'AI Agent Settings' }));
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'btn-secondary ai-agent-settings-close';
+  close.textContent = 'Close';
+  close.addEventListener('click', () => overlay.remove());
+  header.appendChild(close);
+  modal.appendChild(header);
+
+  const body = el('div', { class: 'ai-agent-settings-body' });
+  modal.appendChild(body);
+
+  const instructions = el('section', { class: 'ai-agent-settings-section' });
+  instructions.appendChild(el('h4', { text: 'Instructions' }));
+  instructions.appendChild(el('p', {
+    class: 'ai-agent-settings-help',
+    text: 'Custom instructions are added after immutable safety rules and apply to this sync API user.',
+  }));
+  const textarea = document.createElement('textarea');
+  textarea.className = 'ai-agent-instructions-input';
+  textarea.placeholder = 'Example: answer in Russian unless I ask otherwise.';
+  instructions.appendChild(textarea);
+  const core = el('pre', { class: 'ai-agent-core-instructions', text: 'Loading core instructions...' });
+  instructions.appendChild(core);
+  const status = el('div', { class: 'ai-agent-settings-status', text: '' });
+  const instructionActions = el('div', { class: 'ai-agent-settings-actions' });
+  const saveBtn = el('button', { class: 'ai-agent-save-btn', text: 'Save' });
+  const resetBtn = el('button', { class: 'btn-secondary ai-agent-reset-btn', text: 'Reset' });
+  instructionActions.appendChild(saveBtn);
+  instructionActions.appendChild(resetBtn);
+  instructionActions.appendChild(status);
+  instructions.appendChild(instructionActions);
+  body.appendChild(instructions);
+
+  const capabilities = el('section', { class: 'ai-agent-settings-section' });
+  capabilities.appendChild(el('h4', { text: 'Capabilities' }));
+  const capabilityBox = el('div', { class: 'ai-agent-capabilities-box', text: 'Loading capabilities...' });
+  capabilities.appendChild(capabilityBox);
+  body.appendChild(capabilities);
+
+  const preview = el('section', { class: 'ai-agent-settings-section' });
+  preview.appendChild(el('h4', { text: 'Test Prompt' }));
+  preview.appendChild(el('p', {
+    class: 'ai-agent-settings-help',
+    text: 'Preview asks DeepSeek for a plan but does not execute commands or navigate the app.',
+  }));
+  const previewInput = document.createElement('textarea');
+  previewInput.className = 'ai-agent-preview-input';
+  previewInput.placeholder = 'Покажи задачу Аптека';
+  preview.appendChild(previewInput);
+  const previewActions = el('div', { class: 'ai-agent-settings-actions' });
+  const previewBtn = el('button', { class: 'ai-agent-preview-btn', text: 'Preview' });
+  previewActions.appendChild(previewBtn);
+  preview.appendChild(previewActions);
+  const previewOutput = el('div', { class: 'ai-agent-preview-output empty', text: 'No preview yet' });
+  preview.appendChild(previewOutput);
+  body.appendChild(preview);
+
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) overlay.remove();
+  });
+
+  loadAgentSettingsModal({ textarea, core, capabilityBox, status });
+
+  saveBtn.addEventListener('click', async () => {
+    await saveAgentInstructions(textarea.value, { textarea, core, status, saveBtn });
+  });
+  resetBtn.addEventListener('click', async () => {
+    textarea.value = '';
+    await saveAgentInstructions('', { textarea, core, status, saveBtn: resetBtn });
+  });
+  previewBtn.addEventListener('click', async () => {
+    await runAgentPreview(previewInput.value, { previewBtn, previewOutput });
+  });
+}
+
+async function loadAgentSettingsModal({ textarea, core, capabilityBox, status }) {
+  try {
+    const [settings, capabilities] = await Promise.all([
+      getAiAgentSettings(),
+      getAiCapabilities(),
+    ]);
+    textarea.value = settings?.custom_instructions || '';
+    core.textContent = settings?.core_instructions || '';
+    renderCapabilities(capabilityBox, capabilities);
+    status.textContent = settings?.updated_at ? `Loaded: ${formatDate(settings.updated_at)}` : 'Loaded';
+  } catch (err) {
+    status.textContent = 'Load failed';
+    capabilityBox.textContent = 'Capabilities unavailable.';
+    showErrorDialog({
+      title: 'AI agent settings failed',
+      message: 'The AI tab could not load agent settings.',
+      details: { error: String(err) },
+    });
+  }
+}
+
+async function saveAgentInstructions(value, { status, saveBtn }) {
+  const original = saveBtn.textContent;
+  saveBtn.disabled = true;
+  saveBtn.textContent = 'Saving...';
+  status.textContent = '';
+  try {
+    const saved = await saveAiAgentSettings(value);
+    status.textContent = saved?.updated_at ? `Saved: ${formatDate(saved.updated_at)}` : 'Saved';
+  } catch (err) {
+    status.textContent = 'Save failed';
+    showErrorDialog({
+      title: 'AI agent settings save failed',
+      message: 'Custom instructions could not be saved.',
+      details: { error: String(err) },
+    });
+  } finally {
+    saveBtn.disabled = false;
+    saveBtn.textContent = original;
+  }
+}
+
+function renderCapabilities(container, data) {
+  container.innerHTML = '';
+  const tools = Array.isArray(data?.tools) ? data.tools : [];
+  const safety = Array.isArray(data?.safety_rules) ? data.safety_rules : [];
+  const fields = Array.isArray(data?.context_fields) ? data.context_fields : [];
+
+  const toolList = el('div', { class: 'ai-agent-capability-list' });
+  for (const tool of tools) {
+    const row = el('div', { class: 'ai-agent-capability-tool' });
+    row.appendChild(el('code', { text: tool.name || 'tool' }));
+    row.appendChild(el('span', { text: tool.description || '' }));
+    toolList.appendChild(row);
+  }
+  container.appendChild(sectionBlock('Tools', toolList));
+
+  const safetyList = document.createElement('ul');
+  for (const rule of safety) safetyList.appendChild(el('li', { text: rule }));
+  container.appendChild(sectionBlock('Safety', safetyList));
+
+  const contextList = el('div', { class: 'ai-agent-context-list' });
+  for (const field of fields) {
+    const row = el('div', { class: 'ai-agent-context-field' });
+    row.appendChild(el('code', { text: field.name || 'field' }));
+    row.appendChild(el('span', { text: field.description || '' }));
+    contextList.appendChild(row);
+  }
+  container.appendChild(sectionBlock('Context', contextList));
+}
+
+function sectionBlock(title, content) {
+  const block = el('div', { class: 'ai-agent-capability-block' });
+  block.appendChild(el('h5', { text: title }));
+  block.appendChild(content);
+  return block;
+}
+
+async function runAgentPreview(message, { previewBtn, previewOutput }) {
+  const text = String(message || '').trim();
+  if (!text) {
+    previewOutput.classList.remove('empty');
+    previewOutput.textContent = 'Enter a prompt first.';
+    return;
+  }
+  const original = previewBtn.textContent;
+  previewBtn.disabled = true;
+  previewBtn.textContent = 'Previewing...';
+  previewOutput.classList.add('empty');
+  previewOutput.textContent = 'Planning...';
+  try {
+    const response = await previewAiPrompt({
+      mode: 'command',
+      channel: 'client',
+      message: text,
+      context: buildContext(),
+    });
+    renderPreviewOutput(previewOutput, response);
+  } catch (err) {
+    previewOutput.classList.remove('empty');
+    previewOutput.textContent = 'Preview failed';
+    showErrorDialog({
+      title: 'AI prompt preview failed',
+      message: 'The AI tab could not preview this prompt.',
+      details: { error: String(err), message: text },
+    });
+  } finally {
+    previewBtn.disabled = false;
+    previewBtn.textContent = original;
+  }
+}
+
+function renderPreviewOutput(container, response) {
+  container.innerHTML = '';
+  container.classList.remove('empty');
+  const reply = String(response?.reply || '').trim();
+  if (reply) {
+    container.appendChild(el('div', { class: 'ai-agent-preview-reply', text: reply }));
+  }
+  const commands = Array.isArray(response?.commands) ? response.commands : [];
+  if (!commands.length) {
+    container.appendChild(el('div', { class: 'ai-agent-preview-empty', text: 'No commands planned.' }));
+    return;
+  }
+  for (const command of commands) {
+    const row = el('div', { class: 'ai-agent-preview-command' });
+    row.appendChild(el('code', { text: command?.name || 'command' }));
+    row.appendChild(el('pre', { text: JSON.stringify(command?.args || {}, null, 2) }));
+    container.appendChild(row);
+  }
+}
+
+function formatDate(value) {
+  if (!value) return 'never';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '-';
+  return d.toLocaleString();
 }
 
 function el(tag, opts = {}) {

@@ -45,6 +45,12 @@
     1. **Выбрать тип тега** по `RELEASES.md §1` (см. также CLAUDE.md §12):
        - **`v-*`** — изменения в `desktop-rust/src-tauri/` (нативка, БД-миграции, новые/изменённые `#[tauri::command]`'ы, bump major/minor/patch).
        - **`f-*`** — чисто-фронт-правки (`desktop-rust/src/`) **без** изменения IPC-сигнатур.
+       - Перед тегом выбери semver bump по `desktop-rust/RELEASES.md §1`:
+         patch — фиксы/мелкие UI-правки; minor — новые модули, новые
+         пользовательские workflow, provider-интеграции, новые API/Tauri
+         surface или крупное кросс-модульное поведение; major — несовместимые
+         DB/API/sync изменения или удаление workflow. AI Agent-подобные
+         возможности считаются minor, не hotfix.
     2. Для `v-*` — bump версии в `desktop-rust/src-tauri/Cargo.toml` + `desktop-rust/src-tauri/tauri.conf.json` (одинаковое значение), refresh `Cargo.lock` через `cargo check`, добавить секцию сверху в `desktop-rust/CHANGELOG.md` (§9), коммит «(vX.Y.Z)»-стиля. Для `f-*` — версия не bump'ается, только коммит фронт-правок.
     3. **Sanity-чеки** из `RELEASES.md §2.1`: `cd desktop-rust/src-tauri && cargo check` и `cd desktop-rust/src && python3 dev-test.py` (ожидается **all PASS**). Если что-то падает — **не релизить**, чинить.
     4. `git push` ; `git tag <тег>` (для `v-*` — `vX.Y.Z`; для `f-*` — `f-YYYYMMDD-N`, где N инкрементируется при нескольких релизах за день) ; `git push origin <тег>`.

@@ -9,6 +9,7 @@ from api.schemas import AiCommandCall
 AI_COMMAND_NAMES = {
     "search_tasks",
     "open_task",
+    "show_task",
     "add_task_checkbox",
     "complete_task_checkbox",
     "create_task",
@@ -48,6 +49,11 @@ def deepseek_tools() -> list[dict[str, Any]]:
         _tool(
             "open_task",
             "Open/show one task by UUID or search query.",
+            {"task_uuid": nullable_string, "query": nullable_string},
+        ),
+        _tool(
+            "show_task",
+            "Return a readable task summary by UUID or search query.",
             {"task_uuid": nullable_string, "query": nullable_string},
         ),
         _tool(

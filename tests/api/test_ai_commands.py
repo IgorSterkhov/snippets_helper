@@ -21,7 +21,7 @@ def test_deepseek_tools_do_not_include_destructive_commands():
     assert "delete_task" not in names
     assert "delete_note" not in names
     assert "create_share_link" not in names
-    assert {"open_task", "add_task_checkbox", "create_task"}.issubset(names)
+    assert {"open_task", "show_task", "add_task_checkbox", "create_task"}.issubset(names)
 
 
 def test_deepseek_tools_use_strict_function_schemas():
@@ -38,3 +38,13 @@ def test_complete_checkbox_tool_has_separate_task_and_checkbox_queries():
 
     assert "task_query" in props
     assert "checkbox_query" in props
+
+
+def test_show_task_tool_is_read_only_task_summary_command():
+    tool = next(t for t in deepseek_tools() if t["function"]["name"] == "show_task")
+    fn = tool["function"]
+    props = fn["parameters"]["properties"]
+
+    assert "readable task summary" in fn["description"].lower()
+    assert set(props) == {"task_uuid", "query"}
+    assert validate_command_call({"name": "show_task", "args": {"query": "Аптека"}}).name == "show_task"

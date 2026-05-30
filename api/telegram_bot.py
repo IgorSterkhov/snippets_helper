@@ -9,11 +9,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.ai_commands import deepseek_tools
-from api.ai_prompt import build_messages
 from api.ai_runtime import SqlAlchemyAiRepository
 from api.deepseek_client import DeepSeekClient
 from api.models import TelegramChatBinding, TelegramProcessedMessage, User
-from api.routes.ai import build_ai_response, user_deepseek_api_key, user_telegram_bot_token
+from api.routes.ai import build_ai_response, build_messages_for_user, user_deepseek_api_key, user_telegram_bot_token
 from api.schemas import AiChatRequest, AiContext
 
 
@@ -200,7 +199,7 @@ async def run_telegram_ai(db: AsyncSession, user: User, text: str):
         context=AiContext(module="telegram", locale="ru"),
     )
     reply, commands = await DeepSeekClient(api_key=api_key).chat(
-        messages=build_messages(req.message, req.context),
+        messages=build_messages_for_user(req.message, req.context, user=user, channel="telegram"),
         tools=deepseek_tools(),
     )
     return await build_ai_response(req, reply, commands, SqlAlchemyAiRepository(db, user))

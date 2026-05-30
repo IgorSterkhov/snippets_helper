@@ -35,6 +35,18 @@ pub struct AiProviderBalance {
     pub balance_infos: Vec<AiProviderBalanceInfo>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AiAgentSettings {
+    pub custom_instructions: String,
+    pub updated_at: Option<String>,
+    pub core_instructions: String,
+}
+
+#[derive(Debug, Serialize)]
+struct AiAgentSettingsRequest {
+    custom_instructions: String,
+}
+
 fn sync_settings(state: &State<'_, DbState>) -> Result<(String, String, Option<String>), String> {
     let computer_id = hostname::get()
         .unwrap_or_default()
@@ -92,6 +104,30 @@ fn ai_provider_balance_url(api_url: &str) -> String {
         format!("{api_url}/ai/provider-balance")
     } else {
         format!("{api_url}/v1/ai/provider-balance")
+    }
+}
+
+fn ai_agent_settings_url(api_url: &str) -> String {
+    if api_url.ends_with("/v1") {
+        format!("{api_url}/ai/agent-settings")
+    } else {
+        format!("{api_url}/v1/ai/agent-settings")
+    }
+}
+
+fn ai_capabilities_url(api_url: &str) -> String {
+    if api_url.ends_with("/v1") {
+        format!("{api_url}/ai/capabilities")
+    } else {
+        format!("{api_url}/v1/ai/capabilities")
+    }
+}
+
+fn ai_preview_url(api_url: &str) -> String {
+    if api_url.ends_with("/v1") {
+        format!("{api_url}/ai/preview")
+    } else {
+        format!("{api_url}/v1/ai/preview")
     }
 }
 
@@ -219,6 +255,65 @@ pub async fn get_ai_provider_balance(
 }
 
 #[tauri::command]
+pub async fn get_ai_agent_settings(state: State<'_, DbState>) -> Result<AiAgentSettings, String> {
+    let (api_url, api_key, ca_cert) = sync_settings(&state)?;
+    let client = http_client(&api_url, ca_cert.as_deref())?;
+    let resp = client
+        .get(ai_agent_settings_url(&api_url))
+        .bearer_auth(api_key)
+        .send()
+        .await
+        .map_err(|e| format!("request failed: {e}"))?;
+    parse_json::<AiAgentSettings>(resp).await
+}
+
+#[tauri::command]
+pub async fn save_ai_agent_settings(
+    state: State<'_, DbState>,
+    custom_instructions: String,
+) -> Result<AiAgentSettings, String> {
+    let (api_url, api_key, ca_cert) = sync_settings(&state)?;
+    let client = http_client(&api_url, ca_cert.as_deref())?;
+    let resp = client
+        .put(ai_agent_settings_url(&api_url))
+        .bearer_auth(api_key)
+        .json(&AiAgentSettingsRequest {
+            custom_instructions,
+        })
+        .send()
+        .await
+        .map_err(|e| format!("request failed: {e}"))?;
+    parse_json::<AiAgentSettings>(resp).await
+}
+
+#[tauri::command]
+pub async fn get_ai_capabilities(state: State<'_, DbState>) -> Result<Value, String> {
+    let (api_url, api_key, ca_cert) = sync_settings(&state)?;
+    let client = http_client(&api_url, ca_cert.as_deref())?;
+    let resp = client
+        .get(ai_capabilities_url(&api_url))
+        .bearer_auth(api_key)
+        .send()
+        .await
+        .map_err(|e| format!("request failed: {e}"))?;
+    parse_json::<Value>(resp).await
+}
+
+#[tauri::command]
+pub async fn preview_ai_prompt(state: State<'_, DbState>, request: Value) -> Result<Value, String> {
+    let (api_url, api_key, ca_cert) = sync_settings(&state)?;
+    let client = http_client(&api_url, ca_cert.as_deref())?;
+    let resp = client
+        .post(ai_preview_url(&api_url))
+        .bearer_auth(api_key)
+        .json(&request)
+        .send()
+        .await
+        .map_err(|e| format!("request failed: {e}"))?;
+    parse_json::<Value>(resp).await
+}
+
+#[tauri::command]
 pub async fn save_ai_telegram_bot_settings(
     state: State<'_, DbState>,
     telegram_bot_token: String,
@@ -296,6 +391,7 @@ pub async fn unbind_ai_telegram_chat(
 mod tests {
     use super::{
         ai_chat_url, ai_provider_balance_url, ai_provider_settings_url,
+        ai_agent_settings_url, ai_capabilities_url, ai_preview_url,
         ai_telegram_bot_settings_url, telegram_my_chat_url, telegram_my_poll_once_url,
         telegram_my_status_url,
     };
@@ -333,6 +429,30 @@ mod tests {
         assert_eq!(
             ai_provider_balance_url("https://example.test/snippets-api/v1"),
             "https://example.test/snippets-api/v1/ai/provider-balance"
+        );
+    }
+
+    #[test]
+    fn ai_agent_settings_url_accepts_plain_and_v1_bases() {
+        assert_eq!(
+            ai_agent_settings_url("https://example.test/snippets-api"),
+            "https://example.test/snippets-api/v1/ai/agent-settings"
+        );
+        assert_eq!(
+            ai_agent_settings_url("https://example.test/snippets-api/v1"),
+            "https://example.test/snippets-api/v1/ai/agent-settings"
+        );
+    }
+
+    #[test]
+    fn ai_capabilities_and_preview_urls_accept_plain_and_v1_bases() {
+        assert_eq!(
+            ai_capabilities_url("https://example.test/snippets-api"),
+            "https://example.test/snippets-api/v1/ai/capabilities"
+        );
+        assert_eq!(
+            ai_preview_url("https://example.test/snippets-api/v1"),
+            "https://example.test/snippets-api/v1/ai/preview"
         );
     }
 

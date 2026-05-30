@@ -46,6 +46,33 @@ class CountingRepo:
     async def complete_task_checkbox(self, task_uuid, checkbox_uuid=None, query=None):
         raise AssertionError("unexpected checkbox write")
 
+    async def get_task_details(self, task_uuid):
+        return None
+
+
+class TaskDetailsRepo(CountingRepo):
+    async def search_tasks(self, query, limit=5):
+        return [{"uuid": "task-apteka", "title": "Аптека"}]
+
+    async def get_task_details(self, task_uuid):
+        return {
+            "uuid": task_uuid,
+            "title": "Аптека",
+            "category": None,
+            "status": "Open",
+            "tracker_url": None,
+            "notes_md": "",
+            "checkboxes": [
+                {
+                    "uuid": "box-1",
+                    "parent_uuid": None,
+                    "text": "Купить аспирин",
+                    "is_checked": 0,
+                    "sort_order": 0,
+                }
+            ],
+        }
+
 
 def test_client_channel_returns_commands_without_server_write():
     repo = CountingRepo()
@@ -75,6 +102,23 @@ def test_telegram_channel_executes_server_side():
     assert repo.created == 1
     assert response.results[0].status == "executed"
     assert response.results[0].item_uuid == "server-task"
+
+
+def test_telegram_channel_treats_open_task_as_show_task_summary():
+    repo = TaskDetailsRepo()
+
+    response = asyncio.run(build_ai_response(
+        AiChatRequest(channel="telegram", message="покажи задачу Аптека", context=AiContext()),
+        "Вот задача.",
+        [AiCommandCall(name="open_task", args={"query": "Аптека"})],
+        repo,
+    ))
+
+    assert response.commands[0].name == "show_task"
+    assert response.results[0].name == "show_task"
+    assert response.results[0].status == "executed"
+    assert "Task: Аптека" in response.results[0].message
+    assert "- [ ] Купить аспирин" in response.results[0].message
 
 
 def test_public_ai_route_rejects_telegram_channel_before_provider_call():
@@ -163,6 +207,102 @@ def test_ai_provider_settings_save_and_clear_telegram_bot_token():
     assert user.telegram_bot_token is None
     assert user.telegram_bot_updated_at is not None
     assert db.commits == 2
+
+
+def test_ai_agent_settings_save_trim_and_clear_without_secrets():
+    user = SimpleNamespace(
+        id="user-1",
+        ai_custom_instructions=None,
+        ai_custom_instructions_updated_at=None,
+        deepseek_api_key="sk-secret",
+    )
+    db = FakeDb()
+
+    saved = asyncio.run(ai_routes.update_ai_agent_settings(
+        schemas.AiAgentSettingsRequest(custom_instructions="  Отвечай кратко на русском.  "),
+        user=user,
+        db=db,
+    ))
+
+    assert saved.custom_instructions == "Отвечай кратко на русском."
+    assert user.ai_custom_instructions == "Отвечай кратко на русском."
+    assert user.ai_custom_instructions_updated_at is not None
+    assert "Never invent UUIDs" in saved.core_instructions
+    assert not hasattr(saved, "deepseek_api_key")
+    assert db.commits == 1
+
+    cleared = asyncio.run(ai_routes.update_ai_agent_settings(
+        schemas.AiAgentSettingsRequest(custom_instructions="  "),
+        user=user,
+        db=db,
+    ))
+
+    assert cleared.custom_instructions == ""
+    assert user.ai_custom_instructions is None
+    assert db.commits == 2
+
+
+def test_ai_prompt_keeps_core_safety_before_custom_instructions():
+    messages = ai_routes.build_messages_for_user(
+        "покажи задачу",
+        AiContext(module="telegram", locale="ru"),
+        user=SimpleNamespace(ai_custom_instructions="Всегда отвечай веселым тоном."),
+        channel="telegram",
+    )
+
+    system_text = "\n".join(item["content"] for item in messages if item["role"] == "system")
+    assert "Never invent UUIDs" in system_text
+    assert "Do not request destructive actions" in system_text
+    assert "Всегда отвечай веселым тоном." in system_text
+    assert system_text.index("Never invent UUIDs") < system_text.index("Всегда отвечай веселым тоном.")
+
+
+def test_ai_capabilities_are_generated_from_tool_catalog():
+    response = ai_routes.get_ai_capabilities()
+    tool_names = [tool.name for tool in response.tools]
+    context_names = [field.name for field in response.context_fields]
+
+    assert "show_task" in tool_names
+    assert "complete_task_checkbox" in tool_names
+    assert "current_task_uuid" in context_names
+    assert any("Never invent UUIDs" in rule for rule in response.safety_rules)
+
+
+def test_ai_preview_returns_plan_without_executing_server_commands(monkeypatch):
+    seen = {}
+
+    class FakeDeepSeekClient:
+        def __init__(self, *, api_key=None, **kwargs):
+            seen["api_key"] = api_key
+
+        async def chat(self, *, messages, tools):
+            seen["messages"] = messages
+            seen["tools"] = tools
+            return "Создам задачу.", [AiCommandCall(name="create_task", args={"title": "Аптека"})]
+
+    monkeypatch.setattr(ai_routes, "DeepSeekClient", FakeDeepSeekClient)
+
+    db = FakeDb()
+    response = asyncio.run(ai_routes.preview_ai_prompt(
+        schemas.AiPreviewRequest(
+            mode="command",
+            channel="telegram",
+            message="создай задачу Аптека",
+            context=AiContext(module="telegram", locale="ru"),
+        ),
+        user=SimpleNamespace(
+            id="user-1",
+            deepseek_api_key="sk-current-user",
+            ai_custom_instructions="Отвечай на русском.",
+        ),
+        db=db,
+    ))
+
+    assert seen["api_key"] == "sk-current-user"
+    assert response.reply == "Создам задачу."
+    assert response.commands == [AiCommandCall(name="create_task", args={"title": "Аптека"})]
+    assert response.results == []
+    assert db.commits == 0
 
 
 def test_ai_provider_balance_uses_current_users_deepseek_key(monkeypatch):

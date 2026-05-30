@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## v1.4.0 (2026-05-30)
+
+- **AI agent settings:** the AI tab now has a gear modal for per-user custom
+  instructions, generated capability/safety visibility, and dry-run prompt
+  preview that shows planned commands without executing them.
+- **Telegram task summaries:** Telegram "show task" requests now return a
+  readable task summary with task properties and nested checkbox state instead
+  of using the desktop-only open/navigation behavior.
+- **Versioning policy:** desktop release docs now define patch/minor/major
+  bump rules, so module-level features such as AI Agent ship as minor releases
+  instead of hotfix-looking patch trains.
+
 ## f-20260530-2 (2026-05-30)
 
 - **Settings window redesign:** Settings now opens as a wider two-pane modal

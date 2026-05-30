@@ -182,6 +182,34 @@ class AiProviderBalanceResponse(BaseModel):
     balance_infos: list[AiProviderBalanceInfo] = []
 
 
+class AiAgentSettingsRequest(BaseModel):
+    custom_instructions: str = ""
+
+
+class AiAgentSettingsResponse(BaseModel):
+    custom_instructions: str = ""
+    updated_at: Optional[datetime] = None
+    core_instructions: str
+
+
+class AiCapabilityTool(BaseModel):
+    name: str
+    description: str
+    parameters: list[dict] = []
+
+
+class AiCapabilityField(BaseModel):
+    name: str
+    description: str
+
+
+class AiCapabilitiesResponse(BaseModel):
+    tools: list[AiCapabilityTool] = []
+    context_fields: list[AiCapabilityField] = []
+    safety_rules: list[str] = []
+    telegram_notes: list[str] = []
+
+
 class AiContext(BaseModel):
     module: Optional[str] = None
     current_task_uuid: Optional[str] = None
@@ -192,6 +220,13 @@ class AiContext(BaseModel):
 
 
 class AiChatRequest(BaseModel):
+    mode: str = "command"
+    channel: str = "client"
+    message: str
+    context: AiContext = AiContext()
+
+
+class AiPreviewRequest(BaseModel):
     mode: str = "command"
     channel: str = "client"
     message: str
