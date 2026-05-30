@@ -8,18 +8,18 @@ let activeSubTab = 'general';
 let adminTabVisible = false;
 
 const BASE_SUB_TABS = [
-  { id: 'general',    label: 'General' },
-  { id: 'shortcuts',  label: 'Shortcuts' },
-  { id: 'tasks',      label: 'Tasks' },
-  { id: 'analyzer',   label: 'SQL Analyzer' },
-  { id: 'commits',    label: 'Commits' },
-  { id: 'formatter',  label: 'SQL Formatter' },
-  { id: 'ai',         label: 'AI' },
-  { id: 'sync',       label: 'Sync' },
-  { id: 'updates',    label: 'Updates' },
+  { id: 'general',    label: 'General',       icon: '⚙' },
+  { id: 'shortcuts',  label: 'Shortcuts',     icon: '⌘' },
+  { id: 'tasks',      label: 'Tasks',         icon: '☑' },
+  { id: 'analyzer',   label: 'SQL Analyzer',  icon: '▦' },
+  { id: 'commits',    label: 'Commits',       icon: '⎇' },
+  { id: 'formatter',  label: 'SQL Formatter', icon: '{}' },
+  { id: 'ai',         label: 'AI',            icon: '✦' },
+  { id: 'sync',       label: 'Sync',          icon: '↻' },
+  { id: 'updates',    label: 'Updates',       icon: '⬇' },
 ];
 
-const ADMIN_TAB = { id: 'users', label: 'Users / Limits' };
+const ADMIN_TAB = { id: 'users', label: 'Users / Limits', icon: '◉' };
 
 // ── Public API ────────────────────────────────────────────────
 
@@ -42,13 +42,14 @@ export function openSettingsModal() {
   header.appendChild(closeBtn);
   modal.appendChild(header);
 
-  // Tab strip
+  // Content
+  const content = el('div', { class: 'settings-content' });
   const tabStrip = el('div', { class: 'settings-tab-strip' });
-  modal.appendChild(tabStrip);
-
-  // Body
   const body = el('div', { class: 'settings-body' });
-  modal.appendChild(body);
+  content.appendChild(tabStrip);
+  content.appendChild(body);
+  modal.appendChild(content);
+
   for (const tab of visibleSubTabs()) {
     tabStrip.appendChild(makeTabButton(tab, tabStrip, body));
   }
@@ -111,6 +112,7 @@ function makeTabButton(tab, tabStrip, body) {
     class: 'settings-tab-btn' + (tab.id === activeSubTab ? ' active' : ''),
   });
   btn.dataset.tabId = tab.id;
+  btn.dataset.icon = tab.icon || '';
   btn.addEventListener('click', () => {
     activeSubTab = tab.id;
     tabStrip.querySelectorAll('.settings-tab-btn').forEach(b => b.classList.remove('active'));
@@ -1573,19 +1575,22 @@ function injectStyles() {
   const style = document.createElement('style');
   style.textContent = `
 .settings-modal {
-  max-width: 650px;
-  width: 95%;
-  max-height: 80vh;
+  width: min(980px, calc(100vw - 48px));
+  max-width: 980px;
+  max-height: min(86vh, 760px);
   display: flex;
   flex-direction: column;
   padding: 0;
+  overflow: hidden;
+  box-shadow: 0 18px 70px rgba(0, 0, 0, 0.42);
 }
 .settings-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 20px 12px;
+  padding: 16px 18px 14px;
   border-bottom: 1px solid var(--border);
+  background: rgba(13, 17, 23, 0.42);
 }
 .settings-header h3 { margin: 0; }
 .settings-close-btn {
@@ -1593,38 +1598,75 @@ function injectStyles() {
   min-width: auto;
   font-size: 14px;
 }
+.settings-content {
+  min-height: 0;
+  flex: 1;
+  display: flex;
+}
 .settings-tab-strip {
   display: flex;
-  gap: 0;
-  border-bottom: 1px solid var(--border);
-  padding: 0 12px;
-  overflow-x: auto;
+  flex-direction: column;
+  gap: 4px;
+  width: 190px;
+  flex: 0 0 190px;
+  padding: 12px 10px;
+  border-right: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.018);
+  overflow-y: auto;
 }
 .settings-tab-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 34px;
   background: transparent;
-  border: none;
-  border-bottom: 2px solid transparent;
+  border: 1px solid transparent;
   color: var(--text-muted);
-  padding: 10px 14px;
+  padding: 7px 9px;
   font-size: 13px;
+  font-weight: 600;
+  text-align: left;
   cursor: pointer;
   white-space: nowrap;
-  border-radius: 0;
-  transition: color 0.15s, border-color 0.15s;
+  border-radius: 7px;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.settings-tab-btn::before {
+  content: attr(data-icon);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  min-width: 20px;
+  height: 20px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 11px;
+  line-height: 1;
 }
 .settings-tab-btn:hover {
   color: var(--text);
-  background: transparent;
+  border-color: var(--border);
+  background: rgba(255, 255, 255, 0.035);
 }
 .settings-tab-btn.active {
+  color: var(--text);
+  border-color: rgba(47, 129, 247, 0.48);
+  background: rgba(47, 129, 247, 0.14);
+}
+.settings-tab-btn.active::before {
   color: var(--accent);
-  border-bottom-color: var(--accent);
-  background: transparent;
+  border-color: rgba(47, 129, 247, 0.55);
+  background: rgba(47, 129, 247, 0.16);
 }
 .settings-body {
   flex: 1;
+  min-width: 0;
   overflow-y: auto;
-  padding: 20px;
+  padding: 20px 22px 22px;
 }
 .settings-form-row {
   display: flex;
@@ -1905,6 +1947,50 @@ function injectStyles() {
 .admin-save-btn {
   height: 31px;
   min-width: 64px;
+}
+@media (max-width: 760px) {
+  .settings-modal {
+    width: calc(100vw - 24px);
+    max-height: calc(100vh - 24px);
+  }
+  .settings-content {
+    flex-direction: column;
+  }
+  .settings-tab-strip {
+    width: auto;
+    flex: 0 0 auto;
+    flex-direction: row;
+    gap: 6px;
+    padding: 8px 10px;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  .settings-tab-btn {
+    width: auto;
+    min-width: max-content;
+    padding: 7px 10px;
+  }
+  .settings-body {
+    padding: 16px;
+  }
+  .settings-form-row,
+  .settings-add-row {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .settings-label {
+    min-width: 100%;
+  }
+  .admin-users-header,
+  .admin-limit-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .admin-user-row {
+    grid-template-columns: 1fr;
+  }
 }
 `;
   document.head.appendChild(style);

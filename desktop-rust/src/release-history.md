@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## f-20260530-2 (2026-05-30)
+
+- **Settings window redesign:** Settings now opens as a wider two-pane modal
+  with a left navigation rail, so sections such as Updates and Users / Limits
+  stay visible instead of sliding out of the horizontal tab strip. On narrow
+  windows the navigation folds back into a compact horizontal strip.
+
 ## v1.3.50 (2026-05-30)
 
 - **Telegram chat pairing in Settings:** Settings -> AI now shows a per-user
