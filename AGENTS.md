@@ -22,12 +22,15 @@ Before planning or editing, read the relevant existing guidance:
 
 1. Start by restating the requirement and design questions. Offer answer
    options when asking questions.
-2. Do not implement until the user confirms the direction.
+2. Do not implement until the user confirms the product/UX direction after a
+   short preliminary discussion. This discussion is still required even when
+   the user has said they do not want to approve formal spec/plan documents.
 3. Put new requirement specs in `.workflow/specs`.
 4. Do not stop for user approval of the written spec or implementation plan
    unless the user explicitly asks to review them. Instead, run an additional
    reviewer agent for the spec/plan and apply blocking or important feedback
-   before implementation.
+   before implementation. This skips only final document approval, not the
+   preliminary product/design discussion in step 2.
 5. After writing a spec, present it in the browser visual companion for review
    when the user explicitly asks for visual review or when visual design choices
    are the active deliverable. Use port `8765` when the user asks for a stable
