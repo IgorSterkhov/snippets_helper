@@ -570,6 +570,7 @@ async def run_tests():
     async def t2m2_ai_command_followup_completes_checkbox():
         await close_modals()
         await cdp.eval("""(async () => {
+          window.__mockCommandLog = [];
           const boxes = JSON.parse(localStorage.getItem('mock.task_checkboxes') || '[]');
           for (const box of boxes) {
             if (box.text === 'Regular todo visible') box.is_checked = false;
@@ -598,6 +599,41 @@ async def run_tests():
         await cdp.send('Page.reload', ignoreCache=True)
         await wait_until(cdp, "!!document.querySelector('.tab-btn[data-tab-id=\"shortcuts\"]')", timeout=8)
     await check('T2m2 AI command follows search result', t2m2_ai_command_followup_completes_checkbox)
+
+    # ── T2m3: AI command follows opened task to finish mutation ─
+    async def t2m3_ai_command_followup_after_open_task():
+        await close_modals()
+        await cdp.eval("""(async () => {
+          const boxes = JSON.parse(localStorage.getItem('mock.task_checkboxes') || '[]');
+          for (const box of boxes) {
+            if (box.text === 'Regular todo visible') box.is_checked = false;
+          }
+          localStorage.setItem('mock.task_checkboxes', JSON.stringify(boxes));
+        })()""")
+        await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"ai\"]').click()")
+        await wait_until(cdp, "!!document.querySelector('#panel-ai textarea.ai-input')", timeout=4)
+        await cdp.eval("""(() => {
+          const input = document.querySelector('#panel-ai textarea.ai-input');
+          input.value = 'Открой задачу Regular, и выполни там пункт Regular todo';
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          document.querySelector('#panel-ai .ai-send-btn').click();
+        })()""")
+        completed = await wait_until(cdp, """(async () => {
+          const tasks = await window.__TAURI__.core.invoke('list_tasks', { category: null, status: null });
+          const task = tasks.find(t => t.title === 'Regular mock task');
+          if (!task) return null;
+          const boxes = await window.__TAURI__.core.invoke('list_task_checkboxes', { taskId: task.id });
+          const box = boxes.find(b => b.text === 'Regular todo visible');
+          if (!box || !box.is_checked) return null;
+          const calls = (window.__mockCommandLog || []).filter(call => call.command === 'ai_chat');
+          return { checked: true, text: box.text, aiCalls: calls.length };
+        })()""", timeout=8)
+        assert completed['checked'] is True, completed
+        assert completed['aiCalls'] >= 2, completed
+        await cdp.eval("window.__TAURI__.core.invoke('set_setting', { key: 'last_active_tab', value: 'shortcuts' })")
+        await cdp.send('Page.reload', ignoreCache=True)
+        await wait_until(cdp, "!!document.querySelector('.tab-btn[data-tab-id=\"shortcuts\"]')", timeout=8)
+    await check('T2m3 AI command follows opened task', t2m3_ai_command_followup_after_open_task)
 
     # ── T2n: AI mic records into prompt input ─────────────────
     async def t2n_ai_mic_records_into_prompt():

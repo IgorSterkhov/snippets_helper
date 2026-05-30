@@ -345,9 +345,10 @@ function shouldContinueCommand(message, commands, results) {
   if (!mutationIntent) return false;
   if (commands.some(c => ['create_task', 'add_task_checkbox', 'complete_task_checkbox'].includes(c?.name))) return false;
   return results.some(r => (
-    (r.status === 'executed' || r.status === 'needs_clarification')
-    && Array.isArray(r.choices)
-    && r.choices.length > 0
+    (r.status === 'executed' || r.status === 'needs_clarification') && (
+      (Array.isArray(r.choices) && r.choices.length > 0)
+      || (r.name === 'open_task' && r.item_type === 'task' && !!r.item_uuid)
+    )
   ));
 }
 
@@ -363,6 +364,7 @@ function buildFollowupMessage(originalMessage, results) {
   return [
     'Continue the same command request using the previous local command results.',
     'Do not repeat a pure search if the result contains one suitable item.',
+    'If a previous result has item_type="task" and item_uuid, treat that item_uuid as the target task.',
     'For task checkbox actions, use task_uuid or task_ref="current" for the task and checkbox_query for the checkbox text.',
     `Original request: ${originalMessage}`,
     `Previous command results: ${JSON.stringify(compact)}`,

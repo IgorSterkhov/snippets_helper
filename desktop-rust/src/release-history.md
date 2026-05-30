@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## f-20260530-1 (2026-05-30)
+
+- **AI command continuation fix:** command mode now continues after opening a
+  task when the original request also asks to mutate it, so commands like
+  "open task Pharmacy and mark Buy charcoal done" complete the checkbox update
+  instead of stopping after navigation.
+
 ## v1.3.49 (2026-05-30)
 
 - **DeepSeek balance:** Settings -> AI can check the current user's DeepSeek
