@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## f-20260530-3 (2026-05-30)
+
+- **Settings modal stability:** the redesigned Settings window now keeps a
+  fixed height while switching sections, the left navigation rail scrolls
+  internally when needed, and navigation labels are explicitly left-aligned.
+
 ## v1.4.0 (2026-05-30)
 
 - **AI agent settings:** the AI tab now has a gear modal for per-user custom

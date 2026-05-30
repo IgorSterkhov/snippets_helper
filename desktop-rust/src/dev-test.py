@@ -213,6 +213,44 @@ async def run_tests():
         await wait_until(cdp, "!document.querySelector('.help-overlay')", timeout=3)
     await check('T2b Help changelog shows frontend OTA notes', t2b_help_changelog_shows_frontend_ota_notes)
 
+    # ── T2b2: Settings modal keeps stable layout ─────────────
+    async def t2b2_settings_modal_layout_stable():
+        await cdp.eval("""
+          document.querySelector('.settings-overlay')?.remove();
+          localStorage.setItem('mock.admin_me', JSON.stringify({
+            user_id: 'mock-admin-user', name: 'Mock Admin', is_admin: true,
+            media_quota_bytes: 1073741824, media_max_upload_bytes: 20971520,
+            media_used_bytes: 12582912
+          }));
+          document.querySelector('.tab-btn[title="Settings"]').click();
+        """)
+        await wait_until(cdp, "!!document.querySelector('.settings-overlay')", timeout=3)
+        await wait_until(cdp, "[...document.querySelectorAll('.settings-tab-btn')].some(b => b.textContent.trim() === 'AI')", timeout=3)
+        layout = await cdp.eval("""(() => {
+          const modal = document.querySelector('.settings-modal');
+          const btn = document.querySelector('.settings-tab-btn');
+          const style = getComputedStyle(btn);
+          const strip = document.querySelector('.settings-tab-strip');
+          const stripStyle = getComputedStyle(strip);
+          return {
+            modalHeight: Math.round(modal.getBoundingClientRect().height),
+            expectedHeight: Math.round(Math.min(window.innerHeight * 0.86, 760)),
+            textAlign: style.textAlign,
+            justifyContent: style.justifyContent,
+            stripOverflowY: stripStyle.overflowY,
+          };
+        })()""")
+        assert abs(layout['modalHeight'] - layout['expectedHeight']) <= 2, layout
+        assert layout['textAlign'] == 'left', layout
+        assert layout['justifyContent'] == 'flex-start', layout
+        assert layout['stripOverflowY'] in ('auto', 'scroll'), layout
+        await cdp.eval("[...document.querySelectorAll('.settings-tab-btn')].find(b => b.textContent.trim() === 'AI').click()")
+        await wait_until(cdp, "document.querySelector('.settings-tab-btn.active')?.textContent.trim() === 'AI'", timeout=3)
+        switched_height = await cdp.eval("Math.round(document.querySelector('.settings-modal').getBoundingClientRect().height)")
+        assert switched_height == layout['modalHeight'], { **layout, 'switchedHeight': switched_height }
+        await cdp.eval("document.querySelector('.settings-overlay')?.remove()")
+    await check('T2b2 Settings modal stable layout', t2b2_settings_modal_layout_stable)
+
     # ── T2c: Settings admin tab is gated by server flag ──────
     async def t2c_admin_settings_tab_visibility():
         await cdp.eval("""

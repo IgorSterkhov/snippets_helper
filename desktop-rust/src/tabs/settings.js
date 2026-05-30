@@ -1577,6 +1577,7 @@ function injectStyles() {
 .settings-modal {
   width: min(980px, calc(100vw - 48px));
   max-width: 980px;
+  height: min(86vh, 760px);
   max-height: min(86vh, 760px);
   display: flex;
   flex-direction: column;
@@ -1617,6 +1618,7 @@ function injectStyles() {
 .settings-tab-btn {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 10px;
   width: 100%;
   min-height: 34px;
@@ -1951,6 +1953,7 @@ function injectStyles() {
 @media (max-width: 760px) {
   .settings-modal {
     width: calc(100vw - 24px);
+    height: calc(100vh - 24px);
     max-height: calc(100vh - 24px);
   }
   .settings-content {
