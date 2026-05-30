@@ -24,6 +24,7 @@ class FakeTelegramRepo:
     def __init__(self, bound_user=None):
         self.bound_user = bound_user
         self.processed = set()
+        self.bound_chats = []
 
     async def get_bound_user(self, chat_id):
         return self.bound_user
@@ -34,6 +35,10 @@ class FakeTelegramRepo:
             return False
         self.processed.add(key)
         return True
+
+    async def bind_chat(self, chat_id):
+        self.bound_chats.append(chat_id)
+        self.bound_user = FakeUser()
 
 
 def update(chat_id=123, message_id=7, update_id=99, text="создай задачу"):
@@ -87,6 +92,34 @@ def test_unknown_telegram_chat_is_denied_before_ai_call():
 
     assert result["status"] == "denied"
     assert calls == []
+    assert repo.bound_chats == []
+
+
+def test_pairing_code_binds_unknown_chat_without_ai_call():
+    repo = FakeTelegramRepo(bound_user=None)
+    calls = []
+    sent = []
+
+    async def ai_runner(user, text):
+        calls.append((user, text))
+        return "should not be called"
+
+    async def send_message(chat_id, text):
+        sent.append((chat_id, text))
+
+    result = asyncio.run(process_telegram_text_update(
+        update(chat_id=12345, text="/start pair-abc123"),
+        repo,
+        ai_runner,
+        send_message=send_message,
+        pairing_code="pair-abc123",
+    ))
+
+    assert result["status"] == "bound"
+    assert result["chat_id"] == 12345
+    assert repo.bound_chats == [12345]
+    assert calls == []
+    assert "bound" in sent[0][1].lower()
 
 
 def test_duplicate_telegram_message_does_not_execute_twice():

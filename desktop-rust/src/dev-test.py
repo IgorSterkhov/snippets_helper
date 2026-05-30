@@ -304,6 +304,12 @@ async def run_tests():
         assert telegram_value == '', 'saved Telegram token should not stay visible in the input'
         body_text = await cdp.eval("document.querySelector('.settings-overlay')?.textContent || ''")
         assert 'telegram-secret' not in body_text, 'raw Telegram token leaked into Settings text'
+        pairing_command = await cdp.eval("document.querySelector('.telegram-pairing-command')?.textContent || ''")
+        assert pairing_command.startswith('/start '), f'pairing command missing: {pairing_command!r}'
+        await cdp.eval("document.querySelector('.telegram-provider-poll-btn')?.click()")
+        await wait_until(cdp, "document.querySelector('.telegram-bound-chat')?.textContent.includes('123456789')", timeout=3)
+        await cdp.eval("document.querySelector('.telegram-bound-chat .telegram-chat-unbind-btn')?.click()")
+        await wait_until(cdp, "!document.querySelector('.telegram-bound-chat')", timeout=3)
         await cdp.eval("document.querySelector('.telegram-provider-clear-btn').click()")
         await wait_until(cdp, "document.querySelector('.telegram-provider-status')?.textContent.includes('Not configured')", timeout=3)
 

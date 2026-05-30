@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## v1.3.50 (2026-05-30)
+
+- **Telegram chat pairing in Settings:** Settings -> AI now shows a per-user
+  Telegram pairing command, polls the saved bot token for that pairing message,
+  lists active bound chats, and can unbind a chat without running a server
+  console command.
+- **Telegram safety preserved:** unknown chats remain deny-by-default. The
+  server binds a chat only when a message contains the current user's pairing
+  code, then the bot uses that user's DeepSeek key and Telegram token.
+
 ## f-20260530-1 (2026-05-30)
 
 - **AI command continuation fix:** command mode now continues after opening a

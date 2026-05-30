@@ -512,12 +512,53 @@
       const updatedAt = now();
       localStorage.removeItem(LS_PREFIX + 'ai_provider_telegram_bot_token');
       storeSet('ai_provider_telegram_bot_updated_at', updatedAt);
+      storeSet('telegram_bound_chats', []);
       return {
         deepseek_configured: !!storeGet('ai_provider_deepseek_key', ''),
         deepseek_updated_at: storeGet('ai_provider_deepseek_updated_at', null),
         telegram_bot_configured: false,
         telegram_bot_updated_at: updatedAt,
       };
+    },
+    async get_ai_telegram_status() {
+      return {
+        configured: !!storeGet('ai_provider_telegram_bot_token', ''),
+        polling_enabled: false,
+        last_update_id: storeGet('telegram_last_update_id', null),
+        last_error: null,
+        pairing_code: 'mock-pair-123',
+        pairing_command: '/start mock-pair-123',
+        bound_chats: storeGet('telegram_bound_chats', []),
+      };
+    },
+    async poll_ai_telegram_once() {
+      if (!storeGet('ai_provider_telegram_bot_token', '')) {
+        throw new Error('Telegram bot token is not configured for this user');
+      }
+      const updatedAt = now();
+      const chats = storeGet('telegram_bound_chats', []);
+      if (!chats.some((chat) => String(chat.chat_id) === '123456789')) {
+        chats.push({
+          chat_id: 123456789,
+          created_at: updatedAt,
+          updated_at: updatedAt,
+          is_active: true,
+        });
+      }
+      storeSet('telegram_bound_chats', chats);
+      storeSet('telegram_last_update_id', 1001);
+      return {
+        updates: 1,
+        next_offset: 1002,
+        results: [{ status: 'bound', chat_id: 123456789 }],
+      };
+    },
+    async unbind_ai_telegram_chat({ chatId, chat_id }) {
+      const id = Number(chatId ?? chat_id);
+      const chats = storeGet('telegram_bound_chats', [])
+        .filter((chat) => Number(chat.chat_id) !== id);
+      storeSet('telegram_bound_chats', chats);
+      return { status: 'ok', chat_id: id };
     },
     async ai_chat({ request }) {
       const mode = request?.mode === 'chat' ? 'chat' : 'command';

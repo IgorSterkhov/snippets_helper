@@ -103,6 +103,30 @@ fn ai_telegram_bot_settings_url(api_url: &str) -> String {
     }
 }
 
+fn telegram_my_status_url(api_url: &str) -> String {
+    if api_url.ends_with("/v1") {
+        format!("{api_url}/telegram/my/status")
+    } else {
+        format!("{api_url}/v1/telegram/my/status")
+    }
+}
+
+fn telegram_my_poll_once_url(api_url: &str) -> String {
+    if api_url.ends_with("/v1") {
+        format!("{api_url}/telegram/my/poll-once")
+    } else {
+        format!("{api_url}/v1/telegram/my/poll-once")
+    }
+}
+
+fn telegram_my_chat_url(api_url: &str, chat_id: i64) -> String {
+    if api_url.ends_with("/v1") {
+        format!("{api_url}/telegram/my/chats/{chat_id}")
+    } else {
+        format!("{api_url}/v1/telegram/my/chats/{chat_id}")
+    }
+}
+
 async fn parse_json<T: for<'de> Deserialize<'de>>(resp: reqwest::Response) -> Result<T, String> {
     let status = resp.status();
     if !status.is_success() {
@@ -226,11 +250,54 @@ pub async fn clear_ai_telegram_bot_settings(
     parse_json::<AiProviderSettings>(resp).await
 }
 
+#[tauri::command]
+pub async fn get_ai_telegram_status(state: State<'_, DbState>) -> Result<Value, String> {
+    let (api_url, api_key, ca_cert) = sync_settings(&state)?;
+    let client = http_client(&api_url, ca_cert.as_deref())?;
+    let resp = client
+        .get(telegram_my_status_url(&api_url))
+        .bearer_auth(api_key)
+        .send()
+        .await
+        .map_err(|e| format!("request failed: {e}"))?;
+    parse_json::<Value>(resp).await
+}
+
+#[tauri::command]
+pub async fn poll_ai_telegram_once(state: State<'_, DbState>) -> Result<Value, String> {
+    let (api_url, api_key, ca_cert) = sync_settings(&state)?;
+    let client = http_client(&api_url, ca_cert.as_deref())?;
+    let resp = client
+        .post(telegram_my_poll_once_url(&api_url))
+        .bearer_auth(api_key)
+        .send()
+        .await
+        .map_err(|e| format!("request failed: {e}"))?;
+    parse_json::<Value>(resp).await
+}
+
+#[tauri::command]
+pub async fn unbind_ai_telegram_chat(
+    state: State<'_, DbState>,
+    chat_id: i64,
+) -> Result<Value, String> {
+    let (api_url, api_key, ca_cert) = sync_settings(&state)?;
+    let client = http_client(&api_url, ca_cert.as_deref())?;
+    let resp = client
+        .delete(telegram_my_chat_url(&api_url, chat_id))
+        .bearer_auth(api_key)
+        .send()
+        .await
+        .map_err(|e| format!("request failed: {e}"))?;
+    parse_json::<Value>(resp).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         ai_chat_url, ai_provider_balance_url, ai_provider_settings_url,
-        ai_telegram_bot_settings_url,
+        ai_telegram_bot_settings_url, telegram_my_chat_url, telegram_my_poll_once_url,
+        telegram_my_status_url,
     };
 
     #[test]
@@ -278,6 +345,22 @@ mod tests {
         assert_eq!(
             ai_telegram_bot_settings_url("https://example.test/snippets-api/v1"),
             "https://example.test/snippets-api/v1/ai/provider-settings/telegram-bot"
+        );
+    }
+
+    #[test]
+    fn telegram_my_urls_accept_plain_and_v1_bases() {
+        assert_eq!(
+            telegram_my_status_url("https://example.test/snippets-api"),
+            "https://example.test/snippets-api/v1/telegram/my/status"
+        );
+        assert_eq!(
+            telegram_my_poll_once_url("https://example.test/snippets-api/v1"),
+            "https://example.test/snippets-api/v1/telegram/my/poll-once"
+        );
+        assert_eq!(
+            telegram_my_chat_url("https://example.test/snippets-api", 12345),
+            "https://example.test/snippets-api/v1/telegram/my/chats/12345"
         );
     }
 }

@@ -667,7 +667,7 @@ async function renderAi(container) {
   container.appendChild(deepCard);
 
   const telegramCard = el('div', { class: 'ai-provider-card' });
-  telegramCard.appendChild(providerHeader('Telegram Bot', 'Token from BotFather. Chats are still deny-by-default and must be bound to this user on the server.'));
+  telegramCard.appendChild(providerHeader('Telegram Bot', 'Token from BotFather. Bind chats here by sending the pairing command to your bot.'));
   const telegramStatusBox = el('div', { class: 'ai-provider-box' });
   const telegramStatus = el('div', { class: 'ai-provider-status telegram-provider-status', text: 'Loading...' });
   const telegramMeta = el('div', { class: 'ai-provider-meta', text: '' });
@@ -693,7 +693,86 @@ async function renderAi(container) {
   telegramActions.appendChild(telegramClearBtn);
   telegramActions.appendChild(telegramRefreshBtn);
   telegramCard.appendChild(telegramActions);
+
+  const telegramBindingBox = el('div', { class: 'telegram-binding-box' });
+  const telegramPairingHelp = el('div', {
+    class: 'ai-provider-meta telegram-pairing-help',
+    text: 'Save a bot token to generate a pairing command.',
+  });
+  const telegramPairingCommand = el('code', { class: 'telegram-pairing-command', text: '' });
+  const telegramBindingActions = el('div', { class: 'settings-actions telegram-binding-actions' });
+  const telegramCopyPairingBtn = el('button', { text: 'Copy pairing command', class: 'btn-secondary telegram-pairing-copy-btn' });
+  const telegramPollBtn = el('button', { text: 'Poll / bind', class: 'btn-secondary telegram-provider-poll-btn' });
+  telegramBindingActions.appendChild(telegramCopyPairingBtn);
+  telegramBindingActions.appendChild(telegramPollBtn);
+  const telegramChats = el('div', { class: 'telegram-bound-chats' });
+  telegramBindingBox.appendChild(telegramPairingHelp);
+  telegramBindingBox.appendChild(telegramPairingCommand);
+  telegramBindingBox.appendChild(telegramBindingActions);
+  telegramBindingBox.appendChild(telegramChats);
+  telegramCard.appendChild(telegramBindingBox);
   container.appendChild(telegramCard);
+
+  function renderTelegramChats(chats = []) {
+    telegramChats.innerHTML = '';
+    if (!chats.length) {
+      telegramChats.appendChild(el('div', {
+        class: 'ai-provider-meta telegram-no-bound-chats',
+        text: 'No chats bound yet.',
+      }));
+      return;
+    }
+    for (const chat of chats) {
+      const chatId = chat.chat_id ?? chat.chatId;
+      const row = el('div', { class: 'telegram-bound-chat' });
+      row.appendChild(el('span', { text: `Chat ${chatId}` }));
+      const updated = chat.updated_at || chat.updatedAt;
+      if (updated) {
+        row.appendChild(el('small', { text: `Bound: ${formatDate(updated)}` }));
+      }
+      const unbindBtn = el('button', { text: 'Unbind', class: 'btn-secondary telegram-chat-unbind-btn' });
+      unbindBtn.addEventListener('click', async () => {
+        unbindBtn.disabled = true;
+        unbindBtn.textContent = 'Unbinding...';
+        try {
+          await call('unbind_ai_telegram_chat', { chatId });
+          await refreshTelegramBindingStatus();
+          showToast('Telegram chat unbound', 'success');
+        } catch (err) {
+          showToast('Failed to unbind Telegram chat: ' + err, 'error');
+          unbindBtn.disabled = false;
+          unbindBtn.textContent = 'Unbind';
+        }
+      });
+      row.appendChild(unbindBtn);
+      telegramChats.appendChild(row);
+    }
+  }
+
+  async function refreshTelegramBindingStatus() {
+    telegramPollBtn.disabled = true;
+    telegramCopyPairingBtn.disabled = true;
+    telegramPairingCommand.textContent = '';
+    telegramPairingHelp.textContent = 'Loading Telegram binding status...';
+    renderTelegramChats([]);
+    try {
+      const tg = await call('get_ai_telegram_status');
+      const configured = !!tg.configured;
+      const command = tg.pairing_command || '';
+      telegramPairingCommand.textContent = configured ? command : '';
+      telegramPairingHelp.textContent = configured
+        ? 'Send this command to your bot, then press Poll / bind.'
+        : 'Save a bot token to generate a pairing command.';
+      telegramPollBtn.disabled = !configured;
+      telegramCopyPairingBtn.disabled = !configured || !command;
+      renderTelegramChats(Array.isArray(tg.bound_chats) ? tg.bound_chats : []);
+    } catch (err) {
+      telegramPairingHelp.textContent = 'Telegram binding status unavailable: ' + err;
+      telegramPollBtn.disabled = true;
+      telegramCopyPairingBtn.disabled = true;
+      renderTelegramChats([]);
+    }
+  }
 
   async function refreshStatus(data = null) {
     status.classList.remove('configured', 'missing', 'error');
@@ -727,6 +806,7 @@ async function renderAi(container) {
         telegramMeta.textContent = 'Save a per-user bot token before polling Telegram commands.';
         telegramClearBtn.disabled = true;
       }
+      await refreshTelegramBindingStatus();
     } catch (err) {
       status.textContent = 'Unavailable';
       status.classList.add('error');
@@ -737,6 +817,8 @@ async function renderAi(container) {
       telegramStatus.classList.add('error');
       telegramMeta.textContent = String(err);
       telegramClearBtn.disabled = true;
+      telegramPollBtn.disabled = true;
+      telegramCopyPairingBtn.disabled = true;
     }
   }
 
@@ -820,6 +902,35 @@ async function renderAi(container) {
       await call('open_url', { url: 'https://platform.deepseek.com/usage' });
     } catch (err) {
       showToast('Failed to open DeepSeek usage: ' + err, 'error');
+    }
+  });
+
+  telegramCopyPairingBtn.addEventListener('click', async () => {
+    const command = telegramPairingCommand.textContent.trim();
+    if (!command) return;
+    try {
+      await navigator.clipboard.writeText(command);
+      showToast('Telegram pairing command copied', 'success');
+    } catch {
+      showToast('Could not copy pairing command', 'error');
+    }
+  });
+
+  telegramPollBtn.addEventListener('click', async () => {
+    telegramPollBtn.disabled = true;
+    telegramPollBtn.textContent = 'Polling...';
+    try {
+      const result = await call('poll_ai_telegram_once');
+      await refreshTelegramBindingStatus();
+      const bound = Array.isArray(result?.results)
+        ? result.results.filter((item) => item?.status === 'bound').length
+        : 0;
+      showToast(bound ? 'Telegram chat bound' : 'Telegram polled; no new pairing message found', bound ? 'success' : 'info');
+    } catch (err) {
+      showToast('Telegram poll failed: ' + err, 'error');
+    } finally {
+      telegramPollBtn.disabled = false;
+      telegramPollBtn.textContent = 'Poll / bind';
     }
   });
 
@@ -1665,6 +1776,47 @@ function injectStyles() {
 }
 .ai-provider-balance-row strong {
   color: var(--text);
+}
+.telegram-binding-box {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.025);
+}
+.telegram-pairing-command {
+  display: block;
+  margin-top: 8px;
+  padding: 8px 10px;
+  min-height: 18px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--bg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  user-select: text;
+}
+.telegram-bound-chats {
+  margin-top: 10px;
+}
+.telegram-bound-chat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+  color: var(--text);
+  font-size: 12px;
+}
+.telegram-bound-chat span {
+  font-weight: 700;
+}
+.telegram-bound-chat small {
+  color: var(--text-muted);
+}
+.telegram-bound-chat .telegram-chat-unbind-btn {
+  margin-left: auto;
 }
 .admin-users-header {
   display: flex;

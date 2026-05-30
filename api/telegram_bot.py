@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+from datetime import datetime
 from typing import Any, Awaitable, Callable, Protocol
 
 import httpx
@@ -20,6 +22,9 @@ class TelegramRepository(Protocol):
         ...
 
     async def try_mark_processed(self, chat_id: int, message_id: int, update_id: int | None) -> bool:
+        ...
+
+    async def bind_chat(self, chat_id: int) -> None:
         ...
 
 
@@ -63,6 +68,28 @@ class SqlAlchemyTelegramRepository:
         ))
         await self.db.flush()
         return True
+
+    async def bind_chat(self, chat_id: int) -> None:
+        if self.owner_user is None:
+            raise RuntimeError("telegram chat binding requires an owner user")
+        stmt = select(TelegramChatBinding).where(
+            TelegramChatBinding.user_id == self.owner_user.id,
+            TelegramChatBinding.chat_id == chat_id,
+        )
+        binding = (await self.db.execute(stmt)).scalar_one_or_none()
+        now = datetime.utcnow()
+        if binding is None:
+            binding = TelegramChatBinding(
+                chat_id=chat_id,
+                user_id=self.owner_user.id,
+                is_active=True,
+                updated_at=now,
+            )
+            self.db.add(binding)
+        else:
+            binding.is_active = True
+            binding.updated_at = now
+        await self.db.flush()
 
 
 AiRunner = Callable[[Any, str], Awaitable[Any]]
@@ -136,6 +163,21 @@ def telegram_message_fields(update: dict[str, Any]) -> tuple[int | None, int | N
     return chat_id, message_id, update_id, text
 
 
+def telegram_pairing_code(user: User) -> str:
+    seed = f"{getattr(user, 'id', '')}:{getattr(user, 'api_key', '')}:telegram-pairing-v1"
+    return hashlib.sha256(seed.encode("utf-8")).hexdigest()[:12]
+
+
+def telegram_pairing_command(user: User) -> str:
+    return f"/start {telegram_pairing_code(user)}"
+
+
+def text_has_pairing_code(text: str | None, pairing_code: str | None) -> bool:
+    if not text or not pairing_code:
+        return False
+    return pairing_code in {part.strip() for part in text.strip().split()}
+
+
 async def run_telegram_ai(db: AsyncSession, user: User, text: str):
     api_key = user_deepseek_api_key(user)
     if not api_key:
@@ -158,6 +200,7 @@ async def process_telegram_update_with_db(
     db: AsyncSession,
     bot_api: TelegramBotApi,
     owner_user: User | None = None,
+    pairing_code: str | None = None,
 ) -> dict[str, Any]:
     repo = SqlAlchemyTelegramRepository(db, owner_user)
 
@@ -168,7 +211,13 @@ async def process_telegram_update_with_db(
         return await bot_api.send_message(chat_id, text)
 
     try:
-        result = await process_telegram_text_update(update, repo, ai_runner, send_message)
+        result = await process_telegram_text_update(
+            update,
+            repo,
+            ai_runner,
+            send_message,
+            pairing_code=pairing_code,
+        )
         await db.commit()
         return result
     except Exception:
@@ -211,6 +260,7 @@ async def poll_telegram_once_for_user(
     bot_api: TelegramBotApi | None = None,
     offset: int | None = None,
     limit: int = 20,
+    allow_pairing: bool = False,
 ) -> dict[str, Any]:
     token = user_telegram_bot_token(user)
     if not token:
@@ -232,7 +282,13 @@ async def poll_telegram_once_for_user(
         update_id = update.get("update_id")
         if update_id is not None:
             next_offset = max(next_offset or 0, int(update_id) + 1)
-        results.append(await process_telegram_update_with_db(update, db, api, owner_user=user))
+        results.append(await process_telegram_update_with_db(
+            update,
+            db,
+            api,
+            owner_user=user,
+            pairing_code=telegram_pairing_code(user) if allow_pairing else None,
+        ))
     return {
         "updates": len(updates),
         "next_offset": next_offset,
@@ -245,6 +301,7 @@ async def process_telegram_text_update(
     repo: TelegramRepository,
     ai_runner: AiRunner,
     send_message: SendMessage | None = None,
+    pairing_code: str | None = None,
 ) -> dict[str, Any]:
     chat_id, message_id, update_id, text = telegram_message_fields(update)
     if chat_id is None or message_id is None or not text:
@@ -255,6 +312,11 @@ async def process_telegram_text_update(
 
     user = await repo.get_bound_user(int(chat_id))
     if user is None:
+        if text_has_pairing_code(text, pairing_code):
+            await repo.bind_chat(int(chat_id))
+            if send_message is not None:
+                await send_message(int(chat_id), "Telegram chat bound to this app account.")
+            return {"status": "bound", "chat_id": int(chat_id)}
         if send_message is not None:
             await send_message(int(chat_id), "Telegram chat is not authorized for this app account.")
         return {"status": "denied", "chat_id": int(chat_id)}
