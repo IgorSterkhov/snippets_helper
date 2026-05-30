@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import httpx
 from sqlalchemy import UniqueConstraint
+from sqlalchemy.exc import IntegrityError
 
 from api.telegram_bot import (
     SqlAlchemyTelegramRepository,
@@ -183,6 +184,35 @@ def test_duplicate_telegram_message_does_not_execute_twice():
     assert len(calls) == 1
 
 
+class FakeIntegrityDb:
+    def __init__(self):
+        self.added = []
+        self.rollbacks = 0
+
+    async def execute(self, _stmt):
+        return FakeResult(None)
+
+    def add(self, value):
+        self.added.append(value)
+
+    async def flush(self):
+        raise IntegrityError("insert telegram_processed_messages", {}, RuntimeError("duplicate"))
+
+    async def rollback(self):
+        self.rollbacks += 1
+
+
+def test_sqlalchemy_telegram_repo_treats_processed_insert_race_as_duplicate():
+    db = FakeIntegrityDb()
+    repo = SqlAlchemyTelegramRepository(db, FakeUser(id="user-race"))
+
+    result = asyncio.run(repo.try_mark_processed(chat_id=123, message_id=7, update_id=99))
+
+    assert result is False
+    assert db.rollbacks == 1
+    assert len(db.added) == 1
+
+
 def test_run_telegram_ai_uses_bound_user_deepseek_key(monkeypatch):
     seen = {}
 
@@ -255,6 +285,82 @@ def test_poll_telegram_once_for_user_uses_user_scoped_processed_offset():
     assert bot.offsets == [43]
     assert result["updates"] == 0
     assert "telegram_processed_messages.user_id" in db.statements[0]
+
+
+class FakeScalarResult:
+    def __init__(self, values):
+        self.values = values
+
+    def scalars(self):
+        return self
+
+    def all(self):
+        return self.values
+
+
+class FakePollingDb:
+    def __init__(self, users):
+        self.users = users
+        self.statements = []
+        self.rollbacks = 0
+
+    async def execute(self, stmt):
+        self.statements.append(str(stmt))
+        return FakeScalarResult(self.users)
+
+    async def rollback(self):
+        self.rollbacks += 1
+
+
+def test_background_telegram_poller_polls_configured_users_with_pairing_enabled():
+    from api.telegram_poller import poll_configured_telegram_users
+
+    users = [
+        FakeUser(id="user-1", telegram_bot_token="111:token"),
+        FakeUser(id="user-2", telegram_bot_token="222:token"),
+    ]
+    db = FakePollingDb(users)
+    calls = []
+
+    async def fake_poll(db_arg, user, **kwargs):
+        calls.append((db_arg, user.id, kwargs))
+        return {"updates": 1, "results": [{"status": "processed"}]}
+
+    result = asyncio.run(poll_configured_telegram_users(db, poll_func=fake_poll))
+
+    assert result["users"] == 2
+    assert result["polled"] == 2
+    assert result["updates"] == 2
+    assert result["errors"] == []
+    assert [call[1] for call in calls] == ["user-1", "user-2"]
+    assert all(call[2]["allow_pairing"] is True for call in calls)
+    assert all(call[2]["limit"] == 100 for call in calls)
+
+
+def test_background_telegram_poller_continues_after_user_error():
+    from api.telegram_poller import poll_configured_telegram_users
+
+    users = [
+        FakeUser(id="bad-user", telegram_bot_token="111:token"),
+        FakeUser(id="good-user", telegram_bot_token="222:token"),
+    ]
+    db = FakePollingDb(users)
+    calls = []
+
+    async def fake_poll(_db, user, **_kwargs):
+        calls.append(user.id)
+        if user.id == "bad-user":
+            raise RuntimeError("telegram timeout")
+        return {"updates": 1, "results": [{"status": "processed"}]}
+
+    result = asyncio.run(poll_configured_telegram_users(db, poll_func=fake_poll))
+
+    assert calls == ["bad-user", "good-user"]
+    assert db.rollbacks == 1
+    assert result["users"] == 2
+    assert result["polled"] == 1
+    assert result["updates"] == 1
+    assert result["errors"] == [{"user_id": "bad-user", "error": "RuntimeError: telegram timeout"}]
 
 
 class FakeInsertDb:

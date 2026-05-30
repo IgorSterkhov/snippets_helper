@@ -669,7 +669,7 @@ async function renderAi(container) {
   container.appendChild(deepCard);
 
   const telegramCard = el('div', { class: 'ai-provider-card' });
-  telegramCard.appendChild(providerHeader('Telegram Bot', 'Token from BotFather. Bind chats here by sending the pairing command to your bot.'));
+  telegramCard.appendChild(providerHeader('Telegram Bot', 'Token from BotFather. The server polls bot messages automatically; use Poll now only for an immediate refresh.'));
   const telegramStatusBox = el('div', { class: 'ai-provider-box' });
   const telegramStatus = el('div', { class: 'ai-provider-status telegram-provider-status', text: 'Loading...' });
   const telegramMeta = el('div', { class: 'ai-provider-meta', text: '' });
@@ -704,7 +704,7 @@ async function renderAi(container) {
   const telegramPairingCommand = el('code', { class: 'telegram-pairing-command', text: '' });
   const telegramBindingActions = el('div', { class: 'settings-actions telegram-binding-actions' });
   const telegramCopyPairingBtn = el('button', { text: 'Copy pairing command', class: 'btn-secondary telegram-pairing-copy-btn' });
-  const telegramPollBtn = el('button', { text: 'Poll / bind', class: 'btn-secondary telegram-provider-poll-btn' });
+  const telegramPollBtn = el('button', { text: 'Poll now', class: 'btn-secondary telegram-provider-poll-btn' });
   telegramBindingActions.appendChild(telegramCopyPairingBtn);
   telegramBindingActions.appendChild(telegramPollBtn);
   const telegramChats = el('div', { class: 'telegram-bound-chats' });
@@ -760,10 +760,13 @@ async function renderAi(container) {
     try {
       const tg = await call('get_ai_telegram_status');
       const configured = !!tg.configured;
+      const pollingEnabled = tg.polling_enabled !== false;
       const command = tg.pairing_command || '';
       telegramPairingCommand.textContent = configured ? command : '';
       telegramPairingHelp.textContent = configured
-        ? 'Send this command to your bot, then press Poll / bind.'
+        ? (pollingEnabled
+          ? 'Send this command to your bot. The server polls automatically; Poll now only refreshes immediately.'
+          : 'Send this command to your bot, then press Poll now because automatic polling is disabled on the server.')
         : 'Save a bot token to generate a pairing command.';
       telegramPollBtn.disabled = !configured;
       telegramCopyPairingBtn.disabled = !configured || !command;
@@ -932,7 +935,7 @@ async function renderAi(container) {
       showToast('Telegram poll failed: ' + err, 'error');
     } finally {
       telegramPollBtn.disabled = false;
-      telegramPollBtn.textContent = 'Poll / bind';
+      telegramPollBtn.textContent = 'Poll now';
     }
   });
 

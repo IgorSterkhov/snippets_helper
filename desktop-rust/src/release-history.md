@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## f-20260530-4 (2026-05-30)
+
+- **Telegram automatic polling:** the server now polls configured per-user
+  Telegram bots in the background, so bound chats can receive replies without
+  pressing Poll in Settings. Settings > AI now labels the manual action as
+  Poll now and explains that it is only an immediate refresh.
+
 ## f-20260530-3 (2026-05-30)
 
 - **Settings modal stability:** the redesigned Settings window now keeps a

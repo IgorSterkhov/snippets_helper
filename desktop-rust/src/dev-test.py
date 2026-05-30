@@ -344,6 +344,10 @@ async def run_tests():
         assert 'telegram-secret' not in body_text, 'raw Telegram token leaked into Settings text'
         pairing_command = await cdp.eval("document.querySelector('.telegram-pairing-command')?.textContent || ''")
         assert pairing_command.startswith('/start '), f'pairing command missing: {pairing_command!r}'
+        binding_text = await cdp.eval("document.querySelector('.telegram-binding-box')?.textContent || ''")
+        assert 'automatically' in binding_text.lower(), binding_text
+        poll_label = await cdp.eval("document.querySelector('.telegram-provider-poll-btn')?.textContent.trim() || ''")
+        assert poll_label == 'Poll now', poll_label
         await cdp.eval("document.querySelector('.telegram-provider-poll-btn')?.click()")
         await wait_until(cdp, "document.querySelector('.telegram-bound-chat')?.textContent.includes('123456789')", timeout=3)
         await cdp.eval("document.querySelector('.telegram-bound-chat .telegram-chat-unbind-btn')?.click()")

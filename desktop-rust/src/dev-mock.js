@@ -602,7 +602,7 @@
     async get_ai_telegram_status() {
       return {
         configured: !!storeGet('ai_provider_telegram_bot_token', ''),
-        polling_enabled: false,
+        polling_enabled: true,
         last_update_id: storeGet('telegram_last_update_id', null),
         last_error: null,
         pairing_code: 'mock-pair-123',

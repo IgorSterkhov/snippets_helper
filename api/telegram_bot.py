@@ -6,6 +6,7 @@ from typing import Any, Awaitable, Callable, Protocol
 
 import httpx
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.ai_commands import deepseek_tools
@@ -65,7 +66,11 @@ class SqlAlchemyTelegramRepository:
             message_id=message_id,
             update_id=update_id,
         ))
-        await self.db.flush()
+        try:
+            await self.db.flush()
+        except IntegrityError:
+            await self.db.rollback()
+            return False
         return True
 
     async def bind_chat(self, chat_id: int) -> None:

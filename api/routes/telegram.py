@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.auth import get_current_user
 from api.database import get_db
 from api.models import TelegramChatBinding, TelegramProcessedMessage, User
+from api.config import TELEGRAM_POLLING_ENABLED
 from api.telegram_bot import (
     poll_telegram_once_for_user,
     telegram_pairing_code,
@@ -48,7 +49,7 @@ async def telegram_my_status(
     active_bindings = bindings.scalars().all()
     return {
         "configured": bool(user_telegram_bot_token(user)),
-        "polling_enabled": False,
+        "polling_enabled": TELEGRAM_POLLING_ENABLED,
         "last_update_id": int(latest_update_id) if latest_update_id is not None else None,
         "last_error": None,
         "pairing_code": telegram_pairing_code(user),
