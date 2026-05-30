@@ -24,6 +24,10 @@ services:
       DEEPSEEK_TIMEOUT_SECONDS: ${DEEPSEEK_TIMEOUT_SECONDS:-30}
     expose:
       - "8001"
+    extra_hosts:
+      # The provider DNS can resolve api.telegram.org to an IP that times out
+      # from this VPS. Keep Telegram Bot API polling on a tested reachable IP.
+      - "api.telegram.org:149.154.167.220"
     volumes:
       - /opt/isterapp/uploads/snippets-media:/opt/isterapp/uploads/snippets-media
     networks:

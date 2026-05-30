@@ -132,19 +132,30 @@ class TelegramBotApi:
         })
 
     async def _request(self, method: str, payload: dict[str, Any]) -> dict[str, Any]:
+        timeout = httpx.Timeout(self.timeout, connect=min(8.0, self.timeout))
         if self.http_client is not None:
-            response = await self.http_client.post(
-                f"{self.base_url}/{method}",
-                json=payload,
-                timeout=self.timeout,
-            )
-        else:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
+            try:
+                response = await self.http_client.post(
                     f"{self.base_url}/{method}",
                     json=payload,
-                    timeout=self.timeout,
+                    timeout=timeout,
                 )
+            except httpx.RequestError as exc:
+                raise RuntimeError(
+                    f"Telegram request failed ({type(exc).__name__}): {exc}"
+                ) from exc
+        else:
+            async with httpx.AsyncClient() as client:
+                try:
+                    response = await client.post(
+                        f"{self.base_url}/{method}",
+                        json=payload,
+                        timeout=timeout,
+                    )
+                except httpx.RequestError as exc:
+                    raise RuntimeError(
+                        f"Telegram request failed ({type(exc).__name__}): {exc}"
+                    ) from exc
         if response.status_code >= 400:
             raise RuntimeError(f"Telegram HTTP {response.status_code}: {response.text[:500]}")
         data = response.json()
@@ -314,17 +325,51 @@ async def process_telegram_text_update(
     if user is None:
         if text_has_pairing_code(text, pairing_code):
             await repo.bind_chat(int(chat_id))
+            send_error = None
             if send_message is not None:
-                await send_message(int(chat_id), "Telegram chat bound to this app account.")
-            return {"status": "bound", "chat_id": int(chat_id)}
+                send_error = await try_send_telegram_message(
+                    send_message,
+                    int(chat_id),
+                    "Telegram chat bound to this app account.",
+                )
+            result = {"status": "bound", "chat_id": int(chat_id)}
+            if send_error:
+                result["send_status"] = "failed"
+                result["send_error"] = send_error
+            return result
         if send_message is not None:
-            await send_message(int(chat_id), "Telegram chat is not authorized for this app account.")
+            await try_send_telegram_message(
+                send_message,
+                int(chat_id),
+                "Telegram chat is not authorized for this app account.",
+            )
         return {"status": "denied", "chat_id": int(chat_id)}
 
     response = await ai_runner(user, text)
+    send_error = None
     if send_message is not None:
-        await send_message(int(chat_id), format_telegram_ai_response(response))
-    return {"status": "processed", "chat_id": int(chat_id), "response": response}
+        send_error = await try_send_telegram_message(
+            send_message,
+            int(chat_id),
+            format_telegram_ai_response(response),
+        )
+    result = {"status": "processed", "chat_id": int(chat_id), "response": response}
+    if send_error:
+        result["send_status"] = "failed"
+        result["send_error"] = send_error
+    return result
+
+
+async def try_send_telegram_message(
+    send_message: SendMessage,
+    chat_id: int,
+    text: str,
+) -> str | None:
+    try:
+        await send_message(chat_id, text)
+        return None
+    except Exception as exc:
+        return f"{type(exc).__name__}: {exc}"
 
 
 def format_telegram_ai_response(response: Any) -> str:

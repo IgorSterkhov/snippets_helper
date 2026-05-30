@@ -2,6 +2,7 @@ import asyncio
 import uuid
 from dataclasses import dataclass
 
+import httpx
 from sqlalchemy import UniqueConstraint
 
 from api.telegram_bot import (
@@ -120,6 +121,48 @@ def test_pairing_code_binds_unknown_chat_without_ai_call():
     assert repo.bound_chats == [12345]
     assert calls == []
     assert "bound" in sent[0][1].lower()
+
+
+def test_pairing_code_keeps_binding_when_confirmation_send_fails():
+    repo = FakeTelegramRepo(bound_user=None)
+    calls = []
+
+    async def ai_runner(user, text):
+        calls.append((user, text))
+        return "should not be called"
+
+    async def send_message(chat_id, text):
+        raise RuntimeError("telegram send timeout")
+
+    result = asyncio.run(process_telegram_text_update(
+        update(chat_id=12345, text="/start pair-abc123"),
+        repo,
+        ai_runner,
+        send_message=send_message,
+        pairing_code="pair-abc123",
+    ))
+
+    assert result["status"] == "bound"
+    assert result["chat_id"] == 12345
+    assert result["send_status"] == "failed"
+    assert repo.bound_chats == [12345]
+    assert calls == []
+
+
+def test_telegram_bot_api_wraps_network_errors_as_runtime_error():
+    class TimeoutClient:
+        async def post(self, *args, **kwargs):
+            raise httpx.ConnectTimeout("connect timed out")
+
+    api = TelegramBotApi(token="123456:telegram-token", http_client=TimeoutClient())
+
+    try:
+        asyncio.run(api.get_updates())
+    except RuntimeError as exc:
+        assert "Telegram request failed" in str(exc)
+        assert "ConnectTimeout" in str(exc)
+    else:
+        raise AssertionError("TelegramBotApi leaked raw httpx network error")
 
 
 def test_duplicate_telegram_message_does_not_execute_twice():
