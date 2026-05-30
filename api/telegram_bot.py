@@ -6,13 +6,12 @@ import httpx
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api import config
 from api.ai_commands import deepseek_tools
 from api.ai_prompt import build_messages
 from api.ai_runtime import SqlAlchemyAiRepository
 from api.deepseek_client import DeepSeekClient
 from api.models import TelegramChatBinding, TelegramProcessedMessage, User
-from api.routes.ai import build_ai_response, user_deepseek_api_key
+from api.routes.ai import build_ai_response, user_deepseek_api_key, user_telegram_bot_token
 from api.schemas import AiChatRequest, AiContext
 
 
@@ -25,8 +24,9 @@ class TelegramRepository(Protocol):
 
 
 class SqlAlchemyTelegramRepository:
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession, owner_user: User | None = None):
         self.db = db
+        self.owner_user = owner_user
 
     async def get_bound_user(self, chat_id: int) -> User | None:
         stmt = (
@@ -38,18 +38,25 @@ class SqlAlchemyTelegramRepository:
             )
             .limit(1)
         )
+        if self.owner_user is not None:
+            stmt = stmt.where(User.id == self.owner_user.id)
         return (await self.db.execute(stmt)).scalar_one_or_none()
 
     async def try_mark_processed(self, chat_id: int, message_id: int, update_id: int | None) -> bool:
-        exists = await self.db.execute(
-            select(TelegramProcessedMessage.id).where(
-                TelegramProcessedMessage.chat_id == chat_id,
-                TelegramProcessedMessage.message_id == message_id,
-            )
+        owner_user_id = getattr(self.owner_user, "id", None)
+        stmt = select(TelegramProcessedMessage.id).where(
+            TelegramProcessedMessage.chat_id == chat_id,
+            TelegramProcessedMessage.message_id == message_id,
         )
+        if owner_user_id is None:
+            stmt = stmt.where(TelegramProcessedMessage.user_id.is_(None))
+        else:
+            stmt = stmt.where(TelegramProcessedMessage.user_id == owner_user_id)
+        exists = await self.db.execute(stmt)
         if exists.scalar_one_or_none() is not None:
             return False
         self.db.add(TelegramProcessedMessage(
+            user_id=owner_user_id,
             chat_id=chat_id,
             message_id=message_id,
             update_id=update_id,
@@ -70,14 +77,14 @@ class TelegramBotApi:
         http_client: httpx.AsyncClient | None = None,
         timeout: float = 30,
     ):
-        self.token = token if token is not None else config.TELEGRAM_BOT_TOKEN
+        self.token = token or ""
         self.http_client = http_client
         self.timeout = timeout
 
     @property
     def base_url(self) -> str:
         if not self.token:
-            raise RuntimeError("TELEGRAM_BOT_TOKEN is not configured")
+            raise RuntimeError("Telegram bot token is not configured")
         return f"https://api.telegram.org/bot{self.token}"
 
     async def get_updates(self, offset: int | None = None, limit: int = 20) -> list[dict[str, Any]]:
@@ -150,8 +157,9 @@ async def process_telegram_update_with_db(
     update: dict[str, Any],
     db: AsyncSession,
     bot_api: TelegramBotApi,
+    owner_user: User | None = None,
 ) -> dict[str, Any]:
-    repo = SqlAlchemyTelegramRepository(db)
+    repo = SqlAlchemyTelegramRepository(db, owner_user)
 
     async def ai_runner(user: User, text: str):
         return await run_telegram_ai(db, user, text)
@@ -171,11 +179,11 @@ async def process_telegram_update_with_db(
 async def poll_telegram_once(
     db: AsyncSession,
     *,
-    bot_api: TelegramBotApi | None = None,
+    bot_api: TelegramBotApi,
     offset: int | None = None,
     limit: int = 20,
 ) -> dict[str, Any]:
-    api = bot_api or TelegramBotApi()
+    api = bot_api
     if offset is None:
         latest = await db.execute(select(func.max(TelegramProcessedMessage.update_id)))
         latest_update_id = latest.scalar_one_or_none()
@@ -189,6 +197,42 @@ async def poll_telegram_once(
         if update_id is not None:
             next_offset = max(next_offset or 0, int(update_id) + 1)
         results.append(await process_telegram_update_with_db(update, db, api))
+    return {
+        "updates": len(updates),
+        "next_offset": next_offset,
+        "results": results,
+    }
+
+
+async def poll_telegram_once_for_user(
+    db: AsyncSession,
+    user: User,
+    *,
+    bot_api: TelegramBotApi | None = None,
+    offset: int | None = None,
+    limit: int = 20,
+) -> dict[str, Any]:
+    token = user_telegram_bot_token(user)
+    if not token:
+        raise RuntimeError("Telegram bot token is not configured for this user")
+    api = bot_api or TelegramBotApi(token=token)
+    if offset is None:
+        latest = await db.execute(
+            select(func.max(TelegramProcessedMessage.update_id)).where(
+                TelegramProcessedMessage.user_id == user.id,
+            )
+        )
+        latest_update_id = latest.scalar_one_or_none()
+        if latest_update_id is not None:
+            offset = int(latest_update_id) + 1
+    updates = await api.get_updates(offset=offset, limit=limit)
+    results = []
+    next_offset = offset
+    for update in updates:
+        update_id = update.get("update_id")
+        if update_id is not None:
+            next_offset = max(next_offset or 0, int(update_id) + 1)
+        results.append(await process_telegram_update_with_db(update, db, api, owner_user=user))
     return {
         "updates": len(updates),
         "next_offset": next_offset,

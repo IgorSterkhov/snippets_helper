@@ -10,7 +10,14 @@ from api.auth import get_current_user
 from api.database import get_db
 from api.deepseek_client import DeepSeekClient, DeepSeekError
 from api.models import User
-from api.schemas import AiChatRequest, AiChatResponse, AiProviderSettingsRequest, AiProviderSettingsResponse
+from api.schemas import (
+    AiChatRequest,
+    AiChatResponse,
+    AiProviderBalanceResponse,
+    AiProviderSettingsRequest,
+    AiProviderSettingsResponse,
+    AiTelegramBotSettingsRequest,
+)
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
@@ -23,10 +30,16 @@ def user_deepseek_api_key(user: User) -> str:
     return (getattr(user, "deepseek_api_key", None) or "").strip()
 
 
+def user_telegram_bot_token(user: User) -> str:
+    return (getattr(user, "telegram_bot_token", None) or "").strip()
+
+
 def provider_settings_response(user: User) -> AiProviderSettingsResponse:
     return AiProviderSettingsResponse(
         deepseek_configured=bool(user_deepseek_api_key(user)),
         deepseek_updated_at=getattr(user, "deepseek_updated_at", None),
+        telegram_bot_configured=bool(user_telegram_bot_token(user)),
+        telegram_bot_updated_at=getattr(user, "telegram_bot_updated_at", None),
     )
 
 
@@ -60,6 +73,51 @@ async def clear_ai_provider_settings(
 ):
     user.deepseek_api_key = None
     user.deepseek_updated_at = utc_now()
+    await db.commit()
+    await db.refresh(user)
+    return provider_settings_response(user)
+
+
+@router.get("/provider-balance", response_model=AiProviderBalanceResponse)
+async def get_ai_provider_balance(
+    user: User = Depends(get_current_user),
+):
+    api_key = user_deepseek_api_key(user)
+    if not api_key:
+        raise HTTPException(status_code=400, detail="DeepSeek API key is not configured for this user")
+    try:
+        return AiProviderBalanceResponse.model_validate(
+            await DeepSeekClient(api_key=api_key).balance()
+        )
+    except DeepSeekError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.put("/provider-settings/telegram-bot", response_model=AiProviderSettingsResponse)
+async def update_ai_telegram_bot_settings(
+    req: AiTelegramBotSettingsRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    token = req.telegram_bot_token.strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="Telegram bot token is empty")
+    user.telegram_bot_token = token
+    user.telegram_bot_updated_at = utc_now()
+    await db.commit()
+    await db.refresh(user)
+    return provider_settings_response(user)
+
+
+@router.delete("/provider-settings/telegram-bot", response_model=AiProviderSettingsResponse)
+async def clear_ai_telegram_bot_settings(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    user.telegram_bot_token = None
+    user.telegram_bot_updated_at = utc_now()
     await db.commit()
     await db.refresh(user)
     return provider_settings_response(user)

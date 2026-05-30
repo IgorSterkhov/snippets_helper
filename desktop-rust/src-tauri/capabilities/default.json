@@ -1,6 +1,6 @@
 {
   "identifier": "default",
-  "windows": ["main", "whisper-overlay"],
+  "windows": ["main", "whisper-overlay", "module_*"],
   "permissions": [
     "core:default",
     "core:window:allow-show",

@@ -268,6 +268,10 @@ async def run_tests():
         await wait_until(cdp, "document.querySelector('.ai-provider-status')?.textContent.includes('Not configured')", timeout=3)
         has_input = await cdp.eval("document.querySelector('.ai-provider-key-input')?.type === 'password'")
         assert has_input, 'DeepSeek key password input missing'
+        has_balance_button = await cdp.eval("!!document.querySelector('.ai-provider-balance-btn')")
+        assert has_balance_button, 'DeepSeek balance button missing'
+        has_usage_button = await cdp.eval("!!document.querySelector('.ai-provider-usage-btn')")
+        assert has_usage_button, 'DeepSeek usage cabinet button missing'
 
         await cdp.eval("""(() => {
           const input = document.querySelector('.ai-provider-key-input');
@@ -280,6 +284,28 @@ async def run_tests():
         assert input_value == '', 'saved secret should not stay visible in the input'
         body_text = await cdp.eval("document.querySelector('.settings-overlay')?.textContent || ''")
         assert 'sk-test-secret' not in body_text, 'raw DeepSeek key leaked into Settings text'
+
+        await cdp.eval("document.querySelector('.ai-provider-balance-btn').click()")
+        await wait_until(cdp, "document.querySelector('.ai-provider-balance')?.textContent.includes('Total')", timeout=3)
+        await cdp.eval("document.querySelector('.ai-provider-usage-btn').click()")
+        opened_urls = await cdp.eval("window.__mockOpenedUrls || []")
+        assert 'https://platform.deepseek.com/usage' in opened_urls, opened_urls
+
+        telegram_input_exists = await cdp.eval("document.querySelector('.telegram-provider-token-input')?.type === 'password'")
+        assert telegram_input_exists, 'Telegram bot token password input missing'
+        await cdp.eval("""(() => {
+          const input = document.querySelector('.telegram-provider-token-input');
+          input.value = '123456:telegram-secret';
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          document.querySelector('.telegram-provider-save-btn').click();
+        })()""")
+        await wait_until(cdp, "document.querySelector('.telegram-provider-status')?.textContent.includes('Configured')", timeout=3)
+        telegram_value = await cdp.eval("document.querySelector('.telegram-provider-token-input')?.value || ''")
+        assert telegram_value == '', 'saved Telegram token should not stay visible in the input'
+        body_text = await cdp.eval("document.querySelector('.settings-overlay')?.textContent || ''")
+        assert 'telegram-secret' not in body_text, 'raw Telegram token leaked into Settings text'
+        await cdp.eval("document.querySelector('.telegram-provider-clear-btn').click()")
+        await wait_until(cdp, "document.querySelector('.telegram-provider-status')?.textContent.includes('Not configured')", timeout=3)
 
         await cdp.eval("document.querySelector('.ai-provider-clear-btn').click()")
         await wait_until(cdp, "document.querySelector('.ai-provider-status')?.textContent.includes('Not configured')", timeout=3)
@@ -463,16 +489,20 @@ async def run_tests():
     async def t2k_whisper_overlay_reload_contract():
         ota_rs_path = os.path.join(SRC_DIR, '..', 'src-tauri', 'src', 'commands', 'ota.rs')
         service_rs_path = os.path.join(SRC_DIR, '..', 'src-tauri', 'src', 'whisper', 'service.rs')
+        capabilities_path = os.path.join(SRC_DIR, '..', 'src-tauri', 'capabilities', 'default.json')
         with open(ota_rs_path, 'r', encoding='utf-8') as f:
             ota_rs = f.read()
         with open(service_rs_path, 'r', encoding='utf-8') as f:
             service_rs = f.read()
+        with open(capabilities_path, 'r', encoding='utf-8') as f:
+            capabilities = json.load(f)
         assert 'reload_frontend_windows' in ota_rs, 'frontend OTA should reload all frontend windows, not only main'
         assert 'webview_windows()' in ota_rs, 'frontend OTA should iterate every open WebView window'
         assert 'label == "whisper-overlay"' in ota_rs, 'frontend OTA should explicitly reload the hidden overlay window'
         assert 'label.starts_with("module_")' in ota_rs, 'frontend OTA should reload detached module windows'
         assert 'reload_overlay_document' in service_rs, 'show_overlay should refresh a stale hidden overlay document before showing it'
         assert '.reload()' in service_rs, 'overlay refresh should use the native WebView reload API'
+        assert 'module_*' in capabilities.get('windows', []), 'detached module windows must have Tauri IPC permissions'
     await check('T2k Whisper overlay OTA reload contract', t2k_whisper_overlay_reload_contract)
 
     # ── T2l: AI tab renders command/chat shell ────────────────
@@ -490,6 +520,15 @@ async def run_tests():
         assert 'Send' in send_text, f'send button text: {send_text!r}'
         has_log = await cdp.eval("!!document.querySelector('#panel-ai .ai-execution-log')")
         assert has_log, 'execution log missing'
+        has_help = await cdp.eval("!!document.querySelector('#panel-ai .ai-help-btn')")
+        assert has_help, 'AI tab help button missing'
+        await cdp.eval("document.querySelector('#panel-ai .ai-help-btn').click()")
+        await wait_until(cdp, "!!document.querySelector('.ai-help-modal')", timeout=3)
+        help_text = await cdp.eval("document.querySelector('.ai-help-modal')?.textContent || ''")
+        assert 'Command mode' in help_text, help_text
+        assert 'Telegram bot' in help_text, help_text
+        assert 'Покажи задачу Аптека' in help_text, help_text
+        await cdp.eval("document.querySelector('.ai-help-modal .ai-help-close')?.click()")
     await check('T2l AI tab renders shell', t2l_ai_tab_shell)
 
     # ── T2m: AI command plan executes locally ────────────────
@@ -527,17 +566,72 @@ async def run_tests():
         await wait_until(cdp, "!!document.querySelector('.tab-btn[data-tab-id=\"shortcuts\"]')", timeout=8)
     await check('T2m AI command creates task locally', t2m_ai_command_creates_task_locally)
 
+    # ── T2m2: AI command follows search result to finish mutation ─
+    async def t2m2_ai_command_followup_completes_checkbox():
+        await close_modals()
+        await cdp.eval("""(async () => {
+          const boxes = JSON.parse(localStorage.getItem('mock.task_checkboxes') || '[]');
+          for (const box of boxes) {
+            if (box.text === 'Regular todo visible') box.is_checked = false;
+          }
+          localStorage.setItem('mock.task_checkboxes', JSON.stringify(boxes));
+        })()""")
+        await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"ai\"]').click()")
+        await wait_until(cdp, "!!document.querySelector('#panel-ai textarea.ai-input')", timeout=4)
+        await cdp.eval("""(() => {
+          const input = document.querySelector('#panel-ai textarea.ai-input');
+          input.value = 'В задаче Regular пункт Regular todo отметь выполненным';
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          document.querySelector('#panel-ai .ai-send-btn').click();
+        })()""")
+        completed = await wait_until(cdp, """(async () => {
+          const tasks = await window.__TAURI__.core.invoke('list_tasks', { category: null, status: null });
+          const task = tasks.find(t => t.title === 'Regular mock task');
+          if (!task) return null;
+          const boxes = await window.__TAURI__.core.invoke('list_task_checkboxes', { taskId: task.id });
+          const box = boxes.find(b => b.text === 'Regular todo visible');
+          if (!box || !box.is_checked) return null;
+          return { checked: true, text: box.text };
+        })()""", timeout=8)
+        assert completed['checked'] is True, completed
+        await cdp.eval("window.__TAURI__.core.invoke('set_setting', { key: 'last_active_tab', value: 'shortcuts' })")
+        await cdp.send('Page.reload', ignoreCache=True)
+        await wait_until(cdp, "!!document.querySelector('.tab-btn[data-tab-id=\"shortcuts\"]')", timeout=8)
+    await check('T2m2 AI command follows search result', t2m2_ai_command_followup_completes_checkbox)
+
     # ── T2n: AI mic records into prompt input ─────────────────
     async def t2n_ai_mic_records_into_prompt():
         await close_modals()
         await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"ai\"]').click()")
         await wait_until(cdp, "!!document.querySelector('#panel-ai .ai-mic-btn')", timeout=4)
+        has_voice_select = await cdp.eval("!!document.querySelector('#panel-ai .ai-voice-provider-select')")
+        assert has_voice_select, 'AI voice provider selector missing'
         await cdp.eval("document.querySelector('#panel-ai .ai-mic-btn').click()")
         await wait_until(cdp, "document.querySelector('#panel-ai .ai-mic-btn')?.textContent.includes('Stop')", timeout=3)
         await cdp.eval("document.querySelector('#panel-ai .ai-mic-btn').click()")
         await wait_until(
             cdp,
             "(document.querySelector('#panel-ai textarea.ai-input')?.value || '').includes('Mocked transcript')",
+            timeout=4,
+        )
+        await cdp.eval("""(() => {
+          const settings = JSON.parse(localStorage.getItem('mock.settings') || '{}');
+          settings['whisper.deepgram_api_key'] = 'dg_mock_key';
+          settings['whisper.deepgram_model'] = 'nova-3';
+          localStorage.setItem('mock.settings', JSON.stringify(settings));
+          const input = document.querySelector('#panel-ai textarea.ai-input');
+          input.value = '';
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          const select = document.querySelector('#panel-ai .ai-voice-provider-select');
+          select.value = 'deepgram';
+          select.dispatchEvent(new Event('change', { bubbles: true }));
+        })()""")
+        await cdp.eval("document.querySelector('#panel-ai .ai-mic-btn').click()")
+        await wait_until(cdp, "document.querySelector('#panel-ai .ai-mic-btn')?.textContent.includes('Stop')", timeout=4)
+        await cdp.eval("document.querySelector('#panel-ai .ai-mic-btn').click()")
+        await wait_until(
+            cdp,
+            "(document.querySelector('#panel-ai textarea.ai-input')?.value || '').includes('Live mock transcript')",
             timeout=4,
         )
     await check('T2n AI mic records into prompt', t2n_ai_mic_records_into_prompt)
@@ -2564,6 +2658,19 @@ async def run_tests():
             "JSON.parse(localStorage.getItem('mock.settings') || '{}').last_active_tab"
         )
         assert stored_tab == 'notes', f'standalone changed last_active_tab: {stored_tab!r}'
+
+        await cdp.send('Page.navigate', url=f'{TEST_URL}?standalone=1&module=whisper')
+        await asyncio.sleep(0.8)
+        await wait_until(cdp, "document.body.classList.contains('standalone-module-window')", timeout=8)
+        whisper_panel_id = await cdp.eval("document.querySelector('.tab-panel')?.id")
+        assert whisper_panel_id == 'panel-whisper', whisper_panel_id
+        whisper_text = await wait_until(
+            cdp,
+            "document.body.innerText",
+            timeout=5,
+        )
+        assert 'Failed to load module' not in whisper_text, whisper_text
+        assert 'Whisper' in whisper_text or 'Выберите модель' in whisper_text, whisper_text
 
         await cdp.send('Page.navigate', url=f'{TEST_URL}?standalone=1&module=unknown')
         await asyncio.sleep(0.8)

@@ -62,7 +62,7 @@ async function findTask(args) {
     return { task: null, choices: [] };
   }
 
-  const query = args.query || args.title || '';
+  const query = args.task_query || args.query || args.title || '';
   const matches = query
     ? tasks.filter(t => textIncludes(t.title, query)).slice(0, 5)
     : [];
@@ -161,7 +161,7 @@ async function completeTaskCheckbox(command) {
 
   const boxes = await call('list_task_checkboxes', { taskId: localId(task) });
   const checkboxUuid = args.checkbox_uuid || args.item_uuid;
-  const query = args.query || args.text || '';
+  const query = args.checkbox_query || args.query || args.text || '';
   const matches = boxes.filter(box => {
     if (checkboxUuid && box.uuid === checkboxUuid) return true;
     return query && textIncludes(box.text, query);
@@ -282,6 +282,9 @@ async function searchTasks(command) {
   const tasks = await allTasks();
   const query = args.query || '';
   const matches = query ? tasks.filter(t => textIncludes(t.title, query)).slice(0, 5) : [];
+  if (matches.length === 1) {
+    localStorage.setItem(RECENT_TASK_KEY, matches[0].uuid);
+  }
   return commandResult(command.name, args, matches.length ? 'executed' : 'failed', matches.length ? `Found ${matches.length} task(s).` : 'No tasks found.', {
     choices: matches.map(t => ({ item_type: 'task', item_uuid: t.uuid, title: t.title })),
   });

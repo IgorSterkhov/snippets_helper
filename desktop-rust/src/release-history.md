@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+## v1.3.49 (2026-05-30)
+
+- **DeepSeek balance:** Settings -> AI can check the current user's DeepSeek
+  account balance through the server-managed key and open the DeepSeek usage
+  cabinet in the browser.
+- **Per-user Telegram bot tokens:** Telegram bot tokens are now configured in
+  Settings -> AI per sync API user. The old server-global Telegram token path is
+  removed; chats remain deny-by-default and still require explicit server-side
+  binding to the app user.
+- **AI help:** the AI tab now has a compact help modal explaining Chat vs
+  Command mode, Telegram bot behavior, voice input, and example requests.
+- **AI voice provider:** the AI tab can choose Whisper or Deepgram for voice
+  prompts. Deepgram uses the same locally configured Deepgram key/model from
+  Whisper settings and inserts the stopped live transcript into the AI prompt.
+- **AI command continuation:** command mode now has a short follow-up pass after
+  search-only plans for mutation requests, so requests like marking a checkbox
+  done can continue from "found the task" to the actual checkbox update.
+- **Detached Whisper window:** detached module windows now receive Tauri IPC
+  permissions, fixing Whisper opening as "Failed to load module" from the
+  sidebar context menu.
+
 ## v1.3.48 (2026-05-29)
 
 - **Per-user DeepSeek keys:** AI no longer depends on a single server-wide

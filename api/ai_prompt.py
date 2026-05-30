@@ -9,6 +9,10 @@ You may answer normally, or call one of the provided tools.
 Use tools only for supported low-risk actions.
 Never invent UUIDs. If the target is ambiguous, ask for clarification.
 Do not request destructive actions; deletion and bulk edits are unavailable.
+For task checkbox commands, separate the task lookup from the checkbox lookup:
+use task_query for the task title and checkbox_query for the checkbox text.
+Example: "in task Аптека mark Купить уголь done" should call
+complete_task_checkbox with task_query="Аптека" and checkbox_query="Купить уголь".
 """.strip()
 
 

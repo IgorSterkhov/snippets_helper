@@ -623,21 +623,23 @@ async function renderAi(container) {
   container.innerHTML = '';
 
   const title = el('div', { class: 'settings-section-title' });
-  title.appendChild(el('h4', { text: 'AI provider' }));
+  title.appendChild(el('h4', { text: 'AI providers' }));
   title.appendChild(el('p', {
-    text: 'DeepSeek key is stored on the sync server for the current API account. The saved key is never shown again.',
+    text: 'Provider tokens are stored on the sync server for the current API account. Saved secrets are never shown again.',
     class: 'settings-help',
   }));
   container.appendChild(title);
 
-  const statusBox = el('div', { class: 'ai-provider-box' });
+  const deepCard = el('div', { class: 'ai-provider-card' });
+  deepCard.appendChild(providerHeader('DeepSeek', 'Used by the AI tab and Telegram commands for this sync user.'));
+  const deepStatusBox = el('div', { class: 'ai-provider-box' });
   const status = el('div', { class: 'ai-provider-status', text: 'Loading...' });
   const meta = el('div', { class: 'ai-provider-meta', text: '' });
-  statusBox.appendChild(status);
-  statusBox.appendChild(meta);
-  container.appendChild(statusBox);
+  deepStatusBox.appendChild(status);
+  deepStatusBox.appendChild(meta);
+  deepCard.appendChild(deepStatusBox);
 
-  const keyRow = makeFormRow('DeepSeek key:');
+  const keyRow = makeFormRow('API key:');
   const keyInput = document.createElement('input');
   keyInput.type = 'password';
   keyInput.className = 'settings-input ai-provider-key-input';
@@ -645,20 +647,59 @@ async function renderAi(container) {
   keyInput.autocomplete = 'off';
   keyInput.style.flex = '1';
   keyRow.appendChild(keyInput);
-  container.appendChild(keyRow);
+  deepCard.appendChild(keyRow);
 
   const actions = el('div', { class: 'settings-actions' });
   const saveBtn = el('button', { text: 'Save', class: 'ai-provider-save-btn' });
   const clearBtn = el('button', { text: 'Clear', class: 'btn-secondary ai-provider-clear-btn' });
   const refreshBtn = el('button', { text: 'Refresh', class: 'btn-secondary ai-provider-refresh-btn' });
+  const balanceBtn = el('button', { text: 'Check balance', class: 'btn-secondary ai-provider-balance-btn' });
+  const usageBtn = el('button', { text: 'Open usage', class: 'btn-secondary ai-provider-usage-btn' });
   actions.appendChild(saveBtn);
   actions.appendChild(clearBtn);
   actions.appendChild(refreshBtn);
-  container.appendChild(actions);
+  actions.appendChild(balanceBtn);
+  actions.appendChild(usageBtn);
+  deepCard.appendChild(actions);
+
+  const balanceBox = el('div', { class: 'ai-provider-balance', text: 'Balance not checked.' });
+  deepCard.appendChild(balanceBox);
+  container.appendChild(deepCard);
+
+  const telegramCard = el('div', { class: 'ai-provider-card' });
+  telegramCard.appendChild(providerHeader('Telegram Bot', 'Token from BotFather. Chats are still deny-by-default and must be bound to this user on the server.'));
+  const telegramStatusBox = el('div', { class: 'ai-provider-box' });
+  const telegramStatus = el('div', { class: 'ai-provider-status telegram-provider-status', text: 'Loading...' });
+  const telegramMeta = el('div', { class: 'ai-provider-meta', text: '' });
+  telegramStatusBox.appendChild(telegramStatus);
+  telegramStatusBox.appendChild(telegramMeta);
+  telegramCard.appendChild(telegramStatusBox);
+
+  const telegramRow = makeFormRow('Bot token:');
+  const telegramInput = document.createElement('input');
+  telegramInput.type = 'password';
+  telegramInput.className = 'settings-input telegram-provider-token-input';
+  telegramInput.placeholder = '123456:ABC...';
+  telegramInput.autocomplete = 'off';
+  telegramInput.style.flex = '1';
+  telegramRow.appendChild(telegramInput);
+  telegramCard.appendChild(telegramRow);
+
+  const telegramActions = el('div', { class: 'settings-actions' });
+  const telegramSaveBtn = el('button', { text: 'Save', class: 'telegram-provider-save-btn' });
+  const telegramClearBtn = el('button', { text: 'Clear', class: 'btn-secondary telegram-provider-clear-btn' });
+  const telegramRefreshBtn = el('button', { text: 'Refresh', class: 'btn-secondary telegram-provider-refresh-btn' });
+  telegramActions.appendChild(telegramSaveBtn);
+  telegramActions.appendChild(telegramClearBtn);
+  telegramActions.appendChild(telegramRefreshBtn);
+  telegramCard.appendChild(telegramActions);
+  container.appendChild(telegramCard);
 
   async function refreshStatus(data = null) {
     status.classList.remove('configured', 'missing', 'error');
+    telegramStatus.classList.remove('configured', 'missing', 'error');
     meta.textContent = '';
+    telegramMeta.textContent = '';
     try {
       const info = data || await call('get_ai_provider_settings');
       if (info.deepseek_configured) {
@@ -666,17 +707,36 @@ async function renderAi(container) {
         status.classList.add('configured');
         meta.textContent = info.deepseek_updated_at ? `Last updated: ${formatDate(info.deepseek_updated_at)}` : '';
         clearBtn.disabled = false;
+        balanceBtn.disabled = false;
       } else {
         status.textContent = 'Not configured';
         status.classList.add('missing');
         meta.textContent = 'AI chat and Telegram AI will ask you to save a DeepSeek key first.';
         clearBtn.disabled = true;
+        balanceBtn.disabled = true;
+        balanceBox.textContent = 'Save a DeepSeek key before checking balance.';
+      }
+      if (info.telegram_bot_configured) {
+        telegramStatus.textContent = 'Configured';
+        telegramStatus.classList.add('configured');
+        telegramMeta.textContent = info.telegram_bot_updated_at ? `Last updated: ${formatDate(info.telegram_bot_updated_at)}` : '';
+        telegramClearBtn.disabled = false;
+      } else {
+        telegramStatus.textContent = 'Not configured';
+        telegramStatus.classList.add('missing');
+        telegramMeta.textContent = 'Save a per-user bot token before polling Telegram commands.';
+        telegramClearBtn.disabled = true;
       }
     } catch (err) {
       status.textContent = 'Unavailable';
       status.classList.add('error');
       meta.textContent = String(err);
       clearBtn.disabled = true;
+      balanceBtn.disabled = true;
+      telegramStatus.textContent = 'Unavailable';
+      telegramStatus.classList.add('error');
+      telegramMeta.textContent = String(err);
+      telegramClearBtn.disabled = true;
     }
   }
 
@@ -725,7 +785,97 @@ async function renderAi(container) {
     refreshBtn.textContent = 'Refresh';
   });
 
+  balanceBtn.addEventListener('click', async () => {
+    balanceBtn.disabled = true;
+    balanceBtn.textContent = 'Checking...';
+    balanceBox.textContent = 'Checking DeepSeek balance...';
+    try {
+      const balance = await call('get_ai_provider_balance');
+      balanceBox.innerHTML = '';
+      const availability = balance.is_available ? 'Available' : 'Unavailable';
+      balanceBox.appendChild(el('div', { class: 'ai-provider-balance-status', text: `DeepSeek: ${availability}` }));
+      const infos = Array.isArray(balance.balance_infos) ? balance.balance_infos : [];
+      if (!infos.length) {
+        balanceBox.appendChild(el('div', { class: 'ai-provider-meta', text: 'No balance rows returned.' }));
+      }
+      for (const item of infos) {
+        const row = el('div', { class: 'ai-provider-balance-row' });
+        row.appendChild(el('strong', { text: item.currency || '-' }));
+        row.appendChild(el('span', { text: `Total ${item.total_balance ?? '-'}` }));
+        row.appendChild(el('span', { text: `Granted ${item.granted_balance ?? '-'}` }));
+        row.appendChild(el('span', { text: `Topped up ${item.topped_up_balance ?? '-'}` }));
+        balanceBox.appendChild(row);
+      }
+    } catch (err) {
+      balanceBox.textContent = 'Balance check failed: ' + err;
+      showToast('Balance check failed: ' + err, 'error');
+    } finally {
+      balanceBtn.disabled = false;
+      balanceBtn.textContent = 'Check balance';
+    }
+  });
+
+  usageBtn.addEventListener('click', async () => {
+    try {
+      await call('open_url', { url: 'https://platform.deepseek.com/usage' });
+    } catch (err) {
+      showToast('Failed to open DeepSeek usage: ' + err, 'error');
+    }
+  });
+
+  telegramSaveBtn.addEventListener('click', async () => {
+    const token = telegramInput.value.trim();
+    if (!token) {
+      showToast('Telegram bot token is empty', 'error');
+      return;
+    }
+    telegramSaveBtn.disabled = true;
+    telegramSaveBtn.textContent = 'Saving...';
+    try {
+      const info = await call('save_ai_telegram_bot_settings', { telegramBotToken: token });
+      telegramInput.value = '';
+      await refreshStatus(info);
+      showToast('Telegram bot token saved', 'success');
+    } catch (err) {
+      showToast('Failed to save Telegram token: ' + err, 'error');
+    } finally {
+      telegramSaveBtn.disabled = false;
+      telegramSaveBtn.textContent = 'Save';
+    }
+  });
+
+  telegramClearBtn.addEventListener('click', async () => {
+    telegramClearBtn.disabled = true;
+    telegramClearBtn.textContent = 'Clearing...';
+    try {
+      const info = await call('clear_ai_telegram_bot_settings');
+      telegramInput.value = '';
+      await refreshStatus(info);
+      showToast('Telegram bot token cleared', 'success');
+    } catch (err) {
+      showToast('Failed to clear Telegram token: ' + err, 'error');
+      telegramClearBtn.disabled = false;
+    } finally {
+      telegramClearBtn.textContent = 'Clear';
+    }
+  });
+
+  telegramRefreshBtn.addEventListener('click', async () => {
+    telegramRefreshBtn.disabled = true;
+    telegramRefreshBtn.textContent = 'Refreshing...';
+    await refreshStatus();
+    telegramRefreshBtn.disabled = false;
+    telegramRefreshBtn.textContent = 'Refresh';
+  });
+
   await refreshStatus();
+}
+
+function providerHeader(name, description) {
+  const header = el('div', { class: 'ai-provider-card-header' });
+  header.appendChild(el('h5', { text: name }));
+  header.appendChild(el('p', { text: description }));
+  return header;
 }
 
 // ── Updates ──────────────────────────────────────────────────
@@ -1449,6 +1599,27 @@ function injectStyles() {
   font-size: 12px;
   line-height: 1.4;
 }
+.ai-provider-card {
+  padding: 12px;
+  margin-bottom: 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(13, 17, 23, 0.35);
+}
+.ai-provider-card-header {
+  margin-bottom: 10px;
+}
+.ai-provider-card-header h5 {
+  margin: 0 0 4px;
+  font-size: 13px;
+  color: var(--text);
+}
+.ai-provider-card-header p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
 .ai-provider-box {
   display: flex;
   align-items: center;
@@ -1471,6 +1642,29 @@ function injectStyles() {
   color: var(--text-muted);
   font-size: 12px;
   min-width: 0;
+}
+.ai-provider-balance {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.ai-provider-balance-status {
+  color: var(--text);
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+.ai-provider-balance-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.ai-provider-balance-row strong {
+  color: var(--text);
 }
 .admin-users-header {
   display: flex;

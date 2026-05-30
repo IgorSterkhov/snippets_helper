@@ -23,6 +23,21 @@ export function aiCSS() {
   font-weight: 700;
   color: #f0f6fc;
 }
+.ai-help-btn {
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg-primary);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+.ai-help-btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
 .ai-status-pill {
   margin-left: auto;
   padding: 3px 8px;
@@ -112,6 +127,23 @@ export function aiCSS() {
 .ai-mode-btn.active {
   background: var(--accent);
   color: #fff;
+}
+.ai-voice-provider-wrap {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.ai-voice-provider-select {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text);
+  font-size: 12px;
 }
 .ai-input-row {
   display: flex;
@@ -211,6 +243,62 @@ export function aiCSS() {
 }
 .ai-error {
   color: var(--danger);
+}
+.ai-help-overlay {
+  align-items: center;
+  justify-content: center;
+}
+.ai-help-modal {
+  width: min(680px, 92vw);
+  max-height: 86vh;
+  overflow: auto;
+  padding: 0;
+  background: var(--bg-primary);
+  color: var(--text);
+}
+.ai-help-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+.ai-help-header h3 {
+  margin: 0;
+  font-size: 15px;
+}
+.ai-help-close {
+  margin-left: auto;
+}
+.ai-help-section {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.ai-help-section h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: #f0f6fc;
+}
+.ai-help-section ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.ai-help-examples {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ai-help-examples code {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  color: var(--text);
+  font-size: 12px;
 }
 `;
 }

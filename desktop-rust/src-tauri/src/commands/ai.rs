@@ -7,11 +7,32 @@ use tauri::State;
 pub struct AiProviderSettings {
     pub deepseek_configured: bool,
     pub deepseek_updated_at: Option<String>,
+    pub telegram_bot_configured: bool,
+    pub telegram_bot_updated_at: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 struct AiProviderSettingsRequest {
     deepseek_api_key: String,
+}
+
+#[derive(Debug, Serialize)]
+struct AiTelegramBotSettingsRequest {
+    telegram_bot_token: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AiProviderBalanceInfo {
+    pub currency: String,
+    pub total_balance: String,
+    pub granted_balance: String,
+    pub topped_up_balance: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AiProviderBalance {
+    pub is_available: bool,
+    pub balance_infos: Vec<AiProviderBalanceInfo>,
 }
 
 fn sync_settings(state: &State<'_, DbState>) -> Result<(String, String, Option<String>), String> {
@@ -26,8 +47,8 @@ fn sync_settings(state: &State<'_, DbState>) -> Result<(String, String, Option<S
     let key = queries::get_setting(&conn, &computer_id, "sync_api_key")
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "sync_api_key not configured".to_string())?;
-    let cert = queries::get_setting(&conn, &computer_id, "sync_ca_cert")
-        .map_err(|e| e.to_string())?;
+    let cert =
+        queries::get_setting(&conn, &computer_id, "sync_ca_cert").map_err(|e| e.to_string())?;
     Ok((url.trim_end_matches('/').to_string(), key, cert))
 }
 
@@ -36,8 +57,8 @@ fn http_client(api_url: &str, ca_cert: Option<&str>) -> Result<reqwest::Client, 
     if let Some(path) = ca_cert {
         if std::path::Path::new(path).is_file() {
             let pem = std::fs::read(path).map_err(|e| format!("read CA cert: {e}"))?;
-            let cert = reqwest::Certificate::from_pem(&pem)
-                .map_err(|e| format!("parse CA cert: {e}"))?;
+            let cert =
+                reqwest::Certificate::from_pem(&pem).map_err(|e| format!("parse CA cert: {e}"))?;
             builder = builder.add_root_certificate(cert);
         } else if api_url.starts_with("https://") {
             builder = builder.danger_accept_invalid_certs(true);
@@ -63,6 +84,22 @@ fn ai_provider_settings_url(api_url: &str) -> String {
         format!("{api_url}/ai/provider-settings")
     } else {
         format!("{api_url}/v1/ai/provider-settings")
+    }
+}
+
+fn ai_provider_balance_url(api_url: &str) -> String {
+    if api_url.ends_with("/v1") {
+        format!("{api_url}/ai/provider-balance")
+    } else {
+        format!("{api_url}/v1/ai/provider-balance")
+    }
+}
+
+fn ai_telegram_bot_settings_url(api_url: &str) -> String {
+    if api_url.ends_with("/v1") {
+        format!("{api_url}/ai/provider-settings/telegram-bot")
+    } else {
+        format!("{api_url}/v1/ai/provider-settings/telegram-bot")
     }
 }
 
@@ -142,9 +179,59 @@ pub async fn clear_ai_provider_settings(
     parse_json::<AiProviderSettings>(resp).await
 }
 
+#[tauri::command]
+pub async fn get_ai_provider_balance(
+    state: State<'_, DbState>,
+) -> Result<AiProviderBalance, String> {
+    let (api_url, api_key, ca_cert) = sync_settings(&state)?;
+    let client = http_client(&api_url, ca_cert.as_deref())?;
+    let resp = client
+        .get(ai_provider_balance_url(&api_url))
+        .bearer_auth(api_key)
+        .send()
+        .await
+        .map_err(|e| format!("request failed: {e}"))?;
+    parse_json::<AiProviderBalance>(resp).await
+}
+
+#[tauri::command]
+pub async fn save_ai_telegram_bot_settings(
+    state: State<'_, DbState>,
+    telegram_bot_token: String,
+) -> Result<AiProviderSettings, String> {
+    let (api_url, api_key, ca_cert) = sync_settings(&state)?;
+    let client = http_client(&api_url, ca_cert.as_deref())?;
+    let resp = client
+        .put(ai_telegram_bot_settings_url(&api_url))
+        .bearer_auth(api_key)
+        .json(&AiTelegramBotSettingsRequest { telegram_bot_token })
+        .send()
+        .await
+        .map_err(|e| format!("request failed: {e}"))?;
+    parse_json::<AiProviderSettings>(resp).await
+}
+
+#[tauri::command]
+pub async fn clear_ai_telegram_bot_settings(
+    state: State<'_, DbState>,
+) -> Result<AiProviderSettings, String> {
+    let (api_url, api_key, ca_cert) = sync_settings(&state)?;
+    let client = http_client(&api_url, ca_cert.as_deref())?;
+    let resp = client
+        .delete(ai_telegram_bot_settings_url(&api_url))
+        .bearer_auth(api_key)
+        .send()
+        .await
+        .map_err(|e| format!("request failed: {e}"))?;
+    parse_json::<AiProviderSettings>(resp).await
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{ai_chat_url, ai_provider_settings_url};
+    use super::{
+        ai_chat_url, ai_provider_balance_url, ai_provider_settings_url,
+        ai_telegram_bot_settings_url,
+    };
 
     #[test]
     fn ai_chat_url_accepts_plain_and_v1_bases() {
@@ -167,6 +254,30 @@ mod tests {
         assert_eq!(
             ai_provider_settings_url("https://example.test/snippets-api/v1"),
             "https://example.test/snippets-api/v1/ai/provider-settings"
+        );
+    }
+
+    #[test]
+    fn ai_provider_balance_url_accepts_plain_and_v1_bases() {
+        assert_eq!(
+            ai_provider_balance_url("https://example.test/snippets-api"),
+            "https://example.test/snippets-api/v1/ai/provider-balance"
+        );
+        assert_eq!(
+            ai_provider_balance_url("https://example.test/snippets-api/v1"),
+            "https://example.test/snippets-api/v1/ai/provider-balance"
+        );
+    }
+
+    #[test]
+    fn ai_telegram_bot_settings_url_accepts_plain_and_v1_bases() {
+        assert_eq!(
+            ai_telegram_bot_settings_url("https://example.test/snippets-api"),
+            "https://example.test/snippets-api/v1/ai/provider-settings/telegram-bot"
+        );
+        assert_eq!(
+            ai_telegram_bot_settings_url("https://example.test/snippets-api/v1"),
+            "https://example.test/snippets-api/v1/ai/provider-settings/telegram-bot"
         );
     }
 }

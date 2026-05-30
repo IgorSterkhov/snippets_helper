@@ -49,6 +49,8 @@ class User(Base):
     )
     deepseek_api_key: Mapped[str | None] = mapped_column(Text)
     deepseek_updated_at: Mapped[datetime | None] = mapped_column(DateTime)
+    telegram_bot_token: Mapped[str | None] = mapped_column(Text)
+    telegram_bot_updated_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 class Shortcut(Base):
@@ -330,7 +332,7 @@ class TelegramChatBinding(Base):
     __tablename__ = "telegram_chat_bindings"
 
     chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    user_id: Mapped[uuid_mod.UUID] = mapped_column(Uuid, ForeignKey("users.id"), nullable=False)
+    user_id: Mapped[uuid_mod.UUID] = mapped_column(Uuid, ForeignKey("users.id"), primary_key=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     is_active: Mapped[bool] = mapped_column(
@@ -350,14 +352,16 @@ class TelegramProcessedMessage(Base):
     __tablename__ = "telegram_processed_messages"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[uuid_mod.UUID | None] = mapped_column(Uuid, ForeignKey("users.id"))
     chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     message_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     update_id: Mapped[int | None] = mapped_column(BigInteger)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
     __table_args__ = (
-        UniqueConstraint("chat_id", "message_id", name="uq_telegram_processed_chat_message"),
+        UniqueConstraint("user_id", "chat_id", "message_id", name="uq_telegram_processed_user_chat_message"),
         Index("idx_telegram_processed_update", "update_id"),
+        Index("idx_telegram_processed_user_update", "user_id", "update_id"),
     )
 
 

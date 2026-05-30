@@ -159,9 +159,27 @@ class AiProviderSettingsRequest(BaseModel):
     deepseek_api_key: str
 
 
+class AiTelegramBotSettingsRequest(BaseModel):
+    telegram_bot_token: str
+
+
 class AiProviderSettingsResponse(BaseModel):
     deepseek_configured: bool
     deepseek_updated_at: Optional[datetime] = None
+    telegram_bot_configured: bool = False
+    telegram_bot_updated_at: Optional[datetime] = None
+
+
+class AiProviderBalanceInfo(BaseModel):
+    currency: str
+    total_balance: str
+    granted_balance: str
+    topped_up_balance: str
+
+
+class AiProviderBalanceResponse(BaseModel):
+    is_available: bool
+    balance_infos: list[AiProviderBalanceInfo] = []
 
 
 class AiContext(BaseModel):

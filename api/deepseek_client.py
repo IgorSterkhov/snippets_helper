@@ -66,6 +66,29 @@ class DeepSeekClient:
             raise DeepSeekError(f"DeepSeek HTTP {response.status_code}: {response.text[:500]}")
         return parse_deepseek_response(response.json())
 
+    async def balance(self) -> dict[str, Any]:
+        if not self.api_key:
+            raise DeepSeekError("DeepSeek API key is not configured")
+
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+        if self.http_client:
+            response = await self.http_client.get(
+                f"{self.base_url}/user/balance",
+                headers=headers,
+                timeout=self.timeout,
+            )
+        else:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{self.base_url}/user/balance",
+                    headers=headers,
+                    timeout=self.timeout,
+                )
+
+        if response.status_code >= 400:
+            raise DeepSeekError(f"DeepSeek HTTP {response.status_code}: {response.text[:500]}")
+        return response.json()
+
 
 def parse_deepseek_response(data: dict[str, Any]) -> tuple[str, list[AiCommandCall]]:
     choices = data.get("choices") or []

@@ -210,7 +210,7 @@ async def _resolve_task_uuid(repo: AiRepository, command: AiCommandCall, context
             return ctx_uuid, None
         return None, _result(command, "failed", "Missing current task target.")
 
-    query = args.get("query")
+    query = args.get("task_query") or args.get("title") or args.get("query")
     if not query:
         return None, _result(command, "failed", "Missing task target.")
 
@@ -291,10 +291,11 @@ async def execute_command(repo: AiRepository, command: AiCommandCall, context: A
         task_uuid, error = await _resolve_task_uuid(repo, command, context)
         if error:
             return error
+        checkbox_query = command.args.get("checkbox_query") or command.args.get("text") or command.args.get("query")
         checkbox = await repo.complete_task_checkbox(
             task_uuid,
             checkbox_uuid=command.args.get("checkbox_uuid"),
-            query=command.args.get("query"),
+            query=checkbox_query,
         )
         return _result(
             command,

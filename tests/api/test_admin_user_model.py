@@ -13,3 +13,9 @@ def test_user_model_has_deepseek_provider_columns():
     columns = User.__table__.columns
     assert "deepseek_api_key" in columns
     assert "deepseek_updated_at" in columns
+
+
+def test_user_model_has_telegram_bot_provider_columns():
+    columns = User.__table__.columns
+    assert "telegram_bot_token" in columns
+    assert "telegram_bot_updated_at" in columns

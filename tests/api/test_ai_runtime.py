@@ -136,3 +136,26 @@ def test_add_task_checkbox_without_target_fails_without_mutation():
     assert result.status == "failed"
     assert "task target" in result.message
     assert repo.created_checkboxes == []
+
+
+def test_complete_task_checkbox_resolves_task_query_and_checkbox_query_separately():
+    repo = FakeAiRepo()
+    repo.tasks = [{"uuid": "task-apteka", "title": "Аптека"}]
+
+    result = run(execute_command(
+        repo,
+        AiCommandCall(
+            name="complete_task_checkbox",
+            args={"task_query": "аптека", "checkbox_query": "Купить уголь"},
+        ),
+        AiContext(),
+    ))
+
+    assert result.status == "executed"
+    assert result.item_type == "task_checkbox"
+    assert repo.completed_checkboxes == [{
+        "uuid": "matched-checkbox",
+        "task_uuid": "task-apteka",
+        "text": "Купить уголь",
+        "is_checked": 1,
+    }]

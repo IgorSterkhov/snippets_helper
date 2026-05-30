@@ -42,7 +42,14 @@ async def bind_telegram_chat_by_prefix(prefix: str, chat_id: str | int):
     async with async_session() as db:
         result = await db.execute(select(User).where(User.api_key.like(f"{prefix}%")))
         user = find_unique_user_by_prefix(result.scalars().all(), prefix)
-        binding = await db.get(TelegramChatBinding, parsed_chat_id)
+        binding = (
+            await db.execute(
+                select(TelegramChatBinding).where(
+                    TelegramChatBinding.user_id == user.id,
+                    TelegramChatBinding.chat_id == parsed_chat_id,
+                )
+            )
+        ).scalar_one_or_none()
         now = datetime.utcnow()
         if binding is None:
             binding = TelegramChatBinding(

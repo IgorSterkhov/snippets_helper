@@ -30,3 +30,11 @@ def test_deepseek_tools_use_strict_function_schemas():
         assert tool["function"]["strict"] is True
         assert tool["function"]["parameters"]["type"] == "object"
         assert tool["function"]["parameters"]["additionalProperties"] is False
+
+
+def test_complete_checkbox_tool_has_separate_task_and_checkbox_queries():
+    tool = next(t for t in deepseek_tools() if t["function"]["name"] == "complete_task_checkbox")
+    props = tool["function"]["parameters"]["properties"]
+
+    assert "task_query" in props
+    assert "checkbox_query" in props

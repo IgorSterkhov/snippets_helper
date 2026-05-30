@@ -65,8 +65,10 @@ def deepseek_tools() -> list[dict[str, Any]]:
             "Mark a task checkbox completed by UUID or text query.",
             {
                 "task_uuid": nullable_string,
+                "task_query": nullable_string,
                 "task_ref": {"type": ["string", "null"], "enum": ["current", None]},
                 "checkbox_uuid": nullable_string,
+                "checkbox_query": nullable_string,
                 "query": nullable_string,
             },
         ),

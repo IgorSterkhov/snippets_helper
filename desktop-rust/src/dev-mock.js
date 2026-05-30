@@ -274,11 +274,11 @@
     storeSet('__seq.tasks', 3);
     storeSet('task_checkboxes', [
       {
-        id: 1, task_id: 2, parent_id: null, text: 'Regular todo visible', is_checked: false,
+        id: 1, uuid: uuid(), task_id: 2, parent_id: null, text: 'Regular todo visible', is_checked: false,
         sort_order: 0, created_at: now(), updated_at: now(), sync_status: 'synced', user_id: 'mock-user',
       },
       {
-        id: 2, task_id: 2, parent_id: null, text: 'Regular done hidden', is_checked: true,
+        id: 2, uuid: uuid(), task_id: 2, parent_id: null, text: 'Regular done hidden', is_checked: true,
         sort_order: 1, created_at: now(), updated_at: now(), sync_status: 'synced', user_id: 'mock-user',
       },
     ]);
@@ -453,6 +453,8 @@
       return {
         deepseek_configured: !!storeGet('ai_provider_deepseek_key', ''),
         deepseek_updated_at: storeGet('ai_provider_deepseek_updated_at', null),
+        telegram_bot_configured: !!storeGet('ai_provider_telegram_bot_token', ''),
+        telegram_bot_updated_at: storeGet('ai_provider_telegram_bot_updated_at', null),
       };
     },
     async save_ai_provider_settings({ deepseekApiKey, deepseek_api_key }) {
@@ -464,6 +466,8 @@
       return {
         deepseek_configured: true,
         deepseek_updated_at: updatedAt,
+        telegram_bot_configured: !!storeGet('ai_provider_telegram_bot_token', ''),
+        telegram_bot_updated_at: storeGet('ai_provider_telegram_bot_updated_at', null),
       };
     },
     async clear_ai_provider_settings() {
@@ -473,11 +477,52 @@
       return {
         deepseek_configured: false,
         deepseek_updated_at: updatedAt,
+        telegram_bot_configured: !!storeGet('ai_provider_telegram_bot_token', ''),
+        telegram_bot_updated_at: storeGet('ai_provider_telegram_bot_updated_at', null),
+      };
+    },
+    async get_ai_provider_balance() {
+      if (!storeGet('ai_provider_deepseek_key', '')) throw new Error('DeepSeek API key is not configured for this user');
+      return {
+        is_available: true,
+        balance_infos: [
+          {
+            currency: 'USD',
+            total_balance: '12.50',
+            granted_balance: '2.50',
+            topped_up_balance: '10.00',
+          },
+        ],
+      };
+    },
+    async save_ai_telegram_bot_settings({ telegramBotToken, telegram_bot_token }) {
+      const token = String(telegramBotToken ?? telegram_bot_token ?? '').trim();
+      if (!token) throw new Error('Telegram bot token is empty');
+      const updatedAt = now();
+      storeSet('ai_provider_telegram_bot_token', token);
+      storeSet('ai_provider_telegram_bot_updated_at', updatedAt);
+      return {
+        deepseek_configured: !!storeGet('ai_provider_deepseek_key', ''),
+        deepseek_updated_at: storeGet('ai_provider_deepseek_updated_at', null),
+        telegram_bot_configured: true,
+        telegram_bot_updated_at: updatedAt,
+      };
+    },
+    async clear_ai_telegram_bot_settings() {
+      const updatedAt = now();
+      localStorage.removeItem(LS_PREFIX + 'ai_provider_telegram_bot_token');
+      storeSet('ai_provider_telegram_bot_updated_at', updatedAt);
+      return {
+        deepseek_configured: !!storeGet('ai_provider_deepseek_key', ''),
+        deepseek_updated_at: storeGet('ai_provider_deepseek_updated_at', null),
+        telegram_bot_configured: false,
+        telegram_bot_updated_at: updatedAt,
       };
     },
     async ai_chat({ request }) {
       const mode = request?.mode === 'chat' ? 'chat' : 'command';
       const message = String(request?.message || '');
+      recordMockCall('ai_chat', { mode, message });
       if (mode === 'chat') {
         return {
           mode,
@@ -490,7 +535,17 @@
       const regular = tasks.find(t => /regular/i.test(t.title)) || tasks[0] || null;
       const commands = [];
       const lower = message.toLowerCase();
-      if (lower.includes('create')) {
+      if (lower.includes('regular todo') && lower.includes('previous command results')) {
+        commands.push({
+          name: 'complete_task_checkbox',
+          args: { task_ref: 'current', checkbox_query: 'Regular todo' },
+        });
+      } else if (lower.includes('regular todo') && (lower.includes('отмет') || lower.includes('complete'))) {
+        commands.push({
+          name: 'search_tasks',
+          args: { query: 'Regular' },
+        });
+      } else if (lower.includes('create')) {
         commands.push({
           name: 'create_task',
           args: { title: 'AI created mock task', checkboxes: ['First AI checkbox'] },
@@ -595,7 +650,11 @@
       navigator.clipboard.writeText(text).catch(() => {});
     },
     async read_clipboard() { try { return await navigator.clipboard.readText(); } catch { return ''; } },
-    async open_url({ url }) { window.open(url, '_blank'); },
+    async open_url({ url }) {
+      window.__mockOpenedUrls = window.__mockOpenedUrls || [];
+      window.__mockOpenedUrls.push(url);
+      window.open(url, '_blank');
+    },
 
     // ── Share links ─────────────────────────────────────
     async get_share_link({ itemType, itemUuid }) {
@@ -825,6 +884,12 @@
         sort_order: sortOrder,
         sync_status: 'pending',
         user_id: 'mock-user',
+      });
+    },
+    async update_task_checkbox({ id, text, isChecked }) {
+      return updateItem('task_checkboxes', id, {
+        text: text || '',
+        is_checked: !!isChecked,
       });
     },
     async reorder_task_checkboxes({ taskId, entries }) {

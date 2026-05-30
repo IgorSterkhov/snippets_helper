@@ -11,6 +11,7 @@ const state = {
   busy: false,
   voiceBusy: false,
   voiceRecording: false,
+  voiceProvider: 'local',
   reply: '',
   logs: [],
 };
@@ -23,9 +24,11 @@ export async function init(container) {
   style.textContent = aiCSS();
   container.appendChild(style);
   container.appendChild(buildLayout());
+  await loadVoiceProvider();
   renderModeButtons();
   renderResponse();
   renderLog();
+  renderVoiceProvider();
 }
 
 function buildLayout() {
@@ -33,6 +36,13 @@ function buildLayout() {
 
   const header = el('div', { class: 'ai-agent-header' });
   header.appendChild(el('h2', { text: 'AI' }));
+  const helpBtn = document.createElement('button');
+  helpBtn.type = 'button';
+  helpBtn.className = 'ai-help-btn';
+  helpBtn.title = 'AI help';
+  helpBtn.textContent = '?';
+  helpBtn.addEventListener('click', showAiHelp);
+  header.appendChild(helpBtn);
   header.appendChild(el('div', {
     class: 'ai-status-pill',
     text: 'DeepSeek via server',
@@ -74,6 +84,26 @@ function buildComposer() {
     group.appendChild(btn);
   }
   modeRow.appendChild(group);
+  const voiceWrap = el('label', { class: 'ai-voice-provider-wrap' });
+  voiceWrap.appendChild(el('span', { text: 'Voice' }));
+  const voiceSelect = document.createElement('select');
+  voiceSelect.className = 'ai-voice-provider-select';
+  voiceSelect.innerHTML = '<option value="local">Whisper</option><option value="deepgram">Deepgram</option>';
+  voiceSelect.addEventListener('change', async () => {
+    state.voiceProvider = voiceSelect.value === 'deepgram' ? 'deepgram' : 'local';
+    renderVoiceProvider();
+    try {
+      await whisperApi.setSetting('ai.voice_provider', state.voiceProvider);
+    } catch (err) {
+      showErrorDialog({
+        title: 'AI voice setting failed',
+        message: 'The AI voice provider setting could not be saved.',
+        details: { error: String(err), voice_provider: state.voiceProvider },
+      });
+    }
+  });
+  voiceWrap.appendChild(voiceSelect);
+  modeRow.appendChild(voiceWrap);
   composer.appendChild(modeRow);
 
   const inputRow = el('div', { class: 'ai-input-row' });
@@ -156,6 +186,7 @@ function setBusy(nextBusy) {
   if (input) input.disabled = nextBusy;
   if (send) send.disabled = nextBusy;
   if (mic) mic.disabled = (nextBusy && !state.voiceRecording) || state.voiceBusy;
+  renderVoiceProvider();
   renderVoiceButton();
   renderResponse();
 }
@@ -175,6 +206,22 @@ function renderVoiceButton() {
     mic.title = 'Voice input';
   }
   mic.disabled = (state.busy && !state.voiceRecording) || state.voiceBusy;
+}
+
+function renderVoiceProvider() {
+  const select = state.root?.querySelector('.ai-voice-provider-select');
+  if (!select) return;
+  select.value = state.voiceProvider === 'deepgram' ? 'deepgram' : 'local';
+  select.disabled = state.voiceBusy || state.voiceRecording || state.busy;
+}
+
+async function loadVoiceProvider() {
+  try {
+    const saved = await whisperApi.getSetting('ai.voice_provider');
+    state.voiceProvider = saved === 'deepgram' ? 'deepgram' : 'local';
+  } catch {
+    state.voiceProvider = 'local';
+  }
 }
 
 function buildContext() {
@@ -214,9 +261,26 @@ async function sendCurrentMessage() {
 
     if (state.mode === 'command' && commands.length > 0) {
       results = await executeAiCommands(commands);
+      if (shouldContinueCommand(message, commands, results)) {
+        const followup = await sendAiChat({
+          mode: state.mode,
+          message: buildFollowupMessage(message, results),
+          context: buildContext(),
+        });
+        const followupReply = followup?.reply || '';
+        const followupCommands = Array.isArray(followup?.commands) ? followup.commands : [];
+        let followupResults = Array.isArray(followup?.results) ? followup.results : [];
+        if (followupCommands.length > 0) {
+          followupResults = await executeAiCommands(followupCommands);
+        }
+        results = [...results, ...followupResults];
+        state.reply = followupReply || reply || (results.length ? 'Command plan executed.' : 'No response.');
+      }
     }
 
-    state.reply = reply || (results.length ? 'Command plan executed.' : 'No response.');
+    if (!state.reply) {
+      state.reply = reply || (results.length ? 'Command plan executed.' : 'No response.');
+    }
     state.logs = results;
     if (input) input.value = '';
   } catch (err) {
@@ -239,14 +303,21 @@ async function toggleVoiceRecording() {
   const stopping = state.voiceRecording;
   state.voiceBusy = true;
   renderVoiceButton();
+  renderVoiceProvider();
   try {
     if (!state.voiceRecording) {
-      await whisperApi.startRecording();
+      if (state.voiceProvider === 'deepgram') {
+        await whisperApi.startLive();
+      } else {
+        await whisperApi.startRecording();
+      }
       state.voiceRecording = true;
       return;
     }
 
-    const text = await whisperApi.stopRecording();
+    const text = state.voiceProvider === 'deepgram'
+      ? await whisperApi.stopLive()
+      : await whisperApi.stopRecording();
     state.voiceRecording = false;
     insertVoiceTranscript(text);
   } catch (err) {
@@ -261,8 +332,41 @@ async function toggleVoiceRecording() {
     });
   } finally {
     state.voiceBusy = false;
+    renderVoiceProvider();
     renderVoiceButton();
   }
+}
+
+function shouldContinueCommand(message, commands, results) {
+  const lower = String(message || '').toLowerCase();
+  const mutationIntent = [
+    'отмет', 'выполн', 'добав', 'созд', 'mark', 'complete', 'done', 'add', 'create',
+  ].some(token => lower.includes(token));
+  if (!mutationIntent) return false;
+  if (commands.some(c => ['create_task', 'add_task_checkbox', 'complete_task_checkbox'].includes(c?.name))) return false;
+  return results.some(r => (
+    (r.status === 'executed' || r.status === 'needs_clarification')
+    && Array.isArray(r.choices)
+    && r.choices.length > 0
+  ));
+}
+
+function buildFollowupMessage(originalMessage, results) {
+  const compact = results.map(r => ({
+    name: r.name,
+    status: r.status,
+    message: r.message,
+    item_type: r.item_type,
+    item_uuid: r.item_uuid,
+    choices: (r.choices || []).slice(0, 5),
+  }));
+  return [
+    'Continue the same command request using the previous local command results.',
+    'Do not repeat a pure search if the result contains one suitable item.',
+    'For task checkbox actions, use task_uuid or task_ref="current" for the task and checkbox_query for the checkbox text.',
+    `Original request: ${originalMessage}`,
+    `Previous command results: ${JSON.stringify(compact)}`,
+  ].join('\n');
 }
 
 function insertVoiceTranscript(text) {
@@ -273,6 +377,85 @@ function insertVoiceTranscript(text) {
   input.value = current ? `${current}\n${transcript}` : transcript;
   input.dispatchEvent(new Event('input', { bubbles: true }));
   input.focus();
+}
+
+function showAiHelp() {
+  if (document.querySelector('.ai-help-overlay')) return;
+  const overlay = el('div', { class: 'modal-overlay ai-help-overlay' });
+  const modal = el('div', { class: 'modal ai-help-modal' });
+
+  const header = el('div', { class: 'ai-help-header' });
+  header.appendChild(el('h3', { text: 'AI help' }));
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'btn-secondary ai-help-close';
+  close.textContent = 'Close';
+  close.addEventListener('click', () => overlay.remove());
+  header.appendChild(close);
+  modal.appendChild(header);
+
+  const sections = [
+    {
+      title: 'Modes',
+      items: [
+        'Chat mode answers in this tab and does not change app data.',
+        'Command mode asks DeepSeek for a validated command plan, then the desktop app executes safe local actions.',
+        'When a mutation request starts with a search-only plan, the tab can run one follow-up turn using the found result.',
+        'Voice input writes a transcript into the prompt; choose Whisper for local transcription or Deepgram for live cloud transcription.',
+      ],
+    },
+    {
+      title: 'What commands can do',
+      items: [
+        'Open matching tasks, notes, and snippets.',
+        'Create a new task with optional checkbox items.',
+        'Add a checkbox to the current or named task.',
+        'Mark a matching task checkbox as completed.',
+      ],
+    },
+    {
+      title: 'Telegram bot',
+      items: [
+        'Telegram uses the per-user bot token saved in Settings > AI.',
+        'Unknown chats are denied. Bind a chat to the app user on the server before using commands.',
+        'Telegram commands run on the server, so desktop and mobile see the changes after sync.',
+      ],
+    },
+  ];
+
+  for (const section of sections) {
+    const block = el('section', { class: 'ai-help-section' });
+    block.appendChild(el('h4', { text: section.title }));
+    const list = document.createElement('ul');
+    for (const item of section.items) {
+      list.appendChild(el('li', { text: item }));
+    }
+    block.appendChild(list);
+    modal.appendChild(block);
+  }
+
+  const examples = el('section', { class: 'ai-help-section' });
+  examples.appendChild(el('h4', { text: 'Examples' }));
+  const exampleList = document.createElement('div');
+  exampleList.className = 'ai-help-examples';
+  for (const text of [
+    'Покажи задачу Аптека',
+    'Создай задачу Аптека с пунктами купить аспирин, проверить рецепт',
+    'Добавь в эту задачу пункт купить ибупрофен',
+    'Отметь в задаче Аптека пункт купить аспирин выполненным',
+    'Найди заметку про отпуск',
+    'Найди сниппет про rsync',
+  ]) {
+    exampleList.appendChild(el('code', { text }));
+  }
+  examples.appendChild(exampleList);
+  modal.appendChild(examples);
+
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) overlay.remove();
+  });
 }
 
 function el(tag, opts = {}) {
