@@ -5,6 +5,7 @@ import { useAuth } from '../../auth/AuthContext';
 import { isBiometricAvailable } from '../../auth/biometrics';
 import { performSync } from '../../sync/syncService';
 import { useSyncStatus } from '../../sync/useSyncStatus';
+import { openApkDownload } from '../../updater/apkDownload';
 import { TASK_PREF_KEYS, loadTaskPreferences, setTaskPreference } from '../Tasks/taskPreferences';
 
 export default function SettingsScreen() {
@@ -56,6 +57,14 @@ export default function SettingsScreen() {
     }
   };
 
+  const handleDownloadApk = async () => {
+    try {
+      await openApkDownload();
+    } catch (e) {
+      Alert.alert('Ошибка', 'Не удалось открыть ссылку на APK');
+    }
+  };
+
   const row = (label, right) => (
     <View style={[s.row, { borderColor: colors.border }]}>
       <Text style={[s.label, { color: colors.text }]}>{label}</Text>
@@ -103,6 +112,11 @@ export default function SettingsScreen() {
       {row('Проверить обновления', (
         <TouchableOpacity onPress={handleCheckUpdate}>
           <Text style={{ color: colors.primary }}>Проверить</Text>
+        </TouchableOpacity>
+      ))}
+      {row('Новый APK для AI и микрофона', (
+        <TouchableOpacity onPress={handleDownloadApk}>
+          <Text style={{ color: colors.primary }}>Скачать APK</Text>
         </TouchableOpacity>
       ))}
 

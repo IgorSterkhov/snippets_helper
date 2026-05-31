@@ -413,3 +413,40 @@ def test_telegram_response_renders_show_task_details_as_message_body():
     assert text.startswith("Вот задача.")
     assert "Task: Аптека" in text
     assert "- [ ] Купить аспирин" in text
+
+
+def test_telegram_response_renders_search_choices_as_lists():
+    response = AiChatResponse(
+        mode="command",
+        reply='Давай найдём заметки и сниппеты по запросу "kylin".',
+        commands=[],
+        results=[
+            AiCommandResult(
+                name="search_notes",
+                args={"query": "kylin"},
+                status="executed",
+                message="Found 1 note(s).",
+                item_type="note",
+                choices=[{"uuid": "note-1", "label": "Kylin deployment notes"}],
+            ),
+            AiCommandResult(
+                name="search_snippets",
+                args={"query": "kylin"},
+                status="executed",
+                message="Found 2 snippet(s).",
+                item_type="snippet",
+                choices=[
+                    {"uuid": "snippet-1", "label": "kylin_start"},
+                    {"uuid": "snippet-2", "label": "kylin_restart"},
+                ],
+            ),
+        ],
+    )
+
+    text = format_telegram_ai_response(response)
+
+    assert "Notes:" in text
+    assert "1. Kylin deployment notes" in text
+    assert "Snippets:" in text
+    assert "1. kylin_start" in text
+    assert "2. kylin_restart" in text

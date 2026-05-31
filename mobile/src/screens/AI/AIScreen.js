@@ -16,6 +16,7 @@ import { useTheme } from '../../theme/ThemeContext';
 import { useAuth } from '../../auth/AuthContext';
 import { sendAiChat } from '../../api/ai';
 import { executeMobileAiCommands } from '../../ai/commandDispatcher';
+import { choiceKey, choiceLabel } from '../../ai/choiceDisplay';
 import { startMobileSpeechRecognition, stopMobileSpeechRecognition } from '../../ai/speechRecognition';
 
 export default function AIScreen({ navigation }) {
@@ -109,8 +110,8 @@ export default function AIScreen({ navigation }) {
       {Array.isArray(item.choices) && item.choices.length ? (
         <View style={s.choiceList}>
           {item.choices.slice(0, 5).map((choice) => (
-            <Text key={choice.item_uuid || choice.title} style={[s.choice, { color: colors.textMuted, borderColor: colors.border }]}>
-              {choice.title || choice.item_uuid}
+            <Text key={choiceKey(choice)} style={[s.choice, { color: colors.textMuted, borderColor: colors.border }]}>
+              {choiceLabel(choice)}
             </Text>
           ))}
         </View>

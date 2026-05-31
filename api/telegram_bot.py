@@ -390,9 +390,42 @@ def format_telegram_ai_response(response: Any) -> str:
             name = item.get("name") or "command"
             status = item.get("status") or ""
             message = item.get("message") or ""
+            item_type = item.get("item_type") or ""
+            choices = item.get("choices") or []
         else:
             name = getattr(item, "name", "command")
             status = getattr(item, "status", "")
             message = getattr(item, "message", "")
+            item_type = getattr(item, "item_type", "") or ""
+            choices = getattr(item, "choices", []) or []
         lines.append(f"{name}: {status} {message}".strip())
+        rendered_choices = _format_telegram_choices(item_type, choices)
+        if rendered_choices:
+            lines.extend(rendered_choices)
     return "\n".join(lines)
+
+
+def _format_telegram_choices(item_type: str, choices: list[Any]) -> list[str]:
+    if not choices:
+        return []
+    title = {
+        "note": "Notes",
+        "snippet": "Snippets",
+        "shortcut": "Snippets",
+        "task": "Tasks",
+        "task_checkbox": "Checkboxes",
+    }.get(item_type, "Results")
+    lines = [f"{title}:"]
+    for index, choice in enumerate(choices[:10], start=1):
+        if isinstance(choice, dict):
+            label = choice.get("label") or choice.get("title") or choice.get("name") or choice.get("uuid") or choice.get("item_uuid")
+        else:
+            label = (
+                getattr(choice, "label", None)
+                or getattr(choice, "title", None)
+                or getattr(choice, "name", None)
+                or getattr(choice, "uuid", None)
+                or getattr(choice, "item_uuid", None)
+            )
+        lines.append(f"{index}. {label or '(untitled)'}")
+    return lines
