@@ -1,4 +1,5 @@
 import {
+  getApkVersionStatus,
   getApkUpdateInfo,
   getNativeApkVersionCode,
 } from '../../src/updater/apkVersion';
@@ -30,5 +31,30 @@ describe('APK version checks', () => {
     });
 
     expect(update).toBeNull();
+  });
+
+  test('returns readable installed and latest APK version status', () => {
+    expect(getApkVersionStatus({
+      apk_required_version_code: 4,
+      apk_url: 'https://ister-app.ru/releases/snippets-helper-1.0.0.apk',
+    }, {
+      IsterAppInfo: { versionCode: 3 },
+    })).toEqual({
+      currentVersionCode: 3,
+      latestVersionCode: 4,
+      needsUpdate: true,
+      apkUrl: 'https://ister-app.ru/releases/snippets-helper-1.0.0.apk',
+      releaseNotes: '',
+    });
+
+    expect(getApkVersionStatus({
+      apk_version_code: 4,
+    }, {
+      IsterAppInfo: { versionCode: 4 },
+    })).toEqual(expect.objectContaining({
+      currentVersionCode: 4,
+      latestVersionCode: 4,
+      needsUpdate: false,
+    }));
   });
 });

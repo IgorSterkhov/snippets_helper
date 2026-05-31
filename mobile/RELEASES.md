@@ -153,6 +153,11 @@ Old APKs that do not expose native app info are treated as version code `0`
 and will show the APK download prompt after they receive an OTA containing
 the APK-aware updater.
 
+When an OTA must reach old clients before the APK prompt, publish the same
+value as `apk_required_version_code` instead of `apk_version_code`. Clients
+before 1.0.22 ignore that field and take the OTA first; 1.0.22+ treats it
+as the required APK version and can then show the APK prompt/status.
+
 ---
 
 ## 3. Version management (how semver flows)

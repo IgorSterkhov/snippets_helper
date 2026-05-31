@@ -46,6 +46,7 @@ export default function AIScreen({ navigation }) {
         module: 'ai',
         recent_task_uuid: recentTaskUuid,
         locale: 'ru',
+        user_message: text,
       };
       const response = await sendAiChat(baseUrl, apiKey, {
         mode,
@@ -57,7 +58,10 @@ export default function AIScreen({ navigation }) {
         nextLogs = await executeMobileAiCommands(response.commands, navigation, context);
       }
       if (context.recent_task_uuid) setRecentTaskUuid(context.recent_task_uuid);
-      setReply(response.reply || (nextLogs.length ? 'Команды выполнены.' : 'Нет ответа.'));
+      const commandReply = mode === 'command'
+        ? nextLogs.map((item) => item?.message).filter(Boolean).join('\n')
+        : '';
+      setReply(commandReply || response.reply || (nextLogs.length ? 'Команды выполнены.' : 'Нет ответа.'));
       setLogs(nextLogs);
       setMessage('');
     } catch (e) {

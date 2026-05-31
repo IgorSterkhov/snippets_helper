@@ -6,6 +6,7 @@ import { isBiometricAvailable } from '../../auth/biometrics';
 import { performSync } from '../../sync/syncService';
 import { useSyncStatus } from '../../sync/useSyncStatus';
 import { openApkDownload } from '../../updater/apkDownload';
+import { loadApkVersionStatus } from '../../updater/updateService';
 import { TASK_PREF_KEYS, loadTaskPreferences, setTaskPreference } from '../Tasks/taskPreferences';
 
 export default function SettingsScreen() {
@@ -13,12 +14,24 @@ export default function SettingsScreen() {
   const { logout, biometricEnabled, toggleBiometric } = useAuth();
   const [bioAvailable, setBioAvailable] = useState(false);
   const [taskPrefs, setTaskPrefs] = useState({ hideDone: false, wrapText: true });
+  const [apkStatus, setApkStatus] = useState(null);
+  const [apkStatusLoading, setApkStatusLoading] = useState(true);
   const { pending, syncing } = useSyncStatus();
 
   useEffect(() => {
     isBiometricAvailable().then(setBioAvailable);
     loadTaskPreferences().then(setTaskPrefs).catch(() => {});
+    refreshApkStatus();
   }, []);
+
+  const refreshApkStatus = async () => {
+    setApkStatusLoading(true);
+    try {
+      setApkStatus(await loadApkVersionStatus());
+    } finally {
+      setApkStatusLoading(false);
+    }
+  };
 
   const updateTaskPreference = async (key, value) => {
     await setTaskPreference(key, value);
@@ -63,6 +76,7 @@ export default function SettingsScreen() {
           ],
         );
       }
+      await refreshApkStatus();
     } catch (e) {
       Alert.alert('Ошибка', 'Не удалось проверить обновления');
     }
@@ -70,10 +84,37 @@ export default function SettingsScreen() {
 
   const handleDownloadApk = async () => {
     try {
-      await openApkDownload();
+      await openApkDownload(undefined, apkStatus?.apkUrl);
     } catch (e) {
       Alert.alert('Ошибка', 'Не удалось открыть ссылку на APK');
     }
+  };
+
+  const renderApkStatus = () => {
+    const current = apkStatus?.currentVersionCode || 0;
+    const latest = apkStatus?.latestVersionCode || 0;
+    const currentLabel = current ? `#${current}` : 'старый APK';
+    const latestLabel = latest ? `#${latest}` : 'сервер неизвестен';
+    const hasError = Boolean(apkStatus?.error);
+    const label = hasError
+      ? `APK AI/микрофон: статус неизвестен\n${apkStatus.error}`
+      : latest
+      ? `APK AI/микрофон: установлено ${currentLabel}, доступно ${latestLabel}`
+      : `APK AI/микрофон: ${currentLabel}, ${latestLabel}`;
+
+    return row(label, apkStatusLoading ? (
+      <Text style={{ color: colors.textMuted }}>Проверяю…</Text>
+    ) : hasError || !latest ? (
+      <TouchableOpacity onPress={refreshApkStatus}>
+        <Text style={{ color: colors.primary }}>Проверить</Text>
+      </TouchableOpacity>
+    ) : apkStatus?.needsUpdate ? (
+      <TouchableOpacity onPress={handleDownloadApk}>
+        <Text style={{ color: colors.primary }}>Скачать APK</Text>
+      </TouchableOpacity>
+    ) : (
+      <Text style={{ color: colors.success || colors.primary }}>Актуален</Text>
+    ));
   };
 
   const row = (label, right) => (
@@ -125,11 +166,7 @@ export default function SettingsScreen() {
           <Text style={{ color: colors.primary }}>Проверить</Text>
         </TouchableOpacity>
       ))}
-      {row('Новый APK для AI и микрофона', (
-        <TouchableOpacity onPress={handleDownloadApk}>
-          <Text style={{ color: colors.primary }}>Скачать APK</Text>
-        </TouchableOpacity>
-      ))}
+      {renderApkStatus()}
 
       <TouchableOpacity style={[s.logoutBtn, { borderColor: colors.danger }]} onPress={logout}>
         <Text style={{ color: colors.danger, fontWeight: '600' }}>Выйти</Text>
@@ -142,6 +179,6 @@ const s = StyleSheet.create({
   container: { flex: 1 },
   section: { fontSize: 13, fontWeight: '600', paddingHorizontal: 16, paddingTop: 24, paddingBottom: 8, textTransform: 'uppercase' },
   row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1 },
-  label: { fontSize: 15 },
+  label: { flex: 1, marginRight: 12, fontSize: 15 },
   logoutBtn: { margin: 16, padding: 14, borderRadius: 8, borderWidth: 1, alignItems: 'center' },
 });

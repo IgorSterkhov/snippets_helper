@@ -30,9 +30,17 @@ describe('mobile speech recognition helper', () => {
 
   test('fails clearly when speech recognition is unavailable', async () => {
     await expect(startMobileSpeechRecognition({
-      nativeModule: { isAvailable: jest.fn().mockResolvedValue(false) },
+      nativeModule: { isAvailable: jest.fn().mockResolvedValue(false), start: jest.fn() },
       permissions: {},
       platformOS: 'android',
-    })).rejects.toThrow('Speech recognition is not available');
+    })).rejects.toThrow('Android speech recognition service is unavailable');
+  });
+
+  test('fails clearly when the installed APK does not include the native speech module', async () => {
+    await expect(startMobileSpeechRecognition({
+      nativeModule: null,
+      permissions: {},
+      platformOS: 'android',
+    })).rejects.toThrow('Install the latest APK from Settings');
   });
 });

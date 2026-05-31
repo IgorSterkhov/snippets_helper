@@ -56,6 +56,27 @@ describe('mobile AI command dispatcher', () => {
     expect(navigation.navigate).not.toHaveBeenCalled();
   });
 
+  test('search_tasks opens the only match when the user asked to show it', async () => {
+    const navigation = { navigate: jest.fn() };
+    const deps = makeDeps({
+      getAllTasks: jest.fn().mockResolvedValue([{ uuid: 'task-1', title: 'Аптека', sort_order: 0 }]),
+    });
+    const context = { user_message: 'покажи задачу Аптека' };
+
+    const results = await executeMobileAiCommands([
+      { name: 'search_tasks', args: { query: 'Аптека' } },
+    ], navigation, context, deps);
+
+    expect(results).toHaveLength(2);
+    expect(results[0]).toEqual(expect.objectContaining({ name: 'search_tasks', status: 'executed' }));
+    expect(results[1]).toEqual(expect.objectContaining({ name: 'open_task', status: 'executed', item_uuid: 'task-1' }));
+    expect(context.recent_task_uuid).toBe('task-1');
+    expect(navigation.navigate).toHaveBeenCalledWith('Tasks', expect.objectContaining({
+      screen: 'TaskEditor',
+      params: expect.objectContaining({ isNew: false }),
+    }));
+  });
+
   test('add_task_checkbox uses recent task context', async () => {
     const navigation = { navigate: jest.fn() };
     const deps = makeDeps({

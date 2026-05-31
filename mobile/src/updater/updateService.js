@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import hotUpdate from 'react-native-ota-hot-update';
 import ReactNativeBlobUtil from 'react-native-blob-util';
 import { version as BUNDLED_VERSION } from '../../package.json';
-import { getApkUpdateInfo } from './apkVersion';
+import { getApkUpdateInfo, getApkVersionStatus } from './apkVersion';
 
 const OTA_VERSION_KEY = 'installed_ota_version';
 
@@ -42,6 +42,43 @@ async function getUpdateUrl() {
   return base + '/snippets-updates/latest.json';
 }
 
+async function fetchUpdateManifest(updateUrl) {
+  const response = await fetch(updateUrl, { cache: 'no-store' });
+  const text = await response.text();
+  if (!response.ok) {
+    const error = new Error(`HTTP ${response.status}`);
+    error.responseText = text;
+    throw error;
+  }
+  return JSON.parse(text);
+}
+
+export function selectAvailableUpdate(data, installed, nativeModules) {
+  if (data?.version && compareVersions(data.version, installed) > 0) {
+    return data;
+  }
+  return getApkUpdateInfo(data, nativeModules);
+}
+
+export async function loadApkVersionStatus() {
+  const updateUrl = await getUpdateUrl();
+  if (!updateUrl) {
+    return {
+      ...getApkVersionStatus(null),
+      error: 'API URL не настроен',
+    };
+  }
+  try {
+    const data = await fetchUpdateManifest(updateUrl);
+    return getApkVersionStatus(data);
+  } catch (e) {
+    return {
+      ...getApkVersionStatus(null),
+      error: String(e?.message || e),
+    };
+  }
+}
+
 export async function checkForUpdate(showAlertIfNone = false) {
   let updateUrl = '';
   try {
@@ -51,43 +88,33 @@ export async function checkForUpdate(showAlertIfNone = false) {
       return null;
     }
 
-    const response = await fetch(updateUrl, { cache: 'no-store' });
-    if (!response.ok) {
-      if (showAlertIfNone) {
-        Alert.alert('Ошибка', `HTTP ${response.status}\nURL: ${updateUrl}`);
-      }
-      return null;
-    }
-
-    const text = await response.text();
     let data;
     try {
-      data = JSON.parse(text);
+      data = await fetchUpdateManifest(updateUrl);
     } catch (e) {
       if (showAlertIfNone) {
-        Alert.alert('Ошибка парсинга', `URL: ${updateUrl}\nResponse: ${text.slice(0, 200)}`);
+        Alert.alert('Ошибка', `URL: ${updateUrl}\n${String(e?.message || e)}`);
       }
       return null;
-    }
-
-    const installed = await getInstalledVersion();
-    const apkUpdate = getApkUpdateInfo(data);
-    if (apkUpdate) {
-      updateInfo = apkUpdate;
-      return apkUpdate;
     }
 
     if (!data.version) {
+      const apkUpdate = getApkUpdateInfo(data);
+      if (apkUpdate) {
+        updateInfo = apkUpdate;
+        return apkUpdate;
+      }
       if (showAlertIfNone) {
         Alert.alert('Ошибка', `Нет поля version в ответе:\n${JSON.stringify(data).slice(0, 200)}`);
       }
       return null;
     }
 
-    const diff = compareVersions(data.version, installed);
-    if (diff > 0) {
-      updateInfo = data;
-      return data;
+    const installed = await getInstalledVersion();
+    const selectedUpdate = selectAvailableUpdate(data, installed);
+    if (selectedUpdate) {
+      updateInfo = selectedUpdate;
+      return selectedUpdate;
     }
 
     if (showAlertIfNone) {

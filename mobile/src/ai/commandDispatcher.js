@@ -53,6 +53,30 @@ function choice(itemType, itemUuid, title) {
   return { item_type: itemType, item_uuid: itemUuid, title };
 }
 
+function userAskedToOpenSingleResult(context) {
+  const text = String(context?.user_message || '').toLowerCase();
+  if (!text) return false;
+  const wantsListOnly = /(список|перечисли|найди|поиск|list|search)/i.test(text);
+  if (wantsListOnly) return false;
+  return /(покажи|показать|открой|открыть|show|open)/i.test(text);
+}
+
+function autoOpenCommandForSearch(commandName, searchResult, context) {
+  if (!userAskedToOpenSingleResult(context)) return null;
+  if (searchResult?.status !== 'executed' || searchResult?.choices?.length !== 1) return null;
+  const [selected] = searchResult.choices;
+  if (commandName === 'search_tasks') {
+    return { name: 'open_task', args: { task_uuid: selected.item_uuid } };
+  }
+  if (commandName === 'search_notes') {
+    return { name: 'open_note', args: { note_uuid: selected.item_uuid } };
+  }
+  if (commandName === 'search_snippets') {
+    return { name: 'open_snippet', args: { snippet_uuid: selected.item_uuid } };
+  }
+  return null;
+}
+
 async function findTask(args, context, deps) {
   const all = await deps.getAllTasks();
   const explicitUuid = args.task_uuid || args.item_uuid || (
@@ -331,7 +355,13 @@ export async function executeMobileAiCommands(commands = [], navigation, context
       continue;
     }
     try {
-      results.push(await handler(command, navigation, context, deps));
+      const commandResult = await handler(command, navigation, context, deps);
+      results.push(commandResult);
+      const followUp = autoOpenCommandForSearch(name, commandResult, context);
+      if (followUp) {
+        const followUpHandler = HANDLERS[followUp.name];
+        results.push(await followUpHandler(followUp, navigation, context, deps));
+      }
     } catch (e) {
       results.push(result(name, commandArgs(command), 'failed', String(e)));
     }

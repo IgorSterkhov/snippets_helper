@@ -1,6 +1,8 @@
 import { NativeModules, PermissionsAndroid, Platform } from 'react-native';
 
 const MODULE_NAME = 'IsterSpeechRecognition';
+const MISSING_NATIVE_MODULE_MESSAGE = 'Speech recognition native module is not installed. Install the latest APK from Settings and restart the app.';
+const UNAVAILABLE_SERVICE_MESSAGE = 'Android speech recognition service is unavailable on this device. Install or enable Google speech services, or use text input.';
 
 export function getSpeechRecognitionModule(nativeModules = NativeModules) {
   return nativeModules?.[MODULE_NAME] || null;
@@ -36,12 +38,12 @@ export async function startMobileSpeechRecognition({
   locale = 'ru-RU',
 } = {}) {
   if (!nativeModule?.start) {
-    throw new Error('Speech recognition is not available on this device');
+    throw new Error(MISSING_NATIVE_MODULE_MESSAGE);
   }
   if (nativeModule.isAvailable) {
     const available = await nativeModule.isAvailable();
     if (!available) {
-      throw new Error('Speech recognition is not available on this device');
+      throw new Error(UNAVAILABLE_SERVICE_MESSAGE);
     }
   }
   await ensureMicrophonePermission(permissions, platformOS);
