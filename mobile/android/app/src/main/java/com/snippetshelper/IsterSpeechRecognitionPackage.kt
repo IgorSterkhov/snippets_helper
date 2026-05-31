@@ -7,7 +7,10 @@ import com.facebook.react.uimanager.ViewManager
 
 class IsterSpeechRecognitionPackage : ReactPackage {
   override fun createNativeModules(reactContext: ReactApplicationContext): List<NativeModule> {
-    return listOf(IsterSpeechRecognitionModule(reactContext))
+    return listOf(
+      IsterSpeechRecognitionModule(reactContext),
+      IsterAppInfoModule(reactContext),
+    )
   }
 
   override fun createViewManagers(reactContext: ReactApplicationContext): List<ViewManager<*, *>> {

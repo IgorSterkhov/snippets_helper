@@ -43,6 +43,17 @@ export default function SettingsScreen() {
       const { checkForUpdate, applyUpdate, setOnProgress } = require('../../updater/updateService');
       const update = await checkForUpdate(true);
       if (update) {
+        if (update.type === 'apk') {
+          Alert.alert(
+            'Нужен новый APK',
+            `Доступна новая APK-сборка${update.apk_version_code ? ` #${update.apk_version_code}` : ''}\n${update.release_notes || ''}`,
+            [
+              { text: 'Позже', style: 'cancel' },
+              { text: 'Скачать APK', onPress: () => openApkDownload(undefined, update.apk_url) },
+            ],
+          );
+          return;
+        }
         Alert.alert(
           'Обновление доступно',
           `Версия ${update.version}\n${update.release_notes || ''}`,

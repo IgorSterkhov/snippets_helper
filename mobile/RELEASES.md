@@ -136,6 +136,23 @@ very next "check for updates" has something to apply.
 2. Then bump `package.json` to `"1.0.1"` and follow §2.2 for the OTA.
 3. Two commits, two artifacts.
 
+When the uploaded APK must be installed by existing users, add APK metadata
+to `latest.json` after the new APK is actually uploaded:
+```json
+{
+  "version": "1.0.X",
+  "bundle_url": "https://ister-app.ru/snippets-updates/bundle-1.0.X.zip",
+  "release_notes": "...",
+  "apk_version_code": 4,
+  "apk_url": "https://ister-app.ru/releases/snippets-helper-1.0.0.apk",
+  "apk_release_notes": "New APK is required for native AI voice support."
+}
+```
+Clients compare `apk_version_code` with the installed native `versionCode`.
+Old APKs that do not expose native app info are treated as version code `0`
+and will show the APK download prompt after they receive an OTA containing
+the APK-aware updater.
+
 ---
 
 ## 3. Version management (how semver flows)

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
 import { checkForUpdate, applyUpdate, setOnProgress } from '../updater/updateService';
+import { openApkDownload } from '../updater/apkDownload';
 
 export default function UpdateBanner() {
   const { colors } = useTheme();
@@ -16,6 +17,10 @@ export default function UpdateBanner() {
   if (!update) return null;
 
   const handleUpdate = async () => {
+    if (update.type === 'apk') {
+      await openApkDownload(undefined, update.apk_url);
+      return;
+    }
     setDownloading(true);
     setOnProgress((p) => setProgress(p));
     await applyUpdate();
@@ -24,7 +29,9 @@ export default function UpdateBanner() {
   return (
     <View style={[s.container, { backgroundColor: colors.primaryLight, borderColor: colors.primary }]}>
       <Text style={[s.text, { color: colors.text }]}>
-        Доступна версия {update.version}
+        {update.type === 'apk'
+          ? `Нужен новый APK${update.apk_version_code ? ` #${update.apk_version_code}` : ''}`
+          : `Доступна версия ${update.version}`}
       </Text>
       {downloading ? (
         <View style={s.progressWrap}>
@@ -32,7 +39,7 @@ export default function UpdateBanner() {
         </View>
       ) : (
         <TouchableOpacity style={[s.btn, { backgroundColor: colors.primary }]} onPress={handleUpdate}>
-          <Text style={s.btnText}>Обновить</Text>
+          <Text style={s.btnText}>{update.type === 'apk' ? 'Скачать APK' : 'Обновить'}</Text>
         </TouchableOpacity>
       )}
     </View>

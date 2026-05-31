@@ -58,6 +58,10 @@ react {
  * Set this to true to Run Proguard on Release builds to minify the Java bytecode.
  */
 def enableProguardInReleaseBuilds = false
+def hasReleaseSigning = project.hasProperty('SNIPPETS_RELEASE_STORE_FILE') &&
+        project.hasProperty('SNIPPETS_RELEASE_STORE_PASSWORD') &&
+        project.hasProperty('SNIPPETS_RELEASE_KEY_ALIAS') &&
+        project.hasProperty('SNIPPETS_RELEASE_KEY_PASSWORD')
 
 /**
  * The preferred build flavor of JavaScriptCore (JSC)
@@ -93,10 +97,12 @@ android {
             keyPassword 'android'
         }
         release {
-            storeFile file(SNIPPETS_RELEASE_STORE_FILE)
-            storePassword SNIPPETS_RELEASE_STORE_PASSWORD
-            keyAlias SNIPPETS_RELEASE_KEY_ALIAS
-            keyPassword SNIPPETS_RELEASE_KEY_PASSWORD
+            if (hasReleaseSigning) {
+                storeFile file(SNIPPETS_RELEASE_STORE_FILE)
+                storePassword SNIPPETS_RELEASE_STORE_PASSWORD
+                keyAlias SNIPPETS_RELEASE_KEY_ALIAS
+                keyPassword SNIPPETS_RELEASE_KEY_PASSWORD
+            }
         }
     }
     buildTypes {
@@ -104,10 +110,18 @@ android {
             signingConfig signingConfigs.debug
         }
         release {
-            signingConfig signingConfigs.release
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
+    }
+}
+
+gradle.taskGraph.whenReady { taskGraph ->
+    if (!hasReleaseSigning && taskGraph.allTasks.any { it.name.toLowerCase().contains('release') }) {
+        throw new GradleException('Release signing is not configured. Create ~/.gradle/gradle.properties with SNIPPETS_RELEASE_STORE_FILE, SNIPPETS_RELEASE_STORE_PASSWORD, SNIPPETS_RELEASE_KEY_ALIAS, and SNIPPETS_RELEASE_KEY_PASSWORD.')
     }
 }
 

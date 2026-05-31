@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import hotUpdate from 'react-native-ota-hot-update';
 import ReactNativeBlobUtil from 'react-native-blob-util';
 import { version as BUNDLED_VERSION } from '../../package.json';
+import { getApkUpdateInfo } from './apkVersion';
 
 const OTA_VERSION_KEY = 'installed_ota_version';
 
@@ -70,6 +71,11 @@ export async function checkForUpdate(showAlertIfNone = false) {
     }
 
     const installed = await getInstalledVersion();
+    const apkUpdate = getApkUpdateInfo(data);
+    if (apkUpdate) {
+      updateInfo = apkUpdate;
+      return apkUpdate;
+    }
 
     if (!data.version) {
       if (showAlertIfNone) {
@@ -118,6 +124,7 @@ function semverToInt(semver) {
 export async function applyUpdate() {
   const info = updateInfo;
   if (!info) return;
+  if (info.type === 'apk') return false;
 
   const numericVersion = semverToInt(info.version);
 
