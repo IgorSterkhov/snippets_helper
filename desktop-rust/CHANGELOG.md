@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Cloud speech setup docs:** Help now explains where to create Deepgram and
+  Yandex SpeechKit API keys, which Yandex service-account role is needed, and
+  where to paste those keys in Settings -> Whisper.
+
 ## v1.5.0 (2026-06-01)
 
 - **Yandex SpeechKit live dictation:** Whisper can now stream live dictation
