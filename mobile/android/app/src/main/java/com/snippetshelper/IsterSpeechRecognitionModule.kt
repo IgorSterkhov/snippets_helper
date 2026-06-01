@@ -1,10 +1,12 @@
 package com.snippetshelper
 
 import android.Manifest
+import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.speech.RecognitionListener
+import android.speech.RecognitionService
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import com.facebook.react.bridge.Promise
@@ -63,46 +65,43 @@ class IsterSpeechRecognitionModule(
 
     pendingPromise = promise
     reactContext.runOnUiQueueThread {
-      try {
-        val nextRecognizer = SpeechRecognizer.createSpeechRecognizer(reactContext)
-        recognizer = nextRecognizer
-        nextRecognizer.setRecognitionListener(object : RecognitionListener {
-          override fun onReadyForSpeech(params: Bundle?) = Unit
-          override fun onBeginningOfSpeech() = Unit
-          override fun onRmsChanged(rmsdB: Float) = Unit
-          override fun onBufferReceived(buffer: ByteArray?) = Unit
-          override fun onEndOfSpeech() = Unit
-          override fun onPartialResults(partialResults: Bundle?) = Unit
-          override fun onEvent(eventType: Int, params: Bundle?) = Unit
+      val candidates = recognitionServiceCandidates()
+      val attempts = if (candidates.isEmpty()) listOf<ComponentName?>(null) else candidates + null
+      val tried = mutableListOf<String>()
+      var lastError: Throwable? = null
 
-          override fun onError(error: Int) {
-            val activePromise = pendingPromise
-            cleanup()
-            activePromise?.reject("speech_error", readableSpeechError(error))
+      for (componentName in attempts) {
+        var candidateRecognizer: SpeechRecognizer? = null
+        try {
+          tried.add(componentName?.flattenToShortString() ?: "system default")
+          val nextRecognizer = if (componentName == null) {
+            SpeechRecognizer.createSpeechRecognizer(reactContext)
+          } else {
+            SpeechRecognizer.createSpeechRecognizer(reactContext, componentName)
           }
-
-          override fun onResults(results: Bundle?) {
-            val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-            val text = matches?.firstOrNull().orEmpty()
-            val activePromise = pendingPromise
-            cleanup()
-            if (text.isBlank()) {
-              activePromise?.reject("speech_empty", "No speech text recognized")
-            } else {
-              activePromise?.resolve(text)
-            }
+          candidateRecognizer = nextRecognizer
+          recognizer = nextRecognizer
+          nextRecognizer.setRecognitionListener(createRecognitionListener())
+          nextRecognizer.startListening(recognitionIntent(locale))
+          return@runOnUiQueueThread
+        } catch (e: Throwable) {
+          lastError = e
+          try {
+            candidateRecognizer?.destroy()
+          } catch (_: Throwable) {
+            // Continue trying other recognizers even if a failed candidate cannot be destroyed.
           }
-        })
-        nextRecognizer.startListening(recognitionIntent(locale))
-      } catch (e: Throwable) {
-        val activePromise = pendingPromise
-        cleanup()
-        activePromise?.reject(
-          "speech_start_failed",
-          "Speech recognition failed to start: ${readableThrowable(e)}",
-          e,
-        )
+          recognizer = null
+        }
       }
+
+      val activePromise = pendingPromise
+      cleanup()
+      activePromise?.reject(
+        "speech_start_failed",
+        "Speech recognition failed to start. Tried ${tried.joinToString(", ")}. Last error: ${readableNullableThrowable(lastError)}",
+        lastError,
+      )
     }
   }
 
@@ -143,6 +142,65 @@ class IsterSpeechRecognitionModule(
     }
   }
 
+  private fun createRecognitionListener(): RecognitionListener {
+    return object : RecognitionListener {
+      override fun onReadyForSpeech(params: Bundle?) = Unit
+      override fun onBeginningOfSpeech() = Unit
+      override fun onRmsChanged(rmsdB: Float) = Unit
+      override fun onBufferReceived(buffer: ByteArray?) = Unit
+      override fun onEndOfSpeech() = Unit
+      override fun onPartialResults(partialResults: Bundle?) = Unit
+      override fun onEvent(eventType: Int, params: Bundle?) = Unit
+
+      override fun onError(error: Int) {
+        val activePromise = pendingPromise
+        cleanup()
+        activePromise?.reject("speech_error", readableSpeechError(error))
+      }
+
+      override fun onResults(results: Bundle?) {
+        val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+        val text = matches?.firstOrNull().orEmpty()
+        val activePromise = pendingPromise
+        cleanup()
+        if (text.isBlank()) {
+          activePromise?.reject("speech_empty", "No speech text recognized")
+        } else {
+          activePromise?.resolve(text)
+        }
+      }
+    }
+  }
+
+  private fun recognitionServiceCandidates(): List<ComponentName> {
+    val services = try {
+      reactContext.packageManager.queryIntentServices(
+        Intent(RecognitionService.SERVICE_INTERFACE),
+        PackageManager.MATCH_ALL,
+      )
+    } catch (_: Throwable) {
+      emptyList()
+    }
+
+    return services.mapNotNull { resolveInfo ->
+      val serviceInfo = resolveInfo.serviceInfo ?: return@mapNotNull null
+      if (!serviceInfo.exported) return@mapNotNull null
+      ComponentName(serviceInfo.packageName, serviceInfo.name)
+    }
+      .distinctBy { it.flattenToShortString() }
+      .sortedWith(compareBy<ComponentName> { recognitionServicePriority(it) }
+        .thenBy { it.packageName }
+        .thenBy { it.className })
+  }
+
+  private fun recognitionServicePriority(componentName: ComponentName): Int {
+    return when (componentName.packageName) {
+      "com.google.android.googlequicksearchbox" -> 0
+      "com.google.android.as" -> 1
+      else -> 10
+    }
+  }
+
   private fun cleanup() {
     try {
       recognizer?.destroy()
@@ -156,6 +214,10 @@ class IsterSpeechRecognitionModule(
   private fun readableThrowable(e: Throwable): String {
     val detail = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
     return "${e.javaClass.simpleName}: $detail"
+  }
+
+  private fun readableNullableThrowable(e: Throwable?): String {
+    return e?.let { readableThrowable(it) } ?: "unknown error"
   }
 
   private fun readableSpeechError(error: Int): String = when (error) {

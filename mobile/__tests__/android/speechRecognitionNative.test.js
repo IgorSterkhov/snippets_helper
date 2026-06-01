@@ -13,4 +13,11 @@ describe('Android speech recognition native module', () => {
     expect(source).toContain('catch (e: Throwable)');
     expect(source).toContain('speech_start_failed');
   });
+
+  test('tries explicit recognition services before falling back to the system default', () => {
+    expect(source).toContain('RecognitionService.SERVICE_INTERFACE');
+    expect(source).toContain('recognitionServiceCandidates');
+    expect(source).toContain('SpeechRecognizer.createSpeechRecognizer(reactContext, componentName)');
+    expect(source).toContain('com.google.android.googlequicksearchbox');
+  });
 });
