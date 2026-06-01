@@ -25,7 +25,15 @@ class IsterSpeechRecognitionModule(
 
   @ReactMethod
   fun isAvailable(promise: Promise) {
-    promise.resolve(SpeechRecognizer.isRecognitionAvailable(reactContext))
+    try {
+      promise.resolve(SpeechRecognizer.isRecognitionAvailable(reactContext))
+    } catch (e: Throwable) {
+      promise.reject(
+        "speech_availability_failed",
+        "Speech recognition availability check failed: ${readableThrowable(e)}",
+        e,
+      )
+    }
   }
 
   @ReactMethod
@@ -38,55 +46,84 @@ class IsterSpeechRecognitionModule(
       promise.reject("speech_permission_denied", "Microphone permission was not granted")
       return
     }
-    if (!SpeechRecognizer.isRecognitionAvailable(reactContext)) {
+    val available = try {
+      SpeechRecognizer.isRecognitionAvailable(reactContext)
+    } catch (e: Throwable) {
+      promise.reject(
+        "speech_availability_failed",
+        "Speech recognition availability check failed: ${readableThrowable(e)}",
+        e,
+      )
+      return
+    }
+    if (!available) {
       promise.reject("speech_unavailable", "Speech recognition is not available on this device")
       return
     }
 
     pendingPromise = promise
     reactContext.runOnUiQueueThread {
-      val nextRecognizer = SpeechRecognizer.createSpeechRecognizer(reactContext)
-      recognizer = nextRecognizer
-      nextRecognizer.setRecognitionListener(object : RecognitionListener {
-        override fun onReadyForSpeech(params: Bundle?) = Unit
-        override fun onBeginningOfSpeech() = Unit
-        override fun onRmsChanged(rmsdB: Float) = Unit
-        override fun onBufferReceived(buffer: ByteArray?) = Unit
-        override fun onEndOfSpeech() = Unit
-        override fun onPartialResults(partialResults: Bundle?) = Unit
-        override fun onEvent(eventType: Int, params: Bundle?) = Unit
+      try {
+        val nextRecognizer = SpeechRecognizer.createSpeechRecognizer(reactContext)
+        recognizer = nextRecognizer
+        nextRecognizer.setRecognitionListener(object : RecognitionListener {
+          override fun onReadyForSpeech(params: Bundle?) = Unit
+          override fun onBeginningOfSpeech() = Unit
+          override fun onRmsChanged(rmsdB: Float) = Unit
+          override fun onBufferReceived(buffer: ByteArray?) = Unit
+          override fun onEndOfSpeech() = Unit
+          override fun onPartialResults(partialResults: Bundle?) = Unit
+          override fun onEvent(eventType: Int, params: Bundle?) = Unit
 
-        override fun onError(error: Int) {
-          val activePromise = pendingPromise
-          cleanup()
-          activePromise?.reject("speech_error", readableSpeechError(error))
-        }
-
-        override fun onResults(results: Bundle?) {
-          val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-          val text = matches?.firstOrNull().orEmpty()
-          val activePromise = pendingPromise
-          cleanup()
-          if (text.isBlank()) {
-            activePromise?.reject("speech_empty", "No speech text recognized")
-          } else {
-            activePromise?.resolve(text)
+          override fun onError(error: Int) {
+            val activePromise = pendingPromise
+            cleanup()
+            activePromise?.reject("speech_error", readableSpeechError(error))
           }
-        }
-      })
-      nextRecognizer.startListening(recognitionIntent(locale))
+
+          override fun onResults(results: Bundle?) {
+            val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+            val text = matches?.firstOrNull().orEmpty()
+            val activePromise = pendingPromise
+            cleanup()
+            if (text.isBlank()) {
+              activePromise?.reject("speech_empty", "No speech text recognized")
+            } else {
+              activePromise?.resolve(text)
+            }
+          }
+        })
+        nextRecognizer.startListening(recognitionIntent(locale))
+      } catch (e: Throwable) {
+        val activePromise = pendingPromise
+        cleanup()
+        activePromise?.reject(
+          "speech_start_failed",
+          "Speech recognition failed to start: ${readableThrowable(e)}",
+          e,
+        )
+      }
     }
   }
 
   @ReactMethod
   fun stop(promise: Promise) {
     reactContext.runOnUiQueueThread {
-      val activeRecognizer = recognizer
-      if (activeRecognizer == null) {
-        promise.resolve(false)
-      } else {
-        activeRecognizer.stopListening()
-        promise.resolve(true)
+      try {
+        val activeRecognizer = recognizer
+        if (activeRecognizer == null) {
+          promise.resolve(false)
+        } else {
+          activeRecognizer.stopListening()
+          promise.resolve(true)
+        }
+      } catch (e: Throwable) {
+        cleanup()
+        promise.reject(
+          "speech_stop_failed",
+          "Speech recognition failed to stop: ${readableThrowable(e)}",
+          e,
+        )
       }
     }
   }
@@ -107,9 +144,18 @@ class IsterSpeechRecognitionModule(
   }
 
   private fun cleanup() {
-    recognizer?.destroy()
+    try {
+      recognizer?.destroy()
+    } catch (_: Throwable) {
+      // Cleanup must never crash the app after a speech recognizer failure.
+    }
     recognizer = null
     pendingPromise = null
+  }
+
+  private fun readableThrowable(e: Throwable): String {
+    val detail = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
+    return "${e.javaClass.simpleName}: $detail"
   }
 
   private fun readableSpeechError(error: Int): String = when (error) {
