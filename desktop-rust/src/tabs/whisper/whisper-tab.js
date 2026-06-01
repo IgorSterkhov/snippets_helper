@@ -562,10 +562,12 @@ export async function initTab(container) {
 
   const offLiveError = await onWhisperEvent('liveError', (p) => {
     const providerLabel = liveProviderLabel(p.provider || state.liveProvider);
+    const rawMessage = p.message || `Unknown ${providerLabel} live dictation error.`;
+    const message = enrichLiveErrorMessage(rawMessage, p.provider || state.liveProvider);
     showWhisperError(
       `${providerLabel} live dictation failed`,
-      p.message || `Unknown ${providerLabel} live dictation error.`,
-      p.message || 'unknown error',
+      message,
+      message || 'unknown error',
       { event: 'whisper:live-error', payload: p }
     );
     console.error('[whisper live error]', p);
@@ -924,6 +926,16 @@ export async function initTab(container) {
 function formatErrorMessage(err, fallback = 'Unknown error.') {
   const msg = String(err?.message || err || '').trim();
   return msg || fallback;
+}
+
+function enrichLiveErrorMessage(message, provider) {
+  const msg = formatErrorMessage(message);
+  if (provider !== 'yandex') return msg;
+  if (!/Unknown api key|Unauthenticated/i.test(msg)) return msg;
+  return msg + '\n\n'
+    + 'Yandex API key check: paste the service account API key secret value '
+    + '(usually starts with AQVN...), not the key ID (usually starts with aje...). '
+    + 'If the creation dialog is already closed, create a new API key: Yandex does not show the secret again.';
 }
 
 function formatRelativeTime(unixSec) {

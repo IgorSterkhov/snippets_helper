@@ -395,6 +395,11 @@ async def run_tests():
         assert 'Deepgram' in help_text, help_text
         assert 'Yandex SpeechKit' in help_text, help_text
         assert 'ai.speechkit-stt.user' in help_text, help_text
+        assert 'secret' in help_text.lower(), help_text
+        assert 'key ID' in help_text, help_text
+        assert 'AQVN' in help_text, help_text
+        assert 'aje' in help_text, help_text
+        assert 'Unknown api key' in help_text, help_text
         await close_modals()
         await wait_until(cdp, "!document.querySelector('.sql-help-overlay')", timeout=3)
 
@@ -402,6 +407,9 @@ async def run_tests():
         await wait_until(cdp, "document.body.textContent.includes('Deepgram live dictation')", timeout=3)
         has_key = await cdp.eval("!!document.querySelector('.modal-overlay [data-key=\"whisper.deepgram_api_key\"]')")
         assert has_key, 'Deepgram API key input missing'
+        settings_text = await cdp.eval("document.querySelector('.modal-overlay')?.textContent || ''")
+        assert 'secret value' in settings_text, settings_text
+        assert 'not the key ID' in settings_text, settings_text
         await close_modals()
         await wait_until(cdp, "!document.querySelector('.modal-overlay')", timeout=3)
 

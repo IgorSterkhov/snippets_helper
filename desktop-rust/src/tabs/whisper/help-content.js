@@ -41,6 +41,10 @@ export const WHISPER_HELP_HTML = `
   <li>Создайте <strong>service account</strong> для приложения.</li>
   <li>Выдайте service account роль <code>ai.speechkit-stt.user</code>.</li>
   <li>Создайте API key для этого service account.</li>
+  <li>Сохраните именно <strong>secret value</strong> ключа. Обычно он выглядит
+      как <code>AQVN...</code>. Не вставляйте <strong>key ID</strong> вида
+      <code>aje...</code>: по нему SpeechKit вернет ошибку
+      <code>Unknown api key</code>.</li>
   <li>Скопируйте ключ в <strong>Settings &gt; Whisper &gt; Yandex SpeechKit</strong>.</li>
   <li>Для русской диктовки начните с language <code>ru-RU</code> и включенной
       text normalization.</li>
@@ -60,6 +64,10 @@ export const WHISPER_HELP_HTML = `
   <li>Проверьте billing/квоты в кабинете провайдера.</li>
   <li>Для Yandex проверьте роль service account:
       <code>ai.speechkit-stt.user</code>.</li>
+  <li>Если ошибка содержит <code>Unknown api key 'aje...'</code>, в Settings
+      вставлен идентификатор ключа. Создайте новый API key и вставьте его
+      <strong>secret value</strong>, потому что после закрытия окна создания
+      Yandex больше не показывает secret повторно.</li>
   <li>Ошибки Whisper/cloud provider открываются постоянной модалкой с
       кнопкой <strong>Copy error</strong>. Этот текст лучше копировать целиком
       при разборе проблемы.</li>

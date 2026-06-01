@@ -395,7 +395,7 @@ function yandexSpeechKitBlock(s) {
   wrap.appendChild(header);
 
   const note = document.createElement('div');
-  note.textContent = 'API key is stored locally on this desktop and is not synced. Use a Yandex Cloud service account API key with SpeechKit STT permissions.';
+  note.textContent = 'API key is stored locally on this desktop and is not synced. Paste the service account API key secret value, usually starting with AQVN..., not the key ID that starts with aje.... The service account needs SpeechKit STT permissions.';
   note.style.cssText = 'font-size:11px;color:var(--text-muted,#8b949e)';
   wrap.appendChild(note);
 
@@ -405,7 +405,7 @@ function yandexSpeechKitBlock(s) {
   keyInput.type = 'password';
   keyInput.dataset.key = 'whisper.yandex_api_key';
   keyInput.value = s['whisper.yandex_api_key'] || '';
-  keyInput.placeholder = 'Yandex SpeechKit API key';
+  keyInput.placeholder = 'Yandex API key secret (AQVN..., not aje... ID)';
   stylizeInput(keyInput);
   keyInput.style.flex = '1';
   keyRow.appendChild(keyInput);

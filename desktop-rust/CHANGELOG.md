@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## f-20260601-2 (2026-06-01)
+
+- **Yandex SpeechKit key guidance:** Whisper Settings, local help, and live
+  error dialogs now explicitly explain that Yandex requires the service-account
+  API key secret value (`AQVN...`), not the API key ID (`aje...`). Unknown-key
+  errors now include a recovery hint.
+
 ## f-20260601-1 (2026-06-01)
 
 - **Cloud speech setup docs:** Help now explains where to create Deepgram and
