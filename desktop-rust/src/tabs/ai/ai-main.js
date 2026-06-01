@@ -101,9 +101,9 @@ function buildComposer() {
   voiceWrap.appendChild(el('span', { text: 'Voice' }));
   const voiceSelect = document.createElement('select');
   voiceSelect.className = 'ai-voice-provider-select';
-  voiceSelect.innerHTML = '<option value="local">Whisper</option><option value="deepgram">Deepgram</option>';
+  voiceSelect.innerHTML = '<option value="local">Whisper</option><option value="deepgram">Deepgram</option><option value="yandex">Yandex SpeechKit</option>';
   voiceSelect.addEventListener('change', async () => {
-    state.voiceProvider = voiceSelect.value === 'deepgram' ? 'deepgram' : 'local';
+    state.voiceProvider = ['deepgram', 'yandex'].includes(voiceSelect.value) ? voiceSelect.value : 'local';
     renderVoiceProvider();
     try {
       await whisperApi.setSetting('ai.voice_provider', state.voiceProvider);
@@ -224,14 +224,14 @@ function renderVoiceButton() {
 function renderVoiceProvider() {
   const select = state.root?.querySelector('.ai-voice-provider-select');
   if (!select) return;
-  select.value = state.voiceProvider === 'deepgram' ? 'deepgram' : 'local';
+  select.value = ['deepgram', 'yandex'].includes(state.voiceProvider) ? state.voiceProvider : 'local';
   select.disabled = state.voiceBusy || state.voiceRecording || state.busy;
 }
 
 async function loadVoiceProvider() {
   try {
     const saved = await whisperApi.getSetting('ai.voice_provider');
-    state.voiceProvider = saved === 'deepgram' ? 'deepgram' : 'local';
+    state.voiceProvider = ['deepgram', 'yandex'].includes(saved) ? saved : 'local';
   } catch {
     state.voiceProvider = 'local';
   }
@@ -314,12 +314,18 @@ async function toggleVoiceRecording() {
   if (state.voiceBusy) return;
   if (state.busy && !state.voiceRecording) return;
   const stopping = state.voiceRecording;
+  const cloudVoice = state.voiceProvider === 'deepgram' || state.voiceProvider === 'yandex';
+  let previousLiveProvider = null;
+  let liveProviderTemporarilyChanged = false;
   state.voiceBusy = true;
   renderVoiceButton();
   renderVoiceProvider();
   try {
     if (!state.voiceRecording) {
-      if (state.voiceProvider === 'deepgram') {
+      if (cloudVoice) {
+        previousLiveProvider = await whisperApi.getSetting('whisper.live_provider');
+        await whisperApi.setSetting('whisper.live_provider', state.voiceProvider);
+        liveProviderTemporarilyChanged = true;
         await whisperApi.startLive();
       } else {
         await whisperApi.startRecording();
@@ -328,7 +334,7 @@ async function toggleVoiceRecording() {
       return;
     }
 
-    const text = state.voiceProvider === 'deepgram'
+    const text = (state.voiceProvider === 'deepgram' || state.voiceProvider === 'yandex')
       ? await whisperApi.stopLive()
       : await whisperApi.stopRecording();
     state.voiceRecording = false;
@@ -344,6 +350,13 @@ async function toggleVoiceRecording() {
       },
     });
   } finally {
+    if (liveProviderTemporarilyChanged) {
+      try {
+        await whisperApi.setSetting('whisper.live_provider', previousLiveProvider || 'deepgram');
+      } catch (restoreErr) {
+        console.warn('[ai] failed to restore whisper live provider', restoreErr);
+      }
+    }
     state.voiceBusy = false;
     renderVoiceProvider();
     renderVoiceButton();
@@ -416,7 +429,7 @@ function showAiHelp() {
         'Chat mode answers in this tab and does not change app data.',
         'Command mode asks DeepSeek for a validated command plan, then the desktop app executes safe local actions.',
         'When a mutation request starts with a search-only plan, the tab can run one follow-up turn using the found result.',
-        'Voice input writes a transcript into the prompt; choose Whisper for local transcription or Deepgram for live cloud transcription.',
+        'Voice input writes a transcript into the prompt; choose Whisper for local transcription, or Deepgram/Yandex SpeechKit for live cloud transcription.',
       ],
     },
     {

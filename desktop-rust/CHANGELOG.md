@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## v1.5.0 (2026-06-01)
+
+- **Yandex SpeechKit live dictation:** Whisper can now stream live dictation
+  through Yandex SpeechKit in addition to Deepgram. SpeechKit stores its API key
+  locally, supports a provider selector in the Whisper header, appears in the
+  AI tab voice selector, and uses provider-aware overlay/status/history labels.
+- **Live provider routing:** stop/cancel/status now target the active live
+  provider, so switching the selected provider while dictation is running does
+  not leave the old stream active.
+
 ## f-20260530-4 (2026-05-30)
 
 - **Telegram automatic polling:** the server now polls configured per-user

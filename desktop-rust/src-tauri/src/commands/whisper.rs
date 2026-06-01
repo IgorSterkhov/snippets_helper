@@ -11,6 +11,7 @@ use crate::whisper::inject::{self, InjectMethod};
 use crate::whisper::models;
 use crate::whisper::postprocess::{self, LlmConfig};
 use crate::whisper::service::WhisperService;
+use crate::whisper::yandex::{YandexSpeechKitConfig, YandexSpeechKitLiveService};
 use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::{AppHandle, Manager, State};
 
@@ -21,9 +22,25 @@ static LAST_WHISPER_HOTKEY_MS: AtomicU64 = AtomicU64::new(0);
 enum HotkeyAction {
     LocalStart,
     LocalStop,
-    LiveStart,
-    LiveStop,
+    LiveStart(LiveProvider),
+    LiveStop(LiveProvider),
     Ignore,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LiveProvider {
+    Deepgram,
+    Yandex,
+}
+
+impl LiveProvider {
+    fn from_setting(value: Option<String>) -> Self {
+        match value.as_deref().map(str::trim) {
+            Some("yandex") => LiveProvider::Yandex,
+            _ => LiveProvider::Deepgram,
+        }
+    }
+
 }
 
 // --- helpers -----------------------------------------------------------------
@@ -84,10 +101,37 @@ fn live_dictate_enabled(db: &DbState) -> bool {
         .unwrap_or(false)
 }
 
+fn selected_live_provider(db: &DbState) -> LiveProvider {
+    let conn = db.lock_recover();
+    let cid = computer_id();
+    LiveProvider::from_setting(
+        queries::get_setting(&conn, &cid, "whisper.live_provider")
+            .ok()
+            .flatten(),
+    )
+}
+
+fn active_live_provider(deepgram_state: LiveState, yandex_state: LiveState) -> Option<LiveProvider> {
+    match deepgram_state {
+        LiveState::Connecting | LiveState::Streaming | LiveState::Stopping => {
+            return Some(LiveProvider::Deepgram)
+        }
+        LiveState::Idle | LiveState::Error => {}
+    }
+    match yandex_state {
+        LiveState::Connecting | LiveState::Streaming | LiveState::Stopping => {
+            Some(LiveProvider::Yandex)
+        }
+        LiveState::Idle | LiveState::Error => None,
+    }
+}
+
 fn decide_hotkey_action(
     live_enabled: bool,
+    selected_provider: LiveProvider,
     local_state: crate::whisper::service::State,
-    live_state: LiveState,
+    deepgram_state: LiveState,
+    yandex_state: LiveState,
 ) -> HotkeyAction {
     use crate::whisper::service::State as WState;
 
@@ -97,14 +141,16 @@ fn decide_hotkey_action(
         WState::Idle | WState::Ready => {}
     }
 
-    match live_state {
-        LiveState::Connecting | LiveState::Streaming => return HotkeyAction::LiveStop,
-        LiveState::Stopping => return HotkeyAction::Ignore,
-        LiveState::Idle | LiveState::Error => {}
+    if let Some(provider) = active_live_provider(deepgram_state, yandex_state) {
+        return match (provider, deepgram_state, yandex_state) {
+            (LiveProvider::Deepgram, LiveState::Stopping, _) => HotkeyAction::Ignore,
+            (LiveProvider::Yandex, _, LiveState::Stopping) => HotkeyAction::Ignore,
+            _ => HotkeyAction::LiveStop(provider),
+        };
     }
 
     if live_enabled {
-        HotkeyAction::LiveStart
+        HotkeyAction::LiveStart(selected_provider)
     } else {
         HotkeyAction::LocalStart
     }
@@ -112,15 +158,13 @@ fn decide_hotkey_action(
 
 fn decide_active_stop_action(
     local_state: crate::whisper::service::State,
-    live_state: LiveState,
+    deepgram_state: LiveState,
+    yandex_state: LiveState,
 ) -> HotkeyAction {
     use crate::whisper::service::State as WState;
 
-    match live_state {
-        LiveState::Connecting | LiveState::Streaming | LiveState::Stopping | LiveState::Error => {
-            return HotkeyAction::LiveStop
-        }
-        LiveState::Idle => {}
+    if let Some(provider) = active_live_provider(deepgram_state, yandex_state) {
+        return HotkeyAction::LiveStop(provider);
     }
 
     match local_state {
@@ -133,15 +177,13 @@ fn decide_active_stop_action(
 
 fn decide_active_cancel_action(
     local_state: crate::whisper::service::State,
-    live_state: LiveState,
+    deepgram_state: LiveState,
+    yandex_state: LiveState,
 ) -> HotkeyAction {
     use crate::whisper::service::State as WState;
 
-    match live_state {
-        LiveState::Connecting | LiveState::Streaming | LiveState::Stopping | LiveState::Error => {
-            return HotkeyAction::LiveStop
-        }
-        LiveState::Idle => {}
+    if let Some(provider) = active_live_provider(deepgram_state, yandex_state) {
+        return HotkeyAction::LiveStop(provider);
     }
 
     match local_state {
@@ -396,21 +438,25 @@ pub async fn hotkey_toggle(app: AppHandle) {
 
     let db = app.state::<DbState>();
     let local = app.state::<WhisperService>();
-    let live = app.state::<DeepgramLiveService>();
+    let deepgram = app.state::<DeepgramLiveService>();
+    let yandex = app.state::<YandexSpeechKitLiveService>();
     let action = decide_hotkey_action(
         live_dictate_enabled(&db),
+        selected_live_provider(&db),
         local.current_state().await,
-        live.current_state().await,
+        deepgram.current_state().await,
+        yandex.current_state().await,
     );
 
     let res = match action {
         HotkeyAction::LocalStart => start_recording_impl(&app).await.map(|_| ()),
         HotkeyAction::LocalStop => stop_recording_impl(&app).await.map(|_| ()),
-        HotkeyAction::LiveStart => match deepgram_config_from_settings(&db) {
-            Ok(cfg) => live.start(cfg).await,
-            Err(e) => Err(e),
-        },
-        HotkeyAction::LiveStop => live.stop_and_persist(&db).await.map(|_| ()),
+        HotkeyAction::LiveStart(provider) => {
+            start_live_provider(provider, &db, &deepgram, &yandex).await
+        }
+        HotkeyAction::LiveStop(provider) => {
+            stop_live_provider(provider, &db, &deepgram, &yandex).await.map(|_| ())
+        }
         HotkeyAction::Ignore => Ok(()),
     };
     if let Err(e) = res {
@@ -435,11 +481,18 @@ pub async fn whisper_cancel_recording(svc: State<'_, WhisperService>) -> Result<
 pub async fn whisper_stop_active(app: AppHandle) -> Result<String, String> {
     let db = app.state::<DbState>();
     let local = app.state::<WhisperService>();
-    let live = app.state::<DeepgramLiveService>();
-    match decide_active_stop_action(local.current_state().await, live.current_state().await) {
+    let deepgram = app.state::<DeepgramLiveService>();
+    let yandex = app.state::<YandexSpeechKitLiveService>();
+    match decide_active_stop_action(
+        local.current_state().await,
+        deepgram.current_state().await,
+        yandex.current_state().await,
+    ) {
         HotkeyAction::LocalStop => stop_recording_impl(&app).await,
-        HotkeyAction::LiveStop => live.stop_and_persist(&db).await,
-        HotkeyAction::Ignore | HotkeyAction::LocalStart | HotkeyAction::LiveStart => {
+        HotkeyAction::LiveStop(provider) => {
+            stop_live_provider(provider, &db, &deepgram, &yandex).await
+        }
+        HotkeyAction::Ignore | HotkeyAction::LocalStart | HotkeyAction::LiveStart(_) => {
             Ok(String::new())
         }
     }
@@ -448,11 +501,16 @@ pub async fn whisper_stop_active(app: AppHandle) -> Result<String, String> {
 #[tauri::command]
 pub async fn whisper_cancel_active(app: AppHandle) -> Result<(), String> {
     let local = app.state::<WhisperService>();
-    let live = app.state::<DeepgramLiveService>();
-    match decide_active_cancel_action(local.current_state().await, live.current_state().await) {
+    let deepgram = app.state::<DeepgramLiveService>();
+    let yandex = app.state::<YandexSpeechKitLiveService>();
+    match decide_active_cancel_action(
+        local.current_state().await,
+        deepgram.current_state().await,
+        yandex.current_state().await,
+    ) {
         HotkeyAction::LocalStop => local.cancel_recording().await,
-        HotkeyAction::LiveStop => live.cancel().await,
-        HotkeyAction::Ignore | HotkeyAction::LocalStart | HotkeyAction::LiveStart => {}
+        HotkeyAction::LiveStop(provider) => cancel_live_provider(provider, &deepgram, &yandex).await,
+        HotkeyAction::Ignore | HotkeyAction::LocalStart | HotkeyAction::LiveStart(_) => {}
     }
     Ok(())
 }
@@ -508,34 +566,148 @@ fn deepgram_config_from_settings(db: &DbState) -> Result<DeepgramConfig, String>
     })
 }
 
+fn yandex_config_from_settings(db: &DbState) -> Result<YandexSpeechKitConfig, String> {
+    let conn = db.lock_recover();
+    let cid = computer_id();
+    let api_key = queries::get_setting(&conn, &cid, "whisper.yandex_api_key")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    if api_key.trim().is_empty() {
+        return Err(
+            "Yandex SpeechKit API key is missing. Open Whisper Settings and add a local Yandex key."
+                .into(),
+        );
+    }
+    let model = queries::get_setting(&conn, &cid, "whisper.yandex_model")
+        .ok()
+        .flatten()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "general".into());
+    let language = queries::get_setting(&conn, &cid, "whisper.yandex_language")
+        .ok()
+        .flatten()
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| Some("ru-RU".into()));
+    let text_normalization = queries::get_setting(&conn, &cid, "whisper.yandex_text_normalization")
+        .ok()
+        .flatten()
+        .map(|s| s == "true")
+        .unwrap_or(true);
+    let restore = queries::get_setting(&conn, &cid, "whisper.clipboard_restore_delay_ms")
+        .ok()
+        .flatten()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(200);
+    let mic_device = queries::get_setting(&conn, &cid, "whisper.mic_device")
+        .ok()
+        .flatten()
+        .filter(|s| !s.is_empty());
+    Ok(YandexSpeechKitConfig {
+        api_key,
+        model,
+        language,
+        text_normalization,
+        clipboard_restore_delay_ms: restore,
+        mic_device,
+    })
+}
+
+async fn start_live_provider(
+    provider: LiveProvider,
+    db: &DbState,
+    deepgram: &DeepgramLiveService,
+    yandex: &YandexSpeechKitLiveService,
+) -> Result<(), String> {
+    match provider {
+        LiveProvider::Deepgram => deepgram.start(deepgram_config_from_settings(db)?).await,
+        LiveProvider::Yandex => yandex.start(yandex_config_from_settings(db)?).await,
+    }
+}
+
+async fn stop_live_provider(
+    provider: LiveProvider,
+    db: &DbState,
+    deepgram: &DeepgramLiveService,
+    yandex: &YandexSpeechKitLiveService,
+) -> Result<String, String> {
+    match provider {
+        LiveProvider::Deepgram => deepgram.stop_and_persist(db).await,
+        LiveProvider::Yandex => yandex.stop_and_persist(db).await,
+    }
+}
+
+async fn cancel_live_provider(
+    provider: LiveProvider,
+    deepgram: &DeepgramLiveService,
+    yandex: &YandexSpeechKitLiveService,
+) {
+    match provider {
+        LiveProvider::Deepgram => deepgram.cancel().await,
+        LiveProvider::Yandex => yandex.cancel().await,
+    }
+}
+
 #[tauri::command]
 pub async fn whisper_live_start(
     db: State<'_, DbState>,
-    svc: State<'_, DeepgramLiveService>,
+    deepgram: State<'_, DeepgramLiveService>,
+    yandex: State<'_, YandexSpeechKitLiveService>,
 ) -> Result<(), String> {
-    let cfg = deepgram_config_from_settings(&db)?;
-    svc.start(cfg).await
+    if active_live_provider(
+        deepgram.current_state().await,
+        yandex.current_state().await,
+    )
+    .is_some()
+    {
+        return Ok(());
+    }
+    start_live_provider(selected_live_provider(&db), &db, &deepgram, &yandex).await
 }
 
 #[tauri::command]
 pub async fn whisper_live_stop(
     db: State<'_, DbState>,
-    svc: State<'_, DeepgramLiveService>,
+    deepgram: State<'_, DeepgramLiveService>,
+    yandex: State<'_, YandexSpeechKitLiveService>,
 ) -> Result<String, String> {
-    svc.stop_and_persist(&db).await
+    let provider = active_live_provider(
+        deepgram.current_state().await,
+        yandex.current_state().await,
+    )
+    .unwrap_or_else(|| selected_live_provider(&db));
+    stop_live_provider(provider, &db, &deepgram, &yandex).await
 }
 
 #[tauri::command]
-pub async fn whisper_live_cancel(svc: State<'_, DeepgramLiveService>) -> Result<(), String> {
-    svc.cancel().await;
+pub async fn whisper_live_cancel(
+    deepgram: State<'_, DeepgramLiveService>,
+    yandex: State<'_, YandexSpeechKitLiveService>,
+) -> Result<(), String> {
+    if let Some(provider) = active_live_provider(
+        deepgram.current_state().await,
+        yandex.current_state().await,
+    ) {
+        cancel_live_provider(provider, &deepgram, &yandex).await;
+    }
     Ok(())
 }
 
 #[tauri::command]
 pub async fn whisper_live_status(
-    svc: State<'_, DeepgramLiveService>,
+    db: State<'_, DbState>,
+    deepgram: State<'_, DeepgramLiveService>,
+    yandex: State<'_, YandexSpeechKitLiveService>,
 ) -> Result<serde_json::Value, String> {
-    Ok(svc.status().await)
+    let provider = active_live_provider(
+        deepgram.current_state().await,
+        yandex.current_state().await,
+    )
+    .unwrap_or_else(|| selected_live_provider(&db));
+    match provider {
+        LiveProvider::Deepgram => Ok(deepgram.status().await),
+        LiveProvider::Yandex => Ok(yandex.status().await),
+    }
 }
 
 #[tauri::command]
@@ -642,23 +814,47 @@ mod tests {
     #[test]
     fn hotkey_uses_live_service_when_live_dictate_is_enabled() {
         assert_eq!(
-            decide_hotkey_action(true, LocalState::Idle, LiveState::Idle),
-            HotkeyAction::LiveStart
+            decide_hotkey_action(
+                true,
+                LiveProvider::Deepgram,
+                LocalState::Idle,
+                LiveState::Idle,
+                LiveState::Idle,
+            ),
+            HotkeyAction::LiveStart(LiveProvider::Deepgram)
         );
         assert_eq!(
-            decide_hotkey_action(true, LocalState::Ready, LiveState::Streaming),
-            HotkeyAction::LiveStop
+            decide_hotkey_action(
+                true,
+                LiveProvider::Deepgram,
+                LocalState::Ready,
+                LiveState::Streaming,
+                LiveState::Idle,
+            ),
+            HotkeyAction::LiveStop(LiveProvider::Deepgram)
         );
     }
 
     #[test]
     fn hotkey_stops_active_local_recording_before_starting_live() {
         assert_eq!(
-            decide_hotkey_action(true, LocalState::Recording, LiveState::Idle),
+            decide_hotkey_action(
+                true,
+                LiveProvider::Deepgram,
+                LocalState::Recording,
+                LiveState::Idle,
+                LiveState::Idle,
+            ),
             HotkeyAction::LocalStop
         );
         assert_eq!(
-            decide_hotkey_action(true, LocalState::Warming, LiveState::Idle),
+            decide_hotkey_action(
+                true,
+                LiveProvider::Deepgram,
+                LocalState::Warming,
+                LiveState::Idle,
+                LiveState::Idle,
+            ),
             HotkeyAction::LocalStop
         );
     }
@@ -666,8 +862,14 @@ mod tests {
     #[test]
     fn hotkey_stops_active_live_stream_even_when_live_setting_is_off() {
         assert_eq!(
-            decide_hotkey_action(false, LocalState::Idle, LiveState::Streaming),
-            HotkeyAction::LiveStop
+            decide_hotkey_action(
+                false,
+                LiveProvider::Deepgram,
+                LocalState::Idle,
+                LiveState::Streaming,
+                LiveState::Idle,
+            ),
+            HotkeyAction::LiveStop(LiveProvider::Deepgram)
         );
     }
 
@@ -681,23 +883,23 @@ mod tests {
     #[test]
     fn overlay_stop_targets_active_live_before_local_ready() {
         assert_eq!(
-            decide_active_stop_action(LocalState::Ready, LiveState::Streaming),
-            HotkeyAction::LiveStop
+            decide_active_stop_action(LocalState::Ready, LiveState::Streaming, LiveState::Idle),
+            HotkeyAction::LiveStop(LiveProvider::Deepgram)
         );
         assert_eq!(
-            decide_active_stop_action(LocalState::Recording, LiveState::Connecting),
-            HotkeyAction::LiveStop
+            decide_active_stop_action(LocalState::Recording, LiveState::Connecting, LiveState::Idle),
+            HotkeyAction::LiveStop(LiveProvider::Deepgram)
         );
     }
 
     #[test]
     fn overlay_stop_falls_back_to_local_recording() {
         assert_eq!(
-            decide_active_stop_action(LocalState::Recording, LiveState::Idle),
+            decide_active_stop_action(LocalState::Recording, LiveState::Idle, LiveState::Idle),
             HotkeyAction::LocalStop
         );
         assert_eq!(
-            decide_active_stop_action(LocalState::Warming, LiveState::Idle),
+            decide_active_stop_action(LocalState::Warming, LiveState::Idle, LiveState::Idle),
             HotkeyAction::LocalStop
         );
     }
@@ -705,12 +907,75 @@ mod tests {
     #[test]
     fn overlay_stop_ignores_inactive_states() {
         assert_eq!(
-            decide_active_stop_action(LocalState::Ready, LiveState::Idle),
+            decide_active_stop_action(LocalState::Ready, LiveState::Idle, LiveState::Idle),
             HotkeyAction::Ignore
         );
         assert_eq!(
-            decide_active_stop_action(LocalState::Transcribing, LiveState::Idle),
+            decide_active_stop_action(LocalState::Transcribing, LiveState::Idle, LiveState::Idle),
             HotkeyAction::Ignore
+        );
+    }
+
+    #[test]
+    fn live_provider_setting_defaults_to_deepgram() {
+        assert_eq!(LiveProvider::from_setting(None), LiveProvider::Deepgram);
+        assert_eq!(
+            LiveProvider::from_setting(Some("".to_string())),
+            LiveProvider::Deepgram
+        );
+        assert_eq!(
+            LiveProvider::from_setting(Some("yandex".to_string())),
+            LiveProvider::Yandex
+        );
+    }
+
+    #[test]
+    fn hotkey_starts_selected_live_provider_when_enabled() {
+        assert_eq!(
+            decide_hotkey_action(
+                true,
+                LiveProvider::Yandex,
+                LocalState::Idle,
+                LiveState::Idle,
+                LiveState::Idle,
+            ),
+            HotkeyAction::LiveStart(LiveProvider::Yandex)
+        );
+    }
+
+    #[test]
+    fn stop_targets_active_yandex_even_if_deepgram_is_selected() {
+        assert_eq!(
+            decide_active_stop_action(
+                LocalState::Ready,
+                LiveState::Idle,
+                LiveState::Streaming,
+            ),
+            HotkeyAction::LiveStop(LiveProvider::Yandex)
+        );
+    }
+
+    #[test]
+    fn live_error_state_does_not_block_new_selected_provider_start() {
+        assert_eq!(
+            decide_hotkey_action(
+                true,
+                LiveProvider::Yandex,
+                LocalState::Ready,
+                LiveState::Error,
+                LiveState::Idle,
+            ),
+            HotkeyAction::LiveStart(LiveProvider::Yandex)
+        );
+        assert_eq!(
+            decide_hotkey_action(
+                true,
+                LiveProvider::Yandex,
+                LocalState::Ready,
+                LiveState::Idle,
+                LiveState::Error,
+            ),
+            HotkeyAction::LiveStart(LiveProvider::Yandex)
         );
     }
 }

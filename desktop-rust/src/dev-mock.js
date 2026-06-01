@@ -387,6 +387,7 @@
     liveTimers: [],
     liveCommittedText: '',
     liveModel: 'nova-3',
+    liveProvider: 'deepgram',
   };
 
   const whisperCatalog = [
@@ -408,14 +409,14 @@
   function dispatchWhisperLiveState(state, model = whisperMockState.liveModel) {
     whisperMockState.liveState = state;
     window.dispatchEvent(new CustomEvent('whisper:live-state-changed', {
-      detail: { state, model: state === 'idle' ? null : model },
+      detail: { state, model: state === 'idle' ? null : model, provider: whisperMockState.liveProvider },
     }));
   }
 
   function dispatchWhisperLiveFinal(text) {
     whisperMockState.liveCommittedText = text;
     window.dispatchEvent(new CustomEvent('whisper:live-final', {
-      detail: { chunk: text, committed_text: text, speech_final: true },
+      detail: { chunk: text, committed_text: text, speech_final: true, provider: whisperMockState.liveProvider },
     }));
   }
 
@@ -1403,10 +1404,18 @@
     },
     whisper_live_start() {
       const settings = storeGet('settings', {});
-      const apiKey = settings['whisper.deepgram_api_key'] || '';
-      if (!String(apiKey).trim()) throw new Error('Deepgram API key is missing');
+      const provider = settings['whisper.live_provider'] === 'yandex' ? 'yandex' : 'deepgram';
+      const apiKey = provider === 'yandex'
+        ? (settings['whisper.yandex_api_key'] || '')
+        : (settings['whisper.deepgram_api_key'] || '');
+      if (!String(apiKey).trim()) {
+        throw new Error(provider === 'yandex' ? 'Yandex SpeechKit API key is missing' : 'Deepgram API key is missing');
+      }
       clearWhisperLiveTimers();
-      whisperMockState.liveModel = settings['whisper.deepgram_model'] || 'nova-3';
+      whisperMockState.liveProvider = provider;
+      whisperMockState.liveModel = provider === 'yandex'
+        ? (settings['whisper.yandex_model'] || 'general')
+        : (settings['whisper.deepgram_model'] || 'nova-3');
       whisperMockState.liveCommittedText = '';
       dispatchWhisperLiveState('connecting');
       whisperMockState.liveTimers.push(setTimeout(() => {
@@ -1418,7 +1427,7 @@
       }, 80));
       whisperMockState.liveTimers.push(setTimeout(() => {
         window.dispatchEvent(new CustomEvent('whisper:live-interim', {
-          detail: { text: 'Live mock trans', speech_final: false },
+          detail: { text: 'Live mock trans', speech_final: false, provider },
         }));
       }, 180));
       whisperMockState.liveTimers.push(setTimeout(() => {
@@ -1434,7 +1443,7 @@
       await new Promise(r => setTimeout(r, 80));
       whisperMockState.history.unshift({
         id: Date.now(), text, text_raw: null, model_name: whisperMockState.liveModel,
-        provider: 'deepgram', provider_model: whisperMockState.liveModel,
+        provider: whisperMockState.liveProvider, provider_model: whisperMockState.liveModel,
         duration_ms: 2000, transcribe_ms: 0, language: 'ru', injected_to: 'paste',
         created_at: Math.floor(Date.now() / 1000),
       });
@@ -1451,6 +1460,7 @@
       return {
         state: whisperMockState.liveState,
         model: whisperMockState.liveModel,
+        provider: whisperMockState.liveProvider,
         committed_text: whisperMockState.liveCommittedText,
       };
     },

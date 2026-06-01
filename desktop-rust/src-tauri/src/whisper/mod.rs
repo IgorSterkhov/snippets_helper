@@ -10,3 +10,5 @@ pub mod models;
 pub mod postprocess;
 pub mod server;
 pub mod service;
+pub mod speechkit_proto;
+pub mod yandex;

@@ -116,6 +116,7 @@ impl DeepgramLiveService {
         serde_json::json!({
             "state": g.state.as_str(),
             "model": g.model,
+            "provider": "deepgram",
             "committed_text": g.committed_text,
         })
     }
@@ -184,7 +185,7 @@ impl DeepgramLiveService {
                 crate::whisper::events::emit_to_whisper_windows(
                     &app,
                     EVT_LIVE_ERROR,
-                    serde_json::json!({ "message": e }),
+                    serde_json::json!({ "message": e, "provider": "deepgram" }),
                 );
                 let mut g = inner.lock().await;
                 if is_current_session(g.session_id, session_id) {
@@ -201,7 +202,10 @@ impl DeepgramLiveService {
                     crate::whisper::events::emit_to_whisper_windows(
                         &app,
                         EVT_LIVE_ERROR,
-                        serde_json::json!({ "message": "Deepgram stream ended unexpectedly" }),
+                        serde_json::json!({
+                            "message": "Deepgram stream ended unexpectedly",
+                            "provider": "deepgram",
+                        }),
                     );
                     g.state = LiveState::Error;
                     g.recorder = None;
@@ -478,6 +482,7 @@ async fn handle_deepgram_text_message(
             serde_json::json!({
                 "text": parsed.transcript,
                 "speech_final": parsed.speech_final,
+                "provider": "deepgram",
             }),
         );
         return Ok(());
@@ -503,6 +508,7 @@ async fn handle_deepgram_text_message(
                 "chunk": paste_text,
                 "committed_text": committed,
                 "speech_final": parsed.speech_final,
+                "provider": "deepgram",
             }),
         );
     }
@@ -572,6 +578,7 @@ fn emit_live_state(app: &AppHandle, state: LiveState, model: Option<String>) {
         serde_json::json!({
             "state": state.as_str(),
             "model": model,
+            "provider": "deepgram",
         }),
     );
 }

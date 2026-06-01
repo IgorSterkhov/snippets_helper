@@ -24,6 +24,7 @@ export async function initTab(container) {
     liveDictate: false,
     liveState: 'idle',
     liveModel: 'nova-3',
+    liveProvider: 'deepgram',
     liveCommittedText: '',
     liveInterimText: '',
   };
@@ -37,10 +38,14 @@ export async function initTab(container) {
     <select id="model-select" title="Active Whisper model (switching unloads the warmed server)" style="padding:3px 6px;background:var(--bg,#0d1117);color:var(--text,#c9d1d9);border:1px solid var(--border,#30363d);border-radius:4px;font-size:11px;cursor:pointer;max-width:220px"></select>
     <span style="color:var(--text-muted,#8b949e);font-size:11px">Gemma:</span>
     <select id="gemma-model-select" title="Gemma post-processing model" style="padding:3px 6px;background:var(--bg,#0d1117);color:var(--text,#c9d1d9);border:1px solid var(--border,#30363d);border-radius:4px;font-size:11px;cursor:pointer;max-width:220px"></select>
-    <label id="live-dictate-label" title="Live dictate streams audio through Deepgram and pastes finalized chunks into the active app" style="display:flex;align-items:center;gap:5px;padding:3px 8px;background:var(--bg,#0d1117);border:1px solid var(--border,#30363d);border-radius:4px;color:var(--text,#c9d1d9);font-size:11px;cursor:pointer;user-select:none">
+    <label id="live-dictate-label" title="Live dictate streams audio through the selected cloud provider and pastes finalized chunks into the active app" style="display:flex;align-items:center;gap:5px;padding:3px 8px;background:var(--bg,#0d1117);border:1px solid var(--border,#30363d);border-radius:4px;color:var(--text,#c9d1d9);font-size:11px;cursor:pointer;user-select:none">
       <input id="live-dictate-toggle" type="checkbox" style="margin:0;accent-color:var(--accent,#388bfd)">
       <span>Live dictate</span>
     </label>
+    <select id="live-provider-select" title="Live dictation cloud provider" style="padding:3px 6px;background:var(--bg,#0d1117);color:var(--text,#c9d1d9);border:1px solid var(--border,#30363d);border-radius:4px;font-size:11px;cursor:pointer">
+      <option value="deepgram">Deepgram</option>
+      <option value="yandex">Yandex SpeechKit</option>
+    </select>
     <span style="flex:1"></span>
     <button id="cancel-btn" title="Cancel without transcribing (Esc)" style="padding:5px 10px;background:transparent;color:var(--red,#f85149);border:1px solid var(--red,#f85149);border-radius:4px;cursor:pointer;font-weight:500;display:none">✕ Cancel</button>
     <button id="record-btn" style="padding:5px 14px;background:var(--accent,#388bfd);color:#fff;border:0;border-radius:4px;cursor:pointer;font-weight:600">🎤 Record</button>
@@ -120,6 +125,7 @@ export async function initTab(container) {
   const gemmaSelect = header.querySelector('#gemma-model-select');
   const liveToggle = header.querySelector('#live-dictate-toggle');
   const liveLabel = header.querySelector('#live-dictate-label');
+  const providerSelect = header.querySelector('#live-provider-select');
   const recordBtn = header.querySelector('#record-btn');
   const cancelBtn = header.querySelector('#cancel-btn');
 
@@ -138,9 +144,13 @@ export async function initTab(container) {
     renderControls();
   }
 
-  function setLiveState(st, model) {
+  function setLiveState(st, model, provider) {
     state.liveState = st || 'idle';
     if (model) state.liveModel = model;
+    if (provider) {
+      state.liveProvider = provider;
+      providerSelect.value = provider;
+    }
     renderControls();
   }
 
@@ -196,6 +206,9 @@ export async function initTab(container) {
     liveToggle.disabled = lock;
     liveLabel.style.opacity = lock ? '0.55' : '1';
     liveLabel.style.cursor = lock ? 'not-allowed' : 'pointer';
+    providerSelect.disabled = lock;
+    providerSelect.style.opacity = lock ? '0.55' : '1';
+    providerSelect.style.cursor = lock ? 'not-allowed' : 'pointer';
 
     cancelBtn.style.display = lock ? '' : 'none';
 
@@ -279,6 +292,21 @@ export async function initTab(container) {
       showWhisperError('Live dictate setting failed', formatErrorMessage(e, 'The Live dictate setting could not be saved.'), e, {
         setting: 'whisper.live_dictate',
         attempted_value: state.liveDictate,
+      });
+    }
+  };
+  providerSelect.onchange = async () => {
+    const prev = state.liveProvider;
+    state.liveProvider = providerSelect.value || 'deepgram';
+    try {
+      await whisperApi.setSetting('whisper.live_provider', state.liveProvider);
+      renderLivePreview();
+    } catch (e) {
+      state.liveProvider = prev;
+      providerSelect.value = prev;
+      showWhisperError('Live provider setting failed', formatErrorMessage(e, 'The live provider setting could not be saved.'), e, {
+        setting: 'whisper.live_provider',
+        attempted_value: state.liveProvider,
       });
     }
   };
@@ -484,7 +512,7 @@ export async function initTab(container) {
     }
   };
 
-  const onSettingsChanged = () => { refreshModelSelect(); refreshGemmaSelect(); loadLiveDictateSetting().then(renderControls); };
+  const onSettingsChanged = () => { refreshModelSelect(); refreshGemmaSelect(); loadLiveSettings().then(renderControls); };
   window.addEventListener('whisper:settings-changed', onSettingsChanged);
   state.cleanup.push(() => window.removeEventListener('whisper:settings-changed', onSettingsChanged));
 
@@ -505,7 +533,7 @@ export async function initTab(container) {
   state.cleanup.push(offError);
 
   const offLiveState = await onWhisperEvent('liveStateChanged', (p) => {
-    setLiveState(p.state, p.model);
+    setLiveState(p.state, p.model, p.provider);
     if (p.state === 'idle') {
       state.liveInterimText = '';
     }
@@ -513,12 +541,14 @@ export async function initTab(container) {
   state.cleanup.push(offLiveState);
 
   const offLiveInterim = await onWhisperEvent('liveInterim', (p) => {
+    if (p.provider) state.liveProvider = p.provider;
     state.liveInterimText = p.text || '';
     renderLivePreview();
   });
   state.cleanup.push(offLiveInterim);
 
   const offLiveFinal = await onWhisperEvent('liveFinal', (p) => {
+    if (p.provider) state.liveProvider = p.provider;
     state.liveCommittedText = p.committed_text || ((state.liveCommittedText || '') + (p.chunk || ''));
     state.liveInterimText = '';
     renderLivePreview();
@@ -526,9 +556,10 @@ export async function initTab(container) {
   state.cleanup.push(offLiveFinal);
 
   const offLiveError = await onWhisperEvent('liveError', (p) => {
+    const providerLabel = liveProviderLabel(p.provider || state.liveProvider);
     showWhisperError(
-      'Deepgram live dictation failed',
-      p.message || 'Unknown Deepgram live dictation error.',
+      `${providerLabel} live dictation failed`,
+      p.message || `Unknown ${providerLabel} live dictation error.`,
       p.message || 'unknown error',
       { event: 'whisper:live-error', payload: p }
     );
@@ -536,7 +567,7 @@ export async function initTab(container) {
   });
   state.cleanup.push(offLiveError);
 
-  await loadLiveDictateSetting();
+  await loadLiveSettings();
   await refreshModelSelect();
   await refreshGemmaSelect();
   setChip('idle');
@@ -591,13 +622,21 @@ export async function initTab(container) {
     if (state.gemmaState !== 'busy') hideStatusStrip();
   }
 
-  async function loadLiveDictateSetting() {
+  async function loadLiveSettings() {
     try {
       state.liveDictate = (await whisperApi.getSetting('whisper.live_dictate')) === 'true';
       liveToggle.checked = state.liveDictate;
     } catch {
       state.liveDictate = false;
       liveToggle.checked = false;
+    }
+    try {
+      state.liveProvider = (await whisperApi.getSetting('whisper.live_provider')) || 'deepgram';
+      if (!['deepgram', 'yandex'].includes(state.liveProvider)) state.liveProvider = 'deepgram';
+      providerSelect.value = state.liveProvider;
+    } catch {
+      state.liveProvider = 'deepgram';
+      providerSelect.value = 'deepgram';
     }
   }
 
@@ -615,7 +654,7 @@ export async function initTab(container) {
     tabBar.querySelector('.pp-dot').style.display = 'none';
     const committedWords = committed.trim().split(/\s+/).filter(Boolean).length;
     const interimWords = interim.trim().split(/\s+/).filter(Boolean).length;
-    const parts = [`Deepgram live`, state.liveModel || 'nova-3'];
+    const parts = [`${liveProviderLabel(state.liveProvider)} live`, state.liveModel || liveProviderDefaultModel(state.liveProvider)];
     if (committedWords) parts.push(`${committedWords} committed words`);
     if (interimWords) parts.push(`${interimWords} interim words`);
     meta.textContent = parts.join(' · ');
@@ -664,7 +703,7 @@ export async function initTab(container) {
     const display = isBlank ? '(empty / no speech)' : escapeHtml(h.text.slice(0, 120));
     const words = text.split(/\s+/).filter(Boolean).length;
     const ppMark = h.postprocessed_text ? ' <span title="Has post-processed text" style="color:var(--green,#3fb950);font-size:10px">●</span>' : '';
-    const provider = h.provider === 'deepgram' ? 'Deepgram' : 'Local';
+    const provider = historyProviderLabel(h.provider);
     row.innerHTML = `
       <div style="padding-right:22px">
         <div style="${textStyle}">${display}</div>
@@ -719,7 +758,7 @@ export async function initTab(container) {
     if (h.gpu_peak_percent > 0) perfParts.push(`GPU ${h.gpu_peak_percent.toFixed(0)}%`);
     if (h.vram_peak_mb > 0)     perfParts.push(`VRAM ${h.vram_peak_mb} MB`);
     const perfStr = perfParts.length ? `  ·  ${perfParts.join(' · ')}` : '';
-    const provider = h.provider === 'deepgram' ? 'Deepgram' : 'Local';
+    const provider = historyProviderLabel(h.provider);
     const providerModel = h.provider_model || h.model_name;
     meta.innerHTML = `${formatRelativeTime(h.created_at)} · ${provider} · ${escapeHtml(providerModel)} · ${h.language || 'auto'} · duration ${h.duration_ms}ms · transcribe <b>${h.transcribe_ms}ms</b>${perfStr}${h.injected_to ? ' · ' + h.injected_to : ''}`;
 
@@ -853,6 +892,7 @@ export async function initTab(container) {
       live_dictate: state.liveDictate,
       live_state: state.liveState,
       live_model: state.liveModel,
+      live_provider: state.liveProvider,
       active_tab: state.activeTab,
       selected_history_id: activeHistoryRef?.id ?? state.selectedId ?? null,
       live_status: liveStatus.ok ? liveStatus.value : `unavailable: ${liveStatus.error}`,
@@ -888,6 +928,17 @@ function formatRelativeTime(unixSec) {
   if (diff < 3600) return `${Math.floor(diff/60)} min ago`;
   if (diff < 86400) return `${Math.floor(diff/3600)} hours ago`;
   return new Date(Number(unixSec) * 1000).toLocaleDateString();
+}
+function liveProviderLabel(provider) {
+  return provider === 'yandex' ? 'Yandex SpeechKit' : 'Deepgram';
+}
+function liveProviderDefaultModel(provider) {
+  return provider === 'yandex' ? 'general' : 'nova-3';
+}
+function historyProviderLabel(provider) {
+  if (provider === 'deepgram') return 'Deepgram';
+  if (provider === 'yandex') return 'Yandex';
+  return 'Local';
 }
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));

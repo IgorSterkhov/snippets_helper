@@ -50,6 +50,7 @@ export async function openSettingsModal(opts = {}) {
   content.appendChild(section('Idle timeout (сек)', numInput('idle_timeout_sec', s['whisper.idle_timeout_sec'] || '300', 60, 1800, 30)));
   content.appendChild(section('Постобработка', checkbox('postprocess_rules', (s['whisper.postprocess_rules'] || 'true') === 'true', 'Лёгкие правила (убрать «эээ», заглавная буква)')));
   content.appendChild(deepgramBlock(s));
+  content.appendChild(yandexSpeechKitBlock(s));
   const gemmaSection = await gemmaBlock(() => {
     // Reload settings modal to reflect the new installed Gemma model list.
     backdrop.remove();
@@ -108,7 +109,8 @@ async function loadAllSettings() {
     'whisper.llm_endpoint','whisper.llm_api_key','whisper.llm_model','whisper.llm_prompt',
     'whisper.overlay_position','whisper.overlay_hide_on_tab','whisper.language',
     'whisper.live_dictate','whisper.deepgram_api_key','whisper.deepgram_model',
-    'whisper.deepgram_endpointing_ms',
+    'whisper.deepgram_endpointing_ms','whisper.live_provider','whisper.yandex_api_key',
+    'whisper.yandex_model','whisper.yandex_language','whisper.yandex_text_normalization',
   ];
   const result = {};
   for (const k of keys) {
@@ -381,6 +383,55 @@ function deepgramBlock(s) {
   wrap.appendChild(labeledControl('Endpointing ms', numInput('deepgram_endpointing_ms', s['whisper.deepgram_endpointing_ms'] || '300', 50, 2000, 50)));
 
   return wrap;
+}
+
+function yandexSpeechKitBlock(s) {
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'display:flex;flex-direction:column;gap:8px;padding:10px;border:1px dashed var(--border,#30363d);border-radius:4px';
+
+  const header = document.createElement('div');
+  header.textContent = 'Yandex SpeechKit live dictation';
+  header.style.cssText = 'color:var(--text-muted,#8b949e);font-size:11px;text-transform:uppercase;letter-spacing:.5px';
+  wrap.appendChild(header);
+
+  const note = document.createElement('div');
+  note.textContent = 'API key is stored locally on this desktop and is not synced. Use a Yandex Cloud service account API key with SpeechKit STT permissions.';
+  note.style.cssText = 'font-size:11px;color:var(--text-muted,#8b949e)';
+  wrap.appendChild(note);
+
+  const keyRow = document.createElement('div');
+  keyRow.style.cssText = 'display:flex;gap:6px;align-items:center';
+  const keyInput = document.createElement('input');
+  keyInput.type = 'password';
+  keyInput.dataset.key = 'whisper.yandex_api_key';
+  keyInput.value = s['whisper.yandex_api_key'] || '';
+  keyInput.placeholder = 'Yandex SpeechKit API key';
+  stylizeInput(keyInput);
+  keyInput.style.flex = '1';
+  keyRow.appendChild(keyInput);
+  const clearBtn = document.createElement('button');
+  clearBtn.type = 'button';
+  clearBtn.textContent = 'Clear';
+  clearBtn.style.cssText = 'padding:6px 10px;background:transparent;border:1px solid var(--border,#30363d);color:var(--text,#c9d1d9);border-radius:4px;cursor:pointer;font-size:12px';
+  clearBtn.onclick = () => { keyInput.value = ''; };
+  keyRow.appendChild(clearBtn);
+  wrap.appendChild(labeledControl('API key', keyRow));
+
+  wrap.appendChild(labeledControl('Model', textInput('yandex_model', s['whisper.yandex_model'] || 'general', 'general')));
+  wrap.appendChild(labeledControl('Language', yandexLanguageSelect(s['whisper.yandex_language'] || 'ru-RU')));
+  wrap.appendChild(checkbox('yandex_text_normalization', (s['whisper.yandex_text_normalization'] || 'true') === 'true', 'Text normalization (numbers, dates, punctuation polishing)'));
+
+  return wrap;
+}
+
+function yandexLanguageSelect(current) {
+  const sel = document.createElement('select');
+  sel.dataset.key = 'whisper.yandex_language';
+  sel.innerHTML = ['ru-RU','en-US','auto'].map(l =>
+    `<option value="${l}" ${l === current ? 'selected' : ''}>${l}</option>`
+  ).join('');
+  stylizeInput(sel);
+  return sel;
 }
 
 function overlayBlock(s) {

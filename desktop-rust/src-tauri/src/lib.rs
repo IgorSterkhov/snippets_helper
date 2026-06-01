@@ -332,6 +332,9 @@ pub fn run() {
             app.manage(svc);
             let dsvc = crate::whisper::deepgram::DeepgramLiveService::new(app.handle().clone());
             app.manage(dsvc);
+            let ysvc =
+                crate::whisper::yandex::YandexSpeechKitLiveService::new(app.handle().clone());
+            app.manage(ysvc);
             let gsvc = crate::gemma::service::GemmaService::new(app.handle().clone());
             app.manage(gsvc);
 

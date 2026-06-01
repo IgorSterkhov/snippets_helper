@@ -71,6 +71,7 @@ let startedAt = 0;
 let timerIv = null;
 let activeMode = 'local';
 let currentLiveState = 'idle';
+let currentLiveProvider = 'deepgram';
 let liveCommittedText = '';
 let pendingAction = false;
 
@@ -139,8 +140,14 @@ function setMode(state) {
   }
 }
 
-function setLiveMode(state) {
+function liveProviderLabel(provider = currentLiveProvider) {
+  return provider === 'yandex' ? 'Yandex SpeechKit' : 'Deepgram';
+}
+
+function setLiveMode(state, provider) {
   currentLiveState = state || 'idle';
+  if (provider) currentLiveProvider = provider;
+  const providerLabel = liveProviderLabel();
   activeMode = state === 'idle' ? 'local' : 'live';
   bars.style.display = 'none';
   progress.style.display = 'none';
@@ -149,12 +156,12 @@ function setLiveMode(state) {
   dot.classList.remove('rec');
   if (state === 'connecting') {
     titleEl.textContent = 'Connecting live…';
-    setStatus('Deepgram · opening stream');
-    setTicker('', 'Connecting to Deepgram');
+    setStatus(`${providerLabel} · opening stream`);
+    setTicker('', `Connecting to ${providerLabel}`);
     showProgress(35);
   } else if (state === 'streaming') {
     titleEl.textContent = 'Live dictation';
-    setStatus('Deepgram · streaming');
+    setStatus(`${providerLabel} · streaming`);
     setTicker(liveCommittedText, 'Listening for speech');
     bars.style.display = 'flex';
     dot.classList.add('rec');
@@ -165,13 +172,13 @@ function setLiveMode(state) {
     updateTimer();
   } else if (state === 'stopping') {
     titleEl.textContent = 'Stopping live…';
-    setStatus('Deepgram · finalizing');
+    setStatus(`${providerLabel} · finalizing`);
     setTicker(liveCommittedText, 'Waiting for final transcript');
     showProgress(80);
     if (timerIv) { clearInterval(timerIv); timerIv = null; }
   } else if (state === 'error') {
     titleEl.textContent = 'Live error';
-    setStatus('Deepgram · error');
+    setStatus(`${providerLabel} · error`);
     if (timerIv) { clearInterval(timerIv); timerIv = null; }
     timer.textContent = '';
   } else {
@@ -213,7 +220,7 @@ async function initEvents() {
     setTicker(p.text || '', 'Inserted transcript');
     // Rust side will hide the window ~1s later
   });
-  await onWhisperEvent('liveStateChanged', (p) => setLiveMode(p.state));
+  await onWhisperEvent('liveStateChanged', (p) => setLiveMode(p.state, p.provider));
   await onWhisperEvent('liveLevel', (p) => {
     const h = Math.max(10, Math.min(100, p.rms * 140));
     barArr[barIdx % barArr.length].style.height = h + '%';
@@ -221,20 +228,23 @@ async function initEvents() {
   });
   await onWhisperEvent('liveInterim', (p) => {
     activeMode = 'live';
-    setStatus('Deepgram · interim text');
+    if (p.provider) currentLiveProvider = p.provider;
+    setStatus(`${liveProviderLabel()} · interim text`);
     setTicker(p.text || '', 'Listening for speech');
     sub.textContent = 'Interim';
   });
   await onWhisperEvent('liveFinal', (p) => {
+    if (p.provider) currentLiveProvider = p.provider;
     liveCommittedText = p.committed_text || liveCommittedText;
     const words = liveCommittedText.trim().split(/\s+/).filter(Boolean).length;
-    setStatus(`Deepgram · ${words} committed words`);
+    setStatus(`${liveProviderLabel()} · ${words} committed words`);
     setTicker(liveCommittedText || p.chunk || '', 'Final text committed');
     sub.textContent = `${words} committed words`;
   });
   await onWhisperEvent('liveError', (p) => {
+    if (p.provider) currentLiveProvider = p.provider;
     titleEl.textContent = 'Live error';
-    setStatus('Deepgram · error');
+    setStatus(`${liveProviderLabel()} · error`);
     setOverlayError(p.message || 'Live dictation failed');
     sub.textContent = 'Open Whisper tab for details';
   });
@@ -245,7 +255,7 @@ async function bootstrapState() {
     const live = await whisperApi.liveStatus();
     if (live && live.state && live.state !== 'idle') {
       liveCommittedText = live.committed_text || '';
-      setLiveMode(live.state);
+      setLiveMode(live.state, live.provider);
       return;
     }
   } catch (e) {
@@ -275,13 +285,13 @@ async function runOverlayAction(action) {
   try {
     if (action === 'stop') {
       titleEl.textContent = activeMode === 'live' ? 'Stopping live…' : 'Stopping…';
-      setStatus(activeMode === 'live' ? 'Deepgram · finalizing' : 'Local · finalizing');
+      setStatus(activeMode === 'live' ? `${liveProviderLabel()} · finalizing` : 'Local · finalizing');
       setTicker(liveCommittedText, 'Waiting for final transcript');
       showProgress(activeMode === 'live' ? 80 : 70);
       await whisperApi.stopActive();
     } else {
       titleEl.textContent = 'Cancelling…';
-      setStatus(activeMode === 'live' ? 'Deepgram · cancelling' : 'Local · cancelling');
+      setStatus(activeMode === 'live' ? `${liveProviderLabel()} · cancelling` : 'Local · cancelling');
       showProgress(60);
       await whisperApi.cancelActive();
     }
