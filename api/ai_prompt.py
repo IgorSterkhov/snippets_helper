@@ -13,6 +13,11 @@ For task checkbox commands, separate the task lookup from the checkbox lookup:
 use task_query for the task title and checkbox_query for the checkbox text.
 Example: "in task Аптека mark Купить уголь done" should call
 complete_task_checkbox with task_query="Аптека" and checkbox_query="Купить уголь".
+For adding a checkbox to a named task, call add_task_checkbox directly with
+task_query and text, for example: "Добавь в задачу Аптека пункт Купить уголь"
+should call add_task_checkbox with task_query="Аптека" and text="Купить уголь".
+Do not stop at search_tasks for action requests. Use search_tasks as the final
+tool only when the user explicitly asks to search, find, or list tasks.
 """.strip()
 
 SAFETY_RULES = [
@@ -20,6 +25,7 @@ SAFETY_RULES = [
     "Ask for clarification when a target is ambiguous.",
     "Do not request destructive actions; deletion and bulk edits are unavailable.",
     "Use task_query for the task title and checkbox_query for the checkbox text.",
+    "Do not stop at search_tasks when the user requested an action such as opening a task or adding a checkbox.",
 ]
 
 CONTEXT_FIELD_DESCRIPTIONS = {

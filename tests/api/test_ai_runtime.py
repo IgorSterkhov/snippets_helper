@@ -127,6 +127,29 @@ def test_add_task_checkbox_resolves_current_task_from_context():
     assert repo.created_checkboxes[0]["text"] == "купить аспирин"
 
 
+def test_add_task_checkbox_resolves_task_query():
+    repo = FakeAiRepo()
+    repo.tasks = [{"uuid": "task-apteka", "title": "Аптека"}]
+
+    result = run(execute_command(
+        repo,
+        AiCommandCall(
+            name="add_task_checkbox",
+            args={"task_query": "аптека", "text": "купить монетазон"},
+        ),
+        AiContext(),
+    ))
+
+    assert result.status == "executed"
+    assert result.item_type == "task_checkbox"
+    assert repo.created_checkboxes == [{
+        "uuid": "checkbox-1",
+        "task_uuid": "task-apteka",
+        "parent_uuid": None,
+        "text": "купить монетазон",
+    }]
+
+
 def test_add_task_checkbox_without_target_fails_without_mutation():
     repo = FakeAiRepo()
 

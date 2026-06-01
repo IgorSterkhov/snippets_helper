@@ -73,7 +73,78 @@ describe('mobile AI command dispatcher', () => {
     expect(context.recent_task_uuid).toBe('task-1');
     expect(navigation.navigate).toHaveBeenCalledWith('Tasks', expect.objectContaining({
       screen: 'TaskEditor',
-      params: expect.objectContaining({ isNew: false }),
+      params: expect.objectContaining({ isNew: false, collapsed: true }),
+    }));
+  });
+
+  test('search_tasks follows an add-checkbox user request when one task matches', async () => {
+    const navigation = { navigate: jest.fn() };
+    const deps = makeDeps({
+      uuidv4: jest.fn().mockReturnValue('cb-new'),
+      getAllTasks: jest.fn().mockResolvedValue([{ uuid: 'task-1', title: 'Аптека', sort_order: 0 }]),
+    });
+    const context = { user_message: 'Добавь в задачу аптека пункт купить монетазон.' };
+
+    const results = await executeMobileAiCommands([
+      { name: 'search_tasks', args: { query: 'Аптека' } },
+    ], navigation, context, deps);
+
+    expect(results).toHaveLength(2);
+    expect(results[0]).toEqual(expect.objectContaining({ name: 'search_tasks', status: 'executed' }));
+    expect(results[1]).toEqual(expect.objectContaining({ name: 'add_task_checkbox', status: 'executed', item_uuid: 'task-1' }));
+    expect(deps.upsertTask).not.toHaveBeenCalled();
+    expect(deps.upsertTaskCheckbox).toHaveBeenCalledWith(expect.objectContaining({
+      uuid: 'cb-new',
+      task_uuid: 'task-1',
+      text: 'купить монетазон',
+    }));
+    expect(navigation.navigate).toHaveBeenCalledWith('Tasks', expect.objectContaining({
+      screen: 'TaskEditor',
+      params: expect.objectContaining({ isNew: false, collapsed: true }),
+    }));
+  });
+
+  test('search_tasks asks for clarification for ambiguous add-checkbox requests', async () => {
+    const navigation = { navigate: jest.fn() };
+    const deps = makeDeps({
+      uuidv4: jest.fn().mockReturnValue('cb-new'),
+      getAllTasks: jest.fn().mockResolvedValue([
+        { uuid: 'task-1', title: 'Аптека', sort_order: 0 },
+        { uuid: 'task-2', title: 'Аптека старая', sort_order: 1 },
+      ]),
+    });
+    const context = { user_message: 'Добавь в задачу аптека пункт купить монетазон.' };
+
+    const results = await executeMobileAiCommands([
+      { name: 'search_tasks', args: { query: 'Аптека' } },
+    ], navigation, context, deps);
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toEqual(expect.objectContaining({ name: 'search_tasks', status: 'needs_clarification' }));
+    expect(results[0].choices).toHaveLength(2);
+    expect(deps.upsertTaskCheckbox).not.toHaveBeenCalled();
+    expect(navigation.navigate).not.toHaveBeenCalled();
+  });
+
+  test('create_task does not duplicate an existing task for a dropped-preposition checkbox phrase', async () => {
+    const navigation = { navigate: jest.fn() };
+    const deps = makeDeps({
+      uuidv4: jest.fn().mockReturnValue('cb-new'),
+      getAllTasks: jest.fn().mockResolvedValue([{ uuid: 'task-1', title: 'Аптека', sort_order: 0 }]),
+    });
+    const context = { user_message: 'Добавь задачу аптека пункт купить монетазон.' };
+
+    const results = await executeMobileAiCommands([
+      { name: 'create_task', args: { title: 'Аптека', checkboxes: ['купить монетазон'] } },
+    ], navigation, context, deps);
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toEqual(expect.objectContaining({ name: 'add_task_checkbox', status: 'executed', item_uuid: 'task-1' }));
+    expect(deps.upsertTask).not.toHaveBeenCalled();
+    expect(deps.upsertTaskCheckbox).toHaveBeenCalledWith(expect.objectContaining({
+      uuid: 'cb-new',
+      task_uuid: 'task-1',
+      text: 'купить монетазон',
     }));
   });
 

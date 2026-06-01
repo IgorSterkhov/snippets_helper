@@ -53,13 +53,14 @@ function collectCheckboxSubtree(items, rootUuid) {
 }
 
 export default function TaskEditorScreen({ route, navigation }) {
-  const { task, isNew } = route.params;
+  const { task, isNew, collapsed: initialCollapsed = false } = route.params;
   const { colors } = useTheme();
   const [categories, setCategories] = useState([]);
   const [statuses, setStatuses] = useState([]);
   const [draft, setDraft] = useState(task);
   const [checkboxes, setCheckboxes] = useState([]);
   const [links, setLinks] = useState([]);
+  const [isTaskExpanded, setTaskExpanded] = useState(!initialCollapsed);
   const [collapsedCheckboxIds, setCollapsedCheckboxIds] = useState(new Set());
   const [reorderCheckboxUuid, setReorderCheckboxUuid] = useState(null);
   const [reorderSaving, setReorderSaving] = useState(false);
@@ -120,10 +121,23 @@ export default function TaskEditorScreen({ route, navigation }) {
     }
   }, [taskPrefs.hideDone]);
 
+  const toggleTaskExpanded = useCallback(() => {
+    setTaskExpanded((prev) => !prev);
+  }, []);
+
   useLayoutEffect(() => {
     navigation.setOptions({
       headerRight: () => (
         <View style={s.headerActions}>
+          <TouchableOpacity
+            onPress={toggleTaskExpanded}
+            style={s.headerModeTouch}
+            activeOpacity={0.72}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 4 }}
+            accessibilityLabel={isTaskExpanded ? 'Свернуть задачу' : 'Развернуть задачу'}
+          >
+            <TaskModeIcon expanded={isTaskExpanded} colors={colors} />
+          </TouchableOpacity>
           <TouchableOpacity
             onPress={toggleHideDonePreference}
             style={s.headerEyeTouch}
@@ -147,7 +161,7 @@ export default function TaskEditorScreen({ route, navigation }) {
         </View>
       ),
     });
-  }, [colors, navigation, save, saving, taskPrefs.hideDone, toggleHideDonePreference]);
+  }, [colors, isTaskExpanded, navigation, save, saving, taskPrefs.hideDone, toggleHideDonePreference, toggleTaskExpanded]);
 
   const addCheckbox = async () => {
     const now = new Date().toISOString();
@@ -324,55 +338,59 @@ export default function TaskEditorScreen({ route, navigation }) {
           placeholderTextColor={colors.textMuted}
         />
 
-        <Section title="Категория" colors={colors}>
-          <PickerRow items={categories} selected={draft.category_uuid} onSelect={(category_uuid) => patchDraft({ category_uuid })} colors={colors} />
-        </Section>
+        {isTaskExpanded ? (
+          <>
+            <Section title="Категория" colors={colors}>
+              <PickerRow items={categories} selected={draft.category_uuid} onSelect={(category_uuid) => patchDraft({ category_uuid })} colors={colors} />
+            </Section>
 
-        <Section title="Статус" colors={colors}>
-          <PickerRow items={statuses} selected={draft.status_uuid} onSelect={(status_uuid) => patchDraft({ status_uuid })} colors={colors} />
-        </Section>
+            <Section title="Статус" colors={colors}>
+              <PickerRow items={statuses} selected={draft.status_uuid} onSelect={(status_uuid) => patchDraft({ status_uuid })} colors={colors} />
+            </Section>
 
-        <Section title="Параметры" colors={colors}>
-          <View style={s.switchRow}>
-            <Text style={[s.label, { color: colors.text }]}>Pinned</Text>
-            <Switch value={!!draft.is_pinned} onValueChange={(v) => patchDraft({ is_pinned: v ? 1 : 0 })} />
-          </View>
-          <TextInput
-            style={[s.input, { color: colors.text, borderColor: colors.border }]}
-            value={draft.tracker_url || ''}
-            onChangeText={(tracker_url) => patchDraft({ tracker_url })}
-            placeholder="Tracker URL"
-            placeholderTextColor={colors.textMuted}
-            autoCapitalize="none"
-          />
-          <View style={s.palette}>
-            {COLORS.map((color) => (
-              <TouchableOpacity
-                key={color || 'default'}
-                style={[
-                  s.swatch,
-                  { backgroundColor: color || colors.card, borderColor: colors.border },
-                  (draft.bg_color || null) === color && { borderColor: colors.primary, borderWidth: 2 },
-                ]}
-                onPress={() => patchDraft({ bg_color: color })}
-              >
-                {!color ? <Text style={{ color: colors.textMuted, fontSize: 10 }}>D</Text> : null}
-              </TouchableOpacity>
-            ))}
-          </View>
-        </Section>
+            <Section title="Параметры" colors={colors}>
+              <View style={s.switchRow}>
+                <Text style={[s.label, { color: colors.text }]}>Pinned</Text>
+                <Switch value={!!draft.is_pinned} onValueChange={(v) => patchDraft({ is_pinned: v ? 1 : 0 })} />
+              </View>
+              <TextInput
+                style={[s.input, { color: colors.text, borderColor: colors.border }]}
+                value={draft.tracker_url || ''}
+                onChangeText={(tracker_url) => patchDraft({ tracker_url })}
+                placeholder="Tracker URL"
+                placeholderTextColor={colors.textMuted}
+                autoCapitalize="none"
+              />
+              <View style={s.palette}>
+                {COLORS.map((color) => (
+                  <TouchableOpacity
+                    key={color || 'default'}
+                    style={[
+                      s.swatch,
+                      { backgroundColor: color || colors.card, borderColor: colors.border },
+                      (draft.bg_color || null) === color && { borderColor: colors.primary, borderWidth: 2 },
+                    ]}
+                    onPress={() => patchDraft({ bg_color: color })}
+                  >
+                    {!color ? <Text style={{ color: colors.textMuted, fontSize: 10 }}>D</Text> : null}
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </Section>
 
-        <Section title="Notes" colors={colors}>
-          <TextInput
-            style={[s.notes, { color: colors.text, borderColor: colors.border }]}
-            value={draft.notes_md || ''}
-            onChangeText={(notes_md) => patchDraft({ notes_md })}
-            placeholder="Markdown notes"
-            placeholderTextColor={colors.textMuted}
-            multiline
-            textAlignVertical="top"
-          />
-        </Section>
+            <Section title="Notes" colors={colors}>
+              <TextInput
+                style={[s.notes, { color: colors.text, borderColor: colors.border }]}
+                value={draft.notes_md || ''}
+                onChangeText={(notes_md) => patchDraft({ notes_md })}
+                placeholder="Markdown notes"
+                placeholderTextColor={colors.textMuted}
+                multiline
+                textAlignVertical="top"
+              />
+            </Section>
+          </>
+        ) : null}
 
         <Section title="Чекбоксы" colors={colors} action="Добавить" onAction={addCheckbox}>
           <View style={s.checkboxTree}>
@@ -453,34 +471,38 @@ export default function TaskEditorScreen({ route, navigation }) {
           </View>
         </Section>
 
-        <Section title="Ссылки" colors={colors} action="Добавить" onAction={addLink}>
-          {visibleLinks.map((item) => (
-            <View key={item.uuid} style={s.linkBlock}>
-              <TextInput
-                style={[s.input, { color: colors.text, borderColor: colors.border }]}
-                value={item.label || ''}
-                onChangeText={(label) => setLinks((prev) => prev.map((l) => l.uuid === item.uuid ? { ...l, label, updated_at: new Date().toISOString() } : l))}
-                placeholder="Label"
-                placeholderTextColor={colors.textMuted}
-              />
-              <View style={s.itemRow}>
-                <TextInput
-                  style={[s.flexInput, { color: colors.text, borderColor: colors.border }]}
-                  value={item.url}
-                  onChangeText={(url) => setLinks((prev) => prev.map((l) => l.uuid === item.uuid ? { ...l, url, updated_at: new Date().toISOString() } : l))}
-                  placeholder="https://..."
-                  placeholderTextColor={colors.textMuted}
-                  autoCapitalize="none"
-                />
-                <TextButton label="Del" color={colors.danger} onPress={() => setLinks((prev) => prev.map((l) => l.uuid === item.uuid ? { ...l, is_deleted: 1, updated_at: new Date().toISOString() } : l))} />
-              </View>
-            </View>
-          ))}
-        </Section>
+        {isTaskExpanded ? (
+          <>
+            <Section title="Ссылки" colors={colors} action="Добавить" onAction={addLink}>
+              {visibleLinks.map((item) => (
+                <View key={item.uuid} style={s.linkBlock}>
+                  <TextInput
+                    style={[s.input, { color: colors.text, borderColor: colors.border }]}
+                    value={item.label || ''}
+                    onChangeText={(label) => setLinks((prev) => prev.map((l) => l.uuid === item.uuid ? { ...l, label, updated_at: new Date().toISOString() } : l))}
+                    placeholder="Label"
+                    placeholderTextColor={colors.textMuted}
+                  />
+                  <View style={s.itemRow}>
+                    <TextInput
+                      style={[s.flexInput, { color: colors.text, borderColor: colors.border }]}
+                      value={item.url}
+                      onChangeText={(url) => setLinks((prev) => prev.map((l) => l.uuid === item.uuid ? { ...l, url, updated_at: new Date().toISOString() } : l))}
+                      placeholder="https://..."
+                      placeholderTextColor={colors.textMuted}
+                      autoCapitalize="none"
+                    />
+                    <TextButton label="Del" color={colors.danger} onPress={() => setLinks((prev) => prev.map((l) => l.uuid === item.uuid ? { ...l, is_deleted: 1, updated_at: new Date().toISOString() } : l))} />
+                  </View>
+                </View>
+              ))}
+            </Section>
 
-        <TouchableOpacity style={[s.deleteBtn, { borderColor: colors.danger }]} onPress={removeTask}>
-          <Text style={[s.deleteText, { color: colors.danger }]}>{isNew ? 'Отменить' : 'Удалить задачу'}</Text>
-        </TouchableOpacity>
+            <TouchableOpacity style={[s.deleteBtn, { borderColor: colors.danger }]} onPress={removeTask}>
+              <Text style={[s.deleteText, { color: colors.danger }]}>{isNew ? 'Отменить' : 'Удалить задачу'}</Text>
+            </TouchableOpacity>
+          </>
+        ) : null}
       </ScrollView>
       {reorderCheckboxUuid ? (
         <View style={[s.reorderToolbar, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -585,6 +607,24 @@ function EyeIcon({ hidden, colors }) {
   );
 }
 
+function TaskModeIcon({ expanded, colors }) {
+  return (
+    <View
+      style={[
+        s.taskModeBtn,
+        {
+          backgroundColor: expanded ? colors.primaryLight : colors.bgSecondary,
+          borderColor: expanded ? colors.primaryLight : colors.border,
+        },
+      ]}
+    >
+      <Text style={[s.taskModeGlyph, { color: expanded ? colors.primary : colors.textMuted }]}>
+        {expanded ? '▲' : '▼'}
+      </Text>
+    </View>
+  );
+}
+
 function TrashIcon({ color }) {
   return (
     <View style={[s.trashCan, { borderColor: color }]}>
@@ -599,6 +639,7 @@ const s = StyleSheet.create({
   content: { padding: 16, paddingBottom: 40 },
   contentWithToolbar: { paddingBottom: 112 },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: 2 },
+  headerModeTouch: { width: 38, height: 36 },
   headerEyeTouch: { width: 38, height: 36 },
   headerSaveBtn: { height: 36, borderRadius: 18, borderWidth: 1, paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center' },
   headerSaveText: { fontSize: 14, fontWeight: '800' },
@@ -636,6 +677,8 @@ const s = StyleSheet.create({
   eyeShape: { width: 22, height: 14, borderWidth: 2, borderRadius: 12, alignItems: 'center', justifyContent: 'center', transform: [{ rotate: '-1deg' }] },
   eyePupil: { width: 8, height: 8, borderRadius: 4, borderWidth: 2 },
   eyeSlash: { position: 'absolute', width: 25, height: 2, borderRadius: 2, transform: [{ rotate: '-38deg' }] },
+  taskModeBtn: { width: 38, height: 36, borderRadius: 18, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  taskModeGlyph: { fontSize: 15, fontWeight: '900', lineHeight: 18 },
   reorderToolbar: { position: 'absolute', left: 12, right: 12, bottom: 12, borderWidth: 1, borderRadius: 8, padding: 10 },
   reorderTitle: { fontSize: 13, fontWeight: '700', marginBottom: 8 },
   reorderControls: { flexDirection: 'row', alignItems: 'center', gap: 8 },

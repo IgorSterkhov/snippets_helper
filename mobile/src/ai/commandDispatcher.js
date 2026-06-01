@@ -37,6 +37,14 @@ function includesText(value, query) {
   return String(value || '').toLowerCase().includes(String(query || '').trim().toLowerCase());
 }
 
+function normalizeLookupText(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[.,!?;:()[\]{}"«»]/g, ' ')
+    .replace(/\s+/g, ' ');
+}
+
 function result(name, args, status, message, extra = {}) {
   return {
     name,
@@ -61,6 +69,25 @@ function userAskedToOpenSingleResult(context) {
   return /(покажи|показать|открой|открыть|show|open)/i.test(text);
 }
 
+function parseAddCheckboxTaskIntent(context) {
+  const source = String(context?.user_message || '').trim();
+  if (!source) return null;
+  const patterns = [
+    /(?:^|\s)(?:добавь|добавить)\s+(?:в\s+)?задач[ауе]\s+(.+?)\s+(?:пункт|чекбокс)\s+(.+?)\s*$/i,
+    /(?:^|\s)(?:add)\s+(?:to\s+)?task\s+(.+?)\s+(?:item|checkbox|point)\s+(.+?)\s*$/i,
+  ];
+  for (const pattern of patterns) {
+    const match = source.match(pattern);
+    if (!match) continue;
+    const taskQuery = String(match[1] || '').trim().replace(/^["«]+|["»]+$/g, '');
+    const checkboxText = String(match[2] || '').trim().replace(/[.。]+$/g, '').replace(/^["«]+|["»]+$/g, '');
+    if (taskQuery && checkboxText) {
+      return { taskQuery, checkboxText };
+    }
+  }
+  return null;
+}
+
 function autoOpenCommandForSearch(commandName, searchResult, context) {
   if (!userAskedToOpenSingleResult(context)) return null;
   if (searchResult?.status !== 'executed' || searchResult?.choices?.length !== 1) return null;
@@ -77,6 +104,25 @@ function autoOpenCommandForSearch(commandName, searchResult, context) {
   return null;
 }
 
+function autoFollowUpCommandForSearch(commandName, searchResult, context) {
+  if (searchResult?.status !== 'executed' || searchResult?.choices?.length !== 1) return null;
+  const [selected] = searchResult.choices;
+  if (commandName === 'search_tasks') {
+    const addIntent = parseAddCheckboxTaskIntent(context);
+    if (addIntent) {
+      return {
+        name: 'add_task_checkbox',
+        args: { task_uuid: selected.item_uuid, text: addIntent.checkboxText },
+      };
+    }
+  }
+  return autoOpenCommandForSearch(commandName, searchResult, context);
+}
+
+function userAskedTaskAction(context) {
+  return !!parseAddCheckboxTaskIntent(context) || userAskedToOpenSingleResult(context);
+}
+
 async function findTask(args, context, deps) {
   const all = await deps.getAllTasks();
   const explicitUuid = args.task_uuid || args.item_uuid || (
@@ -88,7 +134,7 @@ async function findTask(args, context, deps) {
       choices: [],
     };
   }
-  const query = args.query || args.title || '';
+  const query = args.task_query || args.query || args.title || '';
   const matches = query ? all.filter((task) => includesText(task.title, query)).slice(0, 5) : [];
   return {
     item: matches.length === 1 ? matches[0] : null,
@@ -141,7 +187,7 @@ async function findSnippet(args, deps) {
 function openTask(navigation, task) {
   navigation.navigate('Tasks', {
     screen: 'TaskEditor',
-    params: { task, isNew: false },
+    params: { task, isNew: false, collapsed: true },
   });
 }
 
@@ -178,6 +224,32 @@ async function handleCreateTask(command, navigation, context, deps) {
   const args = commandArgs(command);
   const title = String(args.title || '').trim();
   if (!title) return result(command.name, args, 'failed', 'Нужно название задачи.');
+
+  const existingTasks = await deps.getAllTasks();
+  const titleKey = normalizeLookupText(title);
+  const exactMatches = existingTasks.filter((task) => normalizeLookupText(task.title) === titleKey);
+  const addIntent = parseAddCheckboxTaskIntent(context);
+  const matchingTasks = exactMatches.length
+    ? exactMatches
+    : (addIntent ? existingTasks.filter((task) => includesText(task.title, title)).slice(0, 5) : []);
+  if (matchingTasks.length === 1) {
+    const checkboxes = Array.isArray(args.checkboxes) ? args.checkboxes : [];
+    const checkboxText = String(addIntent?.checkboxText || checkboxes[0] || '').trim();
+    if (checkboxText) {
+      return handleAddTaskCheckbox({
+        name: 'add_task_checkbox',
+        args: { task_uuid: matchingTasks[0].uuid, text: checkboxText },
+      }, navigation, context, deps);
+    }
+    return result(command.name, args, 'needs_clarification', `Задача уже существует: ${matchingTasks[0].title || title}`, {
+      choices: [choice('task', matchingTasks[0].uuid, matchingTasks[0].title || title)],
+    });
+  }
+  if (matchingTasks.length > 1) {
+    return result(command.name, args, 'needs_clarification', 'Найдено несколько похожих задач.', {
+      choices: matchingTasks.map((task) => choice('task', task.uuid, task.title || 'Без названия')),
+    });
+  }
 
   const createdAt = deps.nowIso();
   const task = {
@@ -318,6 +390,9 @@ async function handleOpenSnippet(command, navigation, _context, deps) {
 async function handleSearchTasks(command, _navigation, context, deps) {
   const args = commandArgs(command);
   const { choices } = await findTask(args, context, deps);
+  if (userAskedTaskAction(context) && choices.length > 1) {
+    return result(command.name, args, 'needs_clarification', 'Найдено несколько задач.', { choices });
+  }
   return result(command.name, args, choices.length ? 'executed' : 'failed', choices.length ? `Найдено задач: ${choices.length}` : 'Задачи не найдены.', { choices });
 }
 
@@ -357,7 +432,7 @@ export async function executeMobileAiCommands(commands = [], navigation, context
     try {
       const commandResult = await handler(command, navigation, context, deps);
       results.push(commandResult);
-      const followUp = autoOpenCommandForSearch(name, commandResult, context);
+      const followUp = autoFollowUpCommandForSearch(name, commandResult, context);
       if (followUp) {
         const followUpHandler = HANDLERS[followUp.name];
         results.push(await followUpHandler(followUp, navigation, context, deps));

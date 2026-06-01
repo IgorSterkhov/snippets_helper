@@ -58,9 +58,11 @@ def deepseek_tools() -> list[dict[str, Any]]:
         ),
         _tool(
             "add_task_checkbox",
-            "Add a new checkbox to a task.",
+            "Add a new checkbox to a task. Use task_query/query when the user names a task and no UUID is available.",
             {
                 "task_uuid": nullable_string,
+                "task_query": nullable_string,
+                "query": nullable_string,
                 "task_ref": {"type": ["string", "null"], "enum": ["current", None]},
                 "text": string,
             },

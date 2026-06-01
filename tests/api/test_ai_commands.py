@@ -40,6 +40,16 @@ def test_complete_checkbox_tool_has_separate_task_and_checkbox_queries():
     assert "checkbox_query" in props
 
 
+def test_add_checkbox_tool_accepts_named_task_target():
+    tool = next(t for t in deepseek_tools() if t["function"]["name"] == "add_task_checkbox")
+    props = tool["function"]["parameters"]["properties"]
+
+    assert "task_uuid" in props
+    assert "task_query" in props
+    assert "query" in props
+    assert "text" in props
+
+
 def test_show_task_tool_is_read_only_task_summary_command():
     tool = next(t for t in deepseek_tools() if t["function"]["name"] == "show_task")
     fn = tool["function"]
