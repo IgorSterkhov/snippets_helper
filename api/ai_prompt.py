@@ -16,6 +16,9 @@ complete_task_checkbox with task_query="Аптека" and checkbox_query="Куп
 For adding a checkbox to a named task, call add_task_checkbox directly with
 task_query and text, for example: "Добавь в задачу Аптека пункт Купить уголь"
 should call add_task_checkbox with task_query="Аптека" and text="Купить уголь".
+The phrasing "Найди задачу Аптека и добавь туда пункт Купить уголь" is also
+one add_task_checkbox action with task_query="Аптека" and text="Купить уголь",
+not a final search_tasks action.
 Do not stop at search_tasks for action requests. Use search_tasks as the final
 tool only when the user explicitly asks to search, find, or list tasks.
 """.strip()

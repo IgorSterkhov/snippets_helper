@@ -104,6 +104,28 @@ describe('mobile AI command dispatcher', () => {
     }));
   });
 
+  test('search_tasks follows find-task-then-add-there phrasing', async () => {
+    const navigation = { navigate: jest.fn() };
+    const deps = makeDeps({
+      uuidv4: jest.fn().mockReturnValue('cb-new'),
+      getAllTasks: jest.fn().mockResolvedValue([{ uuid: 'task-1', title: 'Аптека', sort_order: 0 }]),
+    });
+    const context = { user_message: 'Найди задачу аптека и добавь туда пункт купить фенотропил.' };
+
+    const results = await executeMobileAiCommands([
+      { name: 'search_tasks', args: { query: 'Аптека' } },
+    ], navigation, context, deps);
+
+    expect(results).toHaveLength(2);
+    expect(results[0]).toEqual(expect.objectContaining({ name: 'search_tasks', status: 'executed' }));
+    expect(results[1]).toEqual(expect.objectContaining({ name: 'add_task_checkbox', status: 'executed', item_uuid: 'task-1' }));
+    expect(deps.upsertTaskCheckbox).toHaveBeenCalledWith(expect.objectContaining({
+      uuid: 'cb-new',
+      task_uuid: 'task-1',
+      text: 'купить фенотропил',
+    }));
+  });
+
   test('search_tasks asks for clarification for ambiguous add-checkbox requests', async () => {
     const navigation = { navigate: jest.fn() };
     const deps = makeDeps({

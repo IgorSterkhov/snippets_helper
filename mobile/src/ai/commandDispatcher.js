@@ -74,6 +74,7 @@ function parseAddCheckboxTaskIntent(context) {
   if (!source) return null;
   const patterns = [
     /(?:^|\s)(?:добавь|добавить)\s+(?:в\s+)?задач[ауе]\s+(.+?)\s+(?:пункт|чекбокс)\s+(.+?)\s*$/i,
+    /(?:^|\s)(?:найди|найти|отыщи|найдите|find)\s+задач[ауе]\s+(.+?)\s+и\s+(?:добавь|добавить|добавьте|add)\s+(?:туда\s+)?(?:пункт|чекбокс|item|checkbox|point)\s+(.+?)\s*$/i,
     /(?:^|\s)(?:add)\s+(?:to\s+)?task\s+(.+?)\s+(?:item|checkbox|point)\s+(.+?)\s*$/i,
   ];
   for (const pattern of patterns) {
