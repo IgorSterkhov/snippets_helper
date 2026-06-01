@@ -387,6 +387,16 @@ async def run_tests():
         await wait_until(cdp, "!!document.querySelector('#panel-whisper #live-dictate-toggle')", timeout=5)
         label = await cdp.eval("document.querySelector('#panel-whisper #live-dictate-label')?.textContent || ''")
         assert 'Live dictate' in label, label
+        has_help = await cdp.eval("!!document.querySelector('#panel-whisper .sql-help-btn')")
+        assert has_help, 'Whisper help button missing'
+        await cdp.eval("document.querySelector('#panel-whisper .sql-help-btn').click()")
+        await wait_until(cdp, "!!document.querySelector('.sql-help-overlay')", timeout=3)
+        help_text = await cdp.eval("document.querySelector('.sql-help-overlay')?.textContent || ''")
+        assert 'Deepgram' in help_text, help_text
+        assert 'Yandex SpeechKit' in help_text, help_text
+        assert 'ai.speechkit-stt.user' in help_text, help_text
+        await close_modals()
+        await wait_until(cdp, "!document.querySelector('.sql-help-overlay')", timeout=3)
 
         await cdp.eval("document.querySelector('#panel-whisper #settings-btn').click()")
         await wait_until(cdp, "document.body.textContent.includes('Deepgram live dictation')", timeout=3)

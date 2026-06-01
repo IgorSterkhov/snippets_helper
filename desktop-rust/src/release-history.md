@@ -2,9 +2,14 @@
 
 ## Unreleased
 
+## f-20260601-1 (2026-06-01)
+
 - **Cloud speech setup docs:** Help now explains where to create Deepgram and
   Yandex SpeechKit API keys, which Yandex service-account role is needed, and
   where to paste those keys in Settings -> Whisper.
+- **Whisper local help:** the Whisper tab header now has a `?` help button
+  with local guidance for Local Whisper, Live dictate, Deepgram, Yandex
+  SpeechKit, key storage, and common setup failures.
 
 ## v1.5.0 (2026-06-01)
 

@@ -3,6 +3,8 @@ import { gemmaApi, onGemmaEvent } from './gemma-api.js';
 import { openSettingsModal } from './whisper-settings.js';
 import { showErrorDialog } from '../../components/error-dialog.js';
 import { call } from '../../tauri-api.js';
+import { helpButton } from '../sql/sql-help.js';
+import { WHISPER_HELP_HTML } from './help-content.js';
 
 const GEMMA_NO_MODELS_VALUE = '__open_settings__';
 
@@ -51,6 +53,9 @@ export async function initTab(container) {
     <button id="record-btn" style="padding:5px 14px;background:var(--accent,#388bfd);color:#fff;border:0;border-radius:4px;cursor:pointer;font-weight:600">🎤 Record</button>
     <button id="settings-btn" style="padding:5px 10px;background:transparent;color:var(--text-muted,#8b949e);border:1px solid var(--border,#30363d);border-radius:4px;cursor:pointer">⚙</button>
   `;
+  const help = helpButton('Whisper — справка', WHISPER_HELP_HTML);
+  help.title = 'Whisper help';
+  header.appendChild(help);
   container.appendChild(header);
 
   const body = document.createElement('div');
