@@ -419,7 +419,7 @@ function yandexSpeechKitBlock(s) {
 
   wrap.appendChild(labeledControl('Model', textInput('yandex_model', s['whisper.yandex_model'] || 'general', 'general')));
   wrap.appendChild(labeledControl('Language', yandexLanguageSelect(s['whisper.yandex_language'] || 'ru-RU')));
-  wrap.appendChild(checkbox('yandex_text_normalization', (s['whisper.yandex_text_normalization'] || 'true') === 'true', 'Text normalization (numbers, dates, punctuation polishing)'));
+  wrap.appendChild(checkbox('yandex_text_normalization', (s['whisper.yandex_text_normalization'] || 'true') === 'true', 'Text normalization + punctuation (literary text mode)'));
 
   return wrap;
 }

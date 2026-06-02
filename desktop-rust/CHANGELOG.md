@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v1.5.1 (2026-06-02)
+
+- **Yandex SpeechKit punctuation:** Live dictate now requests SpeechKit
+  literary text normalization when text normalization is enabled, improving
+  Russian punctuation and question/exclamation formatting. Whisper Settings and
+  Help now describe this as text normalization plus punctuation.
+
 ## f-20260601-2 (2026-06-01)
 
 - **Yandex SpeechKit key guidance:** Whisper Settings, local help, and live

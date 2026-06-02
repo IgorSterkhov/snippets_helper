@@ -47,7 +47,8 @@ export const WHISPER_HELP_HTML = `
       <code>Unknown api key</code>.</li>
   <li>Скопируйте ключ в <strong>Settings &gt; Whisper &gt; Yandex SpeechKit</strong>.</li>
   <li>Для русской диктовки начните с language <code>ru-RU</code> и включенной
-      text normalization.</li>
+      text normalization: она также запрашивает у SpeechKit literary text mode
+      для пунктуации и оформления фраз.</li>
 </ol>
 
 <h4>Безопасность ключей</h4>

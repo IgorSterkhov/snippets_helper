@@ -318,7 +318,7 @@ pub fn build_speechkit_options(cfg: &YandexSpeechKitConfig) -> StreamingOptions 
             text_normalization: Some(TextNormalizationOptions {
                 text_normalization: if cfg.text_normalization { 1 } else { 2 },
                 profanity_filter: false,
-                literature_text: false,
+                literature_text: cfg.text_normalization,
                 phone_formatting_mode: 1,
             }),
             language_restriction: language.map(|lang| LanguageRestrictionOptions {
@@ -644,6 +644,10 @@ mod tests {
         assert_eq!(lang.restriction_type, 1);
         let norm = recognition.text_normalization.expect("normalization");
         assert_eq!(norm.text_normalization, 1);
+        assert!(
+            norm.literature_text,
+            "normalized Russian dictation should request SpeechKit literary punctuation"
+        );
     }
 
     #[test]
