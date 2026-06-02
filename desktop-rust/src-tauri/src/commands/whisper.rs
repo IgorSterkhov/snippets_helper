@@ -594,6 +594,21 @@ fn yandex_config_from_settings(db: &DbState) -> Result<YandexSpeechKitConfig, St
         .flatten()
         .map(|s| s == "true")
         .unwrap_or(true);
+    let literature_text = queries::get_setting(&conn, &cid, "whisper.yandex_literature_text")
+        .ok()
+        .flatten()
+        .map(|s| s == "true")
+        .unwrap_or(true);
+    let profanity_filter = queries::get_setting(&conn, &cid, "whisper.yandex_profanity_filter")
+        .ok()
+        .flatten()
+        .map(|s| s == "true")
+        .unwrap_or(false);
+    let phone_formatting = queries::get_setting(&conn, &cid, "whisper.yandex_phone_formatting")
+        .ok()
+        .flatten()
+        .map(|s| s == "true")
+        .unwrap_or(false);
     let restore = queries::get_setting(&conn, &cid, "whisper.clipboard_restore_delay_ms")
         .ok()
         .flatten()
@@ -608,6 +623,9 @@ fn yandex_config_from_settings(db: &DbState) -> Result<YandexSpeechKitConfig, St
         model,
         language,
         text_normalization,
+        literature_text,
+        profanity_filter,
+        phone_formatting,
         clipboard_restore_delay_ms: restore,
         mic_device,
     })

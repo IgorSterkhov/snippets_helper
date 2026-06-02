@@ -111,6 +111,8 @@ async function loadAllSettings() {
     'whisper.live_dictate','whisper.deepgram_api_key','whisper.deepgram_model',
     'whisper.deepgram_endpointing_ms','whisper.live_provider','whisper.yandex_api_key',
     'whisper.yandex_model','whisper.yandex_language','whisper.yandex_text_normalization',
+    'whisper.yandex_literature_text','whisper.yandex_profanity_filter',
+    'whisper.yandex_phone_formatting',
   ];
   const result = {};
   for (const k of keys) {
@@ -419,7 +421,15 @@ function yandexSpeechKitBlock(s) {
 
   wrap.appendChild(labeledControl('Model', textInput('yandex_model', s['whisper.yandex_model'] || 'general', 'general')));
   wrap.appendChild(labeledControl('Language', yandexLanguageSelect(s['whisper.yandex_language'] || 'ru-RU')));
-  wrap.appendChild(checkbox('yandex_text_normalization', (s['whisper.yandex_text_normalization'] || 'true') === 'true', 'Text normalization + punctuation (literary text mode)'));
+  wrap.appendChild(checkbox('yandex_text_normalization', (s['whisper.yandex_text_normalization'] || 'true') === 'true', 'Text normalization (numbers, dates, times)'));
+  wrap.appendChild(checkbox('yandex_literature_text', (s['whisper.yandex_literature_text'] || 'true') === 'true', 'Literary text / punctuation'));
+  wrap.appendChild(checkbox('yandex_profanity_filter', (s['whisper.yandex_profanity_filter'] || 'false') === 'true', 'Profanity filter'));
+  wrap.appendChild(checkbox('yandex_phone_formatting', (s['whisper.yandex_phone_formatting'] || 'false') === 'true', 'Phone number formatting'));
+
+  const normalizationHint = document.createElement('div');
+  normalizationHint.textContent = 'Literary text, profanity filtering, and phone formatting only affect SpeechKit normalized results. For auto language detection, Yandex does not apply normalization.';
+  normalizationHint.style.cssText = 'font-size:11px;color:var(--text-muted,#8b949e);line-height:1.35';
+  wrap.appendChild(normalizationHint);
 
   return wrap;
 }

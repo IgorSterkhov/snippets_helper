@@ -410,6 +410,15 @@ async def run_tests():
         settings_text = await cdp.eval("document.querySelector('.modal-overlay')?.textContent || ''")
         assert 'secret value' in settings_text, settings_text
         assert 'not the key ID' in settings_text, settings_text
+        assert 'Literary text / punctuation' in settings_text, settings_text
+        assert 'Profanity filter' in settings_text, settings_text
+        assert 'Phone number formatting' in settings_text, settings_text
+        has_literature = await cdp.eval("!!document.querySelector('.modal-overlay [data-key=\"whisper.yandex_literature_text\"]')")
+        has_profanity = await cdp.eval("!!document.querySelector('.modal-overlay [data-key=\"whisper.yandex_profanity_filter\"]')")
+        has_phone = await cdp.eval("!!document.querySelector('.modal-overlay [data-key=\"whisper.yandex_phone_formatting\"]')")
+        assert has_literature, 'Yandex literary text checkbox missing'
+        assert has_profanity, 'Yandex profanity filter checkbox missing'
+        assert has_phone, 'Yandex phone formatting checkbox missing'
         await close_modals()
         await wait_until(cdp, "!document.querySelector('.modal-overlay')", timeout=3)
 

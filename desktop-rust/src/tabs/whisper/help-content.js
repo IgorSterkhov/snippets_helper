@@ -46,10 +46,26 @@ export const WHISPER_HELP_HTML = `
       <code>aje...</code>: по нему SpeechKit вернет ошибку
       <code>Unknown api key</code>.</li>
   <li>Скопируйте ключ в <strong>Settings &gt; Whisper &gt; Yandex SpeechKit</strong>.</li>
-  <li>Для русской диктовки начните с language <code>ru-RU</code> и включенной
-      text normalization: она также запрашивает у SpeechKit literary text mode
-      для пунктуации и оформления фраз.</li>
+  <li>Для русской диктовки начните с language <code>ru-RU</code>, включенной
+      text normalization и включенного literary text / punctuation.</li>
 </ol>
+
+<h4>Yandex SpeechKit: настройки нормализации</h4>
+<ul>
+  <li><strong>Text normalization</strong> — преобразует числа, даты и время в
+      нормализованный вид. Остальные флаги работают только для normalized
+      results.</li>
+  <li><strong>Literary text / punctuation</strong> — запрашивает литературное
+      оформление: заглавные буквы и знаки пунктуации. Для русской диктовки это
+      главный флаг для точек, запятых и вопросительных знаков.</li>
+  <li><strong>Profanity filter</strong> — просит SpeechKit маскировать
+      обсценную лексику. По умолчанию выключено.</li>
+  <li><strong>Phone number formatting</strong> — разрешает SpeechKit оформлять
+      телефонные номера. По умолчанию выключено, чтобы сохранить прежнее
+      поведение.</li>
+  <li>Yandex не применяет нормализацию в режиме language <code>auto</code>; для
+      русского языка используйте <code>ru-RU</code>.</li>
+</ul>
 
 <h4>Безопасность ключей</h4>
 <ul>

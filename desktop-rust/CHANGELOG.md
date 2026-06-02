@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v1.5.2 (2026-06-02)
+
+- **Yandex SpeechKit settings:** Settings > Whisper now exposes SpeechKit text
+  normalization, literary punctuation, profanity filter, and phone formatting
+  options instead of keeping those provider flags hardcoded in the native
+  client. Help explains what each option does and when Yandex applies it.
+
 ## v1.5.1 (2026-06-02)
 
 - **Yandex SpeechKit punctuation:** Live dictate now requests SpeechKit

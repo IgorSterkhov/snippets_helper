@@ -28,6 +28,9 @@ pub struct YandexSpeechKitConfig {
     pub model: String,
     pub language: Option<String>,
     pub text_normalization: bool,
+    pub literature_text: bool,
+    pub profanity_filter: bool,
+    pub phone_formatting: bool,
     pub clipboard_restore_delay_ms: u64,
     pub mic_device: Option<String>,
 }
@@ -317,9 +320,9 @@ pub fn build_speechkit_options(cfg: &YandexSpeechKitConfig) -> StreamingOptions 
             }),
             text_normalization: Some(TextNormalizationOptions {
                 text_normalization: if cfg.text_normalization { 1 } else { 2 },
-                profanity_filter: false,
-                literature_text: cfg.text_normalization,
-                phone_formatting_mode: 1,
+                profanity_filter: cfg.profanity_filter,
+                literature_text: cfg.literature_text,
+                phone_formatting_mode: if cfg.phone_formatting { 0 } else { 1 },
             }),
             language_restriction: language.map(|lang| LanguageRestrictionOptions {
                 restriction_type: 1,
@@ -620,6 +623,9 @@ mod tests {
             model: "general".into(),
             language: Some("ru-RU".into()),
             text_normalization: true,
+            literature_text: true,
+            profanity_filter: false,
+            phone_formatting: false,
             clipboard_restore_delay_ms: 200,
             mic_device: None,
         };
@@ -644,10 +650,32 @@ mod tests {
         assert_eq!(lang.restriction_type, 1);
         let norm = recognition.text_normalization.expect("normalization");
         assert_eq!(norm.text_normalization, 1);
-        assert!(
-            norm.literature_text,
-            "normalized Russian dictation should request SpeechKit literary punctuation"
-        );
+        assert!(norm.literature_text);
+        assert!(!norm.profanity_filter);
+        assert_eq!(norm.phone_formatting_mode, 1);
+    }
+
+    #[test]
+    fn build_speechkit_options_applies_user_normalization_flags() {
+        let cfg = YandexSpeechKitConfig {
+            api_key: "test-key".into(),
+            model: "general".into(),
+            language: Some("ru-RU".into()),
+            text_normalization: true,
+            literature_text: false,
+            profanity_filter: true,
+            phone_formatting: true,
+            clipboard_restore_delay_ms: 200,
+            mic_device: None,
+        };
+
+        let options = build_speechkit_options(&cfg);
+        let recognition = options.recognition_model.expect("recognition model");
+        let norm = recognition.text_normalization.expect("normalization");
+        assert_eq!(norm.text_normalization, 1);
+        assert!(!norm.literature_text);
+        assert!(norm.profanity_filter);
+        assert_eq!(norm.phone_formatting_mode, 0);
     }
 
     #[test]
