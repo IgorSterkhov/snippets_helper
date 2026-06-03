@@ -7,6 +7,30 @@ import { helpButton } from '../sql/sql-help.js';
 import { WHISPER_HELP_HTML } from './help-content.js';
 
 const GEMMA_NO_MODELS_VALUE = '__open_settings__';
+const ENGINE_DEEPGRAM = 'deepgram';
+const ENGINE_YANDEX = 'yandex';
+
+function localEngineValue(name) {
+  return `local:${name}`;
+}
+
+function isLocalEngine(value) {
+  return typeof value === 'string' && value.startsWith('local:');
+}
+
+function localEngineName(value) {
+  return isLocalEngine(value) ? value.slice('local:'.length) : '';
+}
+
+function isCloudEngine(value) {
+  return value === ENGINE_DEEPGRAM || value === ENGINE_YANDEX;
+}
+
+function engineProvider(value) {
+  if (value === ENGINE_YANDEX) return 'yandex';
+  if (value === ENGINE_DEEPGRAM) return 'deepgram';
+  return null;
+}
 
 export async function initTab(container) {
   container.innerHTML = '';
@@ -27,6 +51,9 @@ export async function initTab(container) {
     liveState: 'idle',
     liveModel: 'nova-3',
     liveProvider: 'deepgram',
+    recognitionEngine: null,
+    deepgramModel: 'nova-3',
+    yandexModel: 'general',
     liveCommittedText: '',
     liveInterimText: '',
   };
@@ -36,18 +63,14 @@ export async function initTab(container) {
   header.innerHTML = `
     <span style="font-weight:600;color:var(--text,#c9d1d9)">🎤 Whisper</span>
     <span id="state-chip" style="padding:2px 8px;background:var(--bg,#0d1117);border-radius:10px;font-size:11px;color:var(--text-muted,#8b949e)">○ idle</span>
-    <span style="margin-left:8px;color:var(--text-muted,#8b949e);font-size:11px">Whisper:</span>
-    <select id="model-select" title="Active Whisper model (switching unloads the warmed server)" style="padding:3px 6px;background:var(--bg,#0d1117);color:var(--text,#c9d1d9);border:1px solid var(--border,#30363d);border-radius:4px;font-size:11px;cursor:pointer;max-width:220px"></select>
+    <span style="margin-left:8px;color:var(--text-muted,#8b949e);font-size:11px">Recognition:</span>
+    <select id="engine-select" title="Speech recognition engine" style="padding:3px 6px;background:var(--bg,#0d1117);color:var(--text,#c9d1d9);border:1px solid var(--border,#30363d);border-radius:4px;font-size:11px;cursor:pointer;max-width:260px"></select>
     <span style="color:var(--text-muted,#8b949e);font-size:11px">Gemma:</span>
     <select id="gemma-model-select" title="Gemma post-processing model" style="padding:3px 6px;background:var(--bg,#0d1117);color:var(--text,#c9d1d9);border:1px solid var(--border,#30363d);border-radius:4px;font-size:11px;cursor:pointer;max-width:220px"></select>
     <label id="live-dictate-label" title="Live dictate streams audio through the selected cloud provider and pastes finalized chunks into the active app" style="display:flex;align-items:center;gap:5px;padding:3px 8px;background:var(--bg,#0d1117);border:1px solid var(--border,#30363d);border-radius:4px;color:var(--text,#c9d1d9);font-size:11px;cursor:pointer;user-select:none">
       <input id="live-dictate-toggle" type="checkbox" style="margin:0;accent-color:var(--accent,#388bfd)">
       <span>Live dictate</span>
     </label>
-    <select id="live-provider-select" title="Live dictation cloud provider" style="padding:3px 6px;background:var(--bg,#0d1117);color:var(--text,#c9d1d9);border:1px solid var(--border,#30363d);border-radius:4px;font-size:11px;cursor:pointer">
-      <option value="deepgram">Deepgram</option>
-      <option value="yandex">Yandex SpeechKit</option>
-    </select>
     <span style="flex:1"></span>
     <button id="cancel-btn" title="Cancel without transcribing (Esc)" style="padding:5px 10px;background:transparent;color:var(--red,#f85149);border:1px solid var(--red,#f85149);border-radius:4px;cursor:pointer;font-weight:500;display:none">✕ Cancel</button>
     <button id="record-btn" style="padding:5px 14px;background:var(--accent,#388bfd);color:#fff;border:0;border-radius:4px;cursor:pointer;font-weight:600">🎤 Record</button>
@@ -126,19 +149,15 @@ export async function initTab(container) {
   right.appendChild(actions);
 
   const chip = header.querySelector('#state-chip');
-  const modelSelect = header.querySelector('#model-select');
+  const engineSelect = header.querySelector('#engine-select');
   const gemmaSelect = header.querySelector('#gemma-model-select');
   const liveToggle = header.querySelector('#live-dictate-toggle');
   const liveLabel = header.querySelector('#live-dictate-label');
-  const providerSelect = header.querySelector('#live-provider-select');
   const recordBtn = header.querySelector('#record-btn');
   const cancelBtn = header.querySelector('#cancel-btn');
 
-  // Cached last-committed default name. Used to revert the dropdown if the
-  // backend rejects the change. We also use it to suppress the change
-  // handler when we repopulate the <select> programmatically.
-  let committedDefault = null;
-  let programmaticSelect = false;
+  let committedEngine = null;
+  let programmaticEngineSelect = false;
   let committedGemmaDefault = null;
   let programmaticGemmaSelect = false;
   let activeHistoryRef = null;
@@ -154,7 +173,6 @@ export async function initTab(container) {
     if (model) state.liveModel = model;
     if (provider) {
       state.liveProvider = provider;
-      providerSelect.value = provider;
     }
     renderControls();
   }
@@ -177,7 +195,8 @@ export async function initTab(container) {
     };
     const localBusy = isLocalBusy();
     const liveBusy = isLiveBusy();
-    const showLive = state.liveDictate || liveBusy;
+    const cloudEngine = isCloudEngine(state.recognitionEngine);
+    const showLive = liveBusy || (cloudEngine && state.liveDictate);
     const m = showLive ? (liveMap[state.liveState] || liveMap.idle) : (localMap[state.currentState] || localMap.idle);
     chip.textContent = m.label;
     chip.style.color = m.color;
@@ -200,20 +219,21 @@ export async function initTab(container) {
                   : '… Unloading';
       setRecordButton(label, 'noop', true);
     } else {
-      setRecordButton('🎤 Record', 'start', false);
+      setRecordButton(cloudEngine ? '☁ Record cloud' : '🎤 Record', 'start', false);
     }
 
     const lock = localBusy || liveBusy;
-    modelSelect.disabled = lock;
-    modelSelect.style.opacity = lock ? '0.55' : '1';
-    modelSelect.style.cursor = lock ? 'not-allowed' : 'pointer';
+    engineSelect.disabled = lock;
+    engineSelect.style.opacity = lock ? '0.55' : '1';
+    engineSelect.style.cursor = lock ? 'not-allowed' : 'pointer';
 
-    liveToggle.disabled = lock;
-    liveLabel.style.opacity = lock ? '0.55' : '1';
-    liveLabel.style.cursor = lock ? 'not-allowed' : 'pointer';
-    providerSelect.disabled = lock;
-    providerSelect.style.opacity = lock ? '0.55' : '1';
-    providerSelect.style.cursor = lock ? 'not-allowed' : 'pointer';
+    const liveDisabled = lock || !cloudEngine;
+    liveToggle.disabled = liveDisabled;
+    liveLabel.style.opacity = liveDisabled ? '0.55' : '1';
+    liveLabel.style.cursor = liveDisabled ? 'not-allowed' : 'pointer';
+    liveLabel.title = cloudEngine
+      ? 'Live dictate streams audio through the selected cloud provider and pastes finalized chunks into the active app'
+      : 'Live dictate requires Deepgram or Yandex SpeechKit';
 
     cancelBtn.style.display = lock ? '' : 'none';
 
@@ -285,10 +305,17 @@ export async function initTab(container) {
     }
   };
   liveToggle.onchange = async () => {
+    if (!isCloudEngine(state.recognitionEngine)) {
+      state.liveDictate = false;
+      liveToggle.checked = false;
+      renderControls();
+      return;
+    }
     const prev = state.liveDictate;
     state.liveDictate = liveToggle.checked;
     renderControls();
     try {
+      await whisperApi.setSetting('whisper.recognition_engine', state.recognitionEngine);
       await whisperApi.setSetting('whisper.live_dictate', state.liveDictate ? 'true' : 'false');
     } catch (e) {
       state.liveDictate = prev;
@@ -300,18 +327,42 @@ export async function initTab(container) {
       });
     }
   };
-  providerSelect.onchange = async () => {
-    const prev = state.liveProvider;
-    state.liveProvider = providerSelect.value || 'deepgram';
+  engineSelect.onchange = async () => {
+    if (programmaticEngineSelect) return;
+    const prev = committedEngine;
+    const next = engineSelect.value || prev;
+    if (!next || next === prev) return;
+    if (isLocalBusy() || isLiveBusy()) {
+      selectEngineInDropdown(prev);
+      return;
+    }
+    state.recognitionEngine = next;
     try {
-      await whisperApi.setSetting('whisper.live_provider', state.liveProvider);
+      await whisperApi.setSetting('whisper.recognition_engine', next);
+      if (isLocalEngine(next)) {
+        state.liveDictate = false;
+        liveToggle.checked = false;
+        await whisperApi.setSetting('whisper.live_dictate', 'false');
+        const localName = localEngineName(next);
+        if (localName) {
+          await whisperApi.setDefaultModel(localName);
+          try { await whisperApi.unloadNow(); } catch (_) { /* non-fatal */ }
+        }
+      } else {
+        const provider = engineProvider(next) || 'deepgram';
+        state.liveProvider = provider;
+        await whisperApi.setSetting('whisper.live_provider', provider);
+      }
+      committedEngine = next;
       renderLivePreview();
+      renderControls();
     } catch (e) {
-      state.liveProvider = prev;
-      providerSelect.value = prev;
-      showWhisperError('Live provider setting failed', formatErrorMessage(e, 'The live provider setting could not be saved.'), e, {
-        setting: 'whisper.live_provider',
-        attempted_value: state.liveProvider,
+      state.recognitionEngine = prev;
+      selectEngineInDropdown(prev);
+      renderControls();
+      showWhisperError('Recognition engine setting failed', formatErrorMessage(e, 'The recognition engine setting could not be saved.'), e, {
+        setting: 'whisper.recognition_engine',
+        attempted_value: next,
       });
     }
   };
@@ -335,9 +386,11 @@ export async function initTab(container) {
   const offState = await onWhisperEvent('stateChanged', (p) => {
     setChip(p.state);
     if (p.model) {
-      selectModelInDropdown(p.model);
+      if (isLocalEngine(state.recognitionEngine)) {
+        selectEngineInDropdown(localEngineValue(p.model));
+      }
     } else if (p.state === 'idle') {
-      refreshModelSelect();
+      refreshEngineSelect();
     }
   });
   state.cleanup.push(offState);
@@ -376,74 +429,87 @@ export async function initTab(container) {
   });
   state.cleanup.push(offGemmaProgress);
 
-  async function refreshModelSelect() {
+  async function refreshEngineSelect() {
     try {
+      await loadLiveSettings();
       const ms = await whisperApi.listModels();
       const def = ms.find(m => m.is_default);
-      const current = def ? def.name : (ms[0] ? ms[0].name : null);
-      committedDefault = current;
-      programmaticSelect = true;
-      modelSelect.innerHTML = '';
-      if (!ms.length) {
-        const opt = document.createElement('option');
-        opt.value = '';
-        opt.textContent = '(no models installed)';
-        modelSelect.appendChild(opt);
-        modelSelect.disabled = true;
-        modelSelect.style.opacity = '0.55';
-      } else {
-        for (const m of ms) {
-          const opt = document.createElement('option');
-          opt.value = m.name;
-          opt.textContent = m.display_name + (m.is_default ? '  · default' : '');
-          if (m.name === current) opt.selected = true;
-          modelSelect.appendChild(opt);
+      const defaultLocal = def ? localEngineValue(def.name) : (ms[0] ? localEngineValue(ms[0].name) : null);
+      state.deepgramModel = (await whisperApi.getSetting('whisper.deepgram_model')) || 'nova-3';
+      state.yandexModel = (await whisperApi.getSetting('whisper.yandex_model')) || 'general';
+      let saved = await whisperApi.getSetting('whisper.recognition_engine');
+      if (!saved) {
+        saved = state.liveDictate
+          ? (state.liveProvider === 'yandex' ? ENGINE_YANDEX : ENGINE_DEEPGRAM)
+          : defaultLocal;
+        if (isCloudEngine(saved)) {
+          whisperApi.setSetting('whisper.recognition_engine', saved).catch(() => {});
         }
       }
-      programmaticSelect = false;
+      if (isLocalEngine(saved)) {
+        const localName = localEngineName(saved);
+        const exists = ms.some(m => m.name === localName);
+        saved = exists ? saved : defaultLocal;
+      }
+      if (!saved) saved = ENGINE_DEEPGRAM;
+
+      state.recognitionEngine = saved;
+      if (isCloudEngine(saved)) {
+        state.liveProvider = engineProvider(saved) || state.liveProvider;
+      } else {
+        if (state.liveDictate) {
+          state.liveDictate = false;
+          liveToggle.checked = false;
+          whisperApi.setSetting('whisper.live_dictate', 'false').catch(() => {});
+        }
+      }
+      committedEngine = saved;
+
+      programmaticEngineSelect = true;
+      engineSelect.innerHTML = '';
+      if (ms.length) {
+        const localGroup = document.createElement('optgroup');
+        localGroup.label = 'Local Whisper';
+        for (const m of ms) {
+          const opt = document.createElement('option');
+          opt.value = localEngineValue(m.name);
+          opt.textContent = m.display_name + (m.is_default ? '  · default' : '');
+          if (opt.value === saved) opt.selected = true;
+          localGroup.appendChild(opt);
+        }
+        engineSelect.appendChild(localGroup);
+      }
+
+      const cloudGroup = document.createElement('optgroup');
+      cloudGroup.label = 'Cloud';
+      const dg = document.createElement('option');
+      dg.value = ENGINE_DEEPGRAM;
+      dg.textContent = `Deepgram · ${state.deepgramModel}`;
+      if (saved === ENGINE_DEEPGRAM) dg.selected = true;
+      cloudGroup.appendChild(dg);
+      const ya = document.createElement('option');
+      ya.value = ENGINE_YANDEX;
+      ya.textContent = `Yandex SpeechKit · ${state.yandexModel}`;
+      if (saved === ENGINE_YANDEX) ya.selected = true;
+      cloudGroup.appendChild(ya);
+      engineSelect.appendChild(cloudGroup);
+
+      programmaticEngineSelect = false;
+      renderControls();
     } catch (e) { /* ignore */ }
   }
 
-  function selectModelInDropdown(name) {
-    if (!name) return;
-    const hasOption = Array.from(modelSelect.options).some(o => o.value === name);
+  function selectEngineInDropdown(value) {
+    if (!value) return;
+    const hasOption = Array.from(engineSelect.options).some(o => o.value === value);
     if (!hasOption) {
-      refreshModelSelect();
+      refreshEngineSelect();
       return;
     }
-    programmaticSelect = true;
-    modelSelect.value = name;
-    programmaticSelect = false;
+    programmaticEngineSelect = true;
+    engineSelect.value = value;
+    programmaticEngineSelect = false;
   }
-
-  modelSelect.onchange = async () => {
-    if (programmaticSelect) return;
-    const newName = modelSelect.value;
-    if (!newName || newName === committedDefault) return;
-    if (state.currentState !== 'idle' && state.currentState !== 'ready') {
-      selectModelInDropdown(committedDefault);
-      return;
-    }
-    const prev = committedDefault;
-    modelSelect.disabled = true;
-    modelSelect.style.opacity = '0.55';
-    modelSelect.style.cursor = 'not-allowed';
-    try {
-      await whisperApi.setDefaultModel(newName);
-      try { await whisperApi.unloadNow(); } catch (_) { /* non-fatal */ }
-      committedDefault = newName;
-      window.dispatchEvent(new CustomEvent('whisper:settings-changed'));
-      toast(`Whisper: ${newName}`);
-    } catch (e) {
-      showWhisperError('Whisper model switch failed', formatErrorMessage(e, 'The default Whisper model could not be changed.'), e, {
-        previous_model: prev,
-        requested_model: newName,
-      });
-      selectModelInDropdown(prev);
-    } finally {
-      setChip(state.currentState);
-    }
-  };
 
   // ── Gemma combobox ──────────────────────────────────────────────────────
   async function refreshGemmaSelect() {
@@ -517,7 +583,7 @@ export async function initTab(container) {
     }
   };
 
-  const onSettingsChanged = () => { refreshModelSelect(); refreshGemmaSelect(); loadLiveSettings().then(renderControls); };
+  const onSettingsChanged = () => { loadLiveSettings().then(() => refreshEngineSelect()); refreshGemmaSelect(); };
   window.addEventListener('whisper:settings-changed', onSettingsChanged);
   state.cleanup.push(() => window.removeEventListener('whisper:settings-changed', onSettingsChanged));
 
@@ -575,7 +641,7 @@ export async function initTab(container) {
   state.cleanup.push(offLiveError);
 
   await loadLiveSettings();
-  await refreshModelSelect();
+  await refreshEngineSelect();
   await refreshGemmaSelect();
   setChip('idle');
 
@@ -640,10 +706,8 @@ export async function initTab(container) {
     try {
       state.liveProvider = (await whisperApi.getSetting('whisper.live_provider')) || 'deepgram';
       if (!['deepgram', 'yandex'].includes(state.liveProvider)) state.liveProvider = 'deepgram';
-      providerSelect.value = state.liveProvider;
     } catch {
       state.liveProvider = 'deepgram';
-      providerSelect.value = 'deepgram';
     }
   }
 

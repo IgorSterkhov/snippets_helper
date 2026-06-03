@@ -10,7 +10,7 @@ use crate::whisper::gpu_detect::{self, HardwareInfo};
 use crate::whisper::inject::{self, InjectMethod};
 use crate::whisper::models;
 use crate::whisper::postprocess::{self, LlmConfig};
-use crate::whisper::service::WhisperService;
+use crate::whisper::service::{RecordingProvider, WhisperService};
 use crate::whisper::yandex::{YandexSpeechKitConfig, YandexSpeechKitLiveService};
 use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::{AppHandle, Manager, State};
@@ -18,13 +18,30 @@ use tauri::{AppHandle, Manager, State};
 const HOTKEY_DEBOUNCE_MS: u64 = 700;
 static LAST_WHISPER_HOTKEY_MS: AtomicU64 = AtomicU64::new(0);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum HotkeyAction {
-    LocalStart,
-    LocalStop,
+    BatchStart(RecognitionEngine),
+    BatchStop,
     LiveStart(LiveProvider),
     LiveStop(LiveProvider),
     Ignore,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum RecognitionEngine {
+    Local(String),
+    Deepgram,
+    Yandex,
+}
+
+impl RecognitionEngine {
+    fn cloud_provider(&self) -> Option<LiveProvider> {
+        match self {
+            RecognitionEngine::Deepgram => Some(LiveProvider::Deepgram),
+            RecognitionEngine::Yandex => Some(LiveProvider::Yandex),
+            RecognitionEngine::Local(_) => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,6 +58,12 @@ impl LiveProvider {
         }
     }
 
+    fn recognition_engine(self) -> RecognitionEngine {
+        match self {
+            LiveProvider::Deepgram => RecognitionEngine::Deepgram,
+            LiveProvider::Yandex => RecognitionEngine::Yandex,
+        }
+    }
 }
 
 // --- helpers -----------------------------------------------------------------
@@ -111,7 +134,79 @@ fn selected_live_provider(db: &DbState) -> LiveProvider {
     )
 }
 
-fn active_live_provider(deepgram_state: LiveState, yandex_state: LiveState) -> Option<LiveProvider> {
+fn resolve_recognition_engine_setting(
+    setting: Option<&str>,
+    live_enabled: bool,
+    live_provider: LiveProvider,
+    default_model: Option<&str>,
+    installed_models: &[&str],
+) -> Result<RecognitionEngine, String> {
+    let fallback_local = || {
+        default_model
+            .filter(|name| installed_models.iter().any(|m| m == name))
+            .map(|name| RecognitionEngine::Local(name.to_string()))
+            .ok_or_else(|| "no local Whisper model installed".to_string())
+    };
+
+    if let Some(value) = setting.map(str::trim).filter(|s| !s.is_empty()) {
+        match value {
+            "deepgram" => return Ok(RecognitionEngine::Deepgram),
+            "yandex" => return Ok(RecognitionEngine::Yandex),
+            _ => {
+                if let Some(name) = value.strip_prefix("local:").map(str::trim) {
+                    if installed_models.iter().any(|m| *m == name) {
+                        return Ok(RecognitionEngine::Local(name.to_string()));
+                    }
+                    return fallback_local();
+                }
+                return fallback_local();
+            }
+        }
+    }
+
+    if live_enabled {
+        Ok(live_provider.recognition_engine())
+    } else {
+        fallback_local()
+    }
+}
+
+fn selected_recognition_engine(db: &DbState) -> Result<RecognitionEngine, String> {
+    let conn = db.lock_recover();
+    let cid = computer_id();
+    let setting = queries::get_setting(&conn, &cid, "whisper.recognition_engine")
+        .ok()
+        .flatten();
+    let live_enabled = queries::get_setting(&conn, &cid, "whisper.live_dictate")
+        .ok()
+        .flatten()
+        .map(|s| s == "true")
+        .unwrap_or(false);
+    let live_provider = LiveProvider::from_setting(
+        queries::get_setting(&conn, &cid, "whisper.live_provider")
+            .ok()
+            .flatten(),
+    );
+    let models = queries::whisper_list_models(&conn).map_err(|e| e.to_string())?;
+    let default_model = models
+        .iter()
+        .find(|m| m.is_default)
+        .or_else(|| models.first())
+        .map(|m| m.name.as_str());
+    let installed: Vec<&str> = models.iter().map(|m| m.name.as_str()).collect();
+    resolve_recognition_engine_setting(
+        setting.as_deref(),
+        live_enabled,
+        live_provider,
+        default_model,
+        &installed,
+    )
+}
+
+fn active_live_provider(
+    deepgram_state: LiveState,
+    yandex_state: LiveState,
+) -> Option<LiveProvider> {
     match deepgram_state {
         LiveState::Connecting | LiveState::Streaming | LiveState::Stopping => {
             return Some(LiveProvider::Deepgram)
@@ -128,7 +223,7 @@ fn active_live_provider(deepgram_state: LiveState, yandex_state: LiveState) -> O
 
 fn decide_hotkey_action(
     live_enabled: bool,
-    selected_provider: LiveProvider,
+    selected_engine: RecognitionEngine,
     local_state: crate::whisper::service::State,
     deepgram_state: LiveState,
     yandex_state: LiveState,
@@ -136,7 +231,7 @@ fn decide_hotkey_action(
     use crate::whisper::service::State as WState;
 
     match local_state {
-        WState::Warming | WState::Recording => return HotkeyAction::LocalStop,
+        WState::Warming | WState::Recording => return HotkeyAction::BatchStop,
         WState::Transcribing | WState::Unloading => return HotkeyAction::Ignore,
         WState::Idle | WState::Ready => {}
     }
@@ -150,9 +245,13 @@ fn decide_hotkey_action(
     }
 
     if live_enabled {
-        HotkeyAction::LiveStart(selected_provider)
+        if let Some(provider) = selected_engine.cloud_provider() {
+            HotkeyAction::LiveStart(provider)
+        } else {
+            HotkeyAction::BatchStart(selected_engine)
+        }
     } else {
-        HotkeyAction::LocalStart
+        HotkeyAction::BatchStart(selected_engine)
     }
 }
 
@@ -168,7 +267,7 @@ fn decide_active_stop_action(
     }
 
     match local_state {
-        WState::Warming | WState::Recording => HotkeyAction::LocalStop,
+        WState::Warming | WState::Recording => HotkeyAction::BatchStop,
         WState::Idle | WState::Ready | WState::Transcribing | WState::Unloading => {
             HotkeyAction::Ignore
         }
@@ -187,7 +286,7 @@ fn decide_active_cancel_action(
     }
 
     match local_state {
-        WState::Warming | WState::Recording => HotkeyAction::LocalStop,
+        WState::Warming | WState::Recording => HotkeyAction::BatchStop,
         WState::Idle | WState::Ready | WState::Transcribing | WState::Unloading => {
             HotkeyAction::Ignore
         }
@@ -264,32 +363,140 @@ pub fn whisper_set_default_model(db: State<DbState>, name: String) -> Result<(),
 pub async fn start_recording_impl(app: &AppHandle) -> Result<(), String> {
     let db = app.state::<DbState>();
     let svc = app.state::<WhisperService>();
-    let (model_path, model_name, device_name, idle_timeout_sec) = {
-        let conn = db.lock_recover();
-        let def = queries::whisper_get_default_model(&conn)
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "no default model installed".to_string())?;
-        let cid = computer_id();
-        let mic = queries::get_setting(&conn, &cid, "whisper.mic_device")
-            .ok()
-            .flatten()
-            .filter(|s| !s.is_empty());
-        let idle = queries::get_setting(&conn, &cid, "whisper.idle_timeout_sec")
-            .ok()
-            .flatten()
-            .and_then(|s| s.parse::<u64>().ok())
-            .unwrap_or(300);
-        (std::path::PathBuf::from(def.file_path), def.name, mic, idle)
-    };
-    svc.set_idle_timeout(std::time::Duration::from_secs(idle_timeout_sec))
-        .await;
-    svc.start_recording(model_path, model_name, device_name)
-        .await
+    let engine = selected_recognition_engine(&db)?;
+    match engine {
+        RecognitionEngine::Local(selected_model) => {
+            let (model_path, model_name, device_name, idle_timeout_sec) = {
+                let conn = db.lock_recover();
+                let models = queries::whisper_list_models(&conn).map_err(|e| e.to_string())?;
+                let model = models
+                    .iter()
+                    .find(|m| m.name == selected_model)
+                    .or_else(|| models.iter().find(|m| m.is_default))
+                    .or_else(|| models.first())
+                    .ok_or_else(|| "no local Whisper model installed".to_string())?;
+                let cid = computer_id();
+                let mic = queries::get_setting(&conn, &cid, "whisper.mic_device")
+                    .ok()
+                    .flatten()
+                    .filter(|s| !s.is_empty());
+                let idle = queries::get_setting(&conn, &cid, "whisper.idle_timeout_sec")
+                    .ok()
+                    .flatten()
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .unwrap_or(300);
+                (
+                    std::path::PathBuf::from(&model.file_path),
+                    model.name.clone(),
+                    mic,
+                    idle,
+                )
+            };
+            svc.set_idle_timeout(std::time::Duration::from_secs(idle_timeout_sec))
+                .await;
+            svc.start_recording(model_path, model_name, device_name)
+                .await
+        }
+        RecognitionEngine::Deepgram => {
+            let cfg = deepgram_config_from_settings(&db)?;
+            svc.start_capture_only(
+                RecordingProvider::Deepgram,
+                cfg.model.clone(),
+                cfg.mic_device,
+            )
+            .await
+        }
+        RecognitionEngine::Yandex => {
+            let cfg = yandex_config_from_settings(&db, true)?;
+            svc.start_capture_only(RecordingProvider::Yandex, cfg.model.clone(), cfg.mic_device)
+                .await
+        }
+    }
 }
 
 #[tauri::command]
 pub async fn whisper_start_recording(app: AppHandle) -> Result<(), String> {
     start_recording_impl(&app).await
+}
+
+struct StoppedTranscript {
+    raw: String,
+    model_name: String,
+    provider: &'static str,
+    provider_model: Option<String>,
+    duration_ms: u64,
+    transcribe_ms: u64,
+    language: Option<String>,
+    cpu_peak_percent: f64,
+    gpu_peak_percent: f64,
+    vram_peak_mb: i64,
+}
+
+async fn stop_deepgram_batch(
+    db: &DbState,
+    svc: &WhisperService,
+) -> Result<StoppedTranscript, String> {
+    let cfg = deepgram_config_from_settings(db)?;
+    let captured = svc.stop_capture_only().await?;
+    if captured.provider != RecordingProvider::Deepgram {
+        svc.finish_capture_only().await;
+        return Err("active recording is not Deepgram batch".into());
+    }
+    let start = std::time::Instant::now();
+    let transcript =
+        match crate::whisper::deepgram::transcribe_prerecorded_file(&cfg, captured.wav).await {
+            Ok(transcript) => transcript,
+            Err(e) => {
+                svc.finish_capture_only().await;
+                return Err(e);
+            }
+        };
+    Ok(StoppedTranscript {
+        raw: transcript.text,
+        model_name: captured.model_name,
+        provider: "deepgram",
+        provider_model: Some(cfg.model),
+        duration_ms: captured.duration_ms,
+        transcribe_ms: start.elapsed().as_millis() as u64,
+        language: transcript
+            .language
+            .or_else(|| cfg.language.filter(|s| s != "auto")),
+        cpu_peak_percent: 0.0,
+        gpu_peak_percent: 0.0,
+        vram_peak_mb: 0,
+    })
+}
+
+async fn stop_yandex_batch(
+    db: &DbState,
+    svc: &WhisperService,
+) -> Result<StoppedTranscript, String> {
+    let cfg = yandex_config_from_settings(db, true)?;
+    let captured = svc.stop_capture_only().await?;
+    if captured.provider != RecordingProvider::Yandex {
+        svc.finish_capture_only().await;
+        return Err("active recording is not Yandex SpeechKit batch".into());
+    }
+    let start = std::time::Instant::now();
+    let transcript = match crate::whisper::yandex::transcribe_file(&cfg, captured.wav).await {
+        Ok(transcript) => transcript,
+        Err(e) => {
+            svc.finish_capture_only().await;
+            return Err(e);
+        }
+    };
+    Ok(StoppedTranscript {
+        raw: transcript.text,
+        model_name: captured.model_name,
+        provider: "yandex",
+        provider_model: Some(cfg.model),
+        duration_ms: captured.duration_ms,
+        transcribe_ms: start.elapsed().as_millis() as u64,
+        language: transcript.language.or(cfg.language),
+        cpu_peak_percent: 0.0,
+        gpu_peak_percent: 0.0,
+        vram_peak_mb: 0,
+    })
 }
 
 /// Core stop+transcribe+inject+persist logic, callable from both the
@@ -350,18 +557,29 @@ pub async fn stop_recording_impl(app: &AppHandle) -> Result<String, String> {
         (inj, delay, rules, llm_cfg, lang)
     };
 
-    // F4: run inference, get StopOutcome (durations + metrics included)
-    let outcome = svc.stop_recording(lang).await?;
-    let result = outcome.result;
-    let model_name = outcome.model_name;
-    let duration_ms = outcome.duration_ms;
-    let transcribe_ms = outcome.transcribe_ms;
-    let cpu_peak = outcome.cpu_peak_percent;
-    let gpu_peak = outcome.gpu_peak_percent;
-    let vram_peak = outcome.vram_peak_mb;
+    let stopped = match svc.current_recording_provider().await {
+        Some(RecordingProvider::Deepgram) => stop_deepgram_batch(&db, &svc).await?,
+        Some(RecordingProvider::Yandex) => stop_yandex_batch(&db, &svc).await?,
+        Some(RecordingProvider::Local) | None => {
+            // F4: run local inference, get StopOutcome (durations + metrics included)
+            let outcome = svc.stop_recording(lang).await?;
+            StoppedTranscript {
+                raw: outcome.result.text,
+                model_name: outcome.model_name.clone(),
+                provider: "local",
+                provider_model: Some(outcome.model_name),
+                duration_ms: outcome.duration_ms,
+                transcribe_ms: outcome.transcribe_ms,
+                language: outcome.result.language,
+                cpu_peak_percent: outcome.cpu_peak_percent,
+                gpu_peak_percent: outcome.gpu_peak_percent,
+                vram_peak_mb: outcome.vram_peak_mb,
+            }
+        }
+    };
 
     // Postprocess
-    let raw = result.text.clone();
+    let raw = stopped.raw.clone();
     let mut text = if rules_on {
         postprocess::apply_rules(&raw)
     } else {
@@ -386,13 +604,13 @@ pub async fn stop_recording_impl(app: &AppHandle) -> Result<String, String> {
         events::EVT_TRANSCRIBED,
         events::TranscribedPayload {
             text: text.clone(),
-            duration_ms,
-            transcribe_ms,
-            model: model_name.clone(),
-            language: result.language.clone(),
-            cpu_peak_percent: cpu_peak,
-            gpu_peak_percent: gpu_peak,
-            vram_peak_mb: vram_peak,
+            duration_ms: stopped.duration_ms,
+            transcribe_ms: stopped.transcribe_ms,
+            model: stopped.model_name.clone(),
+            language: stopped.language.clone(),
+            cpu_peak_percent: stopped.cpu_peak_percent,
+            gpu_peak_percent: stopped.gpu_peak_percent,
+            vram_peak_mb: stopped.vram_peak_mb,
         },
     );
 
@@ -404,20 +622,26 @@ pub async fn stop_recording_impl(app: &AppHandle) -> Result<String, String> {
         } else {
             None
         };
-        let _ = queries::whisper_insert_history(
+        let _ = queries::whisper_insert_history_with_provider(
             &conn,
             &text,
             text_raw_opt,
-            &model_name,
-            duration_ms as i64,
-            transcribe_ms as i64,
-            result.language.as_deref(),
+            &stopped.model_name,
+            stopped.provider,
+            stopped.provider_model.as_deref(),
+            stopped.duration_ms as i64,
+            stopped.transcribe_ms as i64,
+            stopped.language.as_deref(),
             Some(injected),
-            cpu_peak,
-            gpu_peak,
-            vram_peak,
+            stopped.cpu_peak_percent,
+            stopped.gpu_peak_percent,
+            stopped.vram_peak_mb,
         )
         .map_err(|e| e.to_string());
+    }
+
+    if stopped.provider != "local" {
+        svc.finish_capture_only().await;
     }
 
     Ok(text)
@@ -440,23 +664,37 @@ pub async fn hotkey_toggle(app: AppHandle) {
     let local = app.state::<WhisperService>();
     let deepgram = app.state::<DeepgramLiveService>();
     let yandex = app.state::<YandexSpeechKitLiveService>();
+    let selected_engine = match selected_recognition_engine(&db) {
+        Ok(engine) => engine,
+        Err(e) => {
+            events::emit_to_whisper_windows(
+                &app,
+                events::EVT_ERROR,
+                events::ErrorPayload {
+                    code: "hotkey_toggle_failed".into(),
+                    message: e,
+                },
+            );
+            return;
+        }
+    };
     let action = decide_hotkey_action(
         live_dictate_enabled(&db),
-        selected_live_provider(&db),
+        selected_engine,
         local.current_state().await,
         deepgram.current_state().await,
         yandex.current_state().await,
     );
 
     let res = match action {
-        HotkeyAction::LocalStart => start_recording_impl(&app).await.map(|_| ()),
-        HotkeyAction::LocalStop => stop_recording_impl(&app).await.map(|_| ()),
+        HotkeyAction::BatchStart(_) => start_recording_impl(&app).await.map(|_| ()),
+        HotkeyAction::BatchStop => stop_recording_impl(&app).await.map(|_| ()),
         HotkeyAction::LiveStart(provider) => {
             start_live_provider(provider, &db, &deepgram, &yandex).await
         }
-        HotkeyAction::LiveStop(provider) => {
-            stop_live_provider(provider, &db, &deepgram, &yandex).await.map(|_| ())
-        }
+        HotkeyAction::LiveStop(provider) => stop_live_provider(provider, &db, &deepgram, &yandex)
+            .await
+            .map(|_| ()),
         HotkeyAction::Ignore => Ok(()),
     };
     if let Err(e) = res {
@@ -488,11 +726,11 @@ pub async fn whisper_stop_active(app: AppHandle) -> Result<String, String> {
         deepgram.current_state().await,
         yandex.current_state().await,
     ) {
-        HotkeyAction::LocalStop => stop_recording_impl(&app).await,
+        HotkeyAction::BatchStop => stop_recording_impl(&app).await,
         HotkeyAction::LiveStop(provider) => {
             stop_live_provider(provider, &db, &deepgram, &yandex).await
         }
-        HotkeyAction::Ignore | HotkeyAction::LocalStart | HotkeyAction::LiveStart(_) => {
+        HotkeyAction::Ignore | HotkeyAction::BatchStart(_) | HotkeyAction::LiveStart(_) => {
             Ok(String::new())
         }
     }
@@ -508,9 +746,11 @@ pub async fn whisper_cancel_active(app: AppHandle) -> Result<(), String> {
         deepgram.current_state().await,
         yandex.current_state().await,
     ) {
-        HotkeyAction::LocalStop => local.cancel_recording().await,
-        HotkeyAction::LiveStop(provider) => cancel_live_provider(provider, &deepgram, &yandex).await,
-        HotkeyAction::Ignore | HotkeyAction::LocalStart | HotkeyAction::LiveStart(_) => {}
+        HotkeyAction::BatchStop => local.cancel_recording().await,
+        HotkeyAction::LiveStop(provider) => {
+            cancel_live_provider(provider, &deepgram, &yandex).await
+        }
+        HotkeyAction::Ignore | HotkeyAction::BatchStart(_) | HotkeyAction::LiveStart(_) => {}
     }
     Ok(())
 }
@@ -566,7 +806,10 @@ fn deepgram_config_from_settings(db: &DbState) -> Result<DeepgramConfig, String>
     })
 }
 
-fn yandex_config_from_settings(db: &DbState) -> Result<YandexSpeechKitConfig, String> {
+fn yandex_config_from_settings(
+    db: &DbState,
+    require_folder_id: bool,
+) -> Result<YandexSpeechKitConfig, String> {
     let conn = db.lock_recover();
     let cid = computer_id();
     let api_key = queries::get_setting(&conn, &cid, "whisper.yandex_api_key")
@@ -584,6 +827,16 @@ fn yandex_config_from_settings(db: &DbState) -> Result<YandexSpeechKitConfig, St
         .flatten()
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| "general".into());
+    let folder_id = queries::get_setting(&conn, &cid, "whisper.yandex_folder_id")
+        .ok()
+        .flatten()
+        .filter(|s| !s.trim().is_empty());
+    if require_folder_id && folder_id.is_none() {
+        return Err(
+            "Yandex SpeechKit Folder ID is missing. Open Whisper Settings and add Folder ID for Yandex batch recognition."
+                .into(),
+        );
+    }
     let language = queries::get_setting(&conn, &cid, "whisper.yandex_language")
         .ok()
         .flatten()
@@ -620,6 +873,7 @@ fn yandex_config_from_settings(db: &DbState) -> Result<YandexSpeechKitConfig, St
         .filter(|s| !s.is_empty());
     Ok(YandexSpeechKitConfig {
         api_key,
+        folder_id,
         model,
         language,
         text_normalization,
@@ -639,7 +893,7 @@ async fn start_live_provider(
 ) -> Result<(), String> {
     match provider {
         LiveProvider::Deepgram => deepgram.start(deepgram_config_from_settings(db)?).await,
-        LiveProvider::Yandex => yandex.start(yandex_config_from_settings(db)?).await,
+        LiveProvider::Yandex => yandex.start(yandex_config_from_settings(db, false)?).await,
     }
 }
 
@@ -672,11 +926,7 @@ pub async fn whisper_live_start(
     deepgram: State<'_, DeepgramLiveService>,
     yandex: State<'_, YandexSpeechKitLiveService>,
 ) -> Result<(), String> {
-    if active_live_provider(
-        deepgram.current_state().await,
-        yandex.current_state().await,
-    )
-    .is_some()
+    if active_live_provider(deepgram.current_state().await, yandex.current_state().await).is_some()
     {
         return Ok(());
     }
@@ -689,11 +939,9 @@ pub async fn whisper_live_stop(
     deepgram: State<'_, DeepgramLiveService>,
     yandex: State<'_, YandexSpeechKitLiveService>,
 ) -> Result<String, String> {
-    let provider = active_live_provider(
-        deepgram.current_state().await,
-        yandex.current_state().await,
-    )
-    .unwrap_or_else(|| selected_live_provider(&db));
+    let provider =
+        active_live_provider(deepgram.current_state().await, yandex.current_state().await)
+            .unwrap_or_else(|| selected_live_provider(&db));
     stop_live_provider(provider, &db, &deepgram, &yandex).await
 }
 
@@ -702,10 +950,9 @@ pub async fn whisper_live_cancel(
     deepgram: State<'_, DeepgramLiveService>,
     yandex: State<'_, YandexSpeechKitLiveService>,
 ) -> Result<(), String> {
-    if let Some(provider) = active_live_provider(
-        deepgram.current_state().await,
-        yandex.current_state().await,
-    ) {
+    if let Some(provider) =
+        active_live_provider(deepgram.current_state().await, yandex.current_state().await)
+    {
         cancel_live_provider(provider, &deepgram, &yandex).await;
     }
     Ok(())
@@ -717,11 +964,9 @@ pub async fn whisper_live_status(
     deepgram: State<'_, DeepgramLiveService>,
     yandex: State<'_, YandexSpeechKitLiveService>,
 ) -> Result<serde_json::Value, String> {
-    let provider = active_live_provider(
-        deepgram.current_state().await,
-        yandex.current_state().await,
-    )
-    .unwrap_or_else(|| selected_live_provider(&db));
+    let provider =
+        active_live_provider(deepgram.current_state().await, yandex.current_state().await)
+            .unwrap_or_else(|| selected_live_provider(&db));
     match provider {
         LiveProvider::Deepgram => Ok(deepgram.status().await),
         LiveProvider::Yandex => Ok(yandex.status().await),
@@ -830,11 +1075,125 @@ mod tests {
     use crate::whisper::service::State as LocalState;
 
     #[test]
+    fn recognition_engine_setting_parses_local_and_cloud_values() {
+        let installed = ["ggml-base", "ggml-small"];
+
+        assert_eq!(
+            resolve_recognition_engine_setting(
+                Some("local:ggml-small"),
+                false,
+                LiveProvider::Deepgram,
+                Some("ggml-base"),
+                &installed,
+            )
+            .unwrap(),
+            RecognitionEngine::Local("ggml-small".into())
+        );
+        assert_eq!(
+            resolve_recognition_engine_setting(
+                Some("deepgram"),
+                false,
+                LiveProvider::Yandex,
+                Some("ggml-base"),
+                &installed,
+            )
+            .unwrap(),
+            RecognitionEngine::Deepgram
+        );
+        assert_eq!(
+            resolve_recognition_engine_setting(
+                Some("yandex"),
+                false,
+                LiveProvider::Deepgram,
+                Some("ggml-base"),
+                &installed,
+            )
+            .unwrap(),
+            RecognitionEngine::Yandex
+        );
+    }
+
+    #[test]
+    fn missing_recognition_engine_preserves_existing_live_settings() {
+        let installed = ["ggml-base"];
+
+        assert_eq!(
+            resolve_recognition_engine_setting(
+                None,
+                true,
+                LiveProvider::Yandex,
+                Some("ggml-base"),
+                &installed,
+            )
+            .unwrap(),
+            RecognitionEngine::Yandex
+        );
+        assert_eq!(
+            resolve_recognition_engine_setting(
+                None,
+                false,
+                LiveProvider::Deepgram,
+                Some("ggml-base"),
+                &installed,
+            )
+            .unwrap(),
+            RecognitionEngine::Local("ggml-base".into())
+        );
+    }
+
+    #[test]
+    fn invalid_or_deleted_local_engine_falls_back_to_default_model() {
+        let installed = ["ggml-base"];
+
+        assert_eq!(
+            resolve_recognition_engine_setting(
+                Some("local:ggml-missing"),
+                false,
+                LiveProvider::Deepgram,
+                Some("ggml-base"),
+                &installed,
+            )
+            .unwrap(),
+            RecognitionEngine::Local("ggml-base".into())
+        );
+        assert_eq!(
+            resolve_recognition_engine_setting(
+                Some("not-a-real-engine"),
+                false,
+                LiveProvider::Deepgram,
+                Some("ggml-base"),
+                &installed,
+            )
+            .unwrap(),
+            RecognitionEngine::Local("ggml-base".into())
+        );
+    }
+
+    #[test]
+    fn cloud_engine_does_not_require_local_model_when_explicitly_selected() {
+        assert_eq!(
+            resolve_recognition_engine_setting(
+                Some("deepgram"),
+                false,
+                LiveProvider::Deepgram,
+                None,
+                &[],
+            )
+            .unwrap(),
+            RecognitionEngine::Deepgram
+        );
+        assert!(
+            resolve_recognition_engine_setting(None, false, LiveProvider::Deepgram, None, &[],)
+                .is_err()
+        );
+    }
+
+    #[test]
     fn hotkey_uses_live_service_when_live_dictate_is_enabled() {
         assert_eq!(
             decide_hotkey_action(
                 true,
-                LiveProvider::Deepgram,
+                RecognitionEngine::Deepgram,
                 LocalState::Idle,
                 LiveState::Idle,
                 LiveState::Idle,
@@ -844,7 +1203,7 @@ mod tests {
         assert_eq!(
             decide_hotkey_action(
                 true,
-                LiveProvider::Deepgram,
+                RecognitionEngine::Deepgram,
                 LocalState::Ready,
                 LiveState::Streaming,
                 LiveState::Idle,
@@ -858,22 +1217,22 @@ mod tests {
         assert_eq!(
             decide_hotkey_action(
                 true,
-                LiveProvider::Deepgram,
+                RecognitionEngine::Deepgram,
                 LocalState::Recording,
                 LiveState::Idle,
                 LiveState::Idle,
             ),
-            HotkeyAction::LocalStop
+            HotkeyAction::BatchStop
         );
         assert_eq!(
             decide_hotkey_action(
                 true,
-                LiveProvider::Deepgram,
+                RecognitionEngine::Deepgram,
                 LocalState::Warming,
                 LiveState::Idle,
                 LiveState::Idle,
             ),
-            HotkeyAction::LocalStop
+            HotkeyAction::BatchStop
         );
     }
 
@@ -882,12 +1241,36 @@ mod tests {
         assert_eq!(
             decide_hotkey_action(
                 false,
-                LiveProvider::Deepgram,
+                RecognitionEngine::Deepgram,
                 LocalState::Idle,
                 LiveState::Streaming,
                 LiveState::Idle,
             ),
             HotkeyAction::LiveStop(LiveProvider::Deepgram)
+        );
+    }
+
+    #[test]
+    fn hotkey_starts_cloud_batch_when_cloud_engine_live_is_off() {
+        assert_eq!(
+            decide_hotkey_action(
+                false,
+                RecognitionEngine::Deepgram,
+                LocalState::Idle,
+                LiveState::Idle,
+                LiveState::Idle,
+            ),
+            HotkeyAction::BatchStart(RecognitionEngine::Deepgram)
+        );
+        assert_eq!(
+            decide_hotkey_action(
+                false,
+                RecognitionEngine::Yandex,
+                LocalState::Ready,
+                LiveState::Idle,
+                LiveState::Idle,
+            ),
+            HotkeyAction::BatchStart(RecognitionEngine::Yandex)
         );
     }
 
@@ -905,7 +1288,11 @@ mod tests {
             HotkeyAction::LiveStop(LiveProvider::Deepgram)
         );
         assert_eq!(
-            decide_active_stop_action(LocalState::Recording, LiveState::Connecting, LiveState::Idle),
+            decide_active_stop_action(
+                LocalState::Recording,
+                LiveState::Connecting,
+                LiveState::Idle
+            ),
             HotkeyAction::LiveStop(LiveProvider::Deepgram)
         );
     }
@@ -914,11 +1301,11 @@ mod tests {
     fn overlay_stop_falls_back_to_local_recording() {
         assert_eq!(
             decide_active_stop_action(LocalState::Recording, LiveState::Idle, LiveState::Idle),
-            HotkeyAction::LocalStop
+            HotkeyAction::BatchStop
         );
         assert_eq!(
             decide_active_stop_action(LocalState::Warming, LiveState::Idle, LiveState::Idle),
-            HotkeyAction::LocalStop
+            HotkeyAction::BatchStop
         );
     }
 
@@ -952,7 +1339,7 @@ mod tests {
         assert_eq!(
             decide_hotkey_action(
                 true,
-                LiveProvider::Yandex,
+                RecognitionEngine::Yandex,
                 LocalState::Idle,
                 LiveState::Idle,
                 LiveState::Idle,
@@ -964,11 +1351,7 @@ mod tests {
     #[test]
     fn stop_targets_active_yandex_even_if_deepgram_is_selected() {
         assert_eq!(
-            decide_active_stop_action(
-                LocalState::Ready,
-                LiveState::Idle,
-                LiveState::Streaming,
-            ),
+            decide_active_stop_action(LocalState::Ready, LiveState::Idle, LiveState::Streaming,),
             HotkeyAction::LiveStop(LiveProvider::Yandex)
         );
     }
@@ -978,7 +1361,7 @@ mod tests {
         assert_eq!(
             decide_hotkey_action(
                 true,
-                LiveProvider::Yandex,
+                RecognitionEngine::Yandex,
                 LocalState::Ready,
                 LiveState::Error,
                 LiveState::Idle,
@@ -988,7 +1371,7 @@ mod tests {
         assert_eq!(
             decide_hotkey_action(
                 true,
-                LiveProvider::Yandex,
+                RecognitionEngine::Yandex,
                 LocalState::Ready,
                 LiveState::Idle,
                 LiveState::Error,

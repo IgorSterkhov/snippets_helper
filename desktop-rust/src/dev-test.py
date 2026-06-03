@@ -384,9 +384,12 @@ async def run_tests():
           localStorage.setItem('mock.settings', JSON.stringify(settings));
           document.querySelector('.tab-btn[data-tab-id="whisper"]').click();
         })()""")
+        await wait_until(cdp, "!!document.querySelector('#panel-whisper #engine-select')", timeout=5)
         await wait_until(cdp, "!!document.querySelector('#panel-whisper #live-dictate-toggle')", timeout=5)
         label = await cdp.eval("document.querySelector('#panel-whisper #live-dictate-label')?.textContent || ''")
         assert 'Live dictate' in label, label
+        local_live_disabled = await cdp.eval("document.querySelector('#panel-whisper #live-dictate-toggle')?.disabled === true")
+        assert local_live_disabled, 'Local Whisper engine should disable Live dictate'
         has_help = await cdp.eval("!!document.querySelector('#panel-whisper .sql-help-btn')")
         assert has_help, 'Whisper help button missing'
         await cdp.eval("document.querySelector('#panel-whisper .sql-help-btn').click()")
@@ -423,6 +426,47 @@ async def run_tests():
         await wait_until(cdp, "!document.querySelector('.modal-overlay')", timeout=3)
 
         await cdp.eval("""(() => {
+          const settings = JSON.parse(localStorage.getItem('mock.settings') || '{}');
+          delete settings['whisper.recognition_engine'];
+          settings['whisper.live_provider'] = 'deepgram';
+          settings['whisper.live_dictate'] = 'true';
+          localStorage.setItem('mock.settings', JSON.stringify(settings));
+          window.dispatchEvent(new CustomEvent('whisper:settings-changed'));
+        })()""")
+        await wait_until(cdp, "document.querySelector('#panel-whisper #engine-select')?.value === 'deepgram'", timeout=4)
+        migrated_engine = await wait_until(
+            cdp,
+            "JSON.parse(localStorage.getItem('mock.settings') || '{}')['whisper.recognition_engine']",
+            timeout=4,
+        )
+        assert migrated_engine == 'deepgram', f'legacy cloud engine was not migrated: {migrated_engine!r}'
+        await wait_until(cdp, "document.querySelector('#panel-whisper #live-dictate-toggle')?.disabled === false", timeout=4)
+        await wait_until(cdp, "document.querySelector('#panel-whisper #live-dictate-toggle')?.checked === true", timeout=4)
+        await cdp.eval("document.querySelector('#panel-whisper #live-dictate-toggle').click()")
+        await wait_until(
+            cdp,
+            "JSON.parse(localStorage.getItem('mock.settings') || '{}')['whisper.live_dictate'] === 'false'",
+            timeout=4,
+        )
+        engine_after_live_off = await cdp.eval(
+            "JSON.parse(localStorage.getItem('mock.settings') || '{}')['whisper.recognition_engine']"
+        )
+        assert engine_after_live_off == 'deepgram', f'cloud engine changed after Live off: {engine_after_live_off!r}'
+        await wait_until(cdp, "document.querySelector('#panel-whisper #record-btn')?.textContent.includes('Record cloud')", timeout=4)
+        await cdp.eval("document.querySelector('#panel-whisper #record-btn').click()")
+        await wait_until(
+            cdp,
+            "document.querySelector('#panel-whisper #state-chip')?.textContent.includes('recording')",
+            timeout=4,
+        )
+        await cdp.eval("document.querySelector('#panel-whisper #record-btn').click()")
+        await wait_until(
+            cdp,
+            "[...document.querySelectorAll('#panel-whisper [data-provider=\"deepgram\"]')].length >= 1",
+            timeout=4,
+        )
+
+        await cdp.eval("""(() => {
           document.querySelector('#panel-whisper #live-dictate-toggle').click();
           document.querySelector('#panel-whisper #record-btn').click();
         })()""")
@@ -450,12 +494,16 @@ async def run_tests():
         await cdp.eval("""(() => {
           const settings = JSON.parse(localStorage.getItem('mock.settings') || '{}');
           delete settings['whisper.deepgram_api_key'];
+          settings['whisper.recognition_engine'] = 'deepgram';
+          settings['whisper.live_provider'] = 'deepgram';
           settings['whisper.live_dictate'] = 'true';
           localStorage.setItem('mock.settings', JSON.stringify(settings));
           window.__mockClipboardText = '';
           document.querySelector('.tab-btn[data-tab-id="whisper"]').click();
+          window.dispatchEvent(new CustomEvent('whisper:settings-changed'));
         })()""")
         await wait_until(cdp, "!!document.querySelector('#panel-whisper #live-dictate-toggle')", timeout=5)
+        await wait_until(cdp, "document.querySelector('#panel-whisper #live-dictate-toggle')?.disabled === false", timeout=4)
         await cdp.eval("""(() => {
           const toggle = document.querySelector('#panel-whisper #live-dictate-toggle');
           if (!toggle.checked) toggle.click();
@@ -759,12 +807,27 @@ async def run_tests():
     # ── T2n: AI mic records into prompt input ─────────────────
     async def t2n_ai_mic_records_into_prompt():
         await close_modals()
+        await cdp.eval("""(() => {
+          const settings = JSON.parse(localStorage.getItem('mock.settings') || '{}');
+          settings['ai.voice_provider'] = 'local';
+          localStorage.setItem('mock.settings', JSON.stringify(settings));
+        })()""")
+        await cdp.eval("window.__TAURI__.core.invoke('whisper_install_model', { name: 'ggml-small' })")
         await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"ai\"]').click()")
         await wait_until(cdp, "!!document.querySelector('#panel-ai .ai-mic-btn')", timeout=4)
         has_voice_select = await cdp.eval("!!document.querySelector('#panel-ai .ai-voice-provider-select')")
         assert has_voice_select, 'AI voice provider selector missing'
+        await wait_until(cdp, "document.querySelector('#panel-ai .ai-voice-provider-select')?.value === 'local'", timeout=4)
+        await wait_until(cdp, "document.querySelector('#panel-ai .ai-mic-btn')?.disabled === false", timeout=4)
         await cdp.eval("document.querySelector('#panel-ai .ai-mic-btn').click()")
-        await wait_until(cdp, "document.querySelector('#panel-ai .ai-mic-btn')?.textContent.includes('Stop')", timeout=3)
+        start_result = await wait_until(cdp, """(() => {
+          const mic = document.querySelector('#panel-ai .ai-mic-btn');
+          if (mic?.textContent.includes('Stop')) return 'recording';
+          const err = document.querySelector('.error-dialog-details')?.textContent
+            || document.querySelector('.error-dialog-message')?.textContent;
+          return err ? `error: ${err}` : null;
+        })()""", timeout=3)
+        assert start_result == 'recording', start_result
         await cdp.eval("document.querySelector('#panel-ai .ai-mic-btn').click()")
         await wait_until(
             cdp,

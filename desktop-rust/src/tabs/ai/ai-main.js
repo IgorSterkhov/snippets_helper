@@ -317,6 +317,8 @@ async function toggleVoiceRecording() {
   const cloudVoice = state.voiceProvider === 'deepgram' || state.voiceProvider === 'yandex';
   let previousLiveProvider = null;
   let liveProviderTemporarilyChanged = false;
+  let previousRecognitionEngine = null;
+  let recognitionEngineTemporarilyChanged = false;
   state.voiceBusy = true;
   renderVoiceButton();
   renderVoiceProvider();
@@ -328,6 +330,12 @@ async function toggleVoiceRecording() {
         liveProviderTemporarilyChanged = true;
         await whisperApi.startLive();
       } else {
+        const models = await whisperApi.listModels();
+        const local = models.find(m => m.is_default) || models[0];
+        if (!local) throw new Error('No local Whisper model installed.');
+        previousRecognitionEngine = await whisperApi.getSetting('whisper.recognition_engine');
+        await whisperApi.setSetting('whisper.recognition_engine', `local:${local.name}`);
+        recognitionEngineTemporarilyChanged = true;
         await whisperApi.startRecording();
       }
       state.voiceRecording = true;
@@ -355,6 +363,13 @@ async function toggleVoiceRecording() {
         await whisperApi.setSetting('whisper.live_provider', previousLiveProvider || 'deepgram');
       } catch (restoreErr) {
         console.warn('[ai] failed to restore whisper live provider', restoreErr);
+      }
+    }
+    if (recognitionEngineTemporarilyChanged) {
+      try {
+        await whisperApi.setSetting('whisper.recognition_engine', previousRecognitionEngine || '');
+      } catch (restoreErr) {
+        console.warn('[ai] failed to restore whisper recognition engine', restoreErr);
       }
     }
     state.voiceBusy = false;

@@ -4,11 +4,12 @@ use crate::whisper::deepgram::{
 };
 use crate::whisper::inject;
 use crate::whisper::speechkit_proto::{
-    audio_format_options, final_refinement, recognizer_client::RecognizerClient,
-    streaming_request, streaming_response, AlternativeUpdate, AudioChunk, AudioFormatOptions,
+    audio_format_options, final_refinement, recognizer_client::RecognizerClient, streaming_request,
+    streaming_response, AlternativeUpdate, AudioChunk, AudioFormatOptions,
     LanguageRestrictionOptions, RawAudio, RecognitionModelOptions, StreamingOptions,
     StreamingRequest, StreamingResponse, TextNormalizationOptions,
 };
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::AppHandle;
@@ -18,13 +19,20 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::metadata::MetadataValue;
 
 const SPEECHKIT_ENDPOINT: &str = "https://stt.api.cloud.yandex.net:443";
+const SPEECHKIT_RECOGNIZE_FILE_ENDPOINT: &str =
+    "https://stt.api.cloud.yandex.net/stt/v3/recognizeFileAsync";
+const SPEECHKIT_GET_RECOGNITION_ENDPOINT: &str =
+    "https://stt.api.cloud.yandex.net/stt/v3/getRecognition";
+const YANDEX_OPERATION_ENDPOINT: &str = "https://operation.api.cloud.yandex.net/operations";
 const LIVE_AUDIO_QUEUE_CAPACITY: usize = 64;
 const FINALIZE_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 const SPEECHKIT_MAX_STREAM_DURATION: Duration = Duration::from_secs(270);
+const SPEECHKIT_BATCH_TIMEOUT: Duration = Duration::from_secs(90);
 
 #[derive(Debug, Clone)]
 pub struct YandexSpeechKitConfig {
     pub api_key: String,
+    pub folder_id: Option<String>,
     pub model: String,
     pub language: Option<String>,
     pub text_normalization: bool,
@@ -335,20 +343,20 @@ pub fn build_speechkit_options(cfg: &YandexSpeechKitConfig) -> StreamingOptions 
 
 pub fn parse_speechkit_response(response: StreamingResponse) -> Option<SpeechKitTranscript> {
     match response.event? {
-        streaming_response::Event::Partial(update) => first_text(update).map(|text| {
-            SpeechKitTranscript {
+        streaming_response::Event::Partial(update) => {
+            first_text(update).map(|text| SpeechKitTranscript {
                 transcript: text,
                 is_final: false,
                 is_normalized: false,
-            }
-        }),
-        streaming_response::Event::Final(update) => first_text(update).map(|text| {
-            SpeechKitTranscript {
+            })
+        }
+        streaming_response::Event::Final(update) => {
+            first_text(update).map(|text| SpeechKitTranscript {
                 transcript: text,
                 is_final: true,
                 is_normalized: false,
-            }
-        }),
+            })
+        }
         streaming_response::Event::FinalRefinement(refinement) => {
             let final_refinement::Type::NormalizedText(update) = refinement.r#type?;
             first_text(update).map(|text| SpeechKitTranscript {
@@ -359,6 +367,356 @@ pub fn parse_speechkit_response(response: StreamingResponse) -> Option<SpeechKit
         }
         streaming_response::Event::StatusCode(_) => None,
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct YandexBatchTranscript {
+    pub text: String,
+    pub language: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct YandexBatchSegment {
+    key: String,
+    final_text: Option<String>,
+    normalized_text: Option<String>,
+    language: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum YandexBatchOperation {
+    Pending(String),
+    Ready(String),
+}
+
+pub fn build_yandex_batch_request_json(
+    cfg: &YandexSpeechKitConfig,
+    wav: &[u8],
+) -> Result<serde_json::Value, String> {
+    if wav.is_empty() {
+        return Err("recorded WAV is empty".into());
+    }
+    let model = if cfg.model.trim().is_empty() {
+        "general"
+    } else {
+        cfg.model.trim()
+    };
+    let mut recognition_model = serde_json::json!({
+        "model": model,
+        "audioFormat": {
+            "containerAudio": {
+                "containerAudioType": "WAV"
+            }
+        },
+        "textNormalization": {
+            "textNormalization": if cfg.text_normalization {
+                "TEXT_NORMALIZATION_ENABLED"
+            } else {
+                "TEXT_NORMALIZATION_DISABLED"
+            },
+            "profanityFilter": cfg.profanity_filter,
+            "literatureText": cfg.literature_text,
+            "phoneFormattingMode": if cfg.phone_formatting {
+                "PHONE_FORMATTING_MODE_UNSPECIFIED"
+            } else {
+                "PHONE_FORMATTING_MODE_DISABLED"
+            }
+        },
+        "audioProcessingType": "FULL_DATA"
+    });
+    if let Some(language) = cfg
+        .language
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty() && *s != "auto")
+    {
+        recognition_model["languageRestriction"] = serde_json::json!({
+            "restrictionType": "WHITELIST",
+            "languageCode": [language],
+        });
+    }
+    Ok(serde_json::json!({
+        "content": BASE64_STANDARD.encode(wav),
+        "recognitionModel": recognition_model,
+    }))
+}
+
+pub fn parse_yandex_operation_status(raw: &str) -> Result<YandexBatchOperation, String> {
+    let parsed: serde_json::Value =
+        serde_json::from_str(raw).map_err(|e| format!("yandex operation json parse: {e}"))?;
+    if let Some(message) = parsed
+        .get("error")
+        .and_then(|e| e.get("message"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        return Err(format!("yandex speechkit operation failed: {message}"));
+    }
+    let id = parsed
+        .get("id")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| "yandex operation response missing id".to_string())?
+        .to_string();
+    if parsed
+        .get("done")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        Ok(YandexBatchOperation::Ready(id))
+    } else {
+        Ok(YandexBatchOperation::Pending(id))
+    }
+}
+
+pub fn parse_yandex_batch_recognition_response(raw: &str) -> Result<YandexBatchTranscript, String> {
+    let values = parse_yandex_json_values(raw)?;
+    let mut segments: Vec<YandexBatchSegment> = Vec::new();
+    let mut fallback_index = 0usize;
+
+    for value in &values {
+        if let Some(alternative) = first_pointer(
+            value,
+            &[
+                "/finalRefinement/normalizedText/alternatives/0",
+                "/result/finalRefinement/normalizedText/alternatives/0",
+            ],
+        ) {
+            fallback_index += 1;
+            let key = first_pointer_string(
+                value,
+                &[
+                    "/finalRefinement/finalIndex",
+                    "/result/finalRefinement/finalIndex",
+                    "/audioCursors/finalIndex",
+                    "/result/audioCursors/finalIndex",
+                ],
+            )
+            .unwrap_or_else(|| format!("normalized-{fallback_index}"));
+            let text = alternative_text(alternative)
+                .ok_or_else(|| "yandex recognition response missing transcript".to_string())?;
+            let language = alternative_language(alternative);
+            let segment = upsert_yandex_batch_segment(&mut segments, key);
+            segment.normalized_text = Some(text);
+            if segment.language.is_none() {
+                segment.language = language;
+            }
+            continue;
+        }
+
+        if let Some(alternative) = first_pointer(
+            value,
+            &["/final/alternatives/0", "/result/final/alternatives/0"],
+        ) {
+            fallback_index += 1;
+            let key = first_pointer_string(
+                value,
+                &[
+                    "/audioCursors/finalIndex",
+                    "/result/audioCursors/finalIndex",
+                ],
+            )
+            .unwrap_or_else(|| format!("final-{fallback_index}"));
+            let text = alternative_text(alternative)
+                .ok_or_else(|| "yandex recognition response missing transcript".to_string())?;
+            let language = alternative_language(alternative);
+            let segment = upsert_yandex_batch_segment(&mut segments, key);
+            segment.final_text = Some(text);
+            if segment.language.is_none() {
+                segment.language = language;
+            }
+        }
+    }
+
+    let text = segments
+        .iter()
+        .filter_map(|segment| {
+            segment
+                .normalized_text
+                .as_ref()
+                .or(segment.final_text.as_ref())
+        })
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    if text.trim().is_empty() {
+        return Err("yandex recognition response missing first final alternative".to_string());
+    }
+    let language = segments
+        .iter()
+        .find_map(|segment| segment.language.as_ref().cloned());
+    Ok(YandexBatchTranscript { text, language })
+}
+
+fn parse_yandex_json_values(raw: &str) -> Result<Vec<serde_json::Value>, String> {
+    let mut values = Vec::new();
+    let stream = serde_json::Deserializer::from_str(raw).into_iter::<serde_json::Value>();
+    for value in stream {
+        values.push(value.map_err(|e| format!("yandex recognition json parse: {e}"))?);
+    }
+    if values.len() == 1 {
+        if let Some(items) = values[0].as_array() {
+            values = items.clone();
+        }
+    }
+    if values.is_empty() {
+        return Err("yandex recognition response is empty".into());
+    }
+    Ok(values)
+}
+
+fn first_pointer<'a>(
+    value: &'a serde_json::Value,
+    pointers: &[&str],
+) -> Option<&'a serde_json::Value> {
+    pointers.iter().find_map(|pointer| value.pointer(pointer))
+}
+
+fn first_pointer_string(value: &serde_json::Value, pointers: &[&str]) -> Option<String> {
+    first_pointer(value, pointers)
+        .and_then(|v| {
+            v.as_str()
+                .map(ToOwned::to_owned)
+                .or_else(|| v.as_i64().map(|n| n.to_string()))
+                .or_else(|| v.as_u64().map(|n| n.to_string()))
+        })
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+fn alternative_text(alternative: &serde_json::Value) -> Option<String> {
+    alternative
+        .get("text")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToOwned::to_owned)
+        .or_else(|| {
+            alternative
+                .get("words")
+                .and_then(|v| v.as_array())
+                .map(|words| {
+                    words
+                        .iter()
+                        .filter_map(|word| word.get("text").and_then(|v| v.as_str()))
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                })
+                .filter(|s| !s.trim().is_empty())
+        })
+}
+
+fn alternative_language(alternative: &serde_json::Value) -> Option<String> {
+    alternative
+        .get("languages")
+        .and_then(|v| v.as_array())
+        .and_then(|languages| languages.first())
+        .and_then(|language| {
+            language
+                .get("languageCode")
+                .or_else(|| language.get("language_code"))
+        })
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn upsert_yandex_batch_segment(
+    segments: &mut Vec<YandexBatchSegment>,
+    key: String,
+) -> &mut YandexBatchSegment {
+    if let Some(index) = segments.iter().position(|segment| segment.key == key) {
+        return &mut segments[index];
+    }
+    segments.push(YandexBatchSegment {
+        key,
+        final_text: None,
+        normalized_text: None,
+        language: None,
+    });
+    segments.last_mut().expect("just pushed segment")
+}
+
+pub async fn transcribe_file(
+    cfg: &YandexSpeechKitConfig,
+    wav: Vec<u8>,
+) -> Result<YandexBatchTranscript, String> {
+    if cfg.api_key.trim().is_empty() {
+        return Err(
+            "Yandex SpeechKit API key is missing. Open Whisper Settings and add a local Yandex key."
+                .into(),
+        );
+    }
+    let body = build_yandex_batch_request_json(cfg, &wav)?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("yandex speechkit client: {e}"))?;
+
+    let started = send_yandex_json_request(
+        client.post(SPEECHKIT_RECOGNIZE_FILE_ENDPOINT).json(&body),
+        cfg,
+    )
+    .await?;
+    let mut operation = parse_yandex_operation_status(&started)?;
+    let operation_id = match &operation {
+        YandexBatchOperation::Pending(id) | YandexBatchOperation::Ready(id) => id.clone(),
+    };
+
+    let deadline = std::time::Instant::now() + SPEECHKIT_BATCH_TIMEOUT;
+    while matches!(operation, YandexBatchOperation::Pending(_)) {
+        if std::time::Instant::now() >= deadline {
+            return Err(format!(
+                "Yandex SpeechKit recognition timed out after {}s",
+                SPEECHKIT_BATCH_TIMEOUT.as_secs()
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(1000)).await;
+        let url = format!("{YANDEX_OPERATION_ENDPOINT}/{operation_id}");
+        let text = send_yandex_json_request(client.get(url), cfg).await?;
+        operation = parse_yandex_operation_status(&text)?;
+    }
+
+    let mut url = reqwest::Url::parse(SPEECHKIT_GET_RECOGNITION_ENDPOINT)
+        .map_err(|e| format!("yandex getRecognition url: {e}"))?;
+    url.query_pairs_mut()
+        .append_pair("operationId", &operation_id);
+    let text = send_yandex_json_request(client.get(url), cfg).await?;
+    parse_yandex_batch_recognition_response(&text)
+}
+
+async fn send_yandex_json_request(
+    request: reqwest::RequestBuilder,
+    cfg: &YandexSpeechKitConfig,
+) -> Result<String, String> {
+    let mut request = request.header("Authorization", format!("Api-Key {}", cfg.api_key.trim()));
+    if let Some(folder_id) = cfg
+        .folder_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        request = request.header("x-folder-id", folder_id);
+    }
+    let response = request
+        .send()
+        .await
+        .map_err(|e| format!("yandex speechkit request: {e}"))?;
+    let status = response.status();
+    let text = response
+        .text()
+        .await
+        .map_err(|e| format!("yandex speechkit response read: {e}"))?;
+    if !status.is_success() {
+        return Err(format!("Yandex SpeechKit HTTP {status}: {text}"));
+    }
+    Ok(text)
 }
 
 pub fn build_paste_chunk(committed_text: &str, finalized_delta: &str) -> String {
@@ -414,7 +772,12 @@ async fn run_speechkit_stream(
         let mut g = inner.lock().await;
         g.state = LiveState::Streaming;
     }
-    emit_live_state(&app, LiveState::Streaming, Some(cfg.model.clone()), "yandex");
+    emit_live_state(
+        &app,
+        LiveState::Streaming,
+        Some(cfg.model.clone()),
+        "yandex",
+    );
 
     let max_stream_timer = tokio::time::sleep(SPEECHKIT_MAX_STREAM_DURATION);
     tokio::pin!(max_stream_timer);
@@ -617,9 +980,172 @@ mod tests {
     use super::*;
 
     #[test]
+    fn build_yandex_batch_request_uses_async_file_shape() {
+        let cfg = YandexSpeechKitConfig {
+            api_key: "test-key".into(),
+            folder_id: None,
+            model: "general".into(),
+            language: Some("ru-RU".into()),
+            text_normalization: true,
+            literature_text: true,
+            profanity_filter: false,
+            phone_formatting: false,
+            clipboard_restore_delay_ms: 200,
+            mic_device: None,
+        };
+
+        let body = build_yandex_batch_request_json(&cfg, b"RIFFwav").unwrap();
+
+        assert_eq!(body["content"], "UklGRndhdg==");
+        assert_eq!(body["recognitionModel"]["model"], "general");
+        assert_eq!(
+            body["recognitionModel"]["audioFormat"]["containerAudio"]["containerAudioType"],
+            "WAV"
+        );
+        assert_eq!(
+            body["recognitionModel"]["languageRestriction"]["languageCode"][0],
+            "ru-RU"
+        );
+        assert_eq!(
+            body["recognitionModel"]["textNormalization"]["textNormalization"],
+            "TEXT_NORMALIZATION_ENABLED"
+        );
+        assert_eq!(
+            body["recognitionModel"]["textNormalization"]["phoneFormattingMode"],
+            "PHONE_FORMATTING_MODE_DISABLED"
+        );
+        assert_eq!(
+            body["recognitionModel"]["textNormalization"]["literatureText"],
+            true
+        );
+    }
+
+    #[test]
+    fn parse_yandex_batch_operation_states() {
+        let pending = parse_yandex_operation_status(r#"{"id":"op-1","done":false}"#).unwrap();
+        assert_eq!(pending, YandexBatchOperation::Pending("op-1".into()));
+
+        let ready = parse_yandex_operation_status(r#"{"id":"op-1","done":true}"#).unwrap();
+        assert_eq!(ready, YandexBatchOperation::Ready("op-1".into()));
+
+        let failed = parse_yandex_operation_status(
+            r#"{"id":"op-1","done":true,"error":{"message":"bad key"}}"#,
+        );
+        assert!(failed.unwrap_err().contains("bad key"));
+    }
+
+    #[test]
+    fn parse_yandex_batch_get_recognition_result() {
+        let json = r#"{
+          "final": {
+            "alternatives": [
+              {
+                "words": [
+                  {"text": "Привет"},
+                  {"text": "мир"}
+                ],
+                "text": "Привет мир.",
+                "languages": [
+                  {"languageCode": "ru-RU", "probability": "1.0"}
+                ]
+              }
+            ]
+          }
+        }"#;
+
+        let parsed = parse_yandex_batch_recognition_response(json).unwrap();
+        assert_eq!(parsed.text, "Привет мир.");
+        assert_eq!(parsed.language.as_deref(), Some("ru-RU"));
+    }
+
+    #[test]
+    fn parse_yandex_batch_prefers_normalized_text() {
+        let json = r#"{
+          "final": {
+            "alternatives": [
+              {
+                "words": [
+                  {"text": "привет"},
+                  {"text": "мир"}
+                ],
+                "text": "привет мир"
+              }
+            ]
+          },
+          "finalRefinement": {
+            "normalizedText": {
+              "alternatives": [
+                {
+                  "text": "Привет, мир.",
+                  "languages": [
+                    {"languageCode": "ru-RU", "probability": "1.0"}
+                  ]
+                }
+              ]
+            }
+          }
+        }"#;
+
+        let parsed = parse_yandex_batch_recognition_response(json).unwrap();
+        assert_eq!(parsed.text, "Привет, мир.");
+        assert_eq!(parsed.language.as_deref(), Some("ru-RU"));
+    }
+
+    #[test]
+    fn parse_yandex_batch_concatenates_streamed_result_objects() {
+        let json = r#"{
+          "result": {
+            "audioCursors": {"finalIndex": "0"},
+            "final": {
+              "alternatives": [
+                {
+                  "text": "первая часть",
+                  "languages": [
+                    {"languageCode": "ru-RU", "probability": "1.0"}
+                  ]
+                }
+              ]
+            }
+          }
+        }
+        {
+          "result": {
+            "finalRefinement": {
+              "finalIndex": "0",
+              "normalizedText": {
+                "alternatives": [
+                  {"text": "Первая часть."}
+                ]
+              }
+            }
+          }
+        }
+        {
+          "result": {
+            "audioCursors": {"finalIndex": "1"},
+            "final": {
+              "alternatives": [
+                {
+                  "words": [
+                    {"text": "Вторая"},
+                    {"text": "часть."}
+                  ]
+                }
+              ]
+            }
+          }
+        }"#;
+
+        let parsed = parse_yandex_batch_recognition_response(json).unwrap();
+        assert_eq!(parsed.text, "Первая часть. Вторая часть.");
+        assert_eq!(parsed.language.as_deref(), Some("ru-RU"));
+    }
+
+    #[test]
     fn build_speechkit_options_defaults_to_ru_realtime_linear16() {
         let cfg = YandexSpeechKitConfig {
             api_key: "test-key".into(),
+            folder_id: None,
             model: "general".into(),
             language: Some("ru-RU".into()),
             text_normalization: true,
@@ -659,6 +1185,7 @@ mod tests {
     fn build_speechkit_options_applies_user_normalization_flags() {
         let cfg = YandexSpeechKitConfig {
             api_key: "test-key".into(),
+            folder_id: None,
             model: "general".into(),
             language: Some("ru-RU".into()),
             text_normalization: true,
@@ -681,13 +1208,15 @@ mod tests {
     #[test]
     fn parse_partial_response_returns_interim() {
         let response = crate::whisper::speechkit_proto::StreamingResponse {
-            event: Some(crate::whisper::speechkit_proto::streaming_response::Event::Partial(
-                crate::whisper::speechkit_proto::AlternativeUpdate {
-                    alternatives: vec![crate::whisper::speechkit_proto::Alternative {
-                        text: "проверка микрофона".into(),
-                    }],
-                },
-            )),
+            event: Some(
+                crate::whisper::speechkit_proto::streaming_response::Event::Partial(
+                    crate::whisper::speechkit_proto::AlternativeUpdate {
+                        alternatives: vec![crate::whisper::speechkit_proto::Alternative {
+                            text: "проверка микрофона".into(),
+                        }],
+                    },
+                ),
+            ),
         };
 
         let parsed = parse_speechkit_response(response).expect("parsed");
@@ -705,9 +1234,11 @@ mod tests {
                         r#type: Some(
                             crate::whisper::speechkit_proto::final_refinement::Type::NormalizedText(
                                 crate::whisper::speechkit_proto::AlternativeUpdate {
-                                    alternatives: vec![crate::whisper::speechkit_proto::Alternative {
-                                        text: "Купить 2 упаковки.".into(),
-                                    }],
+                                    alternatives: vec![
+                                        crate::whisper::speechkit_proto::Alternative {
+                                            text: "Купить 2 упаковки.".into(),
+                                        },
+                                    ],
                                 },
                             ),
                         ),

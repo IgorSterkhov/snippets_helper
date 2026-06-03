@@ -388,6 +388,8 @@
     liveCommittedText: '',
     liveModel: 'nova-3',
     liveProvider: 'deepgram',
+    recordingProvider: 'local',
+    recordingModel: 'ggml-small',
   };
 
   const whisperCatalog = [
@@ -1347,8 +1349,39 @@
       return null;
     },
     whisper_start_recording() {
+      const settings = storeGet('settings', {});
+      const defaultModel = whisperMockState.installedModels.find(m => m.is_default)?.name
+        || whisperMockState.installedModels[0]?.name
+        || 'ggml-small';
+      let engine = settings['whisper.recognition_engine'];
+      if (!engine) {
+        engine = settings['whisper.live_dictate'] === 'true'
+          ? (settings['whisper.live_provider'] === 'yandex' ? 'yandex' : 'deepgram')
+          : `local:${defaultModel}`;
+      }
+      let provider = 'local';
+      let model = defaultModel;
+      if (engine === 'deepgram' || engine === 'yandex') {
+        provider = engine;
+        const apiKey = provider === 'yandex'
+          ? (settings['whisper.yandex_api_key'] || '')
+          : (settings['whisper.deepgram_api_key'] || '');
+        if (!String(apiKey).trim()) {
+          throw new Error(provider === 'yandex' ? 'Yandex SpeechKit API key is missing' : 'Deepgram API key is missing');
+        }
+        if (provider === 'yandex' && !String(settings['whisper.yandex_folder_id'] || '').trim()) {
+          throw new Error('Yandex SpeechKit Folder ID is missing');
+        }
+        model = provider === 'yandex'
+          ? (settings['whisper.yandex_model'] || 'general')
+          : (settings['whisper.deepgram_model'] || 'nova-3');
+      } else if (String(engine).startsWith('local:')) {
+        model = String(engine).slice('local:'.length) || defaultModel;
+      }
+      whisperMockState.recordingProvider = provider;
+      whisperMockState.recordingModel = model;
       whisperMockState.currentState = 'recording';
-      window.dispatchEvent(new CustomEvent('whisper:state-changed', { detail: { state: 'recording', model: 'ggml-small' } }));
+      window.dispatchEvent(new CustomEvent('whisper:state-changed', { detail: { state: 'recording', model } }));
       whisperMockState.levelTimer = setInterval(() => {
         const rms = 0.2 + 0.5 * Math.abs(Math.sin(Date.now() / 120));
         window.dispatchEvent(new CustomEvent('whisper:level', { detail: { rms } }));
@@ -1359,18 +1392,22 @@
       if (whisperMockState.levelTimer) clearInterval(whisperMockState.levelTimer);
       whisperMockState.levelTimer = null;
       whisperMockState.currentState = 'transcribing';
-      window.dispatchEvent(new CustomEvent('whisper:state-changed', { detail: { state: 'transcribing', model: 'ggml-small' } }));
+      window.dispatchEvent(new CustomEvent('whisper:state-changed', { detail: { state: 'transcribing', model: whisperMockState.recordingModel } }));
       await new Promise(r => setTimeout(r, 400));
-      const text = 'Mocked transcript: это тестовая запись, привет мир.';
+      const provider = whisperMockState.recordingProvider || 'local';
+      const model = whisperMockState.recordingModel || 'ggml-small';
+      const text = provider === 'local'
+        ? 'Mocked transcript: это тестовая запись, привет мир.'
+        : `Mocked ${provider} transcript: это облачная запись.`;
       whisperMockState.history.unshift({
-        id: Date.now(), text, text_raw: null, model_name: 'ggml-small',
-        provider: 'local', provider_model: 'ggml-small',
+        id: Date.now(), text, text_raw: null, model_name: model,
+        provider, provider_model: model,
         duration_ms: 3000, transcribe_ms: 400, language: 'ru', injected_to: 'paste',
         created_at: Math.floor(Date.now() / 1000),
       });
-      whisperMockState.currentState = 'ready';
-      window.dispatchEvent(new CustomEvent('whisper:state-changed', { detail: { state: 'ready', model: 'ggml-small' } }));
-      window.dispatchEvent(new CustomEvent('whisper:transcribed', { detail: { text, duration_ms: 3000, transcribe_ms: 400, model: 'ggml-small', language: 'ru' } }));
+      whisperMockState.currentState = provider === 'local' ? 'ready' : 'idle';
+      window.dispatchEvent(new CustomEvent('whisper:state-changed', { detail: { state: whisperMockState.currentState, model: provider === 'local' ? model : null } }));
+      window.dispatchEvent(new CustomEvent('whisper:transcribed', { detail: { text, duration_ms: 3000, transcribe_ms: 400, model, language: 'ru' } }));
       return text;
     },
     whisper_cancel_recording() {

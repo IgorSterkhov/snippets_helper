@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## v1.6.0 (2026-06-03)
+
+- **Whisper recognition engine selector:** the Whisper header now separates
+  Recognition engine from Live dictate mode. Local Whisper models, Deepgram,
+  and Yandex SpeechKit are selected in one engine dropdown; Live dictate is
+  enabled only for cloud engines.
+- **Cloud batch transcription:** Deepgram and Yandex SpeechKit can now be used
+  with Live dictate off. The desktop records local WAV audio, sends it directly
+  to the selected provider after Stop, then runs the existing cleanup,
+  insertion, and history persistence pipeline with provider/model metadata.
+- **Yandex batch setup:** Settings > Whisper now exposes the required Yandex
+  Folder ID for async file recognition, validates it before recording, and
+  reads normalized multi-part SpeechKit results when available.
+
 ## f-20260603-1 (2026-06-03)
 
 - **Tasks checkbox arrow navigation:** Inline checkbox editing now keeps native

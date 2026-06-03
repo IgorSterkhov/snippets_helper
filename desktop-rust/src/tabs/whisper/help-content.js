@@ -4,19 +4,27 @@
 export const WHISPER_HELP_HTML = `
 <p>
   <strong>Whisper</strong> — модуль голосового ввода. Он умеет работать в двух
-  режимах: локальная запись через установленную whisper.cpp-модель и
-  <strong>Live dictate</strong>, где аудио потоково отправляется в облачный
-  провайдер и готовые фрагменты вставляются в активное окно.
+  измерениях: <strong>Recognition engine</strong> выбирает локальный или
+  облачный движок распознавания, а <strong>Live dictate</strong> включает
+  потоковую вставку текста в активное окно.
 </p>
 
 <h4>Быстрый выбор режима</h4>
 <ul>
+  <li><strong>Recognition engine</strong> — выберите локальную Whisper-модель,
+      <em>Deepgram</em> или <em>Yandex SpeechKit</em> в header вкладки.</li>
   <li><strong>Local Whisper</strong> — нажмите <em>Record</em>, говорите,
       нажмите <em>Stop</em>. Распознавание идет локально выбранной моделью
       Whisper. Чем больше модель, тем выше качество и тем больше нагрузка.</li>
+  <li><strong>Cloud batch</strong> — выберите <em>Deepgram</em> или
+      <em>Yandex SpeechKit</em>, оставьте <strong>Live dictate</strong>
+      выключенным, нажмите <em>Record cloud</em>, затем <em>Stop</em>.
+      Записанный WAV отправляется напрямую выбранному провайдеру.</li>
   <li><strong>Live dictate</strong> — включите checkbox в header, выберите
-      <em>Deepgram</em> или <em>Yandex SpeechKit</em>, затем нажмите
-      <em>Start live</em>. Финальные фразы будут вставляться в активное окно.</li>
+      облачный engine, затем нажмите <em>Start live</em>. Финальные фразы
+      будут вставляться в активное окно. Для локальных Whisper-моделей этот
+      checkbox выключен, потому что локальный live streaming пока не
+      поддерживается.</li>
   <li><strong>AI tab voice</strong> использует те же локальные настройки
       Whisper/Deepgram/Yandex, но вставляет остановленный transcript в prompt
       AI Agent.</li>
@@ -46,6 +54,9 @@ export const WHISPER_HELP_HTML = `
       <code>aje...</code>: по нему SpeechKit вернет ошибку
       <code>Unknown api key</code>.</li>
   <li>Скопируйте ключ в <strong>Settings &gt; Whisper &gt; Yandex SpeechKit</strong>.</li>
+  <li>Для batch-распознавания файлов нужен <strong>Folder ID</strong>.
+      Его можно скопировать из страницы folder в Yandex Cloud и вставить в
+      поле <strong>Folder ID</strong>. Live streaming обычно работает без него.</li>
   <li>Для русской диктовки начните с language <code>ru-RU</code>, включенной
       text normalization и включенного literary text / punctuation.</li>
 </ol>
@@ -71,11 +82,11 @@ export const WHISPER_HELP_HTML = `
 <ul>
   <li>Ключи Deepgram и Yandex хранятся локально в настройках desktop app.</li>
   <li>Они не синхронизируются между устройствами и не отправляются на sync API.</li>
-  <li>Ключ используется только когда включен <strong>Live dictate</strong> и
-      выбран соответствующий провайдер.</li>
+  <li>Ключ используется только когда выбран соответствующий cloud engine:
+      batch-запись отправляет готовый WAV, Live dictate отправляет поток аудио.</li>
 </ul>
 
-<h4>Если live-диктовка не работает</h4>
+<h4>Если cloud-распознавание не работает</h4>
 <ul>
   <li>Проверьте, что ключ сохранен в <strong>Settings &gt; Whisper</strong>.</li>
   <li>Проверьте billing/квоты в кабинете провайдера.</li>

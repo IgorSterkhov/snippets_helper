@@ -12,6 +12,7 @@ use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
 const LIVE_AUDIO_QUEUE_CAPACITY: usize = 64;
 const FINALIZE_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 const CLOSE_FRAME_TIMEOUT: Duration = Duration::from_secs(2);
+const DEEPGRAM_PRERECORDED_ENDPOINT: &str = "https://api.deepgram.com/v1/listen";
 
 pub const EVT_LIVE_STATE: &str = "whisper:live-state-changed";
 pub const EVT_LIVE_LEVEL: &str = "whisper:live-level";
@@ -368,6 +369,96 @@ pub fn parse_deepgram_message(raw: &str) -> Result<Option<DeepgramTranscript>, S
     }))
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeepgramPrerecordedTranscript {
+    pub text: String,
+    pub language: Option<String>,
+}
+
+pub fn parse_deepgram_prerecorded_response(
+    raw: &str,
+) -> Result<DeepgramPrerecordedTranscript, String> {
+    let parsed: serde_json::Value =
+        serde_json::from_str(raw).map_err(|e| format!("deepgram json parse: {e}"))?;
+    let alternative = parsed
+        .pointer("/results/channels/0/alternatives/0")
+        .ok_or_else(|| "deepgram response missing first alternative".to_string())?;
+    let text = alternative
+        .get("transcript")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| "deepgram response missing transcript".to_string())?
+        .to_string();
+    let language = alternative
+        .get("detected_language")
+        .or_else(|| alternative.get("language"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToOwned::to_owned);
+    Ok(DeepgramPrerecordedTranscript { text, language })
+}
+
+pub async fn transcribe_prerecorded_file(
+    cfg: &DeepgramConfig,
+    wav: Vec<u8>,
+) -> Result<DeepgramPrerecordedTranscript, String> {
+    if cfg.api_key.trim().is_empty() {
+        return Err(
+            "Deepgram API key is missing. Open Whisper Settings and add a local Deepgram key."
+                .into(),
+        );
+    }
+    if wav.is_empty() {
+        return Err("recorded WAV is empty".into());
+    }
+    let mut url = reqwest::Url::parse(DEEPGRAM_PRERECORDED_ENDPOINT)
+        .map_err(|e| format!("deepgram url: {e}"))?;
+    {
+        let mut pairs = url.query_pairs_mut();
+        pairs.append_pair(
+            "model",
+            if cfg.model.trim().is_empty() {
+                "nova-3"
+            } else {
+                cfg.model.trim()
+            },
+        );
+        pairs.append_pair("punctuate", "true");
+        pairs.append_pair("smart_format", "true");
+        if let Some(lang) = cfg
+            .language
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty() && *s != "auto")
+        {
+            pairs.append_pair("language", lang);
+        }
+    }
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(120))
+        .build()
+        .map_err(|e| format!("deepgram client: {e}"))?;
+    let response = client
+        .post(url)
+        .header("Authorization", format!("Token {}", cfg.api_key.trim()))
+        .header("Content-Type", "audio/wav")
+        .body(wav)
+        .send()
+        .await
+        .map_err(|e| format!("deepgram prerecorded request: {e}"))?;
+    let status = response.status();
+    let text = response
+        .text()
+        .await
+        .map_err(|e| format!("deepgram prerecorded response read: {e}"))?;
+    if !status.is_success() {
+        return Err(format!("Deepgram prerecorded HTTP {status}: {text}"));
+    }
+    parse_deepgram_prerecorded_response(&text)
+}
+
 pub fn build_paste_chunk(committed_text: &str, finalized_delta: &str) -> String {
     let delta = finalized_delta.trim();
     if delta.is_empty() {
@@ -586,6 +677,37 @@ fn emit_live_state(app: &AppHandle, state: LiveState, model: Option<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_prerecorded_result_transcript() {
+        let json = r#"{
+            "metadata": {"duration": 3.2},
+            "results": {
+              "channels": [
+                {
+                  "alternatives": [
+                    {
+                      "transcript": "Привет, мир.",
+                      "confidence": 0.97,
+                      "detected_language": "ru"
+                    }
+                  ]
+                }
+              ]
+            }
+        }"#;
+
+        let parsed = parse_deepgram_prerecorded_response(json).unwrap();
+        assert_eq!(parsed.text, "Привет, мир.");
+        assert_eq!(parsed.language.as_deref(), Some("ru"));
+    }
+
+    #[test]
+    fn parse_prerecorded_result_rejects_missing_transcript() {
+        let json = r#"{"results":{"channels":[{"alternatives":[{}]}]}}"#;
+
+        assert!(parse_deepgram_prerecorded_response(json).is_err());
+    }
 
     #[test]
     fn parse_interim_result() {

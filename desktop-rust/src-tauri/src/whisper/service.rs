@@ -53,6 +53,21 @@ pub struct StopOutcome {
     pub vram_peak_mb: i64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecordingProvider {
+    Local,
+    Deepgram,
+    Yandex,
+}
+
+#[derive(Debug, Clone)]
+pub struct CapturedAudio {
+    pub provider: RecordingProvider,
+    pub wav: Vec<u8>,
+    pub duration_ms: u64,
+    pub model_name: String,
+}
+
 pub struct WhisperService {
     inner: Arc<Mutex<Inner>>,
     app: AppHandle,
@@ -75,6 +90,7 @@ struct Inner {
     idle_timer: Option<JoinHandle<()>>,
     pending_stop: bool, // user hit stop while warming
     cancelled: bool,    // user cancelled while warming (fix F5)
+    recording_provider: Option<RecordingProvider>,
     idle_timeout: Duration,
 }
 
@@ -90,6 +106,7 @@ impl WhisperService {
                 idle_timer: None,
                 pending_stop: false,
                 cancelled: false,
+                recording_provider: None,
                 idle_timeout: Duration::from_secs(300),
             })),
             app,
@@ -104,6 +121,10 @@ impl WhisperService {
     /// to start or stop recording on keypress.
     pub async fn current_state(&self) -> State {
         self.inner.lock().await.state
+    }
+
+    pub async fn current_recording_provider(&self) -> Option<RecordingProvider> {
+        self.inner.lock().await.recording_provider
     }
 
     pub async fn status(&self) -> serde_json::Value {
@@ -143,6 +164,7 @@ impl WhisperService {
         // reset stale flags from previous cycles
         g.pending_stop = false;
         g.cancelled = false;
+        g.recording_provider = Some(RecordingProvider::Local);
 
         match g.state {
             State::Idle => {
@@ -169,6 +191,7 @@ impl WhisperService {
                             // Transition based on what happened during warm-up (fix F5)
                             if g.cancelled {
                                 g.cancelled = false;
+                                g.recording_provider = None;
                                 g.state = State::Ready;
                                 emit_state(&app, g.state, g.model_name.clone());
                                 // arm idle timer inline
@@ -187,6 +210,7 @@ impl WhisperService {
                                         g.state = State::Idle;
                                         g.model_path = None;
                                         g.model_name = None;
+                                        g.recording_provider = None;
                                         emit_state(&app_c, g.state, None);
                                         hide_overlay(&app_c);
                                     }
@@ -218,6 +242,7 @@ impl WhisperService {
                             g.recorder = None;
                             g.cancelled = false;
                             g.pending_stop = false;
+                            g.recording_provider = None;
                             emit_state(&app, g.state, None);
                         }
                     }
@@ -231,6 +256,40 @@ impl WhisperService {
             }
             _ => return Err(format!("cannot start from state {:?}", g.state)),
         }
+        Ok(())
+    }
+
+    pub async fn start_capture_only(
+        &self,
+        provider: RecordingProvider,
+        model_name: String,
+        device_name: Option<String>,
+    ) -> Result<(), String> {
+        let mut g = self.inner.lock().await;
+        if matches!(
+            g.state,
+            State::Warming | State::Recording | State::Transcribing | State::Unloading
+        ) {
+            return Ok(());
+        }
+        if let Some(t) = g.idle_timer.take() {
+            t.abort();
+        }
+        if let Some(srv) = g.server.take() {
+            srv.shutdown();
+        }
+
+        let rec = Recorder::start(self.app.clone(), device_name.as_deref())?;
+        g.recorder = Some(SendRecorder(rec));
+        g.model_path = None;
+        g.model_name = Some(model_name.clone());
+        g.pending_stop = false;
+        g.cancelled = false;
+        g.recording_provider = Some(provider);
+        g.state = State::Recording;
+        emit_state(&self.app, g.state, Some(model_name));
+        position_overlay(&self.app, "bottom-right");
+        show_overlay(&self.app);
         Ok(())
     }
 
@@ -294,6 +353,7 @@ impl WhisperService {
         {
             let mut g = self.inner.lock().await;
             g.state = State::Ready;
+            g.recording_provider = None;
             emit_state(&self.app, g.state, Some(model_name.clone()));
             let inner_c = self.inner.clone();
             let app_c = self.app.clone();
@@ -310,6 +370,7 @@ impl WhisperService {
                     g.state = State::Idle;
                     g.model_path = None;
                     g.model_name = None;
+                    g.recording_provider = None;
                     emit_state(&app_c, g.state, None);
                     hide_overlay(&app_c);
                 }
@@ -336,6 +397,48 @@ impl WhisperService {
         })
     }
 
+    pub async fn stop_capture_only(&self) -> Result<CapturedAudio, String> {
+        let (provider, duration_ms, wav, model_name) = {
+            let mut g = self.inner.lock().await;
+            let provider = g
+                .recording_provider
+                .ok_or_else(|| "not recording".to_string())?;
+            if provider == RecordingProvider::Local {
+                return Err("active recording is local Whisper, not cloud batch".into());
+            }
+            let rec = g
+                .recorder
+                .take()
+                .ok_or_else(|| "not recording".to_string())?
+                .0;
+            let name = g.model_name.clone().unwrap_or_default();
+            g.state = State::Transcribing;
+            emit_state(&self.app, g.state, g.model_name.clone());
+            let dur = rec.duration_ms();
+            let w = rec.finish_wav()?;
+            (provider, dur, w, name)
+        };
+        Ok(CapturedAudio {
+            provider,
+            wav,
+            duration_ms,
+            model_name,
+        })
+    }
+
+    pub async fn finish_capture_only(&self) {
+        let mut g = self.inner.lock().await;
+        g.state = State::Idle;
+        g.model_path = None;
+        g.model_name = None;
+        g.recorder = None;
+        g.pending_stop = false;
+        g.cancelled = false;
+        g.recording_provider = None;
+        emit_state(&self.app, g.state, None);
+        hide_overlay(&self.app);
+    }
+
     pub async fn unload_now(&self) {
         let mut g = self.inner.lock().await;
         if let Some(t) = g.idle_timer.take() {
@@ -349,6 +452,7 @@ impl WhisperService {
         g.state = State::Idle;
         g.model_path = None;
         g.model_name = None;
+        g.recording_provider = None;
         emit_state(&self.app, g.state, None);
     }
 
@@ -365,7 +469,17 @@ impl WhisperService {
                 // state stays Warming; warm-up task will transition to Ready
             }
             State::Recording => {
+                if g.server.is_none() && g.recording_provider != Some(RecordingProvider::Local) {
+                    g.state = State::Idle;
+                    g.model_path = None;
+                    g.model_name = None;
+                    g.recording_provider = None;
+                    emit_state(&self.app, g.state, None);
+                    hide_overlay(&self.app);
+                    return;
+                }
                 g.state = State::Ready;
+                g.recording_provider = None;
                 emit_state(&self.app, g.state, g.model_name.clone());
                 // arm idle timer inline
                 let inner_c = self.inner.clone();
@@ -383,6 +497,7 @@ impl WhisperService {
                         g.state = State::Idle;
                         g.model_path = None;
                         g.model_name = None;
+                        g.recording_provider = None;
                         emit_state(&app_c, g.state, None);
                         hide_overlay(&app_c);
                     }

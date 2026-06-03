@@ -110,7 +110,7 @@ async function loadAllSettings() {
     'whisper.overlay_position','whisper.overlay_hide_on_tab','whisper.language',
     'whisper.live_dictate','whisper.deepgram_api_key','whisper.deepgram_model',
     'whisper.deepgram_endpointing_ms','whisper.live_provider','whisper.yandex_api_key',
-    'whisper.yandex_model','whisper.yandex_language','whisper.yandex_text_normalization',
+    'whisper.yandex_folder_id','whisper.yandex_model','whisper.yandex_language','whisper.yandex_text_normalization',
     'whisper.yandex_literature_text','whisper.yandex_profanity_filter',
     'whisper.yandex_phone_formatting',
   ];
@@ -392,7 +392,7 @@ function yandexSpeechKitBlock(s) {
   wrap.style.cssText = 'display:flex;flex-direction:column;gap:8px;padding:10px;border:1px dashed var(--border,#30363d);border-radius:4px';
 
   const header = document.createElement('div');
-  header.textContent = 'Yandex SpeechKit live dictation';
+  header.textContent = 'Yandex SpeechKit recognition';
   header.style.cssText = 'color:var(--text-muted,#8b949e);font-size:11px;text-transform:uppercase;letter-spacing:.5px';
   wrap.appendChild(header);
 
@@ -419,6 +419,7 @@ function yandexSpeechKitBlock(s) {
   keyRow.appendChild(clearBtn);
   wrap.appendChild(labeledControl('API key', keyRow));
 
+  wrap.appendChild(labeledControl('Folder ID', textInput('yandex_folder_id', s['whisper.yandex_folder_id'] || '', 'Required for batch file recognition')));
   wrap.appendChild(labeledControl('Model', textInput('yandex_model', s['whisper.yandex_model'] || 'general', 'general')));
   wrap.appendChild(labeledControl('Language', yandexLanguageSelect(s['whisper.yandex_language'] || 'ru-RU')));
   wrap.appendChild(checkbox('yandex_text_normalization', (s['whisper.yandex_text_normalization'] || 'true') === 'true', 'Text normalization (numbers, dates, times)'));
