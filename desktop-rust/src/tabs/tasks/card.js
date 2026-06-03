@@ -227,6 +227,48 @@ export function focusAfterReload(selector, fallbackSelector) {
   setTimeout(poll, 30);
 }
 
+function getTextSelectionOffset(textEl) {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return null;
+  const range = sel.getRangeAt(0);
+  if (!range.collapsed || !textEl.contains(range.startContainer)) return null;
+
+  const prefix = range.cloneRange();
+  try {
+    prefix.selectNodeContents(textEl);
+    prefix.setEnd(range.startContainer, range.startOffset);
+  } catch {
+    return null;
+  }
+  return prefix.toString().length;
+}
+
+function placeCaret(textEl, atEnd = false) {
+  textEl.focus();
+  const range = document.createRange();
+  range.selectNodeContents(textEl);
+  range.collapse(!atEnd);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+function focusVisibleCheckboxNeighbor(textEl, direction) {
+  const row = textEl.closest('.tcb-item');
+  const container = row ? row.parentElement : null;
+  if (!row || !container) return false;
+
+  const rows = Array.from(container.querySelectorAll(':scope > .tcb-item'));
+  const idx = rows.indexOf(row);
+  const delta = direction === 'previous' ? -1 : 1;
+  const targetRow = rows[idx + delta];
+  const targetText = targetRow?.querySelector('.tcb-text[contenteditable="true"]');
+  if (!targetText) return false;
+
+  placeCaret(targetText, false);
+  return true;
+}
+
 // ── Collapsed body (checkbox list only) ──────────────────────
 
 function buildCollapsedBody(task, ctx) {
@@ -467,7 +509,17 @@ function buildCheckboxRow(node, task, ctx, depth, { editable }) {
 
     // Keyboard: Enter = new item (same parent); Tab = indent; Shift+Tab = outdent.
     textEl.addEventListener('keydown', async (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
+      if (e.key === 'ArrowUp') {
+        const offset = getTextSelectionOffset(textEl);
+        if (offset === 0 && focusVisibleCheckboxNeighbor(textEl, 'previous')) {
+          e.preventDefault();
+        }
+      } else if (e.key === 'ArrowDown') {
+        const offset = getTextSelectionOffset(textEl);
+        if (offset === readText().length && focusVisibleCheckboxNeighbor(textEl, 'next')) {
+          e.preventDefault();
+        }
+      } else if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         await commit();
         try {

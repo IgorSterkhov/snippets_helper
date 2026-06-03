@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## f-20260603-1 (2026-06-03)
+
+- **Tasks checkbox arrow navigation:** Inline checkbox editing now keeps native
+  multi-line text movement, but ArrowUp at the start of a checkbox moves focus
+  to the previous visible checkbox and ArrowDown at the end moves focus to the
+  next visible checkbox. Hidden completed items and collapsed descendants are
+  skipped because navigation follows the rendered visible rows.
+
 ## v1.5.2 (2026-06-02)
 
 - **Yandex SpeechKit settings:** Settings > Whisper now exposes SpeechKit text

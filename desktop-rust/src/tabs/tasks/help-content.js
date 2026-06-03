@@ -41,6 +41,9 @@ export const TASKS_HELP_HTML = `
   <li><strong>Enter</strong> — новый пункт на том же уровне, сразу под текущим чекбоксом.</li>
   <li><strong>Tab</strong> — сделать дочерним верхнего соседа.</li>
   <li><strong>Shift+Tab</strong> — поднять на уровень выше.</li>
+  <li><strong>ArrowUp</strong> в начале текста — перейти к предыдущему
+      видимому чекбоксу; <strong>ArrowDown</strong> в конце текста —
+      перейти к следующему видимому чекбоксу.</li>
   <li><strong>⋮⋮</strong> слева — DnD-рукоятка: перемещать по списку,
       менять родителя.</li>
   <li>Полупрозрачный «<em>+ Add item…</em>» в конце — добавить пункт.</li>

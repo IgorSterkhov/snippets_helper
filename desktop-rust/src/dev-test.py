@@ -1918,6 +1918,207 @@ async def run_tests():
             await restore_task2_checkboxes()
     await check('T15e Tasks checkbox Enter inserts after current sibling', t15e_tasks_checkbox_enter_inserts_after_current)
 
+    # ── T15f: Arrow keys move between visible checkbox rows ───
+    async def t15f_tasks_checkbox_arrow_navigation_uses_visible_rows():
+        async def restore_task2_checkboxes():
+            await cdp.eval("""(() => {
+              const stamp = new Date().toISOString();
+              const restored = [
+                {
+                  id: 1, task_id: 2, parent_id: null,
+                  text: 'Regular todo visible', is_checked: false,
+                  sort_order: 0, created_at: stamp, updated_at: stamp,
+                  sync_status: 'synced', user_id: 'mock-user',
+                },
+                {
+                  id: 2, task_id: 2, parent_id: null,
+                  text: 'Regular done hidden', is_checked: true,
+                  sort_order: 1, created_at: stamp, updated_at: stamp,
+                  sync_status: 'synced', user_id: 'mock-user',
+                },
+              ];
+              const others = JSON.parse(localStorage.getItem('mock.task_checkboxes') || '[]')
+                .filter(x => x.task_id !== 2);
+              localStorage.setItem('mock.task_checkboxes', JSON.stringify([...others, ...restored]));
+              localStorage.setItem('mock.__seq.task_checkboxes', '2');
+              window.dispatchEvent(new CustomEvent('snippets:sync-complete', {
+                detail: {
+                  result: {
+                    timestamp: '12:00:00',
+                    push: { total: 0, pushed: {} },
+                    pull: { total: 1, pulled: { task_checkboxes: ['restore'] } },
+                  },
+                },
+              }));
+            })()""")
+
+        try:
+            await cdp.eval("""(() => {
+              const stamp = new Date().toISOString();
+              const settings = JSON.parse(localStorage.getItem('mock.settings') || '{}');
+              settings.last_active_tab = 'tasks';
+              delete settings.tasks_collapsed_checkbox_ids;
+              localStorage.setItem('mock.settings', JSON.stringify(settings));
+              const rows = [
+                {
+                  id: 70, task_id: 2, parent_id: null,
+                  text: 'Arrow previous', is_checked: false,
+                  sort_order: 0, created_at: stamp, updated_at: stamp,
+                  sync_status: 'synced', user_id: 'mock-user',
+                },
+                {
+                  id: 71, task_id: 2, parent_id: null,
+                  text: 'Arrow hidden before current', is_checked: true,
+                  sort_order: 1, created_at: stamp, updated_at: stamp,
+                  sync_status: 'synced', user_id: 'mock-user',
+                },
+                {
+                  id: 72, task_id: 2, parent_id: null,
+                  text: 'Arrow current', is_checked: false,
+                  sort_order: 2, created_at: stamp, updated_at: stamp,
+                  sync_status: 'synced', user_id: 'mock-user',
+                },
+                {
+                  id: 73, task_id: 2, parent_id: null,
+                  text: 'Arrow hidden after current', is_checked: true,
+                  sort_order: 3, created_at: stamp, updated_at: stamp,
+                  sync_status: 'synced', user_id: 'mock-user',
+                },
+                {
+                  id: 74, task_id: 2, parent_id: null,
+                  text: 'Arrow next', is_checked: false,
+                  sort_order: 4, created_at: stamp, updated_at: stamp,
+                  sync_status: 'synced', user_id: 'mock-user',
+                },
+                {
+                  id: 75, task_id: 2, parent_id: null,
+                  text: 'Arrow nested parent', is_checked: false,
+                  sort_order: 5, created_at: stamp, updated_at: stamp,
+                  sync_status: 'synced', user_id: 'mock-user',
+                },
+                {
+                  id: 76, task_id: 2, parent_id: 75,
+                  text: 'Arrow nested child', is_checked: false,
+                  sort_order: 0, created_at: stamp, updated_at: stamp,
+                  sync_status: 'synced', user_id: 'mock-user',
+                },
+              ];
+              const others = JSON.parse(localStorage.getItem('mock.task_checkboxes') || '[]')
+                .filter(x => x.task_id !== 2);
+              localStorage.setItem('mock.task_checkboxes', JSON.stringify([...others, ...rows]));
+              localStorage.setItem('mock.__seq.task_checkboxes', '76');
+              window.dispatchEvent(new CustomEvent('snippets:sync-complete', {
+                detail: {
+                  result: {
+                    timestamp: '12:00:00',
+                    push: { total: 0, pushed: {} },
+                    pull: { total: 1, pulled: { task_checkboxes: ['arrow fixture'] } },
+                  },
+                },
+              }));
+            })()""")
+            await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"tasks\"]').click()")
+            await wait_until(
+                cdp,
+                "[...document.querySelectorAll('.task-title')]"
+                ".some(x => x.textContent.includes('Regular mock task'))",
+                timeout=4,
+            )
+            await cdp.eval(
+                "[...document.querySelectorAll('.task-title')]"
+                ".find(x => x.textContent.includes('Regular mock task')).click()"
+            )
+            await wait_until(
+                cdp,
+                "[...document.querySelectorAll('.tcb-text')]"
+                ".some(x => x.textContent.includes('Arrow nested child'))",
+                timeout=4,
+            )
+            hidden_visible = await cdp.eval(
+                "[...document.querySelectorAll('.tcb-text')]"
+                ".some(x => x.textContent.includes('Arrow hidden before current') || x.textContent.includes('Arrow hidden after current'))"
+            )
+            assert hidden_visible is False, 'completed arrow fixture rows should be hidden in the UI'
+
+            up_result = await cdp.eval("""(() => {
+              const rowByText = (text) => [...document.querySelectorAll('.tcb-item')]
+                .find(row => row.querySelector('.tcb-text')?.textContent.includes(text));
+              const textByText = (text) => rowByText(text)?.querySelector('.tcb-text');
+              const setCaret = (el, atEnd) => {
+                el.focus();
+                const range = document.createRange();
+                range.selectNodeContents(el);
+                range.collapse(!atEnd);
+                const sel = window.getSelection();
+                sel.removeAllRanges();
+                sel.addRange(range);
+              };
+              const caretOffset = (el) => {
+                const sel = window.getSelection();
+                if (!sel || sel.rangeCount === 0) return -1;
+                const range = sel.getRangeAt(0);
+                const pre = range.cloneRange();
+                pre.selectNodeContents(el);
+                pre.setEnd(range.endContainer, range.endOffset);
+                return pre.toString().length;
+              };
+              const current = textByText('Arrow current');
+              setCaret(current, false);
+              current.dispatchEvent(new KeyboardEvent('keydown', {
+                key: 'ArrowUp',
+                bubbles: true,
+                cancelable: true,
+              }));
+              const active = document.activeElement;
+              return {
+                activeText: active?.textContent || '',
+                offset: active ? caretOffset(active) : -1,
+              };
+            })()""")
+            assert 'Arrow previous' in up_result['activeText'], f'ArrowUp active row: {up_result!r}'
+            assert up_result['offset'] == 0, f'ArrowUp caret offset: {up_result!r}'
+
+            down_result = await cdp.eval("""(() => {
+              const rowByText = (text) => [...document.querySelectorAll('.tcb-item')]
+                .find(row => row.querySelector('.tcb-text')?.textContent.includes(text));
+              const textByText = (text) => rowByText(text)?.querySelector('.tcb-text');
+              const setCaret = (el, atEnd) => {
+                el.focus();
+                const range = document.createRange();
+                range.selectNodeContents(el);
+                range.collapse(!atEnd);
+                const sel = window.getSelection();
+                sel.removeAllRanges();
+                sel.addRange(range);
+              };
+              const caretOffset = (el) => {
+                const sel = window.getSelection();
+                if (!sel || sel.rangeCount === 0) return -1;
+                const range = sel.getRangeAt(0);
+                const pre = range.cloneRange();
+                pre.selectNodeContents(el);
+                pre.setEnd(range.endContainer, range.endOffset);
+                return pre.toString().length;
+              };
+              const current = textByText('Arrow current');
+              setCaret(current, true);
+              current.dispatchEvent(new KeyboardEvent('keydown', {
+                key: 'ArrowDown',
+                bubbles: true,
+                cancelable: true,
+              }));
+              const active = document.activeElement;
+              return {
+                activeText: active?.textContent || '',
+                offset: active ? caretOffset(active) : -1,
+              };
+            })()""")
+            assert 'Arrow next' in down_result['activeText'], f'ArrowDown active row: {down_result!r}'
+            assert down_result['offset'] == 0, f'ArrowDown caret offset: {down_result!r}'
+        finally:
+            await restore_task2_checkboxes()
+    await check('T15f Tasks checkbox arrow navigation uses visible rows', t15f_tasks_checkbox_arrow_navigation_uses_visible_rows)
+
     # ── T16: Tasks Focus view layout/search/outside pinned ──
     async def t16_tasks_focus_view_layout_search_and_outside_pin():
         await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"tasks\"]').click()")

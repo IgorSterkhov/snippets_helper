@@ -376,3 +376,25 @@ preview connected:
 4. Navigate only among variants whose previews are loaded successfully.
 5. Keep full-size preview on image click, using the same loaded preview source
    as the modal.
+
+---
+
+## §13 Contenteditable list boundary navigation
+
+**Used in:** Tasks checkbox text rows
+
+Use this pattern when a wrapped `contenteditable` list item should keep native
+text editing inside the item but move focus between visible rows at hard text
+boundaries.
+
+- Let the browser handle ArrowUp/ArrowDown unless the selection is collapsed
+  and the caret is at the absolute start or end of the text content.
+- Determine the caret offset with a cloned `Range` over the current editable
+  element; do not infer it from click position or stored text alone.
+- Derive previous/next targets from the currently rendered row DOM in the same
+  container. Hidden completed items, collapsed descendants, and filtered-out
+  rows must not become keyboard focus targets.
+- Call `preventDefault()` only when focus actually moves to a neighbor row.
+  Boundary keys on the first or last visible row should remain no-ops.
+- Place the caret explicitly after focusing the target row so WebView2 does not
+  leave the selection on the old contenteditable element.
