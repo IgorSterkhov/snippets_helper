@@ -2,6 +2,7 @@ import { call } from '../tauri-api.js';
 import { showToast } from '../components/toast.js';
 import { showModal } from '../components/modal.js';
 import { ALL_ICONS, iconKey, renderIcon } from '../icons/index.js';
+import { installWrappedChipDnd } from '../components/wrapped-chip-dnd.js';
 
 let root = null;
 let searchType = 'files';   // files | content | git
@@ -61,6 +62,24 @@ function reposForActiveTab() {
   if (activeTabId === 'all') return allRepos;
   if (activeTabId === 'ungrouped') return allRepos.filter(r => !r.group_id);
   return allRepos.filter(r => r.group_id === activeTabId);
+}
+
+function scopedActiveRepos() {
+  return reposForActiveTab().filter(r => activeRepos.has(r.name));
+}
+
+function activeScopeName() {
+  if (activeTabId === 'all') return 'All';
+  if (activeTabId === 'ungrouped') return 'Ungrouped';
+  return allGroups.find(g => g.id === activeTabId)?.name || 'Group';
+}
+
+function updateScopeBadge() {
+  const badge = root?.querySelector('#rs-scope-badge');
+  if (!badge) return;
+  const repos = scopedActiveRepos();
+  badge.textContent = `Scope: ${activeScopeName()} · ${repos.length} repo${repos.length === 1 ? '' : 's'}`;
+  badge.classList.toggle('empty', repos.length === 0);
 }
 
 function hasUngroupedRepos() {
@@ -217,7 +236,10 @@ function buildLayout() {
 
   const countLabel = el('span', { text: '', class: 'rs-count', id: 'rs-count' });
   sortBar.appendChild(countLabel);
+  const scopeBadge = el('span', { text: '', class: 'rs-scope-badge', id: 'rs-scope-badge' });
+  sortBar.appendChild(scopeBadge);
   searchPanel.appendChild(sortBar);
+  updateScopeBadge();
 
   // Results area — inside search panel
   const resultsList = el('div', { class: 'rs-results', id: 'rs-results' });
@@ -536,6 +558,7 @@ function renderRepoChips(barEl) {
     const isActive = activeRepos.has(repo.name);
     const chip = document.createElement('div');
     chip.className = 'rs-repo-chip' + (isActive ? ' active' : '');
+    chip.dataset.repoName = repo.name;
     chip.style.opacity = isActive ? '1' : '0.45';
     if (isActive) {
       chip.style.background = '#161b22';
@@ -614,43 +637,99 @@ function renderRepoChips(barEl) {
     }
   });
   bar.appendChild(addBtn);
+  updateScopeBadge();
 }
 
-// ── Pointer-based drag-drop (chip → tab) ──────────────────────
+// ── Pointer-based drag-drop (chip reorder + chip → tab) ───────
 
 function onChipPointerDown(e, repo, chipEl) {
   // Only primary button; ignore text-selection drags.
   if (e.button !== 0) return;
+  const bar = chipEl.closest('#rs-repo-bar');
+  if (!bar) return;
   const startX = e.clientX, startY = e.clientY;
   const DRAG_THRESHOLD = 4;   // px
-  let dragging = false;
-  let ghost = null;
-  let lastHoveredTab = null;
+  let active = null;
 
-  function moveGhost(x, y) {
-    if (!ghost) return;
-    ghost.style.left = (x + 8) + 'px';
-    ghost.style.top  = (y + 8) + 'px';
+  function startDrag(ev) {
+    const rect = chipEl.getBoundingClientRect();
+    const ghost = chipEl.cloneNode(true);
+    ghost.classList.add('rs-chip-ghost');
+    ghost.style.position = 'fixed';
+    ghost.style.left = rect.left + 'px';
+    ghost.style.top = rect.top + 'px';
+    ghost.style.width = rect.width + 'px';
+    ghost.style.pointerEvents = 'none';
+    ghost.style.zIndex = '99999';
+    ghost.style.opacity = '0.9';
+    document.body.appendChild(ghost);
+
+    const placeholder = document.createElement('div');
+    placeholder.className = 'rs-repo-placeholder';
+    placeholder.style.width = rect.width + 'px';
+    placeholder.style.height = rect.height + 'px';
+    chipEl.parentElement.insertBefore(placeholder, chipEl);
+    chipEl.classList.add('rs-chip-dragging');
+    chipEl.style.display = 'none';
+    draggingRepoName = repo.name;
+
+    return {
+      bar,
+      chipEl,
+      ghost,
+      placeholder,
+      offsetX: ev.clientX - rect.left,
+      offsetY: ev.clientY - rect.top,
+      mode: 'reorder',
+      lastHoveredTab: null,
+    };
+  }
+
+  function moveGhost(ev) {
+    if (!active?.ghost) return;
+    active.ghost.style.left = (ev.clientX - active.offsetX) + 'px';
+    active.ghost.style.top = (ev.clientY - active.offsetY) + 'px';
+  }
+
+  function setHoveredTab(tab) {
+    if (!active || tab === active.lastHoveredTab) return;
+    active.lastHoveredTab?.classList.remove('rs-tab-drop');
+    active.lastHoveredTab = tab;
+    active.lastHoveredTab?.classList.add('rs-tab-drop');
+  }
+
+  function isInsideRepoBar(ev) {
+    const rect = bar.getBoundingClientRect();
+    return ev.clientX >= rect.left && ev.clientX <= rect.right
+      && ev.clientY >= rect.top && ev.clientY <= rect.bottom;
   }
 
   function onMove(ev) {
-    if (!dragging) {
+    if (!active) {
       const dx = ev.clientX - startX, dy = ev.clientY - startY;
       if (dx * dx + dy * dy < DRAG_THRESHOLD * DRAG_THRESHOLD) return;
-      dragging = true;
-      draggingRepoName = repo.name;
-      chipEl.classList.add('rs-chip-dragging');
-      ghost = chipEl.cloneNode(true);
-      ghost.classList.add('rs-chip-ghost');
-      ghost.style.cssText += 'position:fixed;pointer-events:none;z-index:99999;opacity:0.85;';
-      document.body.appendChild(ghost);
+      ev.preventDefault();
+      active = startDrag(ev);
+      chipEl.dataset.dragSuppressClick = '1';
     }
-    moveGhost(ev.clientX, ev.clientY);
+    ev.preventDefault();
+    moveGhost(ev);
     const tab = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('[data-drop-target-for="repo"]');
-    if (tab !== lastHoveredTab) {
-      lastHoveredTab?.classList.remove('rs-tab-drop');
-      lastHoveredTab = tab;
-      lastHoveredTab?.classList.add('rs-tab-drop');
+    if (tab) {
+      setHoveredTab(tab);
+      active.mode = 'group';
+      active.placeholder.style.display = 'none';
+      return;
+    }
+
+    setHoveredTab(null);
+    if (isInsideRepoBar(ev)) {
+      active.mode = 'reorder';
+      active.placeholder.style.display = '';
+      updateRepoPlaceholder(active, ev);
+    } else {
+      active.mode = null;
+      active.placeholder.style.display = 'none';
     }
   }
 
@@ -658,30 +737,31 @@ function onChipPointerDown(e, repo, chipEl) {
     document.removeEventListener('pointermove', onMove);
     document.removeEventListener('pointerup', onUp);
     document.removeEventListener('pointercancel', onUp);
-    if (!dragging) return;  // plain click — let click handler do its thing
+    if (!active) return;  // plain click — let click handler do its thing
     ev.preventDefault();
     ev.stopPropagation();
-    chipEl.classList.remove('rs-chip-dragging');
-    ghost?.remove();
-    lastHoveredTab?.classList.remove('rs-tab-drop');
-    const tab = lastHoveredTab;
-    draggingRepoName = null;
-    if (!tab) return;
-    const targetId = tab.dataset.tabId;
-    const target = targetId === 'ungrouped'
-      ? null
-      : (Number.isFinite(+targetId) ? +targetId : null);
-    const r = allRepos.find(x => x.name === repo.name);
-    if (!r || r.group_id === target) return;
+    const mode = active.mode;
+    const tab = active.lastHoveredTab;
     try {
-      await call('update_repo', {
-        oldName: r.name, name: r.name, path: r.path, color: r.color, groupId: target,
-      });
-      allRepos = await call('list_repos');
-      renderTabStrip();
-      renderRepoChips();
+      if (mode === 'reorder' && active.placeholder?.parentNode) {
+        bar.insertBefore(active.chipEl, active.placeholder);
+        active.chipEl.style.display = '';
+        const names = Array.from(bar.querySelectorAll(':scope > .rs-repo-chip[data-repo-name]'))
+          .map(chip => chip.dataset.repoName)
+          .filter(Boolean);
+        await persistRepoOrderForScope(names);
+      } else if (mode === 'group' && tab) {
+        await moveRepoToTab(repo, tab);
+      }
     } catch (err) {
-      showToast('Move failed: ' + err, 'error');
+      showToast((mode === 'reorder' ? 'Reorder failed: ' : 'Move failed: ') + err, 'error');
+    } finally {
+      cleanupRepoDrag(active);
+      active = null;
+      draggingRepoName = null;
+      setTimeout(() => {
+        if (chipEl.dataset.dragSuppressClick === '1') delete chipEl.dataset.dragSuppressClick;
+      }, 350);
     }
     // Suppress the chip's click handler that would otherwise toggle active state.
     chipEl.addEventListener('click', function kill(ev2) {
@@ -696,13 +776,139 @@ function onChipPointerDown(e, repo, chipEl) {
   document.addEventListener('pointercancel', onUp);
 }
 
+function updateRepoPlaceholder(active, event) {
+  const peers = Array.from(active.bar.querySelectorAll(':scope > .rs-repo-chip[data-repo-name]'))
+    .filter(el => el !== active.chipEl);
+  const addButton = active.bar.querySelector(':scope > .rs-repo-add');
+  let beforeEl = null;
+
+  if (peers.length > 0) {
+    const rows = [];
+    for (const peer of peers) {
+      const rect = peer.getBoundingClientRect();
+      let row = rows.find(r => Math.abs(r.top - rect.top) <= 8);
+      if (!row) {
+        row = { top: rect.top, bottom: rect.bottom, items: [] };
+        rows.push(row);
+      }
+      row.top = Math.min(row.top, rect.top);
+      row.bottom = Math.max(row.bottom, rect.bottom);
+      row.items.push({ el: peer, rect });
+    }
+    rows.sort((a, b) => a.top - b.top);
+    rows.forEach(row => row.items.sort((a, b) => a.rect.left - b.rect.left));
+
+    const targetRow = rows.find(row => event.clientY <= row.bottom + 8) || rows[rows.length - 1];
+    const beforeInRow = targetRow.items.find(({ rect }) => event.clientX < rect.left + rect.width / 2);
+    if (beforeInRow) {
+      beforeEl = beforeInRow.el;
+    } else {
+      const rowLast = targetRow.items[targetRow.items.length - 1].el;
+      const rowLastIndex = peers.indexOf(rowLast);
+      beforeEl = peers[rowLastIndex + 1] || addButton || null;
+    }
+  } else {
+    beforeEl = addButton || null;
+  }
+
+  if (beforeEl === nextSiblingExcept(active.placeholder, active.chipEl)) return;
+  if (beforeEl === null && nextSiblingExcept(active.placeholder, active.chipEl) === null) return;
+
+  const tracked = [...peers, active.placeholder];
+  const oldRects = new Map();
+  for (const el of tracked) {
+    const rect = el.getBoundingClientRect();
+    oldRects.set(el, { left: rect.left, top: rect.top });
+  }
+
+  active.bar.insertBefore(active.placeholder, beforeEl);
+
+  for (const el of tracked) {
+    const oldRect = oldRects.get(el);
+    const newRect = el.getBoundingClientRect();
+    const dx = oldRect.left - newRect.left;
+    const dy = oldRect.top - newRect.top;
+    if (dx === 0 && dy === 0) continue;
+    el.style.transition = 'none';
+    el.style.transform = `translate(${dx}px, ${dy}px)`;
+    void el.offsetHeight;
+    el.style.transition = 'transform 180ms ease';
+    el.style.transform = '';
+  }
+}
+
+function nextSiblingExcept(el, except) {
+  let next = el ? el.nextElementSibling : null;
+  while (next && next === except) next = next.nextElementSibling;
+  return next;
+}
+
+function cleanupRepoDrag(active) {
+  active.lastHoveredTab?.classList.remove('rs-tab-drop');
+  active.ghost?.remove();
+  if (active.placeholder?.parentNode) {
+    active.placeholder.remove();
+  }
+  active.chipEl.classList.remove('rs-chip-dragging');
+  active.chipEl.style.display = '';
+  for (const el of active.bar.querySelectorAll(':scope > .rs-repo-chip[data-repo-name], :scope > .rs-repo-placeholder')) {
+    el.style.transition = '';
+    el.style.transform = '';
+  }
+}
+
+async function persistRepoOrderForScope(visibleNames) {
+  const visibleSet = new Set(visibleNames);
+  let names;
+  if (activeTabId === 'all') {
+    names = [
+      ...visibleNames,
+      ...allRepos.map(r => r.name).filter(name => !visibleSet.has(name)),
+    ];
+  } else {
+    const scopeNames = reposForActiveTab().map(r => r.name);
+    const scopeSet = new Set(scopeNames);
+    const reorderedScope = [
+      ...visibleNames,
+      ...scopeNames.filter(name => !visibleSet.has(name)),
+    ];
+    let scopeIdx = 0;
+    names = allRepos.map(repo => {
+      if (!scopeSet.has(repo.name)) return repo.name;
+      return reorderedScope[scopeIdx++] || repo.name;
+    });
+  }
+
+  await call('reorder_repos', { names });
+  allRepos = await call('list_repos');
+  renderTabStrip();
+  renderRepoChips();
+}
+
+async function moveRepoToTab(repo, tab) {
+  const targetId = tab.dataset.tabId;
+  const target = targetId === 'ungrouped'
+    ? null
+    : (Number.isFinite(+targetId) ? +targetId : null);
+  const r = allRepos.find(x => x.name === repo.name);
+  if (!r || r.group_id === target) return;
+  await call('update_repo', {
+    oldName: r.name, name: r.name, path: r.path, color: r.color, groupId: target,
+  });
+  allRepos = await call('list_repos');
+  renderTabStrip();
+  renderRepoChips();
+}
+
 function renderTabStrip(containerEl) {
   const bar = containerEl || root.querySelector('#rs-tab-strip');
   if (!bar) return;
   bar.innerHTML = '';
 
   const tabs = [{ id: 'all', name: 'All', icon: '', color: '' }];
-  const sorted = [...allGroups].sort((a, b) => a.name.localeCompare(b.name));
+  const sorted = [...allGroups].sort((a, b) =>
+    (a.sort_order || 0) - (b.sort_order || 0) || a.name.localeCompare(b.name)
+  );
   tabs.push(...sorted.map(g => ({ id: g.id, name: g.name, icon: g.icon || '', color: g.color || '' })));
   if (hasUngroupedRepos()) {
     tabs.push({ id: 'ungrouped', name: 'Ungrouped', icon: '◌', color: '' });
@@ -712,6 +918,10 @@ function renderTabStrip(containerEl) {
     const btn = document.createElement('button');
     btn.className = 'rs-tab' + (t.id === activeTabId ? ' active' : '');
     btn.dataset.tabId = t.id;
+    btn.style.setProperty('--rs-tab-color', t.color || 'var(--accent, #3b82f6)');
+    if (typeof t.id === 'number') {
+      btn.dataset.groupId = String(t.id);
+    }
     if (t.icon) {
       const ic = document.createElement('span');
       ic.className = 'rs-tab-icon';
@@ -719,7 +929,11 @@ function renderTabStrip(containerEl) {
       btn.appendChild(ic);
     }
     btn.appendChild(document.createTextNode(t.name));
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', (e) => {
+      if (btn.dataset.dragSuppressClick === '1') {
+        e.preventDefault();
+        return;
+      }
       activeTabId = t.id;
       renderTabStrip();
       renderRepoChips();
@@ -745,6 +959,24 @@ function renderTabStrip(containerEl) {
   addBtn.title = 'New group';
   addBtn.addEventListener('click', () => showNewGroupModal());
   bar.appendChild(addBtn);
+
+  installWrappedChipDnd(bar, {
+    chipSelector: '.rs-tab[data-group-id]',
+    datasetKey: 'groupId',
+    placeholderClass: 'rs-tab-placeholder',
+    sourceClass: 'rs-tab-source',
+    onReorder: async (ids) => {
+      try {
+        await call('reorder_repo_groups', { ids });
+        allGroups = await call('list_repo_groups');
+        renderTabStrip();
+        renderRepoChips();
+      } catch (e) {
+        showToast('Group reorder failed: ' + e, 'error');
+      }
+    },
+  });
+  updateScopeBadge();
 }
 
 function scopeSelect(select) {
@@ -1205,7 +1437,17 @@ async function doSearch() {
   resultsList.innerHTML = '<p class="rs-placeholder">Searching...</p>';
   if (countLabel) countLabel.textContent = '';
 
-  const repos = [...activeRepos];
+  const scopedRepos = scopedActiveRepos();
+  updateScopeBadge();
+  if (!scopedRepos.length) {
+    resultsList.innerHTML = '';
+    resultsList.appendChild(el('p', {
+      text: 'No active repos in this scope',
+      class: 'rs-placeholder',
+    }));
+    return;
+  }
+  const repos = scopedRepos.map(r => r.name);
 
   try {
     lastSearchType = searchType;
@@ -2018,11 +2260,35 @@ function css() {
   align-items: center;
   gap: 5px;
   white-space: nowrap;
+  position: relative;
 }
 .rs-tab.active {
-  background: var(--bg-secondary);
-  border-color: var(--border);
+  background: linear-gradient(180deg, rgba(255,255,255,0.07), var(--bg-secondary));
+  border-color: var(--rs-tab-color, var(--accent, #3b82f6));
   color: var(--text);
+  box-shadow: inset 0 -2px 0 var(--rs-tab-color, var(--accent, #3b82f6)), 0 0 0 1px rgba(255,255,255,0.03);
+}
+.rs-tab[data-group-id] { cursor: grab; }
+.rs-tab[data-group-id]:active { cursor: grabbing; }
+.rs-tab-placeholder {
+  display: inline-flex;
+  border: 1px dashed var(--accent, #3b82f6);
+  background: rgba(59,130,246,0.12);
+  border-radius: 5px 5px 0 0;
+  flex: 0 0 auto;
+}
+.rs-tab-source { opacity: 0.35; }
+.rs-tab-placeholder + .rs-tab,
+.rs-tab-source + .rs-tab { transition: transform 180ms ease; }
+.rs-tab.active::after {
+  content: '';
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--rs-tab-color, var(--accent, #3b82f6));
 }
 .rs-tab-icon { display: inline-flex; font-size: 11px; }
 .rs-sel-btn {
@@ -2228,8 +2494,15 @@ function css() {
   touch-action: none;  /* keep pointer events exclusive during drag */
 }
 .rs-chip-ghost {
-  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
-  transform: translateZ(0);
+  box-shadow: 0 14px 28px rgba(0,0,0,0.45);
+  transform: rotate(-0.7deg) translateZ(0);
+}
+.rs-repo-placeholder {
+  display: inline-flex;
+  border: 1px dashed var(--accent, #3b82f6);
+  border-radius: 4px;
+  background: rgba(59,130,246,0.12);
+  flex: 0 0 auto;
 }
 .rs-repo-chip:hover {
   border-color: var(--text-muted);
@@ -2390,6 +2663,20 @@ function css() {
   margin-left: auto;
   font-size: 11px;
   color: var(--text-muted);
+}
+.rs-scope-badge {
+  font-size: 11px;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: rgba(255,255,255,0.03);
+  white-space: nowrap;
+}
+.rs-scope-badge.empty {
+  color: var(--danger, #f85149);
+  border-color: rgba(248,81,73,0.45);
+  background: rgba(248,81,73,0.08);
 }
 /* Results */
 .rs-results {

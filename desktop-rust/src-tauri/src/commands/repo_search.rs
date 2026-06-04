@@ -1,15 +1,21 @@
+use crate::db::{queries, DbState};
 use serde::{Deserialize, Serialize};
-use tauri::State;
-use crate::db::{DbState, queries};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
-use std::collections::HashMap;
+use tauri::State;
 
 const MAX_RESULTS: usize = 200;
 const MAX_FILE_GROUPS: usize = 50;
 
 const SKIP_DIRS: &[&str] = &[
-    ".git", "node_modules", "target", "__pycache__", ".venv", ".idea", ".vs",
+    ".git",
+    "node_modules",
+    "target",
+    "__pycache__",
+    ".venv",
+    ".idea",
+    ".vs",
 ];
 
 /// Build a `Command` that won't flash a console window on Windows.
@@ -106,18 +112,34 @@ fn load_repos(conn: &rusqlite::Connection, computer_id: &str) -> Vec<RepoEntry> 
     serde_json::from_str::<Vec<RepoEntry>>(&raw).unwrap_or_default()
 }
 
-fn save_repos(conn: &rusqlite::Connection, computer_id: &str, repos: &[RepoEntry]) -> Result<(), String> {
+fn save_repos(
+    conn: &rusqlite::Connection,
+    computer_id: &str,
+    repos: &[RepoEntry],
+) -> Result<(), String> {
     let json = serde_json::to_string(repos).map_err(|e| e.to_string())?;
     queries::set_setting(conn, computer_id, "repo_search_repos", &json).map_err(|e| e.to_string())
 }
 
 fn load_groups(conn: &rusqlite::Connection, computer_id: &str) -> Vec<RepoGroup> {
     let raw = queries::get_setting(conn, computer_id, "repo_search_groups")
-        .ok().flatten().unwrap_or_else(|| "[]".to_string());
-    serde_json::from_str::<Vec<RepoGroup>>(&raw).unwrap_or_default()
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "[]".to_string());
+    let mut groups = serde_json::from_str::<Vec<RepoGroup>>(&raw).unwrap_or_default();
+    groups.sort_by(|a, b| {
+        a.sort_order
+            .cmp(&b.sort_order)
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    groups
 }
 
-fn save_groups(conn: &rusqlite::Connection, computer_id: &str, groups: &[RepoGroup]) -> Result<(), String> {
+fn save_groups(
+    conn: &rusqlite::Connection,
+    computer_id: &str,
+    groups: &[RepoGroup],
+) -> Result<(), String> {
     let json = serde_json::to_string(groups).map_err(|e| e.to_string())?;
     queries::set_setting(conn, computer_id, "repo_search_groups", &json).map_err(|e| e.to_string())
 }
@@ -146,12 +168,13 @@ pub fn add_repo_group(
         return Err(format!("Group '{}' already exists", name));
     }
     let next_id = groups.iter().map(|g| g.id).max().unwrap_or(0) + 1;
+    let sort_order = groups.iter().map(|g| g.sort_order).max().unwrap_or(-1) + 1;
     let group = RepoGroup {
         id: next_id,
         name,
         icon,
         color,
-        sort_order: 0,
+        sort_order,
     };
     groups.push(group.clone());
     save_groups(&conn, &cid, &groups)?;
@@ -177,7 +200,11 @@ pub fn update_repo_group(
     }
     let found = groups.iter_mut().find(|g| g.id == id);
     match found {
-        Some(g) => { g.name = name; g.icon = icon; g.color = color; }
+        Some(g) => {
+            g.name = name;
+            g.icon = icon;
+            g.color = color;
+        }
         None => return Err(format!("Group #{} not found", id)),
     }
     save_groups(&conn, &cid, &groups)
@@ -192,6 +219,31 @@ fn clear_group_from_repos(repos: &mut [RepoEntry], gid: i64) -> bool {
         }
     }
     changed
+}
+
+fn reorder_groups_in_place(groups: &mut Vec<RepoGroup>, ids: &[i64]) {
+    let order: HashMap<i64, usize> = ids.iter().enumerate().map(|(idx, id)| (*id, idx)).collect();
+    groups.sort_by(|a, b| match (order.get(&a.id), order.get(&b.id)) {
+        (Some(a_idx), Some(b_idx)) => a_idx.cmp(b_idx),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => a
+            .sort_order
+            .cmp(&b.sort_order)
+            .then_with(|| a.name.cmp(&b.name)),
+    });
+    for (idx, group) in groups.iter_mut().enumerate() {
+        group.sort_order = idx as i32;
+    }
+}
+
+#[tauri::command]
+pub fn reorder_repo_groups(state: State<DbState>, ids: Vec<i64>) -> Result<(), String> {
+    let conn = state.lock_recover();
+    let cid = get_computer_id();
+    let mut groups = load_groups(&conn, &cid);
+    reorder_groups_in_place(&mut groups, &ids);
+    save_groups(&conn, &cid, &groups)
 }
 
 #[tauri::command]
@@ -234,7 +286,12 @@ pub fn update_repo(
 
     let found = repos.iter_mut().find(|r| r.name == old_name);
     match found {
-        Some(r) => { r.name = name; r.path = path; r.color = color; r.group_id = group_id; }
+        Some(r) => {
+            r.name = name;
+            r.path = path;
+            r.color = color;
+            r.group_id = group_id;
+        }
         None => return Err(format!("Repo '{}' not found", old_name)),
     }
     save_repos(&conn, &cid, &repos)
@@ -261,7 +318,12 @@ pub fn add_repo(
     if repos.iter().any(|r| r.name == name) {
         return Err(format!("Repo with name '{}' already exists", name));
     }
-    repos.push(RepoEntry { name, path, color, group_id });
+    repos.push(RepoEntry {
+        name,
+        path,
+        color,
+        group_id,
+    });
     save_repos(&conn, &cid, &repos)
 }
 
@@ -274,13 +336,44 @@ pub fn remove_repo(state: State<DbState>, name: String) -> Result<(), String> {
     save_repos(&conn, &cid, &repos)
 }
 
+fn reorder_repos_in_place(repos: &mut Vec<RepoEntry>, names: &[String]) {
+    let order: HashMap<&str, usize> = names
+        .iter()
+        .enumerate()
+        .map(|(idx, name)| (name.as_str(), idx))
+        .collect();
+    repos.sort_by(
+        |a, b| match (order.get(a.name.as_str()), order.get(b.name.as_str())) {
+            (Some(a_idx), Some(b_idx)) => a_idx.cmp(b_idx),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        },
+    );
+}
+
+#[tauri::command]
+pub fn reorder_repos(state: State<DbState>, names: Vec<String>) -> Result<(), String> {
+    let conn = state.lock_recover();
+    let cid = get_computer_id();
+    let mut repos = load_repos(&conn, &cid);
+    reorder_repos_in_place(&mut repos, &names);
+    save_repos(&conn, &cid, &repos)
+}
+
 /// Resolve active repo names to paths. If `repos` is empty, use all repos.
-fn resolve_repo_paths(conn: &rusqlite::Connection, computer_id: &str, repos: &[String]) -> Vec<RepoEntry> {
+fn resolve_repo_paths(
+    conn: &rusqlite::Connection,
+    computer_id: &str,
+    repos: &[String],
+) -> Vec<RepoEntry> {
     let all = load_repos(conn, computer_id);
     if repos.is_empty() {
         all
     } else {
-        all.into_iter().filter(|r| repos.contains(&r.name)).collect()
+        all.into_iter()
+            .filter(|r| repos.contains(&r.name))
+            .collect()
     }
 }
 
@@ -341,7 +434,11 @@ fn glob_to_regex(pattern: &str) -> String {
 }
 
 #[tauri::command]
-pub async fn search_filenames(state: State<'_, DbState>, pattern: String, repos: Vec<String>) -> Result<Vec<SearchResult>, String> {
+pub async fn search_filenames(
+    state: State<'_, DbState>,
+    pattern: String,
+    repos: Vec<String>,
+) -> Result<Vec<SearchResult>, String> {
     let entries = {
         let conn = state.lock_recover();
         let cid = get_computer_id();
@@ -424,17 +521,29 @@ struct RawMatch {
     line_text: String,
 }
 
-fn try_ripgrep(query: &str, repo_path: &str, repo_name: &str, max_results: usize) -> Option<Vec<RawMatch>> {
+fn try_ripgrep(
+    query: &str,
+    repo_path: &str,
+    repo_name: &str,
+    max_results: usize,
+) -> Option<Vec<RawMatch>> {
     let output = spawn("rg")
         .args([
             "--json",
-            "--glob", "!.git",
-            "--glob", "!node_modules",
-            "--glob", "!target",
-            "--glob", "!__pycache__",
-            "--glob", "!.venv",
-            "--glob", "!.idea",
-            "--glob", "!.vs",
+            "--glob",
+            "!.git",
+            "--glob",
+            "!node_modules",
+            "--glob",
+            "!target",
+            "--glob",
+            "!__pycache__",
+            "--glob",
+            "!.venv",
+            "--glob",
+            "!.idea",
+            "--glob",
+            "!.vs",
             "-i",
             query,
             repo_path,
@@ -467,7 +576,11 @@ fn try_ripgrep(query: &str, repo_path: &str, repo_name: &str, max_results: usize
         let data = &val["data"];
         let file_path_str = data["path"]["text"].as_str().unwrap_or_default();
         let line_number = data["line_number"].as_u64().unwrap_or(0) as u32;
-        let match_text = data["lines"]["text"].as_str().unwrap_or_default().trim().to_string();
+        let match_text = data["lines"]["text"]
+            .as_str()
+            .unwrap_or_default()
+            .trim()
+            .to_string();
 
         let file_path = Path::new(file_path_str);
         let relative_path = file_path
@@ -488,7 +601,12 @@ fn try_ripgrep(query: &str, repo_path: &str, repo_name: &str, max_results: usize
     Some(results)
 }
 
-fn try_grep(query: &str, repo_path: &str, repo_name: &str, max_results: usize) -> Option<Vec<RawMatch>> {
+fn try_grep(
+    query: &str,
+    repo_path: &str,
+    repo_name: &str,
+    max_results: usize,
+) -> Option<Vec<RawMatch>> {
     let output = spawn("grep")
         .args([
             "-rn",
@@ -549,7 +667,12 @@ fn try_grep(query: &str, repo_path: &str, repo_name: &str, max_results: usize) -
     Some(results)
 }
 
-fn fallback_content_search(query: &str, repo_path: &str, repo_name: &str, max_results: usize) -> Vec<RawMatch> {
+fn fallback_content_search(
+    query: &str,
+    repo_path: &str,
+    repo_name: &str,
+    max_results: usize,
+) -> Vec<RawMatch> {
     let repo_path_obj = Path::new(repo_path);
     let query_lower = query.to_lowercase();
     let files = walk_repo(repo_path_obj);
@@ -626,14 +749,20 @@ fn group_matches(raw: Vec<RawMatch>) -> Vec<FileSearchResult> {
     }
 
     // Return in insertion order, limited to MAX_FILE_GROUPS
-    order.into_iter()
+    order
+        .into_iter()
         .filter_map(|k| map.remove(&k))
         .take(MAX_FILE_GROUPS)
         .collect()
 }
 
 #[tauri::command]
-pub async fn search_content(state: State<'_, DbState>, query: String, repos: Vec<String>, file_pattern: Option<String>) -> Result<Vec<FileSearchResult>, String> {
+pub async fn search_content(
+    state: State<'_, DbState>,
+    query: String,
+    repos: Vec<String>,
+    file_pattern: Option<String>,
+) -> Result<Vec<FileSearchResult>, String> {
     let entries = {
         let conn = state.lock_recover();
         let cid = get_computer_id();
@@ -672,9 +801,13 @@ pub async fn search_content(state: State<'_, DbState>, query: String, repos: Vec
 // ── File context ─────────────────────────────────────────
 
 #[tauri::command]
-pub fn get_file_context(file_path: String, line_num: u32, context_lines: u32) -> Result<Vec<ContextLine>, String> {
-    let content = std::fs::read_to_string(&file_path)
-        .map_err(|e| format!("Cannot read file: {e}"))?;
+pub fn get_file_context(
+    file_path: String,
+    line_num: u32,
+    context_lines: u32,
+) -> Result<Vec<ContextLine>, String> {
+    let content =
+        std::fs::read_to_string(&file_path).map_err(|e| format!("Cannot read file: {e}"))?;
 
     let lines: Vec<&str> = content.lines().collect();
     let total = lines.len() as u32;
@@ -700,15 +833,23 @@ pub fn get_file_context(file_path: String, line_num: u32, context_lines: u32) ->
 
 // ── Git history search ────────────────────────────────────
 
-fn search_git_in_repo(query: &str, repo_path: &str, repo_name: &str, max_results: usize) -> Vec<GitSearchResult> {
+fn search_git_in_repo(
+    query: &str,
+    repo_path: &str,
+    repo_name: &str,
+    max_results: usize,
+) -> Vec<GitSearchResult> {
     let mut results = Vec::new();
     let mut seen_hashes = std::collections::HashSet::new();
 
     // Search by commit message
     if let Ok(output) = spawn("git")
         .args([
-            "-C", repo_path,
-            "log", "--all", "--oneline",
+            "-C",
+            repo_path,
+            "log",
+            "--all",
+            "--oneline",
             &format!("--grep={query}"),
             "--format=%H|%aI|%an|%s",
             "-i",
@@ -744,14 +885,20 @@ fn search_git_in_repo(query: &str, repo_path: &str, repo_name: &str, max_results
         }
     }
 
-    // Search by code changes (pickaxe)
+    // Search by changed patch lines. `-G` matches added/removed lines even
+    // when the number of occurrences stays the same, unlike pickaxe `-S`.
     if results.len() < max_results {
         let remaining = max_results - results.len();
+        let pattern = escape_git_extended_regex(query);
         if let Ok(output) = spawn("git")
             .args([
-                "-C", repo_path,
-                "log", "--all",
-                &format!("-S{query}"),
+                "-C",
+                repo_path,
+                "log",
+                "--all",
+                "--extended-regexp",
+                "--regexp-ignore-case",
+                &format!("-G{pattern}"),
                 "--format=%H|%aI|%an|%s",
                 &format!("-{}", remaining),
             ])
@@ -789,20 +936,50 @@ fn search_git_in_repo(query: &str, repo_path: &str, repo_name: &str, max_results
     results
 }
 
+fn escape_git_extended_regex(query: &str) -> String {
+    let mut out = String::new();
+    for ch in query.chars() {
+        match ch {
+            '.' | '+' | '*' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '^' | '$' | '|' | '\\' => {
+                out.push('\\');
+                out.push(ch);
+            }
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
 fn get_commit_files(repo_path: &str, hash: &str) -> Vec<String> {
     if let Ok(output) = spawn("git")
-        .args(["-C", repo_path, "diff-tree", "--no-commit-id", "-r", "--name-only", hash])
+        .args([
+            "-C",
+            repo_path,
+            "diff-tree",
+            "--no-commit-id",
+            "-r",
+            "--name-only",
+            hash,
+        ])
         .output()
     {
         let stdout = String::from_utf8_lossy(&output.stdout);
-        stdout.lines().map(|l| l.to_string()).filter(|l| !l.is_empty()).collect()
+        stdout
+            .lines()
+            .map(|l| l.to_string())
+            .filter(|l| !l.is_empty())
+            .collect()
     } else {
         Vec::new()
     }
 }
 
 #[tauri::command]
-pub async fn search_git_history(state: State<'_, DbState>, query: String, repos: Vec<String>) -> Result<Vec<GitSearchResult>, String> {
+pub async fn search_git_history(
+    state: State<'_, DbState>,
+    query: String,
+    repos: Vec<String>,
+) -> Result<Vec<GitSearchResult>, String> {
     let entries = {
         let conn = state.lock_recover();
         let cid = get_computer_id();
@@ -842,13 +1019,25 @@ fn git_run(repo: &str, args: &[&str]) -> Result<String, String> {
     // Some git commands (reset --hard, checkout) print to stderr on success.
     // Prefer stdout; fall back to stderr so caller still gets a human message.
     let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if !stdout.is_empty() { return Ok(stdout); }
+    if !stdout.is_empty() {
+        return Ok(stdout);
+    }
     Ok(String::from_utf8_lossy(&out.stderr).trim().to_string())
 }
 
 fn default_branch(repo: &str) -> Option<String> {
     for b in ["main", "master"] {
-        if git_run(repo, &["show-ref", "--verify", "--quiet", &format!("refs/heads/{b}")]).is_ok() {
+        if git_run(
+            repo,
+            &[
+                "show-ref",
+                "--verify",
+                "--quiet",
+                &format!("refs/heads/{b}"),
+            ],
+        )
+        .is_ok()
+        {
             return Some(b.to_string());
         }
     }
@@ -880,7 +1069,9 @@ pub async fn repo_search_status(
         match paths {
             Some(p) if !p.is_empty() => {
                 let set: std::collections::HashSet<_> = p.into_iter().collect();
-                all.into_iter().filter(|r| set.contains(&r.path)).collect::<Vec<_>>()
+                all.into_iter()
+                    .filter(|r| set.contains(&r.path))
+                    .collect::<Vec<_>>()
             }
             _ => all,
         }
@@ -950,7 +1141,9 @@ pub async fn repo_search_pull_main(
         let cid = get_computer_id();
         let all = load_repos(&conn, &cid);
         let set: std::collections::HashSet<_> = paths.into_iter().collect();
-        all.into_iter().filter(|r| set.contains(&r.path)).collect::<Vec<_>>()
+        all.into_iter()
+            .filter(|r| set.contains(&r.path))
+            .collect::<Vec<_>>()
     };
     let handles: Vec<_> = repos
         .into_iter()
@@ -980,13 +1173,15 @@ fn pull_one(repo: &RepoEntry, dry_run: bool) -> PullOutcome {
     }
     let branch = match default_branch(path) {
         Some(b) => b,
-        None => return PullOutcome {
-            name,
-            skipped: true,
-            success: false,
-            message: "no main/master/origin/HEAD".to_string(),
-            commands_run: vec![],
-        },
+        None => {
+            return PullOutcome {
+                name,
+                skipped: true,
+                success: false,
+                message: "no main/master/origin/HEAD".to_string(),
+                commands_run: vec![],
+            }
+        }
     };
     let planned = vec![
         format!("git checkout {branch}"),
@@ -994,22 +1189,34 @@ fn pull_one(repo: &RepoEntry, dry_run: bool) -> PullOutcome {
     ];
     if dry_run {
         return PullOutcome {
-            name, skipped: false, success: true,
+            name,
+            skipped: false,
+            success: true,
             message: "dry-run".to_string(),
             commands_run: planned,
         };
     }
     if let Err(e) = git_run(path, &["checkout", &branch]) {
-        return PullOutcome { name, skipped: false, success: false, message: format!("checkout failed: {e}"), commands_run: planned };
+        return PullOutcome {
+            name,
+            skipped: false,
+            success: false,
+            message: format!("checkout failed: {e}"),
+            commands_run: planned,
+        };
     }
     match git_run(path, &["pull", "--ff-only"]) {
         Ok(out) => PullOutcome {
-            name, skipped: false, success: true,
+            name,
+            skipped: false,
+            success: true,
             message: out.lines().last().unwrap_or("ok").to_string(),
             commands_run: planned,
         },
         Err(e) => PullOutcome {
-            name, skipped: false, success: false,
+            name,
+            skipped: false,
+            success: false,
             message: format!("pull failed: {e}"),
             commands_run: planned,
         },
@@ -1018,10 +1225,10 @@ fn pull_one(repo: &RepoEntry, dry_run: bool) -> PullOutcome {
 
 #[derive(Serialize)]
 pub struct ResetHardResult {
-    pub output: String,         // combined stdout/stderr of git steps
+    pub output: String, // combined stdout/stderr of git steps
     pub dirty_before: bool,
-    pub dirty_after: bool,      // should be false on a real reset (+clean)
-    pub cleaned: bool,           // whether git clean -fd also ran
+    pub dirty_after: bool, // should be false on a real reset (+clean)
+    pub cleaned: bool,     // whether git clean -fd also ran
 }
 
 /// Return `git show <hash>` output for the given commit. Includes the
@@ -1042,7 +1249,9 @@ pub async fn repo_search_commit_diff(
     let full = full_context.unwrap_or(false);
     tokio::task::spawn_blocking(move || {
         let mut args: Vec<&str> = vec!["show", "--no-color"];
-        if full { args.push("-U9999"); }
+        if full {
+            args.push("-U9999");
+        }
         args.push(&hash);
         git_run(&repo_path, &args)
     })
@@ -1074,7 +1283,9 @@ pub async fn repo_search_reset_hard(
         if want_clean {
             let clean_out = git_run(&path, &["clean", "-fd"])?;
             if !clean_out.is_empty() {
-                if !combined.is_empty() { combined.push('\n'); }
+                if !combined.is_empty() {
+                    combined.push('\n');
+                }
                 combined.push_str(&clean_out);
             }
         }
@@ -1124,7 +1335,9 @@ pub fn open_in_editor(
     {
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
         std::process::Command::new(&shell)
-            .arg("-l").arg("-c").arg(&rendered)
+            .arg("-l")
+            .arg("-c")
+            .arg(&rendered)
             .spawn()
             .map_err(|e| format!("spawn {} -lc {:?}: {}", shell, rendered, e))?;
     }
@@ -1158,9 +1371,12 @@ pub fn read_full_file(path: String) -> Result<FullFileResult, String> {
             size,
         });
     }
-    let content = std::fs::read_to_string(&path)
-        .map_err(|e| format!("read_to_string: {e}"))?;
-    Ok(FullFileResult { content, truncated: false, size })
+    let content = std::fs::read_to_string(&path).map_err(|e| format!("read_to_string: {e}"))?;
+    Ok(FullFileResult {
+        content,
+        truncated: false,
+        size,
+    })
 }
 
 #[cfg(test)]
@@ -1241,9 +1457,24 @@ mod tests {
     #[test]
     fn clear_group_from_repos_only_touches_matching_entries() {
         let mut repos = vec![
-            RepoEntry { name: "a".into(), path: "/a".into(), color: "#fff".into(), group_id: Some(1) },
-            RepoEntry { name: "b".into(), path: "/b".into(), color: "#fff".into(), group_id: Some(2) },
-            RepoEntry { name: "c".into(), path: "/c".into(), color: "#fff".into(), group_id: None },
+            RepoEntry {
+                name: "a".into(),
+                path: "/a".into(),
+                color: "#fff".into(),
+                group_id: Some(1),
+            },
+            RepoEntry {
+                name: "b".into(),
+                path: "/b".into(),
+                color: "#fff".into(),
+                group_id: Some(2),
+            },
+            RepoEntry {
+                name: "c".into(),
+                path: "/c".into(),
+                color: "#fff".into(),
+                group_id: None,
+            },
         ];
         assert!(clear_group_from_repos(&mut repos, 1));
         assert!(repos[0].group_id.is_none());
@@ -1267,5 +1498,193 @@ mod tests {
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].name, "r1");
         assert!(parsed[0].group_id.is_none());
+    }
+
+    #[test]
+    fn search_git_history_finds_changed_patch_text_without_message_match() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path();
+        let run = |args: &[&str]| {
+            let out = spawn("git")
+                .arg("-C")
+                .arg(repo)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git {:?} failed: {}",
+                args,
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+
+        run(&["init"]);
+        run(&["config", "user.email", "test@example.com"]);
+        run(&["config", "user.name", "Test User"]);
+        std::fs::write(repo.join("sample.rs"), "pub fn answer() -> i32 { 1 }\n").unwrap();
+        run(&["add", "sample.rs"]);
+        run(&["commit", "-m", "initial commit"]);
+        std::fs::write(repo.join("sample.rs"), "pub fn answer() -> i32 { 2 }\n").unwrap();
+        run(&["add", "sample.rs"]);
+        run(&["commit", "-m", "adjust value"]);
+
+        let found = search_git_in_repo("pub fn answer()", repo.to_str().unwrap(), "tmp-repo", 10);
+
+        let adjusted = found
+            .iter()
+            .find(|commit| commit.message == "adjust value")
+            .expect("changed line commit should be found");
+        assert_eq!(adjusted.files_changed, vec!["sample.rs"]);
+    }
+
+    #[test]
+    fn reorder_groups_in_place_sets_known_ids_first() {
+        let mut groups = vec![
+            RepoGroup {
+                id: 1,
+                name: "One".into(),
+                icon: "".into(),
+                color: "#111".into(),
+                sort_order: 0,
+            },
+            RepoGroup {
+                id: 2,
+                name: "Two".into(),
+                icon: "".into(),
+                color: "#222".into(),
+                sort_order: 1,
+            },
+            RepoGroup {
+                id: 3,
+                name: "Three".into(),
+                icon: "".into(),
+                color: "#333".into(),
+                sort_order: 2,
+            },
+        ];
+
+        reorder_groups_in_place(&mut groups, &[3, 1]);
+
+        assert_eq!(
+            groups.iter().map(|g| g.id).collect::<Vec<_>>(),
+            vec![3, 1, 2]
+        );
+        assert_eq!(
+            groups.iter().map(|g| g.sort_order).collect::<Vec<_>>(),
+            vec![0, 1, 2]
+        );
+    }
+
+    #[test]
+    fn reorder_repos_in_place_sets_known_names_first() {
+        let mut repos = vec![
+            RepoEntry {
+                name: "one".into(),
+                path: "/one".into(),
+                color: "#111".into(),
+                group_id: None,
+            },
+            RepoEntry {
+                name: "two".into(),
+                path: "/two".into(),
+                color: "#222".into(),
+                group_id: Some(2),
+            },
+            RepoEntry {
+                name: "three".into(),
+                path: "/three".into(),
+                color: "#333".into(),
+                group_id: Some(2),
+            },
+        ];
+
+        reorder_repos_in_place(&mut repos, &["three".into(), "one".into()]);
+
+        assert_eq!(
+            repos.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(),
+            vec!["three", "one", "two"]
+        );
+    }
+
+    #[test]
+    fn reorder_groups_persists_sort_order_through_settings() {
+        let conn = crate::db::init_test_db();
+        let cid = "pc1";
+        let groups = vec![
+            RepoGroup {
+                id: 1,
+                name: "One".into(),
+                icon: "".into(),
+                color: "#111".into(),
+                sort_order: 0,
+            },
+            RepoGroup {
+                id: 2,
+                name: "Two".into(),
+                icon: "".into(),
+                color: "#222".into(),
+                sort_order: 1,
+            },
+            RepoGroup {
+                id: 3,
+                name: "Three".into(),
+                icon: "".into(),
+                color: "#333".into(),
+                sort_order: 2,
+            },
+        ];
+        save_groups(&conn, cid, &groups).unwrap();
+
+        let mut loaded = load_groups(&conn, cid);
+        reorder_groups_in_place(&mut loaded, &[2, 3, 1]);
+        save_groups(&conn, cid, &loaded).unwrap();
+
+        let reloaded = load_groups(&conn, cid);
+        assert_eq!(
+            reloaded.iter().map(|g| g.id).collect::<Vec<_>>(),
+            vec![2, 3, 1]
+        );
+        assert_eq!(
+            reloaded.iter().map(|g| g.sort_order).collect::<Vec<_>>(),
+            vec![0, 1, 2]
+        );
+    }
+
+    #[test]
+    fn reorder_repos_persists_order_through_settings() {
+        let conn = crate::db::init_test_db();
+        let cid = "pc1";
+        let repos = vec![
+            RepoEntry {
+                name: "one".into(),
+                path: "/one".into(),
+                color: "#111".into(),
+                group_id: None,
+            },
+            RepoEntry {
+                name: "two".into(),
+                path: "/two".into(),
+                color: "#222".into(),
+                group_id: Some(2),
+            },
+            RepoEntry {
+                name: "three".into(),
+                path: "/three".into(),
+                color: "#333".into(),
+                group_id: Some(2),
+            },
+        ];
+        save_repos(&conn, cid, &repos).unwrap();
+
+        let mut loaded = load_repos(&conn, cid);
+        reorder_repos_in_place(&mut loaded, &["three".into(), "one".into(), "two".into()]);
+        save_repos(&conn, cid, &loaded).unwrap();
+
+        let reloaded = load_repos(&conn, cid);
+        assert_eq!(
+            reloaded.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(),
+            vec!["three", "one", "two"]
+        );
     }
 }

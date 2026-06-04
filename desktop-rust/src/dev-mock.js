@@ -1120,14 +1120,17 @@
     },
     // Groups
     async list_repo_groups() {
-      return storeGet('repo_groups', []);
+      return storeGet('repo_groups', []).sort((a, b) =>
+        (a.sort_order || 0) - (b.sort_order || 0) || String(a.name).localeCompare(String(b.name))
+      );
     },
     async add_repo_group({ name, icon, color }) {
       if (!name || !name.trim()) throw new Error('Name is required');
       const groups = storeGet('repo_groups', []);
       if (groups.some(g => g.name === name)) throw new Error(`Group '${name}' already exists`);
       const id = (groups.reduce((m, g) => Math.max(m, g.id), 0)) + 1;
-      const group = { id, name, icon: icon || '', color: color || '#3b82f6', sort_order: 0 };
+      const sort_order = groups.reduce((m, g) => Math.max(m, g.sort_order || 0), -1) + 1;
+      const group = { id, name, icon: icon || '', color: color || '#3b82f6', sort_order };
       groups.push(group);
       storeSet('repo_groups', groups);
       return group;
@@ -1147,6 +1150,15 @@
       const groups = storeGet('repo_groups', []).filter(g => g.id !== id);
       storeSet('repo_groups', groups);
     },
+    async reorder_repo_groups({ ids }) {
+      const order = new Map((ids || []).map((id, idx) => [id, idx]));
+      const groups = storeGet('repo_groups', []).sort((a, b) => {
+        const ai = order.has(a.id) ? order.get(a.id) : Number.MAX_SAFE_INTEGER;
+        const bi = order.has(b.id) ? order.get(b.id) : Number.MAX_SAFE_INTEGER;
+        return ai - bi || (a.sort_order || 0) - (b.sort_order || 0) || String(a.name).localeCompare(String(b.name));
+      }).map((g, idx) => ({ ...g, sort_order: idx }));
+      storeSet('repo_groups', groups);
+    },
     async update_repo({ oldName, name, path, color, groupId }) {
       const repos = storeGet('repos', []);
       if (repos.some(r => r.name === name && r.name !== oldName)) throw new Error(`Repo '${name}' already exists`);
@@ -1155,9 +1167,27 @@
       r.name = name; r.path = path; r.color = color; r.group_id = groupId ?? null;
       storeSet('repos', repos);
     },
-    async search_filenames() { return []; },
-    async search_content() { return []; },
-    async search_git_history() { return []; },
+    async reorder_repos({ names }) {
+      const order = new Map((names || []).map((name, idx) => [name, idx]));
+      const repos = storeGet('repos', []).sort((a, b) => {
+        const ai = order.has(a.name) ? order.get(a.name) : Number.MAX_SAFE_INTEGER;
+        const bi = order.has(b.name) ? order.get(b.name) : Number.MAX_SAFE_INTEGER;
+        return ai - bi;
+      });
+      storeSet('repos', repos);
+    },
+    async search_filenames({ pattern, repos }) {
+      storeSet('repo_search_last_search', { type: 'files', query: pattern, repos: repos || [] });
+      return [];
+    },
+    async search_content({ query, repos }) {
+      storeSet('repo_search_last_search', { type: 'content', query, repos: repos || [] });
+      return [];
+    },
+    async search_git_history({ query, repos }) {
+      storeSet('repo_search_last_search', { type: 'git', query, repos: repos || [] });
+      return [];
+    },
     async get_file_context() { return []; },
 
     // v1.2.0 tools

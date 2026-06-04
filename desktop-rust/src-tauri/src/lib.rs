@@ -232,6 +232,8 @@ pub fn run() {
             commands::repo_search::add_repo_group,
             commands::repo_search::update_repo_group,
             commands::repo_search::remove_repo_group,
+            commands::repo_search::reorder_repo_groups,
+            commands::repo_search::reorder_repos,
             commands::repo_search::search_filenames,
             commands::repo_search::search_content,
             commands::repo_search::search_git_history,

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## v1.7.0 (2026-06-04)
+
+- **Repo Search git code search:** Git history search now looks through changed
+  patch lines, not only commit messages, so code-only changes are discoverable
+  even when the commit message does not contain the query.
+- **Repo Search group scope:** selecting a repository group now visibly updates
+  the active tab and the scope badge, and search calls are limited to active
+  repositories inside that group instead of leaking to all selected repos.
+- **Repo Search ordering:** group tabs and repository chips can be reordered by
+  drag-and-drop with persistent order. Repository chips still support dragging
+  onto a group tab to move the repository between groups.
+
 ## v1.6.0 (2026-06-03)
 
 - **Whisper recognition engine selector:** the Whisper header now separates

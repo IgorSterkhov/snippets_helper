@@ -1082,6 +1082,40 @@ async def run_tests():
         assert 'snippets_helper' in rows or 'dags-core' in rows, rows
     await check('T13 Manage tab shows status table', t13_manage_tab_renders)
 
+    # ── T13b: group tab scopes search calls ──────────────────
+    async def t13b_group_tab_scopes_search_calls():
+        await cdp.eval("""(async () => {
+          localStorage.setItem('mock.repo_groups', JSON.stringify([
+            { id: 501, name: 'Scoped', icon: '', color: '#10b981', sort_order: 0 }
+          ]));
+          localStorage.setItem('mock.repos', JSON.stringify([
+            { name: 'snippets_helper', path: '/home/dev/snippets_helper', color: '#3b82f6', group_id: 501 },
+            { name: 'dags-core', path: '/home/dev/dags-core', color: '#10b981', group_id: null },
+            { name: 'pg-analytics', path: '/home/dev/pg-analytics', color: '#f59e0b', group_id: null }
+          ]));
+          localStorage.removeItem('mock.repo_search_last_search');
+          document.querySelector('.tab-btn[data-tab-id="repo-search"]').click();
+          await (window.__rsRefreshAfterGroupDelete && window.__rsRefreshAfterGroupDelete());
+        })()""")
+        await wait_until(cdp, "[...document.querySelectorAll('.rs-tab')].some(b => b.textContent.includes('Scoped'))", timeout=3)
+        await cdp.eval("[...document.querySelectorAll('.rs-tab')].find(b => b.textContent.includes('Scoped')).click()")
+        await wait_until(cdp, "[...document.querySelectorAll('.rs-tab.active')].some(b => b.textContent.includes('Scoped'))", timeout=2)
+        await cdp.eval("[...document.querySelectorAll('.rs-inner-tab')].find(b => b.textContent.includes('Search')).click()")
+        await cdp.eval("[...document.querySelectorAll('.rs-type-btn')].find(b => b.textContent.includes('Git')).click()")
+        await cdp.eval("""(() => {
+          const input = document.getElementById('rs-search-input');
+          input.value = 'needle';
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          document.querySelector('.rs-search-btn').click();
+        })()""")
+        await wait_until(cdp, "!!localStorage.getItem('mock.repo_search_last_search')", timeout=3)
+        payload = await cdp.eval("JSON.parse(localStorage.getItem('mock.repo_search_last_search'))")
+        assert payload['type'] == 'git', payload
+        assert payload['repos'] == ['snippets_helper'], payload
+        badge = await cdp.eval("document.querySelector('#rs-scope-badge')?.textContent || ''")
+        assert 'Scoped' in badge and '1 repo' in badge, badge
+    await check('T13b group tab scopes search calls', t13b_group_tab_scopes_search_calls)
+
     # ── T14: expand/collapse file card ───────────────────────
     async def t14_expand_collapse_file_card():
         # Ensure we're on the Search inner tab
