@@ -72,6 +72,7 @@ FENCE_RE = re.compile(r"^[ \t]*```([A-Za-z0-9_+.#-]*)[ \t]*$")
 HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.+?)\s*$")
 UNORDERED_LIST_RE = re.compile(r"^[ \t]*[-*][ \t]+(.+?)\s*$")
 SAFE_LANGUAGE_RE = re.compile(r"[^A-Za-z0-9_+.#-]")
+TABLE_SEPARATOR_CELL_RE = re.compile(r"^:?-{3,}:?$")
 MARKDOWN_MARKER_RE = re.compile(
     r"!\[[^\]]*\]\([^)]+\)"
     r"|\[[^\]]+\]\([^)]+\)"
@@ -169,6 +170,131 @@ def _render_code_block(lines: list[str], language: str) -> str:
     return f"<pre><code{_language_class(language)}>{html.escape(code)}</code></pre>"
 
 
+def _split_table_row(line: str) -> list[str] | None:
+    stripped = (line or "").strip()
+    if "|" not in stripped:
+        return None
+    if stripped.startswith("|"):
+        stripped = stripped[1:]
+    if stripped.endswith("|") and not stripped.endswith("\\|"):
+        stripped = stripped[:-1]
+
+    cells: list[str] = []
+    current: list[str] = []
+    escaped = False
+    in_code_span = False
+    for char in stripped:
+        if escaped:
+            current.append(char if char == "|" else f"\\{char}")
+            escaped = False
+            continue
+        if char == "\\":
+            escaped = True
+            continue
+        if char == "`":
+            in_code_span = not in_code_span
+            current.append(char)
+            continue
+        if char == "|" and not in_code_span:
+            cells.append("".join(current).strip())
+            current = []
+            continue
+        current.append(char)
+    if escaped:
+        current.append("\\")
+    cells.append("".join(current).strip())
+
+    return cells if len(cells) >= 2 else None
+
+
+def _parse_table_separator(line: str, expected_cells: int) -> list[str] | None:
+    if expected_cells < 2:
+        return None
+    cells = _split_table_row(line)
+    if not cells or len(cells) != expected_cells:
+        return None
+
+    alignments: list[str] = []
+    for cell in cells:
+        marker = cell.replace(" ", "")
+        if not TABLE_SEPARATOR_CELL_RE.match(marker):
+            return None
+        if marker.startswith(":") and marker.endswith(":"):
+            alignments.append("center")
+        elif marker.endswith(":"):
+            alignments.append("right")
+        elif marker.startswith(":"):
+            alignments.append("left")
+        else:
+            alignments.append("")
+    return alignments
+
+
+def _table_start_at(lines: list[str], index: int) -> tuple[list[str], list[str]] | None:
+    if index + 1 >= len(lines):
+        return None
+    headers = _split_table_row(lines[index])
+    if not headers:
+        return None
+    alignments = _parse_table_separator(lines[index + 1], len(headers))
+    if alignments is None:
+        return None
+    return headers, alignments
+
+
+def _has_pipe_table(text: str) -> bool:
+    lines = (text or "").splitlines()
+    in_code = False
+    index = 0
+    while index < len(lines):
+        if FENCE_RE.match(lines[index]):
+            in_code = not in_code
+            index += 1
+            continue
+        if not in_code and _table_start_at(lines, index):
+            return True
+        index += 1
+    return False
+
+
+def _alignment_attr(alignment: str) -> str:
+    return f' style="text-align:{alignment}"' if alignment else ""
+
+
+def _normalize_table_cells(cells: list[str], width: int) -> list[str]:
+    return (cells + [""] * width)[:width]
+
+
+def _render_table(
+    headers: list[str],
+    rows: list[list[str]],
+    alignments: list[str],
+    references: dict[str, str],
+) -> str:
+    width = len(headers)
+    normalized_headers = _normalize_table_cells(headers, width)
+    head = "".join(
+        f"<th{_alignment_attr(alignments[index])}>"
+        f"{_render_inline_markdown(normalized_headers[index], references)}</th>"
+        for index in range(width)
+    )
+    body_rows = []
+    for row in rows:
+        normalized_row = _normalize_table_cells(row, width)
+        body_cells = "".join(
+            f"<td{_alignment_attr(alignments[index])}>"
+            f"{_render_inline_markdown(normalized_row[index], references)}</td>"
+            for index in range(width)
+        )
+        body_rows.append(f"<tr>{body_cells}</tr>")
+    body = "".join(body_rows)
+    return (
+        "<div class='share-table-scroll'>"
+        f"<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>"
+        "</div>"
+    )
+
+
 def _extract_reference_definitions(text: str) -> tuple[str, dict[str, str]]:
     refs: dict[str, str] = {}
     output: list[str] = []
@@ -188,7 +314,7 @@ def _extract_reference_definitions(text: str) -> tuple[str, dict[str, str]]:
 
 
 def _is_markdown_like(text: str) -> bool:
-    return bool(MARKDOWN_MARKER_RE.search(text or ""))
+    return bool(MARKDOWN_MARKER_RE.search(text or "")) or _has_pipe_table(text or "")
 
 
 def _render_markdown(text: str) -> str:
@@ -221,7 +347,10 @@ def _render_markdown(text: str) -> str:
         flush_paragraph()
         flush_list()
 
-    for line in (text or "").splitlines():
+    lines = (text or "").splitlines()
+    index = 0
+    while index < len(lines):
+        line = lines[index]
         fence = FENCE_RE.match(line)
         if fence:
             if in_code:
@@ -233,14 +362,34 @@ def _render_markdown(text: str) -> str:
                 flush_blocks()
                 in_code = True
                 code_language = fence.group(1)
+            index += 1
             continue
 
         if in_code:
             code_lines.append(line)
+            index += 1
             continue
 
         if not line.strip():
             flush_blocks()
+            index += 1
+            continue
+
+        table = _table_start_at(lines, index)
+        if table:
+            headers, alignments = table
+            rows: list[list[str]] = []
+            flush_blocks()
+            index += 2
+            while index < len(lines):
+                if not lines[index].strip():
+                    break
+                row = _split_table_row(lines[index])
+                if not row:
+                    break
+                rows.append(row)
+                index += 1
+            output.append(_render_table(headers, rows, alignments, references))
             continue
 
         heading = HEADING_RE.match(line)
@@ -248,16 +397,19 @@ def _render_markdown(text: str) -> str:
             flush_blocks()
             level = min(len(heading.group(1)), 6)
             output.append(f"<h{level}>{_render_inline_markdown(heading.group(2), references)}</h{level}>")
+            index += 1
             continue
 
         unordered = UNORDERED_LIST_RE.match(line)
         if unordered:
             flush_paragraph()
             list_items.append(unordered.group(1))
+            index += 1
             continue
 
         flush_list()
         paragraph.append(line)
+        index += 1
 
     if in_code:
         output.append(_render_code_block(code_lines, code_language))
@@ -288,7 +440,7 @@ def render_share_html(payload: dict) -> str:
         body = (
             f"{description_html}"
             f"{value_html}"
-            "<button type='button' onclick='navigator.clipboard.writeText("
+            "<button class='share-copy-button' type='button' onclick='navigator.clipboard.writeText("
             'document.getElementById("share-code").innerText)'
             "'>Copy</button>"
         )
@@ -318,11 +470,17 @@ def render_share_html(payload: dict) -> str:
     code {{ background: #161b22; border: 1px solid #30363d; border-radius: 4px; padding: 1px 4px; }}
     pre code {{ background: transparent; border: 0; padding: 0; }}
     button {{ background: #238636; color: white; border: 0; border-radius: 6px; padding: 8px 12px; font-weight: 600; }}
+    .share-copy-button {{ display: block; width: 100%; margin: 16px 0 0; padding: 10px 12px; }}
     a {{ color: #58a6ff; }}
     .desc {{ color: #8b949e; }}
     .share-markdown h1, .share-markdown h2, .share-markdown h3 {{ color: #f0f6fc; margin: 20px 0 10px; }}
     .share-markdown p, .share-markdown ul {{ margin: 0 0 12px; }}
     .share-markdown li {{ margin: 4px 0; }}
+    .share-table-scroll {{ overflow-x: auto; margin: 12px 0 16px; }}
+    .share-markdown table {{ width: 100%; min-width: 520px; border-collapse: collapse; background: #0d1117; }}
+    .share-markdown th, .share-markdown td {{ border: 1px solid #30363d; padding: 7px 10px; vertical-align: top; }}
+    .share-markdown th {{ background: #161b22; color: #f0f6fc; font-weight: 700; }}
+    .share-markdown td {{ color: #c9d1d9; }}
     .figure-card {{ margin: 14px 0; border: 1px solid #30363d; border-radius: 8px; overflow: hidden; background: #161b22; }}
     .figure-card img {{ display: block; max-width: 100%; height: auto; margin: 0 auto; }}
     .figure-card figcaption {{ border-top: 1px solid #30363d; padding: 8px 10px; color: #8b949e; font-size: 13px; }}

@@ -122,6 +122,54 @@ def test_render_share_html_renders_shortcut_value_and_description_as_safe_markdo
     assert "href='https://example.com'>Docs</a>" in rendered
 
 
+def test_render_share_html_renders_shortcut_pipe_tables_and_full_width_copy_button():
+    rendered = render_share_html(
+        {
+            "type": "shortcut",
+            "name": "Port rules",
+            "value": (
+                "Правила:\n\n"
+                "| Назначение | Внешний порт | Внутренний адрес | Внутренний порт |\n"
+                "|---|---:|---|---:|\n"
+                "| MTProxy | `7443` | 192.168.1.96 | 7443 |\n"
+                "| SSH в VM | 5555 | 192.168.1.96 | 5555 |"
+            ),
+            "description": "",
+            "links": [],
+        }
+    )
+
+    assert "<table>" in rendered
+    assert "<thead><tr>" in rendered
+    assert "<tbody>" in rendered
+    assert "<th>Назначение</th>" in rendered
+    assert '<th style="text-align:right">Внешний порт</th>' in rendered
+    assert "<td>MTProxy</td>" in rendered
+    assert '<td style="text-align:right"><code>7443</code></td>' in rendered
+    assert "|---|---:" not in rendered
+    assert "class='share-copy-button'" in rendered
+    assert ".share-copy-button {" in rendered
+    assert "width: 100%" in rendered
+
+
+def test_render_share_html_treats_table_only_shortcut_value_as_markdown():
+    rendered = render_share_html(
+        {
+            "type": "shortcut",
+            "name": "Only table",
+            "value": "| A | B |\n|---|---|\n| 1 | 2 |",
+            "description": "",
+            "links": [],
+        }
+    )
+
+    assert "<article id='share-code' class='share-markdown share-value'>" in rendered
+    assert "<table>" in rendered
+    assert "<th>A</th>" in rendered
+    assert "<td>2</td>" in rendered
+    assert "<pre><code id='share-code'>" not in rendered
+
+
 def test_render_share_html_preserves_plain_shortcut_value_as_code_block():
     rendered = render_share_html(
         {

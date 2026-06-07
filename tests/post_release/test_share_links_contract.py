@@ -18,6 +18,9 @@ def test_share_links_live_note_and_shortcut(
         "snippet value v1\n\n"
         "### Snippet Section\n\n"
         "**snippet bold** ([DocsRef][1])\n\n"
+        "| Назначение | Внешний порт |\n"
+        "|---|---:|\n"
+        "| MTProxy | 7443 |\n\n"
         "[1]: https://example.com/ref \"DocsRef\""
     )
     snippet_description_v1 = "snippet description with `code` and [Docs](https://example.com)"
@@ -102,6 +105,9 @@ def test_share_links_live_note_and_shortcut(
     assert "<h3>Snippet Section</h3>" in public_snippet_html
     assert "<strong>snippet bold</strong>" in public_snippet_html
     assert "href='https://example.com/ref'>DocsRef</a>" in public_snippet_html
+    assert "<table>" in public_snippet_html
+    assert "<th>Назначение</th>" in public_snippet_html
+    assert '<td style="text-align:right">7443</td>' in public_snippet_html
     assert "<code>code</code>" in public_snippet_html
     assert "[1]:" not in public_snippet_html
 
