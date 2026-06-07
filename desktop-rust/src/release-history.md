@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## f-20260607-1 (2026-06-07)
+
+- **Snippets navigation and panels:** Related snippet navigation now has
+  Back, History, and Forward controls with a 10-item branch popover. Snippet
+  search can switch between name-only and full content scope, uses literal
+  token matching for space-separated words, and tag/pinned panels can be shown
+  independently with draggable tag and pinned chips.
+
 ## v1.7.1 (2026-06-07)
 
 - **Whisper Yandex batch setup:** when Yandex SpeechKit is selected with

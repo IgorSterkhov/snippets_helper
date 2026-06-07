@@ -39,7 +39,7 @@ the relevant section after implementation.
 
 ## §2 Pointer-based DnD with slot placeholder + FLIP
 
-**Used in:** Exec tab (command cards, already implemented), Tasks tab (checkbox rows, pinned chips), Snippets pinned chips, Notes pinned chips
+**Used in:** Exec tab (command cards, already implemented), Tasks tab (checkbox rows, pinned chips), Snippets tag and pinned chips, Notes pinned chips
 
 **Pattern:**
 1. Use Pointer Events API, NOT HTML5 Drag and Drop (broken in Tauri WebView2).

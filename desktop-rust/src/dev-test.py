@@ -1215,17 +1215,26 @@ async def run_tests():
 
     # ── T14b: Snippets pinned panel + rename chip ───────────
     async def t14b_snippets_pinned_panel_and_rename():
+        await cdp.eval("""(() => {
+          const settings = JSON.parse(localStorage.getItem('mock.settings') || '{}');
+          settings.snippets_show_tags_panel = '1';
+          settings.snippets_show_pinned_panel = '0';
+          localStorage.setItem('mock.settings', JSON.stringify(settings));
+        })()""")
         await open_shortcuts_tab()
-        await wait_until(cdp, "!!document.querySelector('#panel-shortcuts .snippet-panel-button')", timeout=4)
-        await cdp.eval("document.querySelector('#panel-shortcuts .snippet-panel-button').click()")
-        await wait_until(cdp, "!!document.querySelector('.snippet-panel-menu')", timeout=2)
-        await cdp.eval(
-            "[...document.querySelectorAll('.snippet-panel-menu .snippet-sort-menu-item')]"
-            ".find(x => x.textContent.includes('Pinned')).click()"
+        await wait_until(cdp, "!!document.querySelector('#panel-shortcuts .snippet-pinned-toggle')", timeout=4)
+        await cdp.eval("""(() => {
+          const btn = document.querySelector('#panel-shortcuts .snippet-pinned-toggle');
+          if (btn?.dataset.active !== '1') btn.click();
+        })()""")
+        await wait_until(
+            cdp,
+            "!!document.querySelector('#panel-shortcuts .snippet-pinned-panel')",
+            timeout=2,
         )
         await wait_until(
             cdp,
-            "document.querySelector('#panel-shortcuts .snippet-panel-button')?.textContent.includes('Pinned')",
+            "document.querySelector('#panel-shortcuts .snippet-pinned-toggle')?.dataset.active === '1'",
             timeout=2,
         )
         await cdp.eval("[...document.querySelectorAll('#panel-shortcuts .shortcut-list-name')].find(x => x.textContent.includes('SELECT all')).click()")
@@ -1267,15 +1276,13 @@ async def run_tests():
           }
           localStorage.setItem('mock.shortcuts', JSON.stringify(items));
         })()""")
-        await cdp.eval("document.querySelector('#panel-shortcuts .snippet-panel-button').click()")
-        await wait_until(cdp, "!!document.querySelector('.snippet-panel-menu')", timeout=2)
-        await cdp.eval(
-            "[...document.querySelectorAll('.snippet-panel-menu .snippet-sort-menu-item')]"
-            ".find(x => x.textContent.includes('Tags')).click()"
-        )
+        await cdp.eval("""(() => {
+          const btn = document.querySelector('#panel-shortcuts .snippet-pinned-toggle');
+          if (btn?.dataset.active === '1') btn.click();
+        })()""")
         await wait_until(
             cdp,
-            "document.querySelector('#panel-shortcuts .snippet-panel-button')?.textContent.includes('Tags')",
+            "!document.querySelector('#panel-shortcuts .snippet-pinned-panel')",
             timeout=2,
         )
     await check('T14b Snippets pinned panel + rename chip', t14b_snippets_pinned_panel_and_rename)
@@ -2902,7 +2909,7 @@ async def run_tests():
             "[...document.querySelectorAll('#panel-shortcuts div button')]"
             ".find(x => x.textContent.trim() === 'sql').click()"
         )
-        await wait_until(cdp, "!!document.querySelector('#panel-shortcuts div button[style*=\"font-weight: 600\"]')", timeout=3)
+        await wait_until(cdp, "!!document.querySelector('#panel-shortcuts .snippet-tag-chip.active')", timeout=3)
 
         await cdp.eval("window.__keyCloudPerfStart = performance.now(); document.querySelector('#panel-shortcuts button[title=\"Key Cloud\"]').click()")
         await wait_until(cdp, "!!document.querySelector('.snippet-key-cloud-modal')", timeout=3)
@@ -3007,7 +3014,7 @@ async def run_tests():
         await wait_until(cdp, "!document.querySelector('.modal-overlay')", timeout=3)
         search_value = await cdp.eval("document.querySelector('#panel-shortcuts .search-bar input')?.value")
         assert search_value == 'bash', f'search value: {search_value!r}'
-        active_tag = await cdp.eval("!!document.querySelector('#panel-shortcuts div button[style*=\"font-weight: 600\"]')")
+        active_tag = await cdp.eval("!!document.querySelector('#panel-shortcuts .snippet-tag-chip.active')")
         assert not active_tag, 'tag filter should be cleared after key cloud click'
         names = await cdp.eval(
             "[...document.querySelectorAll('#panel-shortcuts div')]"
@@ -3123,6 +3130,159 @@ async def run_tests():
         )
         assert reloaded_names == ['SELECT all', 'sql_guide'], f'reloaded modified order: {reloaded_names!r}'
     await check('T26 Snippets left panel sort mode', t26_snippets_left_panel_sort_mode)
+
+    # ── T26b: Snippets Related navigation history ───────────
+    async def t26b_snippets_related_history_navigation():
+        await open_shortcuts_tab()
+        await cdp.eval(
+            "[...document.querySelectorAll('#panel-shortcuts .shortcut-list-name')]"
+            ".find(x => x.textContent.trim() === 'bash_cd_guide').click()"
+        )
+        await wait_until(cdp, "document.querySelector('#panel-shortcuts h3')?.textContent.trim() === 'bash_cd_guide'", timeout=3)
+        await wait_until(cdp, "!![...document.querySelectorAll('.snippet-detail-tab')].find(x => x.textContent.trim() === 'Related')", timeout=3)
+        await cdp.eval(
+            "[...document.querySelectorAll('.snippet-detail-tab')]"
+            ".find(x => x.textContent.trim() === 'Related').click()"
+        )
+        await wait_until(cdp, "document.querySelectorAll('.snippet-related-row').length > 0", timeout=3)
+        first_related = await cdp.eval("document.querySelector('.snippet-related-row .snippet-related-name')?.textContent.trim()")
+        await cdp.eval("document.querySelector('.snippet-related-row').click()")
+        await wait_until(
+            cdp,
+            f"document.querySelector('#panel-shortcuts h3')?.textContent.trim() === {json.dumps(first_related)}",
+            timeout=3,
+        )
+        await wait_until(cdp, "!!document.querySelector('#panel-shortcuts .snippet-history-back:not(:disabled)')", timeout=3)
+        await cdp.eval("document.querySelector('#panel-shortcuts .snippet-history-back').click()")
+        await wait_until(cdp, "document.querySelector('#panel-shortcuts h3')?.textContent.trim() === 'bash_cd_guide'", timeout=3)
+        await wait_until(cdp, "!!document.querySelector('#panel-shortcuts .snippet-history-forward:not(:disabled)')", timeout=3)
+        await cdp.eval("document.querySelector('#panel-shortcuts .snippet-history-button').click()")
+        await wait_until(cdp, "document.querySelectorAll('.snippet-history-popover-item').length >= 2", timeout=3)
+        count = await cdp.eval("document.querySelectorAll('.snippet-history-popover-item').length")
+        assert count <= 10, f'history popover should be capped at 10, got {count}'
+    await check('T26b Snippets related history navigation', t26b_snippets_related_history_navigation)
+
+    # ── T26c: Snippets search scope and token matching ──────
+    async def t26c_snippets_search_scope_and_tokens():
+        await cdp.eval("""(() => {
+          const settings = JSON.parse(localStorage.getItem('mock.settings') || '{}');
+          settings.snippets_search_scope = 'name';
+          localStorage.setItem('mock.settings', JSON.stringify(settings));
+        })()""")
+        await cdp.eval("""
+          window.__TAURI__.core.invoke('create_shortcut', {
+            name: 'route_plain_name',
+            value: 'plain value',
+            description: '',
+            links: '[]',
+            obsidian_note: ''
+          })
+        """)
+        await cdp.eval("""
+          window.__TAURI__.core.invoke('create_shortcut', {
+            name: 'routes without underscore',
+            value: 'value mentions route_ literal',
+            description: '',
+            links: '[]',
+            obsidian_note: ''
+          })
+        """)
+        await cdp.eval("""
+          window.__TAURI__.core.invoke('create_shortcut', {
+            name: 'bash_obsidian_setup',
+            value: 'setup notes',
+            description: '',
+            links: '[]',
+            obsidian_note: ''
+          })
+        """)
+        await cdp.eval("""
+          window.__TAURI__.core.invoke('create_shortcut', {
+            name: 'setup_bash_chrome_keenetic',
+            value: 'network note',
+            description: '',
+            links: '[]',
+            obsidian_note: ''
+          })
+        """)
+        await cdp.send('Page.reload', ignoreCache=True)
+        await asyncio.sleep(0.8)
+        await wait_until(cdp, "!!window.__TAURI__ && !!window.__TAURI__.core", timeout=5)
+        await open_shortcuts_tab()
+
+        await cdp.eval("""(() => {
+          const input = document.querySelector('#panel-shortcuts .search-bar input');
+          input.value = 'route_';
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        })()""")
+        await wait_until(cdp, "document.querySelector('#panel-shortcuts .shortcut-list-name')?.textContent.includes('route_plain_name')", timeout=3)
+        names = await cdp.eval("[...document.querySelectorAll('#panel-shortcuts .shortcut-list-name')].map(x => x.textContent.trim())")
+        assert 'route_plain_name' in names, names
+        assert 'routes without underscore' not in names, names
+
+        await wait_until(cdp, "!!document.querySelector('#panel-shortcuts .snippet-search-scope-button')", timeout=3)
+        await cdp.eval("document.querySelector('#panel-shortcuts .snippet-search-scope-button').click()")
+        await wait_until(cdp, "document.querySelector('#panel-shortcuts .snippet-search-scope-button')?.dataset.searchScope === 'full'", timeout=3)
+        await wait_until(cdp, "[...document.querySelectorAll('#panel-shortcuts .shortcut-list-name')].some(x => x.textContent.trim() === 'routes without underscore')", timeout=3)
+
+        await cdp.eval("""(() => {
+          const input = document.querySelector('#panel-shortcuts .search-bar input');
+          input.value = 'bash setup';
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        })()""")
+        await wait_until(cdp, "[...document.querySelectorAll('#panel-shortcuts .shortcut-list-name')].some(x => x.textContent.trim() === 'bash_obsidian_setup')", timeout=3)
+        token_names = await cdp.eval("[...document.querySelectorAll('#panel-shortcuts .shortcut-list-name')].map(x => x.textContent.trim())")
+        assert 'bash_obsidian_setup' in token_names, token_names
+        assert 'setup_bash_chrome_keenetic' in token_names, token_names
+    await check('T26c Snippets search scope and tokens', t26c_snippets_search_scope_and_tokens)
+
+    # ── T26d: Snippets panel toggles and tag reorder ────────
+    async def t26d_snippets_panel_toggles_and_tag_reorder():
+        await cdp.eval("""(() => {
+          const settings = JSON.parse(localStorage.getItem('mock.settings') || '{}');
+          settings.snippets_show_tags_panel = '1';
+          settings.snippets_show_pinned_panel = '0';
+          localStorage.setItem('mock.settings', JSON.stringify(settings));
+        })()""")
+        await cdp.send('Page.reload', ignoreCache=True)
+        await asyncio.sleep(0.8)
+        await wait_until(cdp, "!!window.__TAURI__ && !!window.__TAURI__.core", timeout=5)
+        await open_shortcuts_tab()
+
+        await wait_until(cdp, "!!document.querySelector('#panel-shortcuts .snippet-tags-toggle')", timeout=3)
+        assert await cdp.eval("!!document.querySelector('#panel-shortcuts .snippet-tags-panel')"), 'tags panel hidden by default'
+        await cdp.eval("document.querySelector('#panel-shortcuts .snippet-pinned-toggle').click()")
+        await wait_until(cdp, "!!document.querySelector('#panel-shortcuts .snippet-pinned-panel')", timeout=3)
+        assert await cdp.eval("!!document.querySelector('#panel-shortcuts .snippet-tags-panel')"), 'tags should remain visible when pinned is shown'
+        await cdp.eval("document.querySelector('#panel-shortcuts .snippet-tags-toggle').click()")
+        await wait_until(cdp, "!document.querySelector('#panel-shortcuts .snippet-tags-panel') && !!document.querySelector('#panel-shortcuts .snippet-pinned-panel')", timeout=3)
+        await cdp.eval("document.querySelector('#panel-shortcuts .snippet-pinned-toggle').click()")
+        await wait_until(cdp, "!document.querySelector('#panel-shortcuts .snippet-tags-panel') && !document.querySelector('#panel-shortcuts .snippet-pinned-panel')", timeout=3)
+        await cdp.eval("document.querySelector('#panel-shortcuts .snippet-pinned-toggle').click()")
+        await wait_until(cdp, "!!document.querySelector('#panel-shortcuts .snippet-pinned-panel')", timeout=3)
+        await cdp.eval("document.querySelector('#panel-shortcuts .snippet-tags-toggle').click()")
+        await wait_until(cdp, "document.querySelectorAll('#panel-shortcuts .snippet-tag-chip').length >= 2", timeout=3)
+
+        before = await cdp.eval("[...document.querySelectorAll('#panel-shortcuts .snippet-tag-chip')].map(x => Number(x.dataset.tagId))")
+        first_id = before[0]
+        await cdp.eval("""
+          const chips = [...document.querySelectorAll('#panel-shortcuts .snippet-tag-chip')];
+          const first = chips[0];
+          const last = chips[chips.length - 1];
+          const a = first.getBoundingClientRect();
+          const b = last.getBoundingClientRect();
+          first.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 1, button: 0, clientX: a.left + 5, clientY: a.top + 5, bubbles: true }));
+          document.dispatchEvent(new PointerEvent('pointermove', { pointerId: 1, button: 0, clientX: b.right + 28, clientY: b.top + 5, bubbles: true }));
+          document.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1, button: 0, clientX: b.right + 28, clientY: b.top + 5, bubbles: true }));
+        """)
+        await wait_until(
+            cdp,
+            f"JSON.parse(localStorage.getItem('mock.snippet_tags') || '[]').find(t => t.id === {first_id})?.sort_order > 0",
+            timeout=3,
+        )
+        after = await cdp.eval("[...document.querySelectorAll('#panel-shortcuts .snippet-tag-chip')].map(x => Number(x.dataset.tagId))")
+        assert before != after, (before, after)
+    await check('T26d Snippets panel toggles and tag reorder', t26d_snippets_panel_toggles_and_tag_reorder)
 
     # ── T27: Detached module windows ───────────────────────
     async def t27_detached_module_context_menu_and_standalone_boot():

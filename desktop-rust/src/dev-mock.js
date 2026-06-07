@@ -747,9 +747,19 @@
       storeSet('shortcuts', shortcuts);
     },
     async delete_shortcut({ id }) { deleteItem('shortcuts', id); },
-    async list_snippet_tags() { return storeGet('snippet_tags', []); },
-    async create_snippet_tag(args) { return createItem('snippet_tags', { uuid: uuid(), ...args }); },
-    async update_snippet_tag({ id, ...patch }) { return updateItem('snippet_tags', id, patch); },
+    async list_snippet_tags() {
+      return [...storeGet('snippet_tags', [])].sort((a, b) => (
+        (Number(a.sort_order ?? a.sortOrder) || 0) - (Number(b.sort_order ?? b.sortOrder) || 0)
+        || String(a.name || '').localeCompare(String(b.name || ''))
+      ));
+    },
+    async create_snippet_tag(args) {
+      const { sortOrder, ...rest } = args;
+      return createItem('snippet_tags', { uuid: uuid(), ...rest, sort_order: Number(sortOrder) || 0 });
+    },
+    async update_snippet_tag({ id, sortOrder, ...patch }) {
+      return updateItem('snippet_tags', id, { ...patch, sort_order: Number(sortOrder) || 0 });
+    },
     async delete_snippet_tag({ id }) { deleteItem('snippet_tags', id); },
     async open_link_window({ url }) { console.log('[mock] open_link_window', url); window.open(url, '_blank'); },
     async open_module_window({ moduleId }) {

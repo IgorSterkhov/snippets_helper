@@ -22,14 +22,22 @@ let expandHeight = 4; // multiplier for expanded height
 let obsidianConfigured = false;
 let tags = [];
 let selectedTagId = null;
-let tagPanelEl = null;
+let topPanelsEl = null;
+let tagsPanelEl = null;
+let pinnedPanelEl = null;
 let searchInputEl = null;
+let searchScopeButtonEl = null;
 let sortButtonEl = null;
-let panelButtonEl = null;
+let tagsToggleButtonEl = null;
+let pinnedToggleButtonEl = null;
 let sortMode = 'name';
 let sortMenuDocClick = null;
-let panelMode = 'tags';
-let panelMenuDocClick = null;
+let searchScope = 'name';
+let showTagsPanel = true;
+let showPinnedPanel = false;
+let snippetHistoryBack = [];
+let snippetHistoryForward = [];
+let historyPopoverDocClick = null;
 const KEY_CLOUD_CACHE_KEY = 'snippet_key_cloud_cache_v4';
 const KEY_CLOUD_CACHE_SCHEMA = 4;
 const KEY_CLOUD_ALGORITHM_KEY = 'snippet_key_cloud_algorithm';
@@ -38,6 +46,11 @@ const SNIPPETS_SORT_SETTING_KEY = 'snippets_sort_mode';
 const SNIPPET_SORT_MODES = new Set(['name', 'modified']);
 const SNIPPETS_PANEL_SETTING_KEY = 'snippets_panel_mode';
 const SNIPPET_PANEL_MODES = new Set(['tags', 'pinned']);
+const SNIPPETS_SEARCH_SCOPE_SETTING_KEY = 'snippets_search_scope';
+const SNIPPET_SEARCH_SCOPES = new Set(['name', 'full']);
+const SNIPPETS_SHOW_TAGS_SETTING_KEY = 'snippets_show_tags_panel';
+const SNIPPETS_SHOW_PINNED_SETTING_KEY = 'snippets_show_pinned_panel';
+const SNIPPET_HISTORY_BRANCH_LIMIT = 10;
 let keyCloudAlgorithm = readKeyCloudAlgorithm();
 let keyCloudCache = null;
 let keyCloudBuildPromise = null;
@@ -61,7 +74,16 @@ export async function init(container) {
     const eh = await call('get_setting', { key: 'snippet_expand_multiplier' });
     if (eh) expandHeight = parseInt(eh) || 4;
     sortMode = normalizeSnippetSortMode(await call('get_setting', { key: SNIPPETS_SORT_SETTING_KEY }));
-    panelMode = normalizeSnippetPanelMode(await call('get_setting', { key: SNIPPETS_PANEL_SETTING_KEY }));
+    searchScope = normalizeSnippetSearchScope(await call('get_setting', { key: SNIPPETS_SEARCH_SCOPE_SETTING_KEY }));
+    const legacyPanelMode = normalizeSnippetPanelMode(await call('get_setting', { key: SNIPPETS_PANEL_SETTING_KEY }));
+    const showTagsSetting = await call('get_setting', { key: SNIPPETS_SHOW_TAGS_SETTING_KEY });
+    const showPinnedSetting = await call('get_setting', { key: SNIPPETS_SHOW_PINNED_SETTING_KEY });
+    showTagsPanel = showTagsSetting === null || showTagsSetting === undefined
+      ? legacyPanelMode !== 'pinned'
+      : String(showTagsSetting) !== '0';
+    showPinnedPanel = showPinnedSetting === null || showPinnedSetting === undefined
+      ? legacyPanelMode === 'pinned'
+      : String(showPinnedSetting) === '1';
   } catch {}
 
   // Header row: search + add button (fixed)
@@ -74,6 +96,13 @@ export async function init(container) {
   searchBar.style.marginBottom = '0';
   header.appendChild(searchBar);
 
+  searchScopeButtonEl = document.createElement('button');
+  searchScopeButtonEl.type = 'button';
+  searchScopeButtonEl.className = 'snippet-search-scope-button';
+  searchScopeButtonEl.addEventListener('click', () => setSnippetSearchScope(searchScope === 'name' ? 'full' : 'name'));
+  updateSnippetSearchScopeButton();
+  header.appendChild(searchScopeButtonEl);
+
   sortButtonEl = document.createElement('button');
   sortButtonEl.type = 'button';
   sortButtonEl.className = 'snippet-sort-button';
@@ -84,15 +113,15 @@ export async function init(container) {
   updateSnippetSortButton();
   header.appendChild(sortButtonEl);
 
-  panelButtonEl = document.createElement('button');
-  panelButtonEl.type = 'button';
-  panelButtonEl.className = 'snippet-panel-button';
-  panelButtonEl.addEventListener('click', (e) => {
-    e.stopPropagation();
-    toggleSnippetPanelMenu(panelButtonEl);
+  tagsToggleButtonEl = createSnippetPanelToggle('tags', '#', 'Show tags panel', () => {
+    setSnippetPanelVisibility('tags', !showTagsPanel);
   });
-  updateSnippetPanelButton();
-  header.appendChild(panelButtonEl);
+  pinnedToggleButtonEl = createSnippetPanelToggle('pinned', '📌', 'Show pinned snippets panel', () => {
+    setSnippetPanelVisibility('pinned', !showPinnedPanel);
+  });
+  header.appendChild(tagsToggleButtonEl);
+  header.appendChild(pinnedToggleButtonEl);
+  updateSnippetPanelToggles();
 
   const keyCloudBtn = document.createElement('button');
   keyCloudBtn.textContent = 'Key Cloud';
@@ -110,10 +139,10 @@ export async function init(container) {
 
   container.appendChild(header);
 
-  // Tag panel
-  tagPanelEl = document.createElement('div');
-  tagPanelEl.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;padding:6px 12px;border-bottom:1px solid var(--border);flex-shrink:0;align-items:center';
-  container.appendChild(tagPanelEl);
+  // Optional tag/pinned panels
+  topPanelsEl = document.createElement('div');
+  topPanelsEl.className = 'snippet-top-panels';
+  container.appendChild(topPanelsEl);
 
   // Two-panel layout (fills remaining space)
   const panels = document.createElement('div');
@@ -165,30 +194,19 @@ async function loadShortcuts() {
 
     // Load tags
     try {
-      tags = await call('list_snippet_tags');
+      tags = sortSnippetTags(await call('list_snippet_tags'));
     } catch { tags = []; }
 
     allShortcuts = await call('list_shortcuts');
     renderSnippetTopPanel();
     refreshKeyCloudCacheInBackground();
 
-    // Load shortcuts based on tag + search
-    if (selectedTagId !== null) {
-      const tag = tags.find(t => t.id === selectedTagId);
-      if (tag) {
-        const patterns = JSON.parse(tag.patterns || '[]');
-        shortcuts = await call('filter_shortcuts', { patterns, query: currentQuery });
-      } else {
-        selectedTagId = null;
-        shortcuts = currentQuery.trim()
-          ? await call('search_shortcuts', { query: currentQuery })
-          : await call('list_shortcuts');
-      }
-    } else if (currentQuery.trim()) {
-      shortcuts = await call('search_shortcuts', { query: currentQuery });
-    } else {
-      shortcuts = allShortcuts;
+    if (selectedTagId !== null && !tags.some(tag => Number(tag.id) === Number(selectedTagId))) {
+      selectedTagId = null;
     }
+    shortcuts = allShortcuts
+      .filter(shortcut => matchesSelectedSnippetTag(shortcut))
+      .filter(shortcut => matchesSnippetSearch(shortcut, currentQuery, searchScope));
     applyShortcutSort(previousSelectedKey);
     renderList();
     renderDetail();
@@ -243,6 +261,152 @@ async function openSnippetFromAi(detail) {
   await openShortcutById(target.id);
 }
 
+function captureCurrentHistoryEntry() {
+  if (selectedIndex < 0 || selectedIndex >= shortcuts.length) return null;
+  const shortcut = shortcuts[selectedIndex];
+  if (!shortcut) return null;
+  return {
+    id: shortcut.id,
+    name: shortcut.name || '(untitled)',
+    tab: detailTab || 'code',
+  };
+}
+
+function sameHistoryEntry(a, b) {
+  return !!a && !!b && Number(a.id) === Number(b.id);
+}
+
+function pushSnippetHistoryEntry(stack, entry) {
+  if (!entry) return;
+  if (sameHistoryEntry(stack[stack.length - 1], entry)) return;
+  stack.push(entry);
+  if (stack.length > 100) stack.splice(0, stack.length - 100);
+}
+
+function getFullSnippetHistoryBranch() {
+  const current = captureCurrentHistoryEntry();
+  const forwardChronological = [...snippetHistoryForward].reverse();
+  const entries = current
+    ? [...snippetHistoryBack, current, ...forwardChronological]
+    : [...snippetHistoryBack, ...forwardChronological];
+  const currentIndex = current ? snippetHistoryBack.length : -1;
+  return { entries, currentIndex };
+}
+
+function getVisibleSnippetHistoryBranch() {
+  const { entries, currentIndex } = getFullSnippetHistoryBranch();
+  if (currentIndex < 0 || entries.length <= SNIPPET_HISTORY_BRANCH_LIMIT) {
+    return entries.map((entry, index) => ({ entry, branchIndex: index, current: index === currentIndex }));
+  }
+
+  const backCount = currentIndex;
+  const forwardCount = entries.length - currentIndex - 1;
+  let forwardTake = Math.min(forwardCount, Math.floor((SNIPPET_HISTORY_BRANCH_LIMIT - 1) / 2));
+  let backTake = Math.min(backCount, SNIPPET_HISTORY_BRANCH_LIMIT - 1 - forwardTake);
+  forwardTake = Math.min(forwardCount, SNIPPET_HISTORY_BRANCH_LIMIT - 1 - backTake);
+  const start = currentIndex - backTake;
+  const end = currentIndex + forwardTake + 1;
+  return entries.slice(start, end).map((entry, offset) => {
+    const branchIndex = start + offset;
+    return { entry, branchIndex, current: branchIndex === currentIndex };
+  });
+}
+
+function closeSnippetHistoryPopover() {
+  for (const popover of document.querySelectorAll('.snippet-history-popover')) {
+    popover.remove();
+  }
+  if (historyPopoverDocClick) {
+    document.removeEventListener('click', historyPopoverDocClick);
+    historyPopoverDocClick = null;
+  }
+}
+
+async function navigateSnippetHistoryBack() {
+  if (snippetHistoryBack.length === 0) return;
+  await jumpToSnippetHistoryEntry(snippetHistoryBack.length - 1);
+}
+
+async function navigateSnippetHistoryForward() {
+  if (snippetHistoryForward.length === 0) return;
+  await jumpToSnippetHistoryEntry(snippetHistoryBack.length + 1);
+}
+
+async function jumpToSnippetHistoryEntry(branchIndex) {
+  const { entries, currentIndex } = getFullSnippetHistoryBranch();
+  if (branchIndex === currentIndex || branchIndex < 0 || branchIndex >= entries.length) {
+    closeSnippetHistoryPopover();
+    return;
+  }
+
+  const target = entries[branchIndex];
+  if (!allShortcuts.some(shortcut => Number(shortcut.id) === Number(target.id))) {
+    snippetHistoryBack = snippetHistoryBack.filter(entry => Number(entry.id) !== Number(target.id));
+    snippetHistoryForward = snippetHistoryForward.filter(entry => Number(entry.id) !== Number(target.id));
+    closeSnippetHistoryPopover();
+    showToast('Snippet from history was deleted', 'error');
+    renderDetail();
+    return;
+  }
+
+  snippetHistoryBack = entries.slice(0, branchIndex);
+  snippetHistoryForward = entries.slice(branchIndex + 1).reverse();
+  closeSnippetHistoryPopover();
+  await openShortcutById(target.id, { pushHistory: false, tab: target.tab || 'code', preserveFilters: true });
+}
+
+function toggleSnippetHistoryPopover(anchor) {
+  if (document.querySelector('.snippet-history-popover')) {
+    closeSnippetHistoryPopover();
+    return;
+  }
+  openSnippetHistoryPopover(anchor);
+}
+
+function openSnippetHistoryPopover(anchor) {
+  closeSnippetHistoryPopover();
+  const items = getVisibleSnippetHistoryBranch();
+  if (items.length === 0) return;
+
+  const popover = document.createElement('div');
+  popover.className = 'snippet-history-popover';
+  const rect = anchor.getBoundingClientRect();
+  popover.style.left = Math.max(8, rect.left - 110) + 'px';
+  popover.style.top = (rect.bottom + 5) + 'px';
+
+  for (const item of items) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'snippet-history-popover-item' + (item.current ? ' current' : '');
+    btn.dataset.branchIndex = String(item.branchIndex);
+    btn.disabled = item.current;
+
+    const icon = document.createElement('span');
+    icon.className = 'snippet-history-popover-icon';
+    icon.textContent = item.current ? '●' : '○';
+    btn.appendChild(icon);
+
+    const label = document.createElement('span');
+    label.className = 'snippet-history-popover-label';
+    label.textContent = item.entry.name || '(untitled)';
+    btn.appendChild(label);
+
+    btn.addEventListener('click', async (event) => {
+      event.stopPropagation();
+      await jumpToSnippetHistoryEntry(item.branchIndex);
+    });
+    popover.appendChild(btn);
+  }
+
+  document.body.appendChild(popover);
+  historyPopoverDocClick = (event) => {
+    if (!popover.contains(event.target) && event.target !== anchor) {
+      closeSnippetHistoryPopover();
+    }
+  };
+  setTimeout(() => document.addEventListener('click', historyPopoverDocClick), 0);
+}
+
 function renderList() {
   listEl.innerHTML = '';
 
@@ -281,10 +445,7 @@ function renderList() {
     item.appendChild(nameEl);
 
     item.addEventListener('click', () => {
-      selectedIndex = index;
-      detailTab = 'code';
-      renderList();
-      renderDetail();
+      openShortcutById(shortcut.id, { tab: 'code', preserveFilters: true });
     });
 
     listEl.appendChild(item);
@@ -297,6 +458,64 @@ function normalizeSnippetSortMode(value) {
 
 function normalizeSnippetPanelMode(value) {
   return SNIPPET_PANEL_MODES.has(value) ? value : 'tags';
+}
+
+function normalizeSnippetSearchScope(value) {
+  return SNIPPET_SEARCH_SCOPES.has(value) ? value : 'name';
+}
+
+function tokenizeSnippetQuery(query) {
+  return String(query || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+}
+
+function snippetSearchHaystack(shortcut, scope = searchScope) {
+  const fields = scope === 'full'
+    ? [shortcut?.name, shortcut?.value, shortcut?.description]
+    : [shortcut?.name];
+  return fields.map(value => String(value || '').toLowerCase()).join('\n');
+}
+
+function matchesSnippetSearch(shortcut, query, scope = searchScope) {
+  const tokens = tokenizeSnippetQuery(query);
+  if (tokens.length === 0) return true;
+  const haystack = snippetSearchHaystack(shortcut, scope);
+  return tokens.every(token => haystack.includes(token));
+}
+
+function parseSnippetTagPatterns(tag) {
+  const raw = String(tag?.patterns || '').trim();
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.map(value => String(value || '').trim()).filter(Boolean);
+    }
+  } catch {}
+  return raw.split(/[|,]/).map(value => value.trim()).filter(Boolean);
+}
+
+function escapeRegexLiteral(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function globMatchesName(pattern, name) {
+  const regexSource = escapeRegexLiteral(pattern)
+    .replace(/\\\*/g, '.*')
+    .replace(/\\\?/g, '.');
+  try {
+    return new RegExp(`^${regexSource}$`, 'i').test(String(name || ''));
+  } catch {
+    return false;
+  }
+}
+
+function matchesSelectedSnippetTag(shortcut) {
+  if (selectedTagId === null) return true;
+  const tag = tags.find(item => Number(item.id) === Number(selectedTagId));
+  if (!tag) return true;
+  const patterns = parseSnippetTagPatterns(tag);
+  if (patterns.length === 0) return true;
+  return patterns.some(pattern => globMatchesName(pattern, shortcut?.name));
 }
 
 function getShortcutKey(shortcut) {
@@ -349,10 +568,6 @@ function snippetSortLabel(mode = sortMode) {
   return mode === 'modified' ? 'Modified' : 'A-Z';
 }
 
-function snippetPanelLabel(mode = panelMode) {
-  return mode === 'pinned' ? 'Pinned' : 'Tags';
-}
-
 function updateSnippetSortButton() {
   if (!sortButtonEl) return;
   sortButtonEl.textContent = `${snippetSortLabel()} ▾`;
@@ -360,6 +575,30 @@ function updateSnippetSortButton() {
     ? 'Sort snippets by modified date'
     : 'Sort snippets by name';
   sortButtonEl.dataset.sortMode = sortMode;
+}
+
+function updateSnippetSearchScopeButton() {
+  if (!searchScopeButtonEl) return;
+  const isFull = searchScope === 'full';
+  searchScopeButtonEl.textContent = isFull ? '▤' : 'T';
+  searchScopeButtonEl.title = isFull
+    ? 'Search names and snippet content'
+    : 'Search snippet names only';
+  searchScopeButtonEl.dataset.searchScope = searchScope;
+}
+
+async function setSnippetSearchScope(scope) {
+  const nextScope = normalizeSnippetSearchScope(scope);
+  if (nextScope === searchScope) return;
+  searchScope = nextScope;
+  updateSnippetSearchScopeButton();
+  selectedIndex = -1;
+  await loadShortcuts();
+  try {
+    await call('set_setting', { key: SNIPPETS_SEARCH_SCOPE_SETTING_KEY, value: searchScope });
+  } catch (err) {
+    showToast('Failed to save snippet search scope: ' + err, 'error');
+  }
 }
 
 function closeSnippetSortMenu() {
@@ -381,7 +620,6 @@ function toggleSnippetSortMenu(anchor) {
 }
 
 function openSnippetSortMenu(anchor) {
-  closeSnippetPanelMenu();
   closeSnippetSortMenu();
   const menu = document.createElement('div');
   menu.className = 'snippet-sort-menu';
@@ -449,96 +687,41 @@ async function setSnippetSortMode(mode) {
   }
 }
 
-function updateSnippetPanelButton() {
-  if (!panelButtonEl) return;
-  panelButtonEl.textContent = `${snippetPanelLabel()} ▾`;
-  panelButtonEl.title = panelMode === 'pinned'
-    ? 'Show pinned snippets'
-    : 'Show snippet tags';
-  panelButtonEl.dataset.panelMode = panelMode;
+function createSnippetPanelToggle(panel, icon, title, onClick) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = `snippet-panel-toggle snippet-${panel}-toggle`;
+  button.textContent = icon;
+  button.title = title;
+  button.addEventListener('click', onClick);
+  return button;
 }
 
-function closeSnippetPanelMenu() {
-  for (const menu of document.querySelectorAll('.snippet-panel-menu')) {
-    menu.remove();
+function updateSnippetPanelToggles() {
+  if (tagsToggleButtonEl) {
+    tagsToggleButtonEl.dataset.active = showTagsPanel ? '1' : '0';
+    tagsToggleButtonEl.title = showTagsPanel ? 'Hide tags panel' : 'Show tags panel';
   }
-  if (panelMenuDocClick) {
-    document.removeEventListener('click', panelMenuDocClick);
-    panelMenuDocClick = null;
+  if (pinnedToggleButtonEl) {
+    pinnedToggleButtonEl.dataset.active = showPinnedPanel ? '1' : '0';
+    pinnedToggleButtonEl.title = showPinnedPanel ? 'Hide pinned snippets panel' : 'Show pinned snippets panel';
   }
 }
 
-function toggleSnippetPanelMenu(anchor) {
-  if (document.querySelector('.snippet-panel-menu')) {
-    closeSnippetPanelMenu();
-    return;
+async function setSnippetPanelVisibility(panel, visible) {
+  if (panel === 'tags') {
+    showTagsPanel = !!visible;
+  } else if (panel === 'pinned') {
+    showPinnedPanel = !!visible;
   }
-  openSnippetPanelMenu(anchor);
-}
-
-function openSnippetPanelMenu(anchor) {
-  closeSnippetSortMenu();
-  closeSnippetPanelMenu();
-  const menu = document.createElement('div');
-  menu.className = 'snippet-sort-menu snippet-panel-menu';
-  const rect = anchor.getBoundingClientRect();
-  menu.style.left = Math.max(8, rect.left) + 'px';
-  menu.style.top = (rect.bottom + 4) + 'px';
-
-  const options = [
-    { mode: 'tags', label: 'Tags', hint: 'Tag filters' },
-    { mode: 'pinned', label: 'Pinned', hint: 'Pinned snippets' },
-  ];
-  for (const option of options) {
-    const item = document.createElement('button');
-    item.type = 'button';
-    item.className = 'snippet-sort-menu-item' + (panelMode === option.mode ? ' active' : '');
-    item.dataset.panelMode = option.mode;
-
-    const check = document.createElement('span');
-    check.className = 'snippet-sort-menu-check';
-    check.textContent = panelMode === option.mode ? '✓' : '';
-    item.appendChild(check);
-
-    const label = document.createElement('span');
-    label.className = 'snippet-sort-menu-label';
-    label.textContent = option.label;
-    item.appendChild(label);
-
-    const hint = document.createElement('span');
-    hint.className = 'snippet-sort-menu-hint';
-    hint.textContent = option.hint;
-    item.appendChild(hint);
-
-    item.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      closeSnippetPanelMenu();
-      await setSnippetPanelMode(option.mode);
-    });
-    menu.appendChild(item);
-  }
-
-  document.body.appendChild(menu);
-  panelMenuDocClick = (event) => {
-    if (!menu.contains(event.target) && event.target !== anchor) {
-      closeSnippetPanelMenu();
-    }
-  };
-  setTimeout(() => document.addEventListener('click', panelMenuDocClick), 0);
-}
-
-async function setSnippetPanelMode(mode) {
-  const nextMode = normalizeSnippetPanelMode(mode);
-  if (nextMode === panelMode) return;
-
-  panelMode = nextMode;
-  updateSnippetPanelButton();
+  updateSnippetPanelToggles();
   renderSnippetTopPanel();
 
   try {
-    await call('set_setting', { key: SNIPPETS_PANEL_SETTING_KEY, value: panelMode });
+    await call('set_setting', { key: SNIPPETS_SHOW_TAGS_SETTING_KEY, value: showTagsPanel ? '1' : '0' });
+    await call('set_setting', { key: SNIPPETS_SHOW_PINNED_SETTING_KEY, value: showPinnedPanel ? '1' : '0' });
   } catch (err) {
-    showToast('Failed to save snippet panel mode: ' + err, 'error');
+    showToast('Failed to save snippet panel visibility: ' + err, 'error');
   }
 }
 
@@ -990,6 +1173,40 @@ function renderDetail() {
   const header = document.createElement('div');
   header.style.cssText = 'display:flex;align-items:center;padding:10px 18px;border-bottom:1px solid var(--border);flex-shrink:0;gap:10px;background:var(--bg-secondary)';
 
+  const historyControls = document.createElement('div');
+  historyControls.className = 'snippet-history-controls';
+
+  const backBtn = document.createElement('button');
+  backBtn.type = 'button';
+  backBtn.className = 'snippet-history-back';
+  backBtn.textContent = '‹';
+  backBtn.title = 'Back to previous snippet';
+  backBtn.disabled = snippetHistoryBack.length === 0;
+  backBtn.addEventListener('click', () => navigateSnippetHistoryBack());
+  historyControls.appendChild(backBtn);
+
+  const historyBtn = document.createElement('button');
+  historyBtn.type = 'button';
+  historyBtn.className = 'snippet-history-button';
+  historyBtn.textContent = '◷';
+  historyBtn.title = 'Snippet history';
+  historyBtn.addEventListener('click', (event) => {
+    event.stopPropagation();
+    toggleSnippetHistoryPopover(historyBtn);
+  });
+  historyControls.appendChild(historyBtn);
+
+  const forwardBtn = document.createElement('button');
+  forwardBtn.type = 'button';
+  forwardBtn.className = 'snippet-history-forward';
+  forwardBtn.textContent = '›';
+  forwardBtn.title = 'Forward to next snippet';
+  forwardBtn.disabled = snippetHistoryForward.length === 0;
+  forwardBtn.addEventListener('click', () => navigateSnippetHistoryForward());
+  historyControls.appendChild(forwardBtn);
+
+  header.appendChild(historyControls);
+
   const nameEl = document.createElement('h3');
   nameEl.style.cssText = `margin:0;font-size:${fontSize + 1}px;font-weight:700;color:#f0f6fc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;font-family:'SF Mono','Cascadia Code','Fira Code',monospace;letter-spacing:-0.3px`;
   nameEl.textContent = shortcut.name;
@@ -1192,17 +1409,7 @@ function renderRelatedTab(related) {
     row.appendChild(keys);
 
     row.addEventListener('click', () => {
-      const idx = shortcuts.findIndex(s => s.id === item.shortcut.id);
-      if (idx >= 0) {
-        selectedIndex = idx;
-        detailTab = 'code';
-        renderList();
-        renderDetail();
-      } else {
-        currentQuery = item.shortcut.name;
-        selectedIndex = -1;
-        loadShortcuts();
-      }
+      openShortcutById(item.shortcut.id, { tab: 'code', preserveFilters: true });
     });
 
     view.appendChild(row);
@@ -1479,17 +1686,30 @@ async function openLinkNoteModal(shortcut) {
 }
 
 function renderSnippetTopPanel() {
-  if (panelMode === 'pinned') {
-    renderPinnedSnippetPanel();
-  } else {
+  if (!topPanelsEl) return;
+  topPanelsEl.innerHTML = '';
+  topPanelsEl.style.display = showTagsPanel || showPinnedPanel ? 'flex' : 'none';
+  tagsPanelEl = null;
+  pinnedPanelEl = null;
+
+  if (showTagsPanel) {
+    tagsPanelEl = document.createElement('div');
+    tagsPanelEl.className = 'snippet-tags-panel snippet-panel-row';
+    topPanelsEl.appendChild(tagsPanelEl);
     renderTagPanel();
+  }
+
+  if (showPinnedPanel) {
+    pinnedPanelEl = document.createElement('div');
+    pinnedPanelEl.className = 'snippet-pinned-panel snippet-panel-row';
+    topPanelsEl.appendChild(pinnedPanelEl);
+    renderPinnedSnippetPanel();
   }
 }
 
 function renderPinnedSnippetPanel() {
-  if (!tagPanelEl) return;
-  tagPanelEl.innerHTML = '';
-  tagPanelEl.className = 'snippet-pinned-panel';
+  if (!pinnedPanelEl) return;
+  pinnedPanelEl.innerHTML = '';
 
   const pinned = allShortcuts
     .filter(shortcut => shortcut && shortcut.is_pinned)
@@ -1500,9 +1720,9 @@ function renderPinnedSnippetPanel() {
 
   if (!pinned.length) {
     const empty = document.createElement('span');
-    empty.className = 'snippet-pinned-empty';
+    empty.className = 'snippet-panel-empty';
     empty.textContent = 'No pinned snippets';
-    tagPanelEl.appendChild(empty);
+    pinnedPanelEl.appendChild(empty);
     return;
   }
 
@@ -1532,10 +1752,10 @@ function renderPinnedSnippetPanel() {
       }
       openPinnedSnippet(shortcut.id);
     });
-    tagPanelEl.appendChild(chip);
+    pinnedPanelEl.appendChild(chip);
   }
 
-  installWrappedChipDnd(tagPanelEl, {
+  installWrappedChipDnd(pinnedPanelEl, {
     chipSelector: '.snippet-pinned-chip',
     datasetKey: 'snippetId',
     placeholderClass: 'snippet-chip-dnd-placeholder',
@@ -1548,27 +1768,44 @@ function renderPinnedSnippetPanel() {
 }
 
 async function openPinnedSnippet(shortcutId) {
-  await openShortcutById(shortcutId);
+  await openShortcutById(shortcutId, { tab: 'code', preserveFilters: false });
 }
 
-async function openShortcutById(shortcutId) {
+async function openShortcutById(shortcutId, {
+  pushHistory = true,
+  clearForward = true,
+  tab = 'code',
+  preserveFilters = true,
+} = {}) {
   const shortcut = allShortcuts.find(s => Number(s.id) === Number(shortcutId));
   if (!shortcut) return false;
-  selectedTagId = null;
-  currentQuery = '';
-  if (searchInputEl) searchInputEl.value = '';
-  shortcuts = allShortcuts;
+
+  const current = captureCurrentHistoryEntry();
+  if (pushHistory && current && Number(current.id) !== Number(shortcut.id)) {
+    pushSnippetHistoryEntry(snippetHistoryBack, current);
+    if (clearForward) snippetHistoryForward = [];
+  }
+
+  let targetInCurrentList = shortcuts.some(item => Number(item.id) === Number(shortcut.id));
+  if (!preserveFilters || !targetInCurrentList) {
+    selectedTagId = null;
+    currentQuery = '';
+    if (searchInputEl) searchInputEl.value = '';
+    shortcuts = allShortcuts.filter(item => matchesSnippetSearch(item, '', searchScope));
+    targetInCurrentList = true;
+    renderSnippetTopPanel();
+  }
+
   applyShortcutSort(getShortcutKey(shortcut));
-  detailTab = 'code';
+  detailTab = tab || 'code';
   renderList();
   renderDetail();
-  return true;
+  return targetInCurrentList;
 }
 
 function renderTagPanel() {
-  if (!tagPanelEl) return;
-  tagPanelEl.innerHTML = '';
-  tagPanelEl.className = '';
+  if (!tagsPanelEl) return;
+  tagsPanelEl.innerHTML = '';
 
   if (tags.length === 0 && selectedTagId === null) {
     // Show only the "+" button when no tags exist
@@ -1576,48 +1813,98 @@ function renderTagPanel() {
 
   tags.forEach(tag => {
     const btn = document.createElement('button');
-    const isSelected = selectedTagId === tag.id;
-    btn.textContent = tag.name;
-    btn.style.cssText = `
-      background: ${isSelected ? tag.color + '22' : 'transparent'};
-      border: 1px solid ${tag.color};
-      color: ${tag.color};
-      padding: 2px 10px;
-      border-radius: 12px;
-      font-size: 12px;
-      cursor: pointer;
-      font-weight: ${isSelected ? '600' : '400'};
-      line-height: 1.4;
-    `;
-    btn.addEventListener('click', () => {
+    const isSelected = Number(selectedTagId) === Number(tag.id);
+    btn.type = 'button';
+    btn.className = 'snippet-tag-chip' + (isSelected ? ' active' : '');
+    btn.dataset.tagId = String(tag.id);
+    btn.style.setProperty('--snippet-tag-color', tag.color || 'var(--accent)');
+    btn.title = tag.name;
+
+    const dot = document.createElement('span');
+    dot.className = 'snippet-tag-chip-dot';
+    btn.appendChild(dot);
+
+    const label = document.createElement('span');
+    label.className = 'snippet-tag-chip-label';
+    label.textContent = tag.name;
+    btn.appendChild(label);
+
+    btn.addEventListener('click', (event) => {
+      if (btn.dataset.dragSuppressClick === '1') {
+        event.preventDefault();
+        event.stopPropagation();
+        delete btn.dataset.dragSuppressClick;
+        return;
+      }
       selectedTagId = isSelected ? null : tag.id;
       selectedIndex = -1;
       loadShortcuts();
     });
-    tagPanelEl.appendChild(btn);
+    tagsPanelEl.appendChild(btn);
   });
 
   // Clear selection button (only if a tag is selected)
   if (selectedTagId !== null) {
     const clearBtn = document.createElement('button');
+    clearBtn.type = 'button';
+    clearBtn.className = 'snippet-tag-clear';
     clearBtn.textContent = '×';
     clearBtn.title = 'Clear tag filter';
-    clearBtn.style.cssText = 'background:transparent;border:1px solid var(--text-muted);color:var(--text-muted);width:24px;height:24px;border-radius:12px;font-size:14px;cursor:pointer;padding:0;display:flex;align-items:center;justify-content:center;line-height:1';
     clearBtn.addEventListener('click', () => {
       selectedTagId = null;
       selectedIndex = -1;
       loadShortcuts();
     });
-    tagPanelEl.appendChild(clearBtn);
+    tagsPanelEl.appendChild(clearBtn);
   }
 
   // "+" manage tags button
   const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.className = 'snippet-tag-manage';
   addBtn.textContent = '+';
   addBtn.title = 'Manage tags';
-  addBtn.style.cssText = 'background:transparent;border:1px solid var(--text-muted);color:var(--text-muted);width:24px;height:24px;border-radius:12px;font-size:14px;cursor:pointer;padding:0;display:flex;align-items:center;justify-content:center;line-height:1';
   addBtn.addEventListener('click', openTagManager);
-  tagPanelEl.appendChild(addBtn);
+  tagsPanelEl.appendChild(addBtn);
+
+  installWrappedChipDnd(tagsPanelEl, {
+    chipSelector: '.snippet-tag-chip',
+    datasetKey: 'tagId',
+    placeholderClass: 'snippet-chip-dnd-placeholder',
+    sourceClass: 'snippet-chip-dnd-source',
+    onReorder: async (ids) => {
+      await persistSnippetTagOrder(ids);
+      await loadShortcuts();
+    },
+  });
+}
+
+function tagSortOrder(tag) {
+  const value = tag?.sort_order ?? tag?.sortOrder ?? 0;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function sortSnippetTags(items) {
+  return [...(items || [])].sort((a, b) => (
+    tagSortOrder(a) - tagSortOrder(b)
+    || String(a?.name || '').localeCompare(String(b?.name || ''))
+    || Number(a?.id || 0) - Number(b?.id || 0)
+  ));
+}
+
+async function persistSnippetTagOrder(ids) {
+  const order = new Map(ids.map((id, index) => [Number(id), index]));
+  const updates = tags
+    .filter(tag => order.has(Number(tag.id)))
+    .map(tag => call('update_snippet_tag', {
+      id: tag.id,
+      name: tag.name,
+      patterns: tag.patterns || '[]',
+      color: tag.color || '#388bfd',
+      sortOrder: order.get(Number(tag.id)),
+    }));
+  await Promise.all(updates);
 }
 
 function openKeyCloudModal() {
@@ -1977,8 +2264,8 @@ function openTagManager() {
       delBtn.addEventListener('click', async () => {
         try {
           await call('delete_snippet_tag', { id: tag.id });
-          if (selectedTagId === tag.id) selectedTagId = null;
-          tags = await call('list_snippet_tags');
+          if (Number(selectedTagId) === Number(tag.id)) selectedTagId = null;
+          tags = sortSnippetTags(await call('list_snippet_tags'));
           renderTagList();
           renderTagPanel();
           showToast('Tag deleted', 'success');
@@ -2037,6 +2324,7 @@ function openTagManager() {
   form.appendChild(colorRow);
 
   let editingId = null;
+  let editingTagOrder = null;
 
   const saveBtn = document.createElement('button');
   saveBtn.textContent = 'Save tag';
@@ -2054,13 +2342,16 @@ function openTagManager() {
 
     try {
       if (editingId !== null) {
-        await call('update_snippet_tag', { id: editingId, name, patterns, color, sortOrder: 0 });
+        const existing = tags.find(tag => Number(tag.id) === Number(editingId));
+        const sortOrder = editingTagOrder ?? tagSortOrder(existing);
+        await call('update_snippet_tag', { id: editingId, name, patterns, color, sortOrder });
         showToast('Tag updated', 'success');
       } else {
-        await call('create_snippet_tag', { name, patterns, color, sortOrder: tags.length });
+        const maxOrder = tags.reduce((max, tag) => Math.max(max, tagSortOrder(tag)), -1);
+        await call('create_snippet_tag', { name, patterns, color, sortOrder: maxOrder + 1 });
         showToast('Tag created', 'success');
       }
-      tags = await call('list_snippet_tags');
+      tags = sortSnippetTags(await call('list_snippet_tags'));
       renderTagList();
       renderTagPanel();
       clearForm();
@@ -2071,6 +2362,7 @@ function openTagManager() {
 
   function fillForm(tag) {
     editingId = tag.id;
+    editingTagOrder = tagSortOrder(tag);
     nameInput.value = tag.name;
     try {
       patternsInput.value = JSON.parse(tag.patterns).join(', ');
@@ -2082,6 +2374,7 @@ function openTagManager() {
 
   function clearForm() {
     editingId = null;
+    editingTagOrder = null;
     nameInput.value = '';
     patternsInput.value = '';
     colorInput.value = '#388bfd';
