@@ -1400,7 +1400,7 @@
           throw new Error(provider === 'yandex' ? 'Yandex SpeechKit API key is missing' : 'Deepgram API key is missing');
         }
         if (provider === 'yandex' && !String(settings['whisper.yandex_folder_id'] || '').trim()) {
-          throw new Error('Yandex SpeechKit Folder ID is missing');
+          throw new Error('Yandex batch recognition needs Folder ID. Add Yandex Folder ID in Whisper Settings, or enable Live dictate to use Yandex streaming instead.');
         }
         model = provider === 'yandex'
           ? (settings['whisper.yandex_model'] || 'general')

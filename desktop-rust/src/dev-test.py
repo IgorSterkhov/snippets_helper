@@ -403,6 +403,8 @@ async def run_tests():
         assert 'AQVN' in help_text, help_text
         assert 'aje' in help_text, help_text
         assert 'Unknown api key' in help_text, help_text
+        assert 'Folder ID' in help_text, help_text
+        assert 'folder identifier' in help_text, help_text
         await close_modals()
         await wait_until(cdp, "!document.querySelector('.sql-help-overlay')", timeout=3)
 
@@ -486,6 +488,64 @@ async def run_tests():
             "[...document.querySelectorAll('#panel-whisper [data-provider=\"deepgram\"]')].length >= 1",
             timeout=4,
         )
+
+        await close_modals()
+        await cdp.eval("""(() => {
+          const settings = JSON.parse(localStorage.getItem('mock.settings') || '{}');
+          settings['whisper.yandex_api_key'] = 'AQVN_mock_key';
+          settings['whisper.yandex_folder_id'] = '';
+          settings['whisper.recognition_engine'] = 'yandex';
+          settings['whisper.live_provider'] = 'yandex';
+          settings['whisper.live_dictate'] = 'false';
+          localStorage.setItem('mock.settings', JSON.stringify(settings));
+          window.dispatchEvent(new CustomEvent('whisper:settings-changed'));
+        })()""")
+        await wait_until(cdp, "document.querySelector('#panel-whisper #engine-select')?.value === 'yandex'", timeout=4)
+        await wait_until(cdp, "document.querySelector('#panel-whisper #live-dictate-toggle')?.checked === false", timeout=4)
+        warning_text = await wait_until(
+            cdp,
+            "document.querySelector('#panel-whisper #yandex-folder-warning')?.textContent || ''",
+            timeout=4,
+        )
+        assert 'Yandex batch' in warning_text, warning_text
+        assert 'Folder ID' in warning_text, warning_text
+        assert 'Live dictate' in warning_text, warning_text
+        await wait_until(
+            cdp,
+            "document.querySelector('#panel-whisper #record-btn')?.dataset.mode === 'start' && !document.querySelector('#panel-whisper #record-btn')?.disabled",
+            timeout=4,
+        )
+        await cdp.eval("document.querySelector('#panel-whisper #record-btn').click()")
+        await wait_until(cdp, "!!document.querySelector('.error-dialog-overlay')", timeout=5)
+        yandex_error = await cdp.eval("document.querySelector('.error-dialog-message')?.textContent || ''")
+        assert 'Yandex batch recognition' in yandex_error, yandex_error
+        assert 'Folder ID' in yandex_error, yandex_error
+        assert 'Live dictate' in yandex_error, yandex_error
+        await cdp.eval("""(() => {
+          [...document.querySelectorAll('.error-dialog button')]
+            .find(b => b.textContent.trim() === 'OK').click();
+        })()""")
+        await wait_until(cdp, "!document.querySelector('.error-dialog-overlay')", timeout=3)
+        await cdp.eval("""(() => {
+          window.dispatchEvent(new CustomEvent('whisper:error', {
+            detail: {
+              code: 'hotkey_toggle_failed',
+              message: 'Yandex batch recognition needs Folder ID. Add Yandex Folder ID in Whisper Settings, or enable Live dictate to use Yandex streaming instead.'
+            }
+          }));
+        })()""")
+        await wait_until(cdp, "!!document.querySelector('.error-dialog-overlay')", timeout=5)
+        hotkey_error = await cdp.eval("document.querySelector('.error-dialog-message')?.textContent || ''")
+        assert 'Yandex batch recognition' in hotkey_error, hotkey_error
+        assert 'Folder ID' in hotkey_error, hotkey_error
+        assert 'Live dictate' in hotkey_error, hotkey_error
+        details = await cdp.eval("document.querySelector('.error-dialog-details')?.textContent || ''")
+        assert 'hotkey_toggle_failed' in details, details
+        await cdp.eval("""(() => {
+          [...document.querySelectorAll('.error-dialog button')]
+            .find(b => b.textContent.trim() === 'OK').click();
+        })()""")
+        await wait_until(cdp, "!document.querySelector('.error-dialog-overlay')", timeout=3)
     await check('T2e Whisper live dictate UI + mock flow', t2e_whisper_live_dictate_ui_and_mock_flow)
 
     # ── T2f: Whisper errors show persistent copyable dialog ──

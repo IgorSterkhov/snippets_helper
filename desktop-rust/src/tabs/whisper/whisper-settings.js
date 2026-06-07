@@ -419,7 +419,11 @@ function yandexSpeechKitBlock(s) {
   keyRow.appendChild(clearBtn);
   wrap.appendChild(labeledControl('API key', keyRow));
 
-  wrap.appendChild(labeledControl('Folder ID', textInput('yandex_folder_id', s['whisper.yandex_folder_id'] || '', 'Required for batch file recognition')));
+  wrap.appendChild(labeledControl('Folder ID', textInput('yandex_folder_id', s['whisper.yandex_folder_id'] || '', 'Required for Yandex batch recognition')));
+  const folderHint = document.createElement('div');
+  folderHint.textContent = 'Folder ID is the folder identifier in Yandex Cloud Console: open the cloud, open the folder used for SpeechKit/billing, then copy the folder ID from that folder page. It is required for Yandex batch recognition; Live dictate uses streaming instead.';
+  folderHint.style.cssText = 'font-size:11px;color:var(--text-muted,#8b949e);line-height:1.35';
+  wrap.appendChild(folderHint);
   wrap.appendChild(labeledControl('Model', textInput('yandex_model', s['whisper.yandex_model'] || 'general', 'general')));
   wrap.appendChild(labeledControl('Language', yandexLanguageSelect(s['whisper.yandex_language'] || 'ru-RU')));
   wrap.appendChild(checkbox('yandex_text_normalization', (s['whisper.yandex_text_normalization'] || 'true') === 'true', 'Text normalization (numbers, dates, times)'));

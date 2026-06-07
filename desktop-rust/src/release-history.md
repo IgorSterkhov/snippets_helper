@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v1.7.1 (2026-06-07)
+
+- **Whisper Yandex batch setup:** when Yandex SpeechKit is selected with
+  Live dictate off and Folder ID is empty, the Whisper header now shows an
+  inline warning and Record/hotkey errors explain that Folder ID is required
+  for batch recognition or Live dictate can be enabled for streaming.
+
 ## v1.7.0 (2026-06-04)
 
 - **Repo Search git code search:** Git history search now looks through changed

@@ -54,6 +54,7 @@ export async function initTab(container) {
     recognitionEngine: null,
     deepgramModel: 'nova-3',
     yandexModel: 'general',
+    yandexFolderId: '',
     liveCommittedText: '',
     liveInterimText: '',
   };
@@ -71,6 +72,9 @@ export async function initTab(container) {
       <input id="live-dictate-toggle" type="checkbox" style="margin:0;accent-color:var(--accent,#388bfd)">
       <span>Live dictate</span>
     </label>
+    <span id="yandex-folder-warning" title="Yandex batch mode needs Folder ID. Turn on Live dictate to use Yandex streaming without batch Folder ID." style="display:none;align-items:center;gap:5px;padding:3px 8px;background:rgba(240,136,62,.12);border:1px solid rgba(240,136,62,.45);border-radius:4px;color:var(--warn,#f0883e);font-size:11px;max-width:360px;line-height:1.25">
+      ⚠ Yandex batch needs Folder ID · add it in Settings or enable Live dictate
+    </span>
     <span style="flex:1"></span>
     <button id="cancel-btn" title="Cancel without transcribing (Esc)" style="padding:5px 10px;background:transparent;color:var(--red,#f85149);border:1px solid var(--red,#f85149);border-radius:4px;cursor:pointer;font-weight:500;display:none">✕ Cancel</button>
     <button id="record-btn" style="padding:5px 14px;background:var(--accent,#388bfd);color:#fff;border:0;border-radius:4px;cursor:pointer;font-weight:600">🎤 Record</button>
@@ -153,6 +157,7 @@ export async function initTab(container) {
   const gemmaSelect = header.querySelector('#gemma-model-select');
   const liveToggle = header.querySelector('#live-dictate-toggle');
   const liveLabel = header.querySelector('#live-dictate-label');
+  const yandexFolderWarning = header.querySelector('#yandex-folder-warning');
   const recordBtn = header.querySelector('#record-btn');
   const cancelBtn = header.querySelector('#cancel-btn');
 
@@ -242,6 +247,14 @@ export async function initTab(container) {
     } else {
       stopWhisperElapsedTimer();
     }
+    renderYandexFolderWarning();
+  }
+
+  function renderYandexFolderWarning() {
+    const show = state.recognitionEngine === ENGINE_YANDEX
+      && !state.liveDictate
+      && !String(state.yandexFolderId || '').trim();
+    yandexFolderWarning.style.display = show ? 'inline-flex' : 'none';
   }
 
   function setRecordButton(label, mode, disabled) {
@@ -708,6 +721,11 @@ export async function initTab(container) {
       if (!['deepgram', 'yandex'].includes(state.liveProvider)) state.liveProvider = 'deepgram';
     } catch {
       state.liveProvider = 'deepgram';
+    }
+    try {
+      state.yandexFolderId = (await whisperApi.getSetting('whisper.yandex_folder_id')) || '';
+    } catch {
+      state.yandexFolderId = '';
     }
   }
 

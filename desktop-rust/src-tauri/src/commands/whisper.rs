@@ -17,6 +17,7 @@ use tauri::{AppHandle, Manager, State};
 
 const HOTKEY_DEBOUNCE_MS: u64 = 700;
 static LAST_WHISPER_HOTKEY_MS: AtomicU64 = AtomicU64::new(0);
+const YANDEX_FOLDER_ID_MISSING_MESSAGE: &str = "Yandex batch recognition needs Folder ID. Add Yandex Folder ID in Whisper Settings, or enable Live dictate to use Yandex streaming instead.";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum HotkeyAction {
@@ -832,10 +833,7 @@ fn yandex_config_from_settings(
         .flatten()
         .filter(|s| !s.trim().is_empty());
     if require_folder_id && folder_id.is_none() {
-        return Err(
-            "Yandex SpeechKit Folder ID is missing. Open Whisper Settings and add Folder ID for Yandex batch recognition."
-                .into(),
-        );
+        return Err(YANDEX_FOLDER_ID_MISSING_MESSAGE.into());
     }
     let language = queries::get_setting(&conn, &cid, "whisper.yandex_language")
         .ok()
@@ -1073,6 +1071,13 @@ mod tests {
     use super::*;
     use crate::whisper::deepgram::LiveState;
     use crate::whisper::service::State as LocalState;
+
+    #[test]
+    fn yandex_missing_folder_id_message_explains_batch_and_live_alternative() {
+        assert!(YANDEX_FOLDER_ID_MISSING_MESSAGE.contains("Yandex batch recognition"));
+        assert!(YANDEX_FOLDER_ID_MISSING_MESSAGE.contains("Folder ID"));
+        assert!(YANDEX_FOLDER_ID_MISSING_MESSAGE.contains("Live dictate"));
+    }
 
     #[test]
     fn recognition_engine_setting_parses_local_and_cloud_values() {

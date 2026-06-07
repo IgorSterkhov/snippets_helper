@@ -19,7 +19,9 @@ export const WHISPER_HELP_HTML = `
   <li><strong>Cloud batch</strong> — выберите <em>Deepgram</em> или
       <em>Yandex SpeechKit</em>, оставьте <strong>Live dictate</strong>
       выключенным, нажмите <em>Record cloud</em>, затем <em>Stop</em>.
-      Записанный WAV отправляется напрямую выбранному провайдеру.</li>
+      Записанный WAV отправляется напрямую выбранному провайдеру. Для Yandex
+      batch recognition нужен <strong>Folder ID</strong>; если он не заполнен,
+      header покажет предупреждение.</li>
   <li><strong>Live dictate</strong> — включите checkbox в header, выберите
       облачный engine, затем нажмите <em>Start live</em>. Финальные фразы
       будут вставляться в активное окно. Для локальных Whisper-моделей этот
@@ -54,9 +56,11 @@ export const WHISPER_HELP_HTML = `
       <code>aje...</code>: по нему SpeechKit вернет ошибку
       <code>Unknown api key</code>.</li>
   <li>Скопируйте ключ в <strong>Settings &gt; Whisper &gt; Yandex SpeechKit</strong>.</li>
-  <li>Для batch-распознавания файлов нужен <strong>Folder ID</strong>.
-      Его можно скопировать из страницы folder в Yandex Cloud и вставить в
-      поле <strong>Folder ID</strong>. Live streaming обычно работает без него.</li>
+  <li>Для batch-распознавания файлов нужен <strong>Folder ID</strong>
+      (<em>folder identifier</em>). В Yandex Cloud Console откройте нужный
+      cloud, затем folder, в котором включен billing/SpeechKit, и скопируйте
+      идентификатор folder со страницы этой папки. Вставьте его в поле
+      <strong>Folder ID</strong>. Live streaming обычно работает без него.</li>
   <li>Для русской диктовки начните с language <code>ru-RU</code>, включенной
       text normalization и включенного literary text / punctuation.</li>
 </ol>
@@ -92,6 +96,10 @@ export const WHISPER_HELP_HTML = `
   <li>Проверьте billing/квоты в кабинете провайдера.</li>
   <li>Для Yandex проверьте роль service account:
       <code>ai.speechkit-stt.user</code>.</li>
+  <li>Если выбран <strong>Yandex SpeechKit</strong>, а
+      <strong>Live dictate</strong> выключен, приложение использует Yandex
+      batch recognition. Для него нужен <strong>Folder ID</strong>; добавьте
+      его в Whisper Settings или включите Live dictate для streaming-режима.</li>
   <li>Если ошибка содержит <code>Unknown api key 'aje...'</code>, в Settings
       вставлен идентификатор ключа. Создайте новый API key и вставьте его
       <strong>secret value</strong>, потому что после закрытия окна создания
