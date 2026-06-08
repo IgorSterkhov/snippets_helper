@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## f-20260608-2 (2026-06-08)
+
+- **Ctrl+Tab in Tasks Focus view:** selecting several tasks from the Focus
+  view left pane now updates the shared recent-view history, so Ctrl+Tab
+  returns to the previous task instead of jumping back to an older module.
+
 ## f-20260608-1 (2026-06-08)
 
 - **Ctrl+Tab recent view switching:** Ctrl+Tab now returns to the previous

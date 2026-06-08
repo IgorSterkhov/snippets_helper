@@ -412,6 +412,7 @@ async function renderTaskList() {
   scroll.innerHTML = '';
   if (state.layoutMode === 'focus') {
     await renderFocusView(scroll);
+    recordCurrentTaskView();
     return;
   }
   if (!state.tasks.length) {

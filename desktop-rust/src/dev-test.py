@@ -3373,6 +3373,69 @@ async def run_tests():
         await cdp.eval("document.querySelector('.modal-overlay')?.remove()")
     await check('T26e Ctrl+Tab recent view history', t26e_ctrl_tab_recent_view_history)
 
+    # ── T26f: Ctrl+Tab tracks task changes in Focus view ─────
+    async def t26f_ctrl_tab_tracks_tasks_focus_view():
+        await cdp.send('Page.navigate', url=TEST_URL)
+        await asyncio.sleep(0.8)
+        await wait_until(cdp, "!!document.querySelector('.tab-btn')", timeout=8)
+        await wait_until(cdp, "!!window.__TAURI__ && !!window.__TAURI__.core", timeout=5)
+
+        await open_shortcuts_tab()
+        await cdp.eval(
+            "[...document.querySelectorAll('#panel-shortcuts .shortcut-list-name')]"
+            ".find(x => x.textContent.trim() === 'bash_obsidian_setup').click()"
+        )
+        await wait_until(
+            cdp,
+            "document.querySelector('#panel-shortcuts h3')?.textContent.trim() === 'bash_obsidian_setup'",
+            timeout=3,
+        )
+
+        await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"tasks\"]').click()")
+        await wait_until(cdp, "document.body.innerText.includes('Regular mock task')", timeout=5)
+        await cdp.eval("document.querySelector('#tasks-layout-focus').click()")
+        await wait_until(cdp, "!!document.querySelector('#panel-tasks .tasks-focus-row')", timeout=4)
+
+        await cdp.eval(
+            "[...document.querySelectorAll('#panel-tasks .tasks-focus-row')]"
+            ".find(x => x.textContent.includes('Pinned mock task')).click()"
+        )
+        await wait_until(
+            cdp,
+            "document.querySelector('#panel-tasks .tasks-focus-row.active .tasks-focus-row-title')?.textContent.trim() === 'Pinned mock task'",
+            timeout=4,
+        )
+
+        await cdp.eval(
+            "[...document.querySelectorAll('#panel-tasks .tasks-focus-row')]"
+            ".find(x => x.textContent.includes('Regular mock task')).click()"
+        )
+        await wait_until(
+            cdp,
+            "document.querySelector('#panel-tasks .tasks-focus-row.active .tasks-focus-row-title')?.textContent.trim() === 'Regular mock task'",
+            timeout=4,
+        )
+
+        await cdp.eval("""(() => {
+          document.dispatchEvent(new KeyboardEvent('keydown', {
+            key: 'Tab', code: 'Tab', ctrlKey: true, bubbles: true, cancelable: true
+          }));
+          document.dispatchEvent(new KeyboardEvent('keyup', {
+            key: 'Control', code: 'ControlLeft', bubbles: true, cancelable: true
+          }));
+        })()""")
+        await wait_until(
+            cdp,
+            "document.querySelector('.tab-btn[data-tab-id=\"tasks\"]')?.classList.contains('active')",
+            timeout=4,
+        )
+        await wait_until(
+            cdp,
+            "document.querySelector('#panel-tasks .tasks-focus-row.active .tasks-focus-row-title')?.textContent.trim() === 'Pinned mock task'",
+            timeout=4,
+        )
+    await check('T26f Ctrl+Tab tracks tasks Focus view', t26f_ctrl_tab_tracks_tasks_focus_view)
+
     # ── T27: Detached module windows ───────────────────────
     async def t27_detached_module_context_menu_and_standalone_boot():
         await cdp.send('Page.navigate', url=TEST_URL)
