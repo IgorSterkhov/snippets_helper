@@ -234,6 +234,15 @@ function installAiSnippetListener() {
     if (searchInputEl) searchInputEl.value = query;
     await loadShortcuts();
   });
+  window.addEventListener('view-history:open', async (event) => {
+    const detail = event.detail || {};
+    if (detail.moduleId !== 'shortcuts') return;
+    try {
+      await openSnippetFromViewHistory(detail);
+    } catch (err) {
+      showToast('Failed to restore snippet view: ' + err, 'error');
+    }
+  });
 }
 
 async function ensureShortcutsForAi() {
@@ -259,6 +268,26 @@ async function openSnippetFromAi(detail) {
     return;
   }
   await openShortcutById(target.id);
+}
+
+async function openSnippetFromViewHistory(detail) {
+  await ensureShortcutsForAi();
+  let target = null;
+  if (detail.objectUuid) {
+    target = allShortcuts.find(shortcut => shortcut.uuid === detail.objectUuid);
+  }
+  if (!target && detail.objectId != null) {
+    target = allShortcuts.find(shortcut => Number(shortcut.id) === Number(detail.objectId));
+  }
+  if (!target) {
+    showToast('Snippet from history was deleted', 'error');
+    return;
+  }
+  await openShortcutById(target.id, {
+    pushHistory: false,
+    tab: detail.detail?.detailTab || detail.detail?.tab || 'code',
+    preserveFilters: false,
+  });
 }
 
 function captureCurrentHistoryEntry() {
@@ -1291,6 +1320,24 @@ function renderDetail() {
     detailTab = 'code';
     renderCodeTab(shortcut, links, hasLinks);
   }
+  recordCurrentSnippetView(shortcut);
+}
+
+function recordCurrentSnippetView(shortcut) {
+  if (!shortcut || window.__keyboardHelperActiveTab !== 'shortcuts') return;
+  window.dispatchEvent(new CustomEvent('view-history:record', {
+    detail: {
+      key: `shortcut:${shortcut.uuid || shortcut.id}`,
+      moduleId: 'shortcuts',
+      objectType: 'shortcut',
+      objectId: shortcut.id,
+      objectUuid: shortcut.uuid || null,
+      title: shortcut.name || '(untitled)',
+      label: 'Shortcuts',
+      icon: '🏷️',
+      detail: { detailTab: detailTab || 'code' },
+    },
+  }));
 }
 
 function renderCodeTab(shortcut) {

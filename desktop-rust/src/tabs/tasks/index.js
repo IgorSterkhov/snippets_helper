@@ -144,6 +144,16 @@ function installAiTaskListener() {
       showToast('Failed to open AI task target: ' + err, 'error');
     }
   });
+  window.addEventListener('view-history:open', async (event) => {
+    if (!state.root) return;
+    const detail = event.detail || {};
+    if (detail.moduleId !== 'tasks') return;
+    try {
+      await openTaskFromViewHistory(detail);
+    } catch (err) {
+      showToast('Failed to restore task view: ' + err, 'error');
+    }
+  });
 }
 
 function syncResultTouchesTasks(result) {
@@ -446,6 +456,7 @@ async function renderTaskList() {
       scroll.appendChild(card);
     }
   }
+  recordCurrentTaskView();
 }
 
 async function renderFocusView(scroll) {
@@ -603,6 +614,7 @@ async function showSelectedTaskInList(task) {
   state.focusCardExpanded = false;
   state.focusSearch = '';
   await reloadTasks();
+  recordCurrentTaskView();
 }
 
 // ── Expand / collapse ───────────────────────────────────────
@@ -619,14 +631,56 @@ export async function openExpanded(id, taskSnapshot = null) {
   if (state.layoutMode === 'focus') {
     state.focusCardExpanded = false;
     await renderTaskList();
+    recordCurrentTaskView();
     return;
   }
   await renderTaskList();
+  recordCurrentTaskView();
   // Ensure card is scrolled into view.
   setTimeout(() => {
     const card = state.root.querySelector(`[data-task-id="${id}"]`);
     if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, 50);
+}
+
+async function openTaskFromViewHistory(detail) {
+  let target = null;
+  if (detail.objectId != null) {
+    target = findTaskById(Number(detail.objectId));
+  }
+  if (!target) {
+    const all = await call('list_tasks', { category: null, status: null });
+    target = all.find(task => (
+      (detail.objectUuid && task.uuid === detail.objectUuid)
+      || (detail.objectId != null && Number(task.id) === Number(detail.objectId))
+      || (detail.title && String(task.title || '') === String(detail.title))
+    )) || null;
+  }
+  if (!target) {
+    showToast('Task from history was deleted', 'error');
+    return;
+  }
+  await showSelectedTaskInList(target);
+}
+
+function recordCurrentTaskView() {
+  if (!state.root || window.__keyboardHelperActiveTab !== 'tasks') return;
+  if (state.expandedTaskId == null) return;
+  const task = findTaskById(state.expandedTaskId) || state.selectedTask;
+  if (!task) return;
+  window.dispatchEvent(new CustomEvent('view-history:record', {
+    detail: {
+      key: `task:${task.uuid || task.id}`,
+      moduleId: 'tasks',
+      objectType: 'task',
+      objectId: task.id,
+      objectUuid: task.uuid || null,
+      title: task.title || '(untitled)',
+      label: 'Tasks',
+      icon: '✅',
+      detail: {},
+    },
+  }));
 }
 
 // ── Actions ─────────────────────────────────────────────────

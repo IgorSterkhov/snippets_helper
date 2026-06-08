@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## f-20260608-1 (2026-06-08)
+
+- **Ctrl+Tab recent view switching:** Ctrl+Tab now returns to the previous
+  recent view, including exact snippets, tasks, and notes. Repeated Ctrl+Tab
+  in the same sequence shows a compact dark switcher overlay and cycles through
+  the frozen recent-view snapshot; Ctrl+Shift+Tab cycles backward.
+
 ## f-20260607-1 (2026-06-07)
 
 - **Snippets navigation and panels:** Related snippet navigation now has

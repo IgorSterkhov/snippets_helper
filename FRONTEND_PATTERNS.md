@@ -398,3 +398,44 @@ boundaries.
   Boundary keys on the first or last visible row should remain no-ops.
 - Place the caret explicitly after focusing the target row so WebView2 does not
   leave the selection on the old contenteditable element.
+
+---
+
+## §14 Ctrl+Tab recent view history
+
+**Used in:** Main desktop shell, Snippets, Tasks, Notes
+
+Use this pattern when a module has object-level views that should participate
+in global `Ctrl+Tab` switching.
+
+1. Install one shell-level controller with
+   `installViewHistory({ tabContainer, tabs })`.
+2. Modules publish the currently opened object through:
+   ```js
+   window.dispatchEvent(new CustomEvent('view-history:record', {
+     detail: {
+       key: `task:${task.uuid || task.id}`,
+       moduleId: 'tasks',
+       objectType: 'task',
+       objectId: task.id,
+       objectUuid: task.uuid || null,
+       title: task.title || '(untitled)',
+       label: 'Tasks',
+       icon: '✅',
+       detail: {},
+     },
+   }));
+   ```
+3. The shell dedupes by `key`, keeps an in-memory MRU list, and handles the
+   global shortcut:
+   - first `Ctrl+Tab` jumps immediately to the previous recent view;
+   - repeated `Ctrl+Tab` in the same sequence shows the switcher overlay and
+     cycles through the frozen snapshot;
+   - `Ctrl+Shift+Tab` cycles backward.
+4. Modules restore object views by listening for `view-history:open` and
+   checking `event.detail.moduleId` before acting.
+5. Do not record synthetic module entries for modules that have object-level
+   records unless there is no meaningful object to restore; otherwise the MRU
+   list gets polluted with same-tab placeholders.
+6. The controller must ignore active `.modal-overlay` dialogs for the entire
+   shortcut flow, not only for overlay rendering.

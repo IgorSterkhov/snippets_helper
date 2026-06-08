@@ -3284,6 +3284,95 @@ async def run_tests():
         assert before != after, (before, after)
     await check('T26d Snippets panel toggles and tag reorder', t26d_snippets_panel_toggles_and_tag_reorder)
 
+    # ── T26e: Ctrl+Tab recent view history ─────────────────
+    async def t26e_ctrl_tab_recent_view_history():
+        await cdp.send('Page.navigate', url=TEST_URL)
+        await asyncio.sleep(0.8)
+        await wait_until(cdp, "!!document.querySelector('.tab-btn')", timeout=8)
+        await wait_until(cdp, "!!window.__TAURI__ && !!window.__TAURI__.core", timeout=5)
+        await open_shortcuts_tab()
+        await cdp.eval(
+            "[...document.querySelectorAll('#panel-shortcuts .shortcut-list-name')]"
+            ".find(x => x.textContent.trim() === 'bash_obsidian_setup').click()"
+        )
+        await wait_until(
+            cdp,
+            "document.querySelector('#panel-shortcuts h3')?.textContent.trim() === 'bash_obsidian_setup'",
+            timeout=3,
+        )
+
+        await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"tasks\"]').click()")
+        await wait_until(cdp, "document.body.innerText.includes('Regular mock task')", timeout=5)
+        await cdp.eval(
+            "[...document.querySelectorAll('#panel-tasks .task-title')]"
+            ".find(x => x.textContent.trim() === 'Regular mock task').click()"
+        )
+        await wait_until(
+            cdp,
+            "document.querySelector('#panel-tasks .task-card.expanded .task-title')?.textContent.trim() === 'Regular mock task'",
+            timeout=4,
+        )
+
+        await cdp.eval("""(() => {
+          document.dispatchEvent(new KeyboardEvent('keydown', {
+            key: 'Tab', code: 'Tab', ctrlKey: true, bubbles: true, cancelable: true
+          }));
+          document.dispatchEvent(new KeyboardEvent('keyup', {
+            key: 'Control', code: 'ControlLeft', bubbles: true, cancelable: true
+          }));
+        })()""")
+        await wait_until(
+            cdp,
+            "document.querySelector('.tab-btn[data-tab-id=\"shortcuts\"]')?.classList.contains('active')",
+            timeout=4,
+        )
+        await wait_until(
+            cdp,
+            "document.querySelector('#panel-shortcuts h3')?.textContent.trim() === 'bash_obsidian_setup'",
+            timeout=4,
+        )
+
+        await cdp.eval("""(() => {
+          document.dispatchEvent(new KeyboardEvent('keydown', {
+            key: 'Tab', code: 'Tab', ctrlKey: true, bubbles: true, cancelable: true
+          }));
+          document.dispatchEvent(new KeyboardEvent('keydown', {
+            key: 'Tab', code: 'Tab', ctrlKey: true, bubbles: true, cancelable: true
+          }));
+        })()""")
+        await wait_until(cdp, "!!document.querySelector('.view-history-switcher')", timeout=4)
+        switcher_text = await cdp.eval("document.querySelector('.view-history-switcher')?.textContent || ''")
+        assert 'Regular mock task' in switcher_text, switcher_text
+        assert 'bash_obsidian_setup' in switcher_text, switcher_text
+        await cdp.eval("""(() => {
+          document.dispatchEvent(new KeyboardEvent('keyup', {
+            key: 'Control', code: 'ControlLeft', bubbles: true, cancelable: true
+          }));
+        })()""")
+        await wait_until(cdp, "!document.querySelector('.view-history-switcher')", timeout=3)
+
+        await wait_until(
+            cdp,
+            "document.querySelector('.tab-btn[data-tab-id=\"shortcuts\"]')?.classList.contains('active')",
+            timeout=3,
+        )
+        await cdp.eval("""(() => {
+          const modal = document.createElement('div');
+          modal.className = 'modal-overlay';
+          document.body.appendChild(modal);
+          document.dispatchEvent(new KeyboardEvent('keydown', {
+            key: 'Tab', code: 'Tab', ctrlKey: true, bubbles: true, cancelable: true
+          }));
+        })()""")
+        await asyncio.sleep(0.2)
+        still_shortcuts = await cdp.eval(
+            "document.querySelector('.tab-btn[data-tab-id=\"shortcuts\"]')?.classList.contains('active')"
+        )
+        assert still_shortcuts is True, 'Ctrl+Tab switched while modal overlay was open'
+        assert await cdp.eval("!document.querySelector('.view-history-switcher')"), 'switcher opened over modal'
+        await cdp.eval("document.querySelector('.modal-overlay')?.remove()")
+    await check('T26e Ctrl+Tab recent view history', t26e_ctrl_tab_recent_view_history)
+
     # ── T27: Detached module windows ───────────────────────
     async def t27_detached_module_context_menu_and_standalone_boot():
         await cdp.send('Page.navigate', url=TEST_URL)

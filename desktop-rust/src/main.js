@@ -3,6 +3,7 @@ import { call } from './tauri-api.js';
 import { openSettingsModal, checkFirstRun } from './tabs/settings.js';
 import { createStatusBar, doSync, checkUpdateStatus, checkFrontendUpdateStatus, startFrontendUpdateWatcher } from './components/status-bar.js';
 import { showToast } from './components/toast.js';
+import { installViewHistory } from './components/view-history.js';
 
 const TABS = [
   { id: 'shortcuts', label: 'Shortcuts', icon: '\u{1F3F7}\u{FE0F}', loader: (el) => import('./tabs/shortcuts.js').then(m => m.init(el)) },
@@ -108,6 +109,8 @@ async function main() {
 
   app.innerHTML = '';
   const tabContainer = new TabContainer(app, TABS);
+  const objectViewTabs = new Set(['shortcuts', 'notes', 'tasks']);
+  const viewHistory = installViewHistory({ tabContainer, tabs: TABS });
   for (const tab of TABS) {
     const btn = tabContainer.buttons[tab.id];
     if (btn) {
@@ -156,6 +159,9 @@ async function main() {
 
   await tabContainer.activate(lastTab);
   window.__keyboardHelperActiveTab = tabContainer.activeTabId || lastTab;
+  if (!objectViewTabs.has(tabContainer.activeTabId || lastTab)) {
+    viewHistory.ensureModuleEntry(tabContainer.activeTabId || lastTab);
+  }
 
   let repoSearchTimer = null;
   const origActivate = tabContainer.activate.bind(tabContainer);
@@ -180,6 +186,9 @@ async function main() {
     }
     await origActivate(tabId);
     window.__keyboardHelperActiveTab = tabId;
+    if (!objectViewTabs.has(tabId)) {
+      viewHistory.ensureModuleEntry(tabId);
+    }
     call('set_setting', { key: 'last_active_tab', value: tabId }).catch(() => {});
   };
 

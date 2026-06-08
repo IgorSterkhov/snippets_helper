@@ -468,6 +468,16 @@ function installAiNoteListener() {
       showToast('Failed to search notes from AI: ' + err, 'error');
     }
   });
+  window.addEventListener('view-history:open', async (event) => {
+    if (!root) return;
+    const detail = event.detail || {};
+    if (detail.moduleId !== 'notes') return;
+    try {
+      await openNoteFromViewHistory(detail);
+    } catch (err) {
+      showToast('Failed to restore note view: ' + err, 'error');
+    }
+  });
 }
 
 async function collectAllNotesForAi() {
@@ -493,10 +503,36 @@ async function findNoteForAi(detail) {
   )) || null;
 }
 
+async function findNoteForViewHistory(detail) {
+  const allNotes = await collectAllNotesForAi();
+  if (detail.objectUuid) {
+    return allNotes.find(note => note.uuid === detail.objectUuid) || null;
+  }
+  if (detail.objectId != null) {
+    return allNotes.find(note => Number(note.id) === Number(detail.objectId)) || null;
+  }
+  if (detail.title) {
+    return allNotes.find(note => String(note.title || '') === String(detail.title)) || null;
+  }
+  return null;
+}
+
 async function openNoteFromAi(detail) {
   const target = await findNoteForAi(detail);
   if (!target) {
     showToast('AI note target not found', 'error');
+    return;
+  }
+  selectedFolderId = target.folder_id;
+  notes = await call('list_notes', { folderId: selectedFolderId });
+  renderFolders();
+  openEditor(target);
+}
+
+async function openNoteFromViewHistory(detail) {
+  const target = await findNoteForViewHistory(detail);
+  if (!target) {
+    showToast('Note from history was deleted', 'error');
     return;
   }
   selectedFolderId = target.folder_id;
@@ -623,6 +659,24 @@ function openEditor(note) {
   // Empty notes fall back to edit so the user can type straight away.
   previewMode = !!(note.content && note.content.trim());
   renderEditor();
+  recordCurrentNoteView(editingNote);
+}
+
+function recordCurrentNoteView(note) {
+  if (!note || !note.id || window.__keyboardHelperActiveTab !== 'notes') return;
+  window.dispatchEvent(new CustomEvent('view-history:record', {
+    detail: {
+      key: `note:${note.uuid || note.id}`,
+      moduleId: 'notes',
+      objectType: 'note',
+      objectId: note.id,
+      objectUuid: note.uuid || null,
+      title: note.title || '(untitled)',
+      label: 'Notes',
+      icon: '🗒️',
+      detail: {},
+    },
+  }));
 }
 
 function renderEditor() {
