@@ -170,6 +170,37 @@ def test_render_share_html_treats_table_only_shortcut_value_as_markdown():
     assert "<pre><code id='share-code'>" not in rendered
 
 
+def test_render_share_html_renders_ordered_lists_split_by_code_blocks():
+    rendered = render_share_html(
+        {
+            "type": "shortcut",
+            "name": "Manual",
+            "value": (
+                "### Порядок действий\n"
+                "1. Берем SQL запрос и адаптируем его.\n\n"
+                "```sql\n"
+                "SELECT 1;\n"
+                "```\n"
+                "2. Адаптируем запрос для процессинга куба.\n\n"
+                "```json\n"
+                "{\"refresh\": true}\n"
+                "```\n"
+                "3. Запускаем процессинг."
+            ),
+            "description": "",
+            "links": [],
+        }
+    )
+
+    assert "<h3>Порядок действий</h3>" in rendered
+    assert "<ol><li>Берем SQL запрос и адаптируем его.</li></ol>" in rendered
+    assert '<pre><code class="language-sql">SELECT 1;\n</code></pre>' in rendered
+    assert '<ol start="2"><li>Адаптируем запрос для процессинга куба.</li></ol>' in rendered
+    assert '<pre><code class="language-json">{&quot;refresh&quot;: true}\n</code></pre>' in rendered
+    assert '<ol start="3"><li>Запускаем процессинг.</li></ol>' in rendered
+    assert "<p>1. Берем SQL запрос" not in rendered
+
+
 def test_render_share_html_preserves_plain_shortcut_value_as_code_block():
     rendered = render_share_html(
         {

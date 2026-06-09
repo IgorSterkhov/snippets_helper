@@ -71,6 +71,7 @@ REFERENCE_DEF_RE = re.compile(r"^[ \t]*\[([^\]]+)\]:[ \t]*(\S+)(?:[ \t]+[\"'(].*
 FENCE_RE = re.compile(r"^[ \t]*```([A-Za-z0-9_+.#-]*)[ \t]*$")
 HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.+?)\s*$")
 UNORDERED_LIST_RE = re.compile(r"^[ \t]*[-*][ \t]+(.+?)\s*$")
+ORDERED_LIST_RE = re.compile(r"^[ \t]*(\d{1,9})[.)][ \t]+(.+?)\s*$")
 SAFE_LANGUAGE_RE = re.compile(r"[^A-Za-z0-9_+.#-]")
 TABLE_SEPARATOR_CELL_RE = re.compile(r"^:?-{3,}:?$")
 MARKDOWN_MARKER_RE = re.compile(
@@ -80,6 +81,7 @@ MARKDOWN_MARKER_RE = re.compile(
     r"|^[ \t]*\[([^\]]+)\]:[ \t]*\S+"
     r"|^[ \t]{0,3}#{1,6}[ \t]+"
     r"|^[ \t]*```"
+    r"|^[ \t]*(?:[-*]|\d{1,9}[.)])[ \t]+"
     r"|\*\*[^*\n]+\*\*"
     r"|`[^`\n]+`",
     re.MULTILINE,
@@ -322,6 +324,8 @@ def _render_markdown(text: str) -> str:
     output: list[str] = []
     paragraph: list[str] = []
     list_items: list[str] = []
+    list_kind = ""
+    list_start = 1
     code_lines: list[str] = []
     code_language = ""
     in_code = False
@@ -337,11 +341,18 @@ def _render_markdown(text: str) -> str:
         paragraph.clear()
 
     def flush_list() -> None:
+        nonlocal list_kind, list_start
         if not list_items:
             return
         items = "".join(f"<li>{_render_inline_markdown(item, references)}</li>" for item in list_items)
-        output.append(f"<ul>{items}</ul>")
+        if list_kind == "ol":
+            start_attr = f' start="{list_start}"' if list_start != 1 else ""
+            output.append(f"<ol{start_attr}>{items}</ol>")
+        else:
+            output.append(f"<ul>{items}</ul>")
         list_items.clear()
+        list_kind = ""
+        list_start = 1
 
     def flush_blocks() -> None:
         flush_paragraph()
@@ -403,7 +414,23 @@ def _render_markdown(text: str) -> str:
         unordered = UNORDERED_LIST_RE.match(line)
         if unordered:
             flush_paragraph()
+            if list_kind and list_kind != "ul":
+                flush_list()
+            list_kind = "ul"
             list_items.append(unordered.group(1))
+            index += 1
+            continue
+
+        ordered = ORDERED_LIST_RE.match(line)
+        if ordered:
+            number = int(ordered.group(1))
+            flush_paragraph()
+            if list_kind and list_kind != "ol":
+                flush_list()
+            if not list_items:
+                list_kind = "ol"
+                list_start = number
+            list_items.append(ordered.group(2))
             index += 1
             continue
 
@@ -474,7 +501,7 @@ def render_share_html(payload: dict) -> str:
     a {{ color: #58a6ff; }}
     .desc {{ color: #8b949e; }}
     .share-markdown h1, .share-markdown h2, .share-markdown h3 {{ color: #f0f6fc; margin: 20px 0 10px; }}
-    .share-markdown p, .share-markdown ul {{ margin: 0 0 12px; }}
+    .share-markdown p, .share-markdown ul, .share-markdown ol {{ margin: 0 0 12px; }}
     .share-markdown li {{ margin: 4px 0; }}
     .share-table-scroll {{ overflow-x: auto; margin: 12px 0 16px; }}
     .share-markdown table {{ width: 100%; min-width: 520px; border-collapse: collapse; background: #0d1117; }}
