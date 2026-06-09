@@ -82,6 +82,35 @@ def test_render_share_html_renders_image_markdown_as_figure_card():
     assert "<figcaption>diagram</figcaption>" in rendered
 
 
+def test_render_share_html_renders_html_markdown_as_sandbox_card():
+    rendered = render_share_html(
+        {
+            "type": "note",
+            "title": "Deck",
+            "content": "Before\n![html:Architecture Deck](https://ister-app.ru/snippets-api/v1/media/html/html_TOKEN_123456)\nAfter",
+        }
+    )
+    assert "class='html-card'" in rendered
+    assert "Architecture Deck" in rendered
+    assert "src='https://ister-app.ru/snippets-api/v1/media/html/html_TOKEN_123456'" in rendered
+    assert "sandbox='allow-scripts'" in rendered
+    assert "referrerpolicy='no-referrer'" in rendered
+    assert "<img" not in rendered
+
+
+def test_render_share_html_rejects_arbitrary_html_iframe_url():
+    rendered = render_share_html(
+        {
+            "type": "note",
+            "title": "Deck",
+            "content": "![html:Evil](https://example.com/deck.html)",
+        }
+    )
+    assert "class='html-card'" not in rendered
+    assert "<iframe" not in rendered
+    assert "![html:Evil]" in rendered
+
+
 def test_render_share_html_renders_note_content_as_safe_markdown():
     rendered = render_share_html(
         {

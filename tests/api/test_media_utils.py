@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from api.media_utils import generate_media_token, safe_media_path, validate_quota
+from api.media_utils import generate_media_token, public_html_url, safe_media_path, validate_quota
 
 
 def test_generate_media_token_is_url_safe():
@@ -17,9 +17,24 @@ def test_safe_media_path_stays_under_root(tmp_path):
     assert path == (tmp_path / f"{token}.webp").resolve()
 
 
+def test_safe_media_path_allows_html_assets_under_root(tmp_path):
+    token = "abc_DEF-123"
+    path = safe_media_path(tmp_path, token, "html")
+    assert path == (tmp_path / f"{token}.html").resolve()
+
+
 def test_safe_media_path_rejects_unsafe_token(tmp_path):
     with pytest.raises(ValueError):
         safe_media_path(tmp_path, "../secret")
+
+
+def test_safe_media_path_rejects_unknown_extension(tmp_path):
+    with pytest.raises(ValueError, match="webp and html"):
+        safe_media_path(tmp_path, "token", "svg")
+
+
+def test_public_html_url_uses_media_html_endpoint():
+    assert public_html_url("token") == "https://ister-app.ru/snippets-api/v1/media/html/token"
 
 
 def test_validate_quota_rejects_over_max_upload():

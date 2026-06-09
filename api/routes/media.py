@@ -1,19 +1,21 @@
 import asyncio
+import hashlib
 import os
 import uuid as uuid_mod
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Response, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.auth import get_current_user
 from api.database import async_session, get_db
 from api.image_processing import ImageProcessingError, generate_variants, validate_image_bytes
-from api.media_utils import generate_media_token, media_root, public_media_url, safe_media_path
+from api.media_utils import generate_media_token, media_root, public_html_url, public_media_url, safe_media_path
 from api.models import MediaAsset, MediaAssetVariant, User
 from api.schemas import (
+    HtmlUploadResponse,
     MediaDeleteResponse,
     MediaJobResponse,
     MediaSelectRequest,
@@ -25,6 +27,23 @@ from api.schemas import (
 router = APIRouter(prefix="/media", tags=["media"])
 
 MAX_DECODED_PIXELS = 48_000_000
+HTML_EXTENSIONS = {".html", ".htm"}
+HTML_MIME_TYPE = "text/html; charset=utf-8"
+HTML_RESPONSE_CSP = (
+    "sandbox allow-scripts; "
+    "default-src 'none'; "
+    "script-src 'unsafe-inline'; "
+    "style-src 'unsafe-inline'; "
+    "img-src data: blob:; "
+    "font-src data:; "
+    "media-src data: blob:; "
+    "connect-src 'none'; "
+    "frame-src 'none'; "
+    "worker-src 'none'; "
+    "object-src 'none'; "
+    "base-uri 'none'; "
+    "form-action 'none'"
+)
 _jobs: dict[str, dict] = {}
 _jobs_lock = asyncio.Lock()
 _quota_locks: dict[str, asyncio.Lock] = {}
@@ -65,6 +84,40 @@ async def _media_used_bytes(db: AsyncSession, user_id) -> int:
         .where(MediaAsset.user_id == user_id, MediaAsset.is_deleted == False)  # noqa: E712
     )
     return int(result.scalar_one() or 0)
+
+
+def _safe_original_file_name(name: str | None, fallback: str) -> str:
+    candidate = Path(name or fallback).name.strip()
+    return candidate or fallback
+
+
+def _html_title_from_filename(name: str | None) -> str:
+    candidate = Path(name or "presentation.html").name.strip()
+    stem = Path(candidate).stem.strip()
+    return stem or "HTML"
+
+
+def _markdown_html_alt(title: str) -> str:
+    cleaned = " ".join((title or "HTML").replace("[", "(").replace("]", ")").split())
+    return cleaned or "HTML"
+
+
+def _validate_html_upload(file_name: str | None, content: bytes) -> tuple[str, bytes]:
+    if not content:
+        raise HTTPException(status_code=400, detail="upload is empty")
+    safe_name = _safe_original_file_name(file_name, "presentation.html")
+    if Path(safe_name).suffix.lower() not in HTML_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="only .html and .htm files are supported")
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail="HTML file must be UTF-8 encoded") from exc
+    lowered = text[:4096].lower()
+    if "<html" not in lowered and "<!doctype html" not in lowered and "<body" not in lowered:
+        raise HTTPException(status_code=400, detail="file does not look like an HTML document")
+    if "\x00" in text:
+        raise HTTPException(status_code=400, detail="HTML file contains invalid NUL bytes")
+    return safe_name, text.encode("utf-8")
 
 
 async def _process_upload_job(
@@ -182,6 +235,109 @@ async def upload_media(
         content,
     )
     return MediaUploadResponse(job_id=job_id, status="queued")
+
+
+@router.post("/html/uploads", response_model=HtmlUploadResponse)
+async def upload_html_media(
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+):
+    content = await file.read()
+    if len(content) > user.media_max_upload_bytes:
+        raise HTTPException(status_code=413, detail="upload exceeds max upload limit")
+    original_file_name, normalized = _validate_html_upload(file.filename, content)
+    total_bytes = len(normalized)
+    root = media_root()
+    root.mkdir(parents=True, exist_ok=True)
+    asset_uuid = uuid_mod.uuid4()
+    public_token = generate_media_token()
+    path = safe_media_path(root, public_token, "html")
+    now = datetime.utcnow()
+    path.write_bytes(normalized)
+    try:
+        async with _quota_lock(user.id):
+            async with async_session() as db:
+                result = await db.execute(select(User).where(User.id == user.id).with_for_update())
+                locked_user = result.scalar_one_or_none()
+                if not locked_user:
+                    raise ValueError("user not found")
+                used = await _media_used_bytes(db, locked_user.id)
+                if used + total_bytes > locked_user.media_quota_bytes:
+                    raise ValueError("upload exceeds media quota")
+                asset = MediaAsset(
+                    uuid=asset_uuid,
+                    user_id=locked_user.id,
+                    original_file_name=original_file_name,
+                    selected_variant="html",
+                    created_at=now,
+                    updated_at=now,
+                    is_deleted=False,
+                )
+                variant = MediaAssetVariant(
+                    asset_uuid=asset_uuid,
+                    variant="html",
+                    public_token=public_token,
+                    storage_path=str(path),
+                    mime_type=HTML_MIME_TYPE,
+                    size_bytes=total_bytes,
+                    width=0,
+                    height=0,
+                    sha256=hashlib.sha256(normalized).hexdigest(),
+                    created_at=now,
+                )
+                db.add(asset)
+                db.add(variant)
+                await db.commit()
+    except Exception as exc:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        if isinstance(exc, ValueError):
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise
+
+    title = _html_title_from_filename(original_file_name)
+    url = public_html_url(public_token)
+    return HtmlUploadResponse(
+        asset_uuid=str(asset_uuid),
+        markdown=f"![html:{_markdown_html_alt(title)}]({url})",
+        url=url,
+        title=title,
+        size_bytes=total_bytes,
+    )
+
+
+@router.get("/html/{public_token}")
+async def get_public_html_media(public_token: str, db: AsyncSession = Depends(get_db)):
+    if not public_token or not all(ch.isalnum() or ch in "_-" for ch in public_token):
+        raise HTTPException(status_code=404, detail="asset not found")
+    result = await db.execute(
+        select(MediaAssetVariant, MediaAsset)
+        .join(MediaAsset, MediaAsset.uuid == MediaAssetVariant.asset_uuid)
+        .where(
+            MediaAssetVariant.public_token == public_token,
+            MediaAssetVariant.variant == "html",
+            MediaAsset.is_deleted == False,  # noqa: E712
+        )
+    )
+    row = result.first()
+    if not row:
+        raise HTTPException(status_code=404, detail="asset not found")
+    variant, _asset = row
+    try:
+        content = Path(variant.storage_path).read_bytes()
+    except OSError as exc:
+        raise HTTPException(status_code=404, detail="asset file not found") from exc
+    return Response(
+        content=content,
+        media_type=HTML_MIME_TYPE,
+        headers={
+            "Content-Security-Policy": HTML_RESPONSE_CSP,
+            "X-Content-Type-Options": "nosniff",
+            "Referrer-Policy": "no-referrer",
+        },
+    )
 
 
 @router.get("/jobs/{job_id}", response_model=MediaJobResponse)

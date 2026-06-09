@@ -90,6 +90,14 @@ class MediaSelectResponse(BaseModel):
     size_bytes: int
 
 
+class HtmlUploadResponse(BaseModel):
+    asset_uuid: str
+    markdown: str
+    url: str
+    title: str
+    size_bytes: int
+
+
 class MediaDeleteResponse(BaseModel):
     status: str = "ok"
 

@@ -5,6 +5,7 @@ from pathlib import Path
 
 DEFAULT_MEDIA_ROOT = "/opt/isterapp/uploads/snippets-media"
 DEFAULT_PUBLIC_MEDIA_BASE_URL = "https://ister-app.ru/snippets-media"
+DEFAULT_PUBLIC_HTML_BASE_URL = "https://ister-app.ru/snippets-api/v1/media/html"
 
 
 def media_root() -> Path:
@@ -13,6 +14,10 @@ def media_root() -> Path:
 
 def public_media_base_url() -> str:
     return os.environ.get("PUBLIC_MEDIA_BASE_URL", DEFAULT_PUBLIC_MEDIA_BASE_URL).rstrip("/")
+
+
+def public_html_base_url() -> str:
+    return os.environ.get("PUBLIC_HTML_BASE_URL", DEFAULT_PUBLIC_HTML_BASE_URL).rstrip("/")
 
 
 def generate_media_token() -> str:
@@ -25,8 +30,8 @@ def safe_media_path(root: str | Path, variant_public_token: str, extension: str 
     if not all(ch.isalnum() or ch in "_-" for ch in variant_public_token):
         raise ValueError("media token contains unsafe characters")
     clean_extension = extension.lstrip(".").lower()
-    if clean_extension != "webp":
-        raise ValueError("only webp media paths are supported")
+    if clean_extension not in {"webp", "html"}:
+        raise ValueError("only webp and html media paths are supported")
     base = Path(root).resolve()
     path = (base / f"{variant_public_token}.{clean_extension}").resolve()
     if base not in path.parents:
@@ -36,6 +41,10 @@ def safe_media_path(root: str | Path, variant_public_token: str, extension: str 
 
 def public_media_url(variant_public_token: str) -> str:
     return f"{public_media_base_url()}/{variant_public_token}.webp"
+
+
+def public_html_url(variant_public_token: str) -> str:
+    return f"{public_html_base_url()}/{variant_public_token}"
 
 
 def validate_quota(max_upload: int, quota: int, used: int, incoming_bytes: int) -> None:

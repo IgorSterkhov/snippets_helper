@@ -371,7 +371,11 @@ async def run_tests():
         assert 'https:' in img_directive, img_directive
         assert 'data:' in img_directive, img_directive
         assert 'blob:' in img_directive, img_directive
-    await check('T2d Tauri CSP allows media image previews', t2d_tauri_csp_allows_media_images)
+        frame_directive = next((part.strip() for part in csp.split(';') if part.strip().startswith('frame-src')), '')
+        assert 'https:' not in frame_directive.split(), frame_directive
+        assert 'https://ister-app.ru' in frame_directive, frame_directive
+        assert 'http://localhost:*' in frame_directive, frame_directive
+    await check('T2d Tauri CSP allows media and HTML previews', t2d_tauri_csp_allows_media_images)
 
     # ── T2e: Whisper live dictate UI + mock flow ──────────────
     async def t2e_whisper_live_dictate_ui_and_mock_flow():
@@ -2643,6 +2647,58 @@ async def run_tests():
         )
         await wait_until(cdp, "!!document.querySelector('.markdown-figure-card')", timeout=3)
     await check('T21b Snippets image upload modal and figure card', t21b_snippets_image_upload_modal_and_figure)
+
+    # ── T21b2: Snippets HTML upload renders sandbox card ─────
+    async def t21b2_snippets_html_upload_modal_and_card():
+        await close_modals()
+        await open_shortcuts_tab()
+        await cdp.eval("document.querySelector('#panel-shortcuts button[title=\"Add shortcut\"]').click()")
+        await wait_until(cdp, "!!document.querySelector('.modal-overlay textarea[placeholder^=\"Value\"]')", timeout=3)
+        await wait_until(
+            cdp,
+            "[...document.querySelectorAll('.modal-overlay .md-toolbar button')].some(b => b.title === 'Sandbox HTML card')",
+            timeout=3,
+        )
+        await cdp.eval(
+            "[...document.querySelectorAll('.modal-overlay .md-toolbar button')]"
+            ".find(b => b.title === 'Sandbox HTML card').click()"
+        )
+        await wait_until(cdp, "!!document.querySelector('.html-upload-overlay')", timeout=3)
+        await cdp.eval("document.querySelector('.html-upload-overlay .image-upload-picker button').click()")
+        await wait_until(cdp, "!!document.querySelector('.html-upload-overlay iframe')", timeout=3)
+        await wait_until(cdp, "!document.querySelector('.html-upload-overlay .image-upload-footer button').disabled", timeout=3)
+        await cdp.eval("document.querySelector('.html-upload-overlay .image-upload-footer button').click()")
+        value = await wait_until(
+            cdp,
+            "document.querySelector('.modal-overlay textarea[placeholder^=\"Value\"]')?.value.includes('![html:mock-presentation]') && document.querySelector('.modal-overlay textarea[placeholder^=\"Value\"]').value",
+            timeout=3,
+        )
+        assert '/snippets-api/v1/media/html/' in value
+        await cdp.eval("""(() => {
+          const editor = [...document.querySelectorAll('.modal-overlay')]
+            .find(x => !x.classList.contains('html-upload-overlay') && x.querySelector('input[placeholder="Name"]'));
+          if (!editor) throw new Error('missing snippet editor modal');
+          const name = editor.querySelector('input[placeholder="Name"]');
+          name.value = 'HTML markdown';
+          name.dispatchEvent(new Event('input', { bubbles: true }));
+          const confirm = [...editor.querySelectorAll('.modal-actions button')]
+            .find(x => x.textContent.trim() === 'Confirm');
+          if (!confirm) throw new Error('missing editor confirm button');
+          confirm.click();
+        })()""")
+        await wait_until(
+            cdp,
+            "[...document.querySelectorAll('#panel-shortcuts .shortcut-list-item .shortcut-list-name')].some(x => x.textContent.trim() === 'HTML markdown')",
+            timeout=3,
+        )
+        await cdp.eval(
+            "[...document.querySelectorAll('#panel-shortcuts .shortcut-list-item .shortcut-list-name')]"
+            ".find(x => x.textContent.trim() === 'HTML markdown').click()"
+        )
+        await wait_until(cdp, "!!document.querySelector('.markdown-html-card iframe')", timeout=3)
+        sandbox = await cdp.eval("document.querySelector('.markdown-html-card iframe')?.getAttribute('sandbox')")
+        assert sandbox == 'allow-scripts', sandbox
+    await check('T21b2 Snippets HTML upload modal and sandbox card', t21b2_snippets_html_upload_modal_and_card)
 
     # ── T21c: Notes image upload toolbar renders Figure Card ─
     async def t21c_notes_image_upload_modal_and_figure():

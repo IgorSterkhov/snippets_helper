@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## v1.8.0 (2026-06-09)
+
+- **Sandbox HTML Cards:** Notes and Snippets can upload single-file UTF-8 HTML
+  artifacts from the Markdown toolbar and insert them as portable HTML Card
+  tokens. Desktop previews and public share pages render them in sandboxed
+  iframes, while the API stores the files under existing media quotas and
+  serves them with restrictive CSP headers.
+
 ## f-20260608-2 (2026-06-08)
 
 - **Ctrl+Tab in Tasks Focus view:** selecting several tasks from the Focus

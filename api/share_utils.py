@@ -4,6 +4,8 @@ import re
 import secrets
 from urllib.parse import urlparse
 
+from api.media_utils import public_html_base_url
+
 
 def generate_share_token() -> str:
     return secrets.token_urlsafe(32)
@@ -73,6 +75,7 @@ HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.+?)\s*$")
 UNORDERED_LIST_RE = re.compile(r"^[ \t]*[-*][ \t]+(.+?)\s*$")
 ORDERED_LIST_RE = re.compile(r"^[ \t]*(\d{1,9})[.)][ \t]+(.+?)\s*$")
 SAFE_LANGUAGE_RE = re.compile(r"[^A-Za-z0-9_+.#-]")
+SAFE_HTML_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{16,}$")
 TABLE_SEPARATOR_CELL_RE = re.compile(r"^:?-{3,}:?$")
 MARKDOWN_MARKER_RE = re.compile(
     r"!\[[^\]]*\]\([^)]+\)"
@@ -95,6 +98,27 @@ def _is_safe_image_url(url: str) -> bool:
     return parsed.scheme.lower() in {"http", "https"}
 
 
+def _is_safe_html_url(url: str) -> bool:
+    if url.startswith("/snippets-api/v1/media/html/") or url.startswith("/v1/media/html/"):
+        token = url.rsplit("/", 1)[-1]
+        return bool(SAFE_HTML_TOKEN_RE.match(token))
+    parsed = urlparse(url)
+    if parsed.scheme.lower() not in {"http", "https"}:
+        return False
+    base = urlparse(public_html_base_url())
+    if (
+        parsed.scheme.lower() != base.scheme.lower()
+        or parsed.hostname != base.hostname
+        or parsed.port != base.port
+    ):
+        return False
+    base_path = base.path.rstrip("/")
+    if not parsed.path.startswith(base_path + "/"):
+        return False
+    token = parsed.path[len(base_path) + 1:]
+    return bool(SAFE_HTML_TOKEN_RE.match(token))
+
+
 def _figure_card(alt: str, url: str) -> str:
     safe_alt = html.escape(alt or "image")
     safe_url = html.escape(url, quote=True)
@@ -102,6 +126,24 @@ def _figure_card(alt: str, url: str) -> str:
         "<figure class='figure-card'>"
         f"<img src='{safe_url}' alt='{safe_alt}' loading='lazy'>"
         f"<figcaption>{safe_alt}</figcaption>"
+        "</figure>"
+    )
+
+
+def _html_card(alt: str, url: str) -> str:
+    raw_title = (alt or "").strip()
+    title = raw_title[5:].strip() if raw_title.lower().startswith("html:") else raw_title
+    safe_title = html.escape(title or "HTML")
+    safe_url = html.escape(url, quote=True)
+    return (
+        "<figure class='html-card'>"
+        "<figcaption>"
+        f"<span>{safe_title}</span>"
+        "<a rel='noopener noreferrer' target='_blank' "
+        f"href='{safe_url}'>Open</a>"
+        "</figcaption>"
+        "<iframe sandbox='allow-scripts' loading='lazy' "
+        f"referrerpolicy='no-referrer' src='{safe_url}'></iframe>"
         "</figure>"
     )
 
@@ -122,6 +164,10 @@ def _render_inline_markdown(text: str, references: dict[str, str] | None = None)
 
     def image_repl(match: re.Match) -> str:
         alt, url = match.group(1), match.group(2)
+        if alt.strip().lower().startswith("html:"):
+            if _is_safe_html_url(url):
+                return stash(_html_card(alt, url))
+            return stash(html.escape(match.group(0)))
         if _is_safe_image_url(url):
             return stash(_figure_card(alt, url))
         return stash(html.escape(match.group(0)))
@@ -511,6 +557,11 @@ def render_share_html(payload: dict) -> str:
     .figure-card {{ margin: 14px 0; border: 1px solid #30363d; border-radius: 8px; overflow: hidden; background: #161b22; }}
     .figure-card img {{ display: block; max-width: 100%; height: auto; margin: 0 auto; }}
     .figure-card figcaption {{ border-top: 1px solid #30363d; padding: 8px 10px; color: #8b949e; font-size: 13px; }}
+    .html-card {{ margin: 14px 0; border: 1px solid #30363d; border-radius: 8px; overflow: hidden; background: #161b22; }}
+    .html-card figcaption {{ display: flex; align-items: center; justify-content: space-between; gap: 10px; border-bottom: 1px solid #30363d; padding: 8px 10px; color: #c9d1d9; font-size: 13px; }}
+    .html-card figcaption span {{ min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+    .html-card figcaption a {{ flex-shrink: 0; font-size: 12px; }}
+    .html-card iframe {{ display: block; width: 100%; min-height: 520px; border: 0; background: white; }}
   </style>
 </head>
 <body><main><h1>{safe_title}</h1>{body}</main></body>

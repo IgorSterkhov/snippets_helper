@@ -812,8 +812,26 @@
     async pick_media_file() {
       return '/tmp/mock-image.png';
     },
+    async pick_html_file() {
+      return '/tmp/mock-presentation.html';
+    },
     async start_media_upload({ filePath }) {
       return mockMediaJob({ sourcePath: filePath });
+    },
+    async start_html_upload({ filePath }) {
+      const assetUuid = 'mock-html-asset-' + Math.random().toString(16).slice(2);
+      const token = 'mock_HTML_token_123456';
+      window.dispatchEvent(new CustomEvent('media-upload-progress', {
+        detail: { phase: 'upload', bytes_done: 1200, bytes_total: 1200, finished: true },
+      }));
+      return {
+        asset_uuid: assetUuid,
+        markdown: `![html:mock-presentation](https://ister-app.ru/snippets-api/v1/media/html/${token})`,
+        url: `https://ister-app.ru/snippets-api/v1/media/html/${token}`,
+        title: 'mock-presentation',
+        size_bytes: 1200,
+        source_path: filePath,
+      };
     },
     async start_media_clipboard_upload() {
       return mockMediaJob({

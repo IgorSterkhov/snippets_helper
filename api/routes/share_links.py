@@ -1,4 +1,5 @@
 from datetime import datetime
+from urllib.parse import urlparse
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -9,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.auth import get_current_user
 from api.database import get_db
+from api.media_utils import public_html_base_url
 from api.models import Note, ShareLink, Shortcut, User
 from api.schemas import ShareLinkRequest, ShareLinkResponse, ShareLinkStatusResponse
 from api.share_utils import (
@@ -24,6 +26,33 @@ router = APIRouter(prefix="/share-links", tags=["share-links"])
 public_router = APIRouter(tags=["public-share"])
 
 VALID_ITEM_TYPES = {"note", "shortcut"}
+def _public_html_frame_source() -> str:
+    parsed = urlparse(public_html_base_url())
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return ""
+    port = f":{parsed.port}" if parsed.port else ""
+    return f" {parsed.scheme}://{parsed.hostname}{port}"
+
+
+def _public_share_csp() -> str:
+    return (
+        "default-src 'none'; "
+        "script-src 'unsafe-inline'; "
+        "style-src 'unsafe-inline'; "
+        "img-src 'self' https: data: blob:; "
+        f"frame-src 'self'{_public_html_frame_source()}; "
+        "connect-src 'none'; "
+        "object-src 'none'; "
+        "base-uri 'none'; "
+        "form-action 'none'"
+    )
+
+
+PUBLIC_SHARE_HEADERS = {
+    "Content-Security-Policy": _public_share_csp(),
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+}
 
 
 def _validate_item_type(item_type: str) -> str:
@@ -196,4 +225,7 @@ async def public_share_json(token: str, db: AsyncSession = Depends(get_db)):
 
 @public_router.get("/share/{token}", response_class=HTMLResponse)
 async def public_share_html(token: str, db: AsyncSession = Depends(get_db)):
-    return HTMLResponse(render_share_html(await _public_payload(token, db)))
+    return HTMLResponse(
+        render_share_html(await _public_payload(token, db)),
+        headers=PUBLIC_SHARE_HEADERS,
+    )

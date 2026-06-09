@@ -847,6 +847,53 @@ button:hover, .btn:hover {
   color: var(--text-muted);
   font-size: 12px;
 }
+.markdown-html-card {
+  margin: 12px 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  overflow: hidden;
+}
+.markdown-html-card figcaption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid var(--border);
+  padding: 7px 10px;
+  color: var(--text);
+  font-size: 12px;
+}
+.markdown-html-card figcaption span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.markdown-html-card figcaption button {
+  flex-shrink: 0;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.markdown-html-card iframe {
+  display: block;
+  width: 100%;
+  min-height: 420px;
+  border: 0;
+  background: white;
+}
+.html-upload-preview-body iframe {
+  display: block;
+  width: 100%;
+  min-height: 420px;
+  border: 0;
+  background: white;
+}
 .markdown-code-header {
   display: flex;
   align-items: center;

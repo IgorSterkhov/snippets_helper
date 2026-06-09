@@ -342,7 +342,29 @@ technical context from the user.
 
 ---
 
-## §11 Native media preview fallback
+## §11 Sandboxed HTML Cards
+
+**Used in:** Notes/Snippets Markdown previews and public share pages
+
+Use this pattern when user content needs to include an interactive single-file
+HTML artifact such as a generated presentation.
+
+- Store a portable Markdown token, not raw HTML:
+  `![html:Title](https://.../v1/media/html/<token>)`.
+- Render only allowlisted API media URLs as HTML Cards. Never convert arbitrary
+  `https://`, `data:`, or `blob:` URLs into iframes.
+- Always use `<iframe sandbox="allow-scripts">` without `allow-same-origin`.
+- The served HTML asset must also send restrictive CSP headers that block
+  network fetches, external frames, workers, forms, object/embed content, and
+  base URL changes.
+- Keep raw HTML typed directly into Markdown escaped. The upload/card token is
+  the only supported path for interactive HTML.
+- Public share pages need a parent CSP with `frame-src 'self'` so Markdown
+  cannot introduce third-party iframes.
+
+---
+
+## §12 Native media preview fallback
 
 **Used in:** Notes/Snippets image upload modal, desktop Markdown Figure Cards
 
@@ -361,7 +383,7 @@ Use this pattern for server media URLs under `/snippets-media/`.
 
 ---
 
-## §12 Image upload variant preview
+## §13 Image upload variant preview
 
 **Used in:** Notes/Snippets Markdown image upload modal
 
@@ -379,7 +401,7 @@ preview connected:
 
 ---
 
-## §13 Contenteditable list boundary navigation
+## §14 Contenteditable list boundary navigation
 
 **Used in:** Tasks checkbox text rows
 
@@ -401,7 +423,7 @@ boundaries.
 
 ---
 
-## §14 Ctrl+Tab recent view history
+## §15 Ctrl+Tab recent view history
 
 **Used in:** Main desktop shell, Snippets, Tasks, Notes
 

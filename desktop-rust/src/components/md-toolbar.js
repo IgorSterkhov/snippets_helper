@@ -8,6 +8,7 @@
  */
 
 import { openImageUploadModal } from './image-upload-modal.js';
+import { openHtmlUploadModal } from './html-upload-modal.js';
 
 // ── Core helpers ──────────────────────────────────────────────
 
@@ -178,6 +179,15 @@ function getButtons(textarea, options = {}) {
         textarea.setRangeText(replacement, start, end, 'select');
         textarea.focus();
         textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      },
+    },
+    {
+      label: 'HTML', title: 'Sandbox HTML card',
+      action: () => {
+        if (!options.enableImageUpload) return;
+        openHtmlUploadModal({
+          onInsert: (markdown) => insertAtCursor(textarea, markdown),
+        });
       },
     },
     'sep',

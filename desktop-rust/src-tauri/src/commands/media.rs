@@ -65,6 +65,15 @@ pub struct MediaSelectResponse {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct HtmlUploadResponse {
+    pub asset_uuid: String,
+    pub markdown: String,
+    pub url: String,
+    pub title: String,
+    pub size_bytes: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct MediaPreviewDataResponse {
     pub data_url: String,
     pub mime_type: String,
@@ -183,6 +192,21 @@ pub async fn pick_media_file(app: AppHandle) -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
+pub async fn pick_html_file(app: AppHandle) -> Result<Option<String>, String> {
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .add_filter("HTML", &["html", "htm"])
+            .blocking_pick_file()
+    })
+    .await
+    .map_err(|e| format!("pick file task: {e}"))?;
+    Ok(picked
+        .and_then(|p| p.into_path().ok())
+        .map(|p| p.to_string_lossy().to_string()))
+}
+
+#[tauri::command]
 pub async fn start_media_upload(
     app: AppHandle,
     state: State<'_, DbState>,
@@ -239,6 +263,92 @@ pub async fn start_media_upload(
     let form = reqwest::multipart::Form::new().part("file", part);
     let send_future = client
         .post(format!("{api_url}/v1/media/uploads"))
+        .bearer_auth(api_key)
+        .multipart(form)
+        .send();
+    let resp = tokio::select! {
+        _ = cancel_token.cancelled() => {
+            remove_upload_cancellation(&upload_id);
+            return Err("upload cancelled".to_string());
+        }
+        result = send_future => {
+            remove_upload_cancellation(&upload_id);
+            result.map_err(|e| format!("request failed: {e}"))?
+        }
+    };
+    let parsed = parse_json(resp).await?;
+    let _ = app.emit(
+        "media-upload-progress",
+        ProgressPayload {
+            phase: "upload",
+            bytes_done: total,
+            bytes_total: total,
+            finished: true,
+        },
+    );
+    Ok(parsed)
+}
+
+#[tauri::command]
+pub async fn start_html_upload(
+    app: AppHandle,
+    state: State<'_, DbState>,
+    file_path: String,
+    upload_id: String,
+) -> Result<HtmlUploadResponse, String> {
+    let path = std::path::PathBuf::from(&file_path);
+    let file_name = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("presentation.html")
+        .to_string();
+    let total = tokio::fs::metadata(&path)
+        .await
+        .map_err(|e| format!("read file metadata: {e}"))?
+        .len();
+    let _ = app.emit(
+        "media-upload-progress",
+        ProgressPayload {
+            phase: "upload",
+            bytes_done: 0,
+            bytes_total: total,
+            finished: false,
+        },
+    );
+    let (api_url, api_key, ca_cert) = sync_settings(&state)?;
+    let client = http_client(&api_url, ca_cert.as_deref())?;
+    let file = tokio::fs::File::open(&path)
+        .await
+        .map_err(|e| format!("open file: {e}"))?;
+    let cancel_token = CancellationToken::new();
+    register_upload_cancellation(upload_id.clone(), cancel_token.clone())?;
+    let sent = Arc::new(AtomicU64::new(0));
+    let app_for_progress = app.clone();
+    let cancel_for_stream = cancel_token.clone();
+    let stream = ReaderStream::new(file).map_ok(move |chunk| {
+        if cancel_for_stream.is_cancelled() {
+            return chunk;
+        }
+        let done = sent.fetch_add(chunk.len() as u64, Ordering::Relaxed) + chunk.len() as u64;
+        let _ = app_for_progress.emit(
+            "media-upload-progress",
+            ProgressPayload {
+                phase: "upload",
+                bytes_done: done.min(total),
+                bytes_total: total,
+                finished: done >= total,
+            },
+        );
+        chunk
+    });
+    let body = reqwest::Body::wrap_stream(stream);
+    let part = reqwest::multipart::Part::stream_with_length(body, total)
+        .file_name(file_name)
+        .mime_str("text/html")
+        .map_err(|e| format!("set html mime type: {e}"))?;
+    let form = reqwest::multipart::Form::new().part("file", part);
+    let send_future = client
+        .post(format!("{api_url}/v1/media/html/uploads"))
         .bearer_auth(api_key)
         .multipart(form)
         .send();
