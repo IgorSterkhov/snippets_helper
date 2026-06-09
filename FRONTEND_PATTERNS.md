@@ -378,6 +378,9 @@ Use this pattern when an item can be exported to a third-party public page:
   section from live link controls.
 - Save and sync the source item before publishing so the API exports current
   content.
+- Show publish failures in the shared persistent error dialog with copyable
+  diagnostics; do not rely on short-lived toast messages for third-party API
+  failures.
 - Convert content server-side with a strict allowlist for tags, attributes, and
   URL schemes. Interactive app-only cards should degrade to links.
 

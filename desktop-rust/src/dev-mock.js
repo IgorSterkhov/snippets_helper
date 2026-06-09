@@ -830,6 +830,9 @@
     },
     async publish_telegraph_page({ itemType, itemUuid }) {
       recordMockCall('publish_telegraph_page', { itemType, itemUuid });
+      if (window.__mockFailTelegraphPublish) {
+        throw new Error('HTTP 502 Bad Gateway: {"detail":"Telegraph publish failed: Telegra.ph API timeout"}');
+      }
       const key = shareKey(itemType, itemUuid);
       const page = mockTelegraphPage(itemType, itemUuid, telegraphPages.get(key));
       telegraphPages.set(key, page);

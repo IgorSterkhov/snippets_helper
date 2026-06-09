@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## v1.9.1 (2026-06-09)
+
+- **Telegra.ph diagnostics:** publishing failures now open a persistent dialog
+  with copyable diagnostics instead of a short toast. The desktop waits long
+  enough to receive the API error, while the server fails fast with a clear
+  message if outbound access to Telegra.ph is blocked. `TELEGRAPH_API_BASE_URL`
+  can be set on the API server when publishing must go through a proxy endpoint.
+
 ## v1.9.0 (2026-06-09)
 
 - **Telegra.ph publishing:** Share dialogs for Notes and Snippets can publish

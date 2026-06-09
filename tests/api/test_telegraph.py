@@ -2,11 +2,14 @@ import asyncio
 from types import SimpleNamespace
 from uuid import uuid4
 
+import httpx
 import pytest
 from fastapi import HTTPException
 
 from api.routes import share_links
 from api.telegraph import (
+    TelegraphClient,
+    TelegraphError,
     content_hash,
     markdown_to_telegraph_nodes,
     telegraph_short_name,
@@ -40,6 +43,20 @@ class FakeTelegraphClient:
             title="Deploy",
             views=1,
         )
+
+
+class TimeoutHttpClient:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return False
+
+    async def post(self, *args, **kwargs):
+        raise httpx.ConnectTimeout("connect timed out")
 
 
 def test_telegraph_short_name_uses_api_key_prefix_and_limit():
@@ -98,6 +115,17 @@ def test_telegraph_converter_truncates_utf8_safely():
     assert content_hash(nodes)
     assert "truncated" in str(nodes)
     assert "�" not in str(nodes)
+
+
+def test_telegraph_client_translates_connection_timeout(monkeypatch):
+    monkeypatch.setattr("api.telegraph.httpx.AsyncClient", TimeoutHttpClient)
+
+    with pytest.raises(TelegraphError) as exc:
+        asyncio.run(TelegraphClient().create_account(short_name="ister_timeout"))
+
+    message = str(exc.value)
+    assert "Telegra.ph API timeout" in message or "Telegra.ph API connection failed" in message
+    assert "TELEGRAPH_API_BASE_URL" in message
 
 
 def test_publish_telegraph_rejects_item_not_owned(monkeypatch):

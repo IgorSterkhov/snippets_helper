@@ -1,5 +1,6 @@
 use crate::db::{queries, DbState};
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use tauri::State;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -61,8 +62,12 @@ fn sync_settings(state: &State<'_, DbState>) -> Result<(String, String, Option<S
     Ok((url.trim_end_matches('/').to_string(), key, cert))
 }
 
-fn http_client(api_url: &str, ca_cert: Option<&str>) -> Result<reqwest::Client, String> {
-    let mut builder = reqwest::Client::builder().timeout(std::time::Duration::from_secs(20));
+fn http_client(
+    api_url: &str,
+    ca_cert: Option<&str>,
+    timeout: Duration,
+) -> Result<reqwest::Client, String> {
+    let mut builder = reqwest::Client::builder().timeout(timeout);
     if let Some(path) = ca_cert {
         if std::path::Path::new(path).is_file() {
             let pem = std::fs::read(path).map_err(|e| format!("read CA cert: {e}"))?;
@@ -78,6 +83,25 @@ fn http_client(api_url: &str, ca_cert: Option<&str>) -> Result<reqwest::Client, 
     builder
         .build()
         .map_err(|e| format!("build http client: {e}"))
+}
+
+fn format_request_error(context: &str, err: reqwest::Error) -> String {
+    let mut parts = vec![format!("{context}: {err}")];
+    if err.is_timeout() {
+        parts.push("kind: timeout".to_string());
+    }
+    if err.is_connect() {
+        parts.push("kind: connect".to_string());
+    }
+    if let Some(url) = err.url() {
+        parts.push(format!("url: {url}"));
+    }
+    let mut source = std::error::Error::source(&err);
+    while let Some(err) = source {
+        parts.push(format!("caused by: {err}"));
+        source = err.source();
+    }
+    parts.join("\n")
 }
 
 async fn parse_json<T: for<'de> Deserialize<'de>>(resp: reqwest::Response) -> Result<T, String> {
@@ -98,14 +122,14 @@ pub async fn get_share_link(
     item_uuid: String,
 ) -> Result<Option<ShareLink>, String> {
     let (api_url, api_key, ca_cert) = sync_settings(&state)?;
-    let client = http_client(&api_url, ca_cert.as_deref())?;
+    let client = http_client(&api_url, ca_cert.as_deref(), Duration::from_secs(20))?;
     let resp = client
         .get(format!("{api_url}/v1/share-links"))
         .bearer_auth(api_key)
         .query(&[("item_type", item_type), ("item_uuid", item_uuid)])
         .send()
         .await
-        .map_err(|e| format!("request failed: {e}"))?;
+        .map_err(|e| format_request_error("get share link request failed", e))?;
     let status: ShareStatusResponse = parse_json(resp).await?;
     Ok(status.link)
 }
@@ -117,7 +141,7 @@ pub async fn create_share_link(
     item_uuid: String,
 ) -> Result<ShareLink, String> {
     let (api_url, api_key, ca_cert) = sync_settings(&state)?;
-    let client = http_client(&api_url, ca_cert.as_deref())?;
+    let client = http_client(&api_url, ca_cert.as_deref(), Duration::from_secs(20))?;
     let resp = client
         .post(format!("{api_url}/v1/share-links"))
         .bearer_auth(api_key)
@@ -127,20 +151,20 @@ pub async fn create_share_link(
         })
         .send()
         .await
-        .map_err(|e| format!("request failed: {e}"))?;
+        .map_err(|e| format_request_error("create share link request failed", e))?;
     parse_json(resp).await
 }
 
 #[tauri::command]
 pub async fn revoke_share_link(state: State<'_, DbState>, token: String) -> Result<(), String> {
     let (api_url, api_key, ca_cert) = sync_settings(&state)?;
-    let client = http_client(&api_url, ca_cert.as_deref())?;
+    let client = http_client(&api_url, ca_cert.as_deref(), Duration::from_secs(20))?;
     let resp = client
         .delete(format!("{api_url}/v1/share-links/{token}"))
         .bearer_auth(api_key)
         .send()
         .await
-        .map_err(|e| format!("request failed: {e}"))?;
+        .map_err(|e| format_request_error("revoke share link request failed", e))?;
     let _: ShareStatusResponse = parse_json(resp).await?;
     Ok(())
 }
@@ -152,14 +176,14 @@ pub async fn get_telegraph_page(
     item_uuid: String,
 ) -> Result<Option<TelegraphPage>, String> {
     let (api_url, api_key, ca_cert) = sync_settings(&state)?;
-    let client = http_client(&api_url, ca_cert.as_deref())?;
+    let client = http_client(&api_url, ca_cert.as_deref(), Duration::from_secs(20))?;
     let resp = client
         .get(format!("{api_url}/v1/share-links/telegraph"))
         .bearer_auth(api_key)
         .query(&[("item_type", item_type), ("item_uuid", item_uuid)])
         .send()
         .await
-        .map_err(|e| format!("request failed: {e}"))?;
+        .map_err(|e| format_request_error("get Telegra.ph page request failed", e))?;
     let status: TelegraphStatusResponse = parse_json(resp).await?;
     Ok(status.page)
 }
@@ -171,7 +195,7 @@ pub async fn publish_telegraph_page(
     item_uuid: String,
 ) -> Result<TelegraphPage, String> {
     let (api_url, api_key, ca_cert) = sync_settings(&state)?;
-    let client = http_client(&api_url, ca_cert.as_deref())?;
+    let client = http_client(&api_url, ca_cert.as_deref(), Duration::from_secs(45))?;
     let resp = client
         .post(format!("{api_url}/v1/share-links/telegraph/publish"))
         .bearer_auth(api_key)
@@ -181,6 +205,6 @@ pub async fn publish_telegraph_page(
         })
         .send()
         .await
-        .map_err(|e| format!("request failed: {e}"))?;
+        .map_err(|e| format_request_error("publish Telegra.ph page request failed", e))?;
     parse_json(resp).await
 }

@@ -1,4 +1,5 @@
 import { call } from '../tauri-api.js';
+import { showErrorDialog } from './error-dialog.js';
 import { showToast } from './toast.js';
 
 async function copyText(text) {
@@ -42,7 +43,12 @@ export async function openShareLinkModal({
     link = linkResult.value;
     telegraphPage = telegraphResult.status === 'fulfilled' ? telegraphResult.value : null;
   } catch (err) {
-    showToast('Failed to load share link: ' + err, 'error');
+    showShareError(
+      'Share link load failed',
+      'The share dialog could not load link status from the sync API.',
+      err,
+      { stage: 'load' },
+    );
     return;
   }
 
@@ -143,7 +149,12 @@ export async function openShareLinkModal({
         showToast('Telegra.ph page published and copied', 'success');
         renderTelegraphSection();
       } catch (err) {
-        showToast('Failed to publish to Telegra.ph: ' + err, 'error');
+        showShareError(
+          'Telegra.ph publish failed',
+          'The app could not publish this item to Telegra.ph.',
+          err,
+          { stage: 'telegraph_publish' },
+        );
         btn.disabled = false;
         btn.textContent = originalText;
       }
@@ -185,7 +196,12 @@ export async function openShareLinkModal({
         if (onChange) onChange(link);
         close();
       } catch (err) {
-        showToast('Failed to create link: ' + err, 'error');
+        showShareError(
+          'Share link create failed',
+          'The app could not create a live public share link.',
+          err,
+          { stage: 'live_link_create' },
+        );
         btn.disabled = false;
         btn.textContent = originalText;
       }
@@ -205,7 +221,12 @@ export async function openShareLinkModal({
         if (onChange) onChange(null);
         close();
       } catch (err) {
-        showToast('Failed to revoke link: ' + err, 'error');
+        showShareError(
+          'Share link revoke failed',
+          'The app could not revoke the live public share link.',
+          err,
+          { stage: 'live_link_revoke', token: link.token },
+        );
       }
     }));
   }
@@ -215,4 +236,55 @@ export async function openShareLinkModal({
 
   document.addEventListener('keydown', onKeydown);
   document.body.appendChild(overlay);
+
+  function showShareError(errorTitle, message, err, extra = {}) {
+    void (async () => {
+      const details = await buildShareErrorDetails(errorTitle, message, err, extra);
+      showErrorDialog({ title: errorTitle, message, details });
+    })();
+  }
+
+  async function buildShareErrorDetails(errorTitle, message, err, extra) {
+    const [frontendVersion, updateInfo] = await Promise.all([
+      safeCommand('get_frontend_version', {}, 800),
+      safeCommand('check_for_update', {}, 1200),
+    ]);
+    return {
+      title: errorTitle,
+      message,
+      timestamp: new Date().toISOString(),
+      frontend_version: frontendVersion.ok ? frontendVersion.value : `unavailable: ${frontendVersion.error}`,
+      native_version: updateInfo.ok ? (updateInfo.value?.current_version || null) : `unavailable: ${updateInfo.error}`,
+      latest_native_version: updateInfo.ok ? (updateInfo.value?.latest_version || null) : null,
+      update_build_in_progress: updateInfo.ok ? !!updateInfo.value?.build_in_progress : null,
+      error: formatErrorMessage(err),
+      item_type: itemType,
+      item_uuid: itemUuid,
+      item_title: title || null,
+      live_link_active: !!link,
+      live_link_url: link?.public_url || null,
+      telegraph_published: !!telegraphPage,
+      telegraph_url: telegraphPage?.url || null,
+      extra,
+    };
+  }
+}
+
+async function safeCommand(command, args = {}, timeoutMs = 1000) {
+  try {
+    const value = await Promise.race([
+      call(command, args),
+      new Promise((_, reject) => {
+        setTimeout(() => reject(new Error(`${command} timed out after ${timeoutMs}ms`)), timeoutMs);
+      }),
+    ]);
+    return { ok: true, value };
+  } catch (err) {
+    return { ok: false, error: formatErrorMessage(err) };
+  }
+}
+
+function formatErrorMessage(err) {
+  if (err?.message) return String(err.message);
+  return String(err || '');
 }

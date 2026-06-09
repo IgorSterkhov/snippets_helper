@@ -1,6 +1,7 @@
 import hashlib
 import html
 import json
+import os
 import re
 from dataclasses import dataclass
 from urllib.parse import urlparse
@@ -10,7 +11,9 @@ import httpx
 from api.media_utils import public_html_base_url, public_media_base_url
 
 
-TELEGRAPH_API_BASE = "https://api.telegra.ph"
+TELEGRAPH_API_BASE = os.getenv("TELEGRAPH_API_BASE_URL", "https://api.telegra.ph")
+TELEGRAPH_CONNECT_TIMEOUT_SECONDS = float(os.getenv("TELEGRAPH_CONNECT_TIMEOUT_SECONDS", "6"))
+TELEGRAPH_READ_TIMEOUT_SECONDS = float(os.getenv("TELEGRAPH_READ_TIMEOUT_SECONDS", "12"))
 TELEGRAPH_CONTENT_MAX_BYTES = 60 * 1024
 TELEGRAPH_AUTHOR_NAME = "Ister App"
 SAFE_HREF_SCHEMES = {"http", "https", "mailto"}
@@ -365,9 +368,29 @@ class TelegraphClient:
         }
 
     async def _post(self, path: str, data: dict) -> dict:
-        async with httpx.AsyncClient(timeout=20) as client:
-            resp = await client.post(f"{self.base_url}{path}", data=data)
-        resp.raise_for_status()
+        url = f"{self.base_url}{path}"
+        timeout = httpx.Timeout(
+            TELEGRAPH_READ_TIMEOUT_SECONDS,
+            connect=TELEGRAPH_CONNECT_TIMEOUT_SECONDS,
+        )
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.post(url, data=data)
+            resp.raise_for_status()
+        except httpx.TimeoutException as exc:
+            raise TelegraphError(
+                "Telegra.ph API timeout. The server cannot reach Telegra.ph "
+                f"at {self.base_url}; check outbound network access or configure TELEGRAPH_API_BASE_URL."
+            ) from exc
+        except httpx.ConnectError as exc:
+            raise TelegraphError(
+                "Telegra.ph API connection failed. The server cannot connect to "
+                f"{self.base_url}; check outbound network access or configure TELEGRAPH_API_BASE_URL."
+            ) from exc
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code if exc.response is not None else "unknown"
+            body = exc.response.text[:300] if exc.response is not None else ""
+            raise TelegraphError(f"Telegra.ph API HTTP {status}: {body}") from exc
         payload = resp.json()
         if not payload.get("ok"):
             error = str(payload.get("error") or "Telegraph API error")

@@ -1328,6 +1328,16 @@ async def run_tests():
         assert telegraph_url.startswith('https://telegra.ph/'), telegraph_url
         commands = await cdp.eval("window.__mockCommandLog.map(x => x.command)")
         assert 'publish_telegraph_page' in commands, f'commands: {commands!r}'
+        await cdp.eval("window.__mockFailTelegraphPublish = true")
+        await cdp.eval(
+            "[...document.querySelectorAll('.share-link-telegraph-actions button')]"
+            ".find(b => b.textContent.includes('Update Telegra.ph')).click()"
+        )
+        await wait_until(cdp, "document.body.innerText.includes('Telegra.ph publish failed')", timeout=3)
+        copy_label = await cdp.eval("document.querySelector('.error-dialog .btn-secondary')?.textContent.trim() || ''")
+        assert copy_label == 'Copy error', copy_label
+        await cdp.eval("window.__mockFailTelegraphPublish = false")
+        await cdp.eval("document.querySelector('.error-dialog-ok').click()")
         await cdp.eval("[...document.querySelectorAll('.share-link-actions button')].find(b => b.textContent === 'Revoke').click()")
         await wait_until(cdp, "!document.body.innerText.includes('Share link')", timeout=3)
     await check('T14d Snippets share link modal', t14d_snippets_share_link_modal)
