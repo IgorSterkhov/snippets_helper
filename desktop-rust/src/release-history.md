@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## v1.9.0 (2026-06-09)
+
+- **Telegra.ph publishing:** Share dialogs for Notes and Snippets can publish
+  Telegram-friendly snapshot pages to Telegra.ph, then copy/open or update the
+  page. The API creates a per-user Telegra.ph account automatically, keeps the
+  access token server-side, and converts Markdown/HTML Cards to safe Telegra.ph
+  content.
+- **HTML Card iframe fix:** the production HTML media endpoint no longer sends
+  `X-Frame-Options: DENY`, so sandboxed HTML Cards can render inside desktop
+  previews and public share pages.
+
 ## v1.8.0 (2026-06-09)
 
 - **Sandbox HTML Cards:** Notes and Snippets can upload single-file UTF-8 HTML

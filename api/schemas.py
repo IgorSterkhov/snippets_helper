@@ -161,6 +161,28 @@ class ShareLinkStatusResponse(BaseModel):
     link: Optional[ShareLinkResponse] = None
 
 
+class TelegraphPublishRequest(BaseModel):
+    item_type: str
+    item_uuid: str
+
+
+class TelegraphPageResponse(BaseModel):
+    item_type: str
+    item_uuid: str
+    url: str
+    path: str
+    title: str
+    content_hash: str
+    views: Optional[int] = None
+    created_at: datetime
+    updated_at: datetime
+    published_at: datetime
+
+
+class TelegraphStatusResponse(BaseModel):
+    page: Optional[TelegraphPageResponse] = None
+
+
 # ==================== AI Agent ====================
 
 class AiProviderSettingsRequest(BaseModel):

@@ -635,6 +635,18 @@ button:hover, .btn:hover {
   color: #7ee787;
 }
 
+.share-link-telegraph {
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+  padding-top: 10px;
+}
+
+.share-link-section-title {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .share-link-input {
   width: 100%;
   box-sizing: border-box;
@@ -653,6 +665,10 @@ button:hover, .btn:hover {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 2px;
+}
+
+.share-link-telegraph-actions {
+  justify-content: flex-start;
 }
 
 .error-dialog-overlay {

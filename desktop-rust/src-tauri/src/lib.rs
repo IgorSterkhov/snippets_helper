@@ -149,6 +149,8 @@ pub fn run() {
             commands::share_links::get_share_link,
             commands::share_links::create_share_link,
             commands::share_links::revoke_share_link,
+            commands::share_links::get_telegraph_page,
+            commands::share_links::publish_telegraph_page,
             commands::admin::get_admin_me,
             commands::admin::list_admin_users,
             commands::admin::update_admin_user_limits,

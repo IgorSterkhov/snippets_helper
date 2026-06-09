@@ -318,6 +318,7 @@
   }
 
   const shareLinks = new Map();
+  const telegraphPages = new Map();
   const mediaJobs = new Map();
   const mediaAssets = new Map();
 
@@ -337,6 +338,23 @@
       created_at: stamp,
       updated_at: stamp,
       revoked_at: null,
+    };
+  }
+
+  function mockTelegraphPage(itemType, itemUuid, existing = null) {
+    const stamp = now();
+    const slug = `${itemType}-${itemUuid}`.replace(/[^A-Za-z0-9_-]/g, '-');
+    return {
+      item_type: itemType,
+      item_uuid: itemUuid,
+      url: existing?.url || `https://telegra.ph/${slug}-06-09`,
+      path: existing?.path || `${slug}-06-09`,
+      title: existing?.title || (itemType === 'note' ? 'Mock note' : 'Mock snippet'),
+      content_hash: Math.random().toString(16).slice(2).padEnd(64, '0').slice(0, 64),
+      views: (existing?.views || 0) + 1,
+      created_at: existing?.created_at || stamp,
+      updated_at: stamp,
+      published_at: stamp,
     };
   }
 
@@ -806,6 +824,16 @@
         if (value.token === token) shareLinks.delete(key);
       }
       return null;
+    },
+    async get_telegraph_page({ itemType, itemUuid }) {
+      return telegraphPages.get(shareKey(itemType, itemUuid)) || null;
+    },
+    async publish_telegraph_page({ itemType, itemUuid }) {
+      recordMockCall('publish_telegraph_page', { itemType, itemUuid });
+      const key = shareKey(itemType, itemUuid);
+      const page = mockTelegraphPage(itemType, itemUuid, telegraphPages.get(key));
+      telegraphPages.set(key, page);
+      return page;
     },
 
     // ── Media uploads ───────────────────────────────────

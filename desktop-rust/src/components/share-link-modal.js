@@ -32,8 +32,15 @@ export async function openShareLinkModal({
   }
 
   let link = null;
+  let telegraphPage = null;
   try {
-    link = await call('get_share_link', { itemType, itemUuid });
+    const [linkResult, telegraphResult] = await Promise.allSettled([
+      call('get_share_link', { itemType, itemUuid }),
+      call('get_telegraph_page', { itemType, itemUuid }),
+    ]);
+    if (linkResult.status === 'rejected') throw linkResult.reason;
+    link = linkResult.value;
+    telegraphPage = telegraphResult.status === 'fulfilled' ? telegraphResult.value : null;
   } catch (err) {
     showToast('Failed to load share link: ' + err, 'error');
     return;
@@ -73,6 +80,10 @@ export async function openShareLinkModal({
     body.appendChild(input);
   }
 
+  const telegraphSection = document.createElement('div');
+  telegraphSection.className = 'share-link-telegraph';
+  body.appendChild(telegraphSection);
+
   const actions = document.createElement('div');
   actions.className = 'share-link-actions';
   body.appendChild(actions);
@@ -84,6 +95,69 @@ export async function openShareLinkModal({
 
   function onKeydown(event) {
     if (event.key === 'Escape') close();
+  }
+
+  function renderTelegraphSection() {
+    telegraphSection.innerHTML = '';
+    const titleRow = document.createElement('div');
+    titleRow.className = 'share-link-section-title';
+    titleRow.textContent = 'Telegra.ph';
+    telegraphSection.appendChild(titleRow);
+
+    const hint = document.createElement('div');
+    hint.className = telegraphPage ? 'share-link-status active' : 'share-link-status';
+    hint.textContent = telegraphPage
+      ? `Published snapshot${telegraphPage.views != null ? ` · ${telegraphPage.views} views` : ''}`
+      : 'No Telegra.ph page yet';
+    telegraphSection.appendChild(hint);
+
+    if (telegraphPage?.url) {
+      const input = document.createElement('input');
+      input.className = 'share-link-input';
+      input.value = telegraphPage.url;
+      input.readOnly = true;
+      input.addEventListener('focus', () => input.select());
+      telegraphSection.appendChild(input);
+    }
+
+    const row = document.createElement('div');
+    row.className = 'share-link-actions share-link-telegraph-actions';
+    telegraphSection.appendChild(row);
+
+    row.appendChild(makeButton(telegraphPage ? 'Update Telegra.ph' : 'Publish to Telegra.ph', '', async (event) => {
+      const btn = event.currentTarget;
+      const originalText = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = telegraphPage ? 'Updating...' : 'Publishing...';
+      try {
+        if (onBeforeCreate) {
+          const updated = await onBeforeCreate();
+          if (updated?.itemUuid) itemUuid = updated.itemUuid;
+          if (updated?.title) title = updated.title;
+        }
+        if (syncBeforeCreate) {
+          await call('trigger_sync');
+        }
+        telegraphPage = await call('publish_telegraph_page', { itemType, itemUuid });
+        await copyText(telegraphPage.url);
+        showToast('Telegra.ph page published and copied', 'success');
+        renderTelegraphSection();
+      } catch (err) {
+        showToast('Failed to publish to Telegra.ph: ' + err, 'error');
+        btn.disabled = false;
+        btn.textContent = originalText;
+      }
+    }));
+
+    if (telegraphPage?.url) {
+      row.appendChild(makeButton('Copy', 'btn-secondary', async () => {
+        await copyText(telegraphPage.url);
+        showToast('Telegra.ph link copied', 'success');
+      }));
+      row.appendChild(makeButton('Open', 'btn-secondary', async () => {
+        await call('open_link_window', { url: telegraphPage.url, title: telegraphPage.title || title || 'Telegra.ph' });
+      }));
+    }
   }
 
   overlay.addEventListener('click', (event) => {
@@ -136,6 +210,7 @@ export async function openShareLinkModal({
     }));
   }
 
+  renderTelegraphSection();
   actions.appendChild(makeButton('Close', 'btn-secondary', close));
 
   document.addEventListener('keydown', onKeydown);

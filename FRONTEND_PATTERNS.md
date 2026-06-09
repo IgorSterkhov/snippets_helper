@@ -364,7 +364,26 @@ HTML artifact such as a generated presentation.
 
 ---
 
-## §12 Native media preview fallback
+## §12 External snapshot publishing
+
+**Used in:** Notes/Snippets Telegra.ph publishing
+
+Use this pattern when an item can be exported to a third-party public page:
+
+- Treat external publishing as an explicit snapshot, not a replacement for the
+  app's live `/share/<token>` link.
+- Keep third-party access tokens server-side only. Desktop receives status,
+  URL, path, timestamps, views, and content hash, never credentials.
+- Put Publish/Update controls in the existing Share dialog as a separate
+  section from live link controls.
+- Save and sync the source item before publishing so the API exports current
+  content.
+- Convert content server-side with a strict allowlist for tags, attributes, and
+  URL schemes. Interactive app-only cards should degrade to links.
+
+---
+
+## §13 Native media preview fallback
 
 **Used in:** Notes/Snippets image upload modal, desktop Markdown Figure Cards
 
@@ -383,7 +402,7 @@ Use this pattern for server media URLs under `/snippets-media/`.
 
 ---
 
-## §13 Image upload variant preview
+## §14 Image upload variant preview
 
 **Used in:** Notes/Snippets Markdown image upload modal
 
@@ -401,7 +420,7 @@ preview connected:
 
 ---
 
-## §14 Contenteditable list boundary navigation
+## §15 Contenteditable list boundary navigation
 
 **Used in:** Tasks checkbox text rows
 
@@ -423,7 +442,7 @@ boundaries.
 
 ---
 
-## §15 Ctrl+Tab recent view history
+## §16 Ctrl+Tab recent view history
 
 **Used in:** Main desktop shell, Snippets, Tasks, Notes
 

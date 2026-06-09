@@ -182,7 +182,7 @@ function getButtons(textarea, options = {}) {
       },
     },
     {
-      label: 'HTML', title: 'Sandbox HTML card',
+      label: 'HTML', title: 'Insert HTML from file',
       action: () => {
         if (!options.enableImageUpload) return;
         openHtmlUploadModal({

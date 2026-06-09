@@ -53,6 +53,11 @@ class User(Base):
     telegram_bot_updated_at: Mapped[datetime | None] = mapped_column(DateTime)
     ai_custom_instructions: Mapped[str | None] = mapped_column(Text)
     ai_custom_instructions_updated_at: Mapped[datetime | None] = mapped_column(DateTime)
+    telegraph_access_token: Mapped[str | None] = mapped_column(Text)
+    telegraph_short_name: Mapped[str | None] = mapped_column(String(32))
+    telegraph_author_name: Mapped[str | None] = mapped_column(String(128))
+    telegraph_author_url: Mapped[str | None] = mapped_column(String(512))
+    telegraph_updated_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 class Shortcut(Base):
@@ -288,6 +293,30 @@ class ShareLink(Base):
             unique=True,
             postgresql_where=text("is_active = true"),
         ),
+    )
+
+
+class TelegraphPage(Base):
+    __tablename__ = "telegraph_pages"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[uuid_mod.UUID] = mapped_column(Uuid, ForeignKey("users.id"), nullable=False)
+    item_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    item_uuid: Mapped[uuid_mod.UUID] = mapped_column(Uuid, nullable=False)
+    path: Mapped[str] = mapped_column(String(255), nullable=False)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str] = mapped_column(String(256), nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    views: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    published_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        CheckConstraint("item_type IN ('note', 'shortcut')", name="ck_telegraph_pages_item_type"),
+        Index("idx_telegraph_pages_owner_item", "user_id", "item_type", "item_uuid"),
+        Index("idx_telegraph_pages_user_updated", "user_id", "updated_at"),
+        UniqueConstraint("user_id", "item_type", "item_uuid", name="uq_telegraph_pages_owner_item"),
     )
 
 

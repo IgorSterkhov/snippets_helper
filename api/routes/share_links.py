@@ -2,6 +2,7 @@ from datetime import datetime
 from urllib.parse import urlparse
 from uuid import UUID
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy import select
@@ -11,8 +12,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.auth import get_current_user
 from api.database import get_db
 from api.media_utils import public_html_base_url
-from api.models import Note, ShareLink, Shortcut, User
-from api.schemas import ShareLinkRequest, ShareLinkResponse, ShareLinkStatusResponse
+from api.models import Note, ShareLink, Shortcut, TelegraphPage, User
+from api.schemas import (
+    ShareLinkRequest,
+    ShareLinkResponse,
+    ShareLinkStatusResponse,
+    TelegraphPageResponse,
+    TelegraphPublishRequest,
+    TelegraphStatusResponse,
+)
 from api.share_utils import (
     build_public_url,
     generate_share_token,
@@ -20,12 +28,22 @@ from api.share_utils import (
     public_shortcut_payload,
     render_share_html,
 )
+from api.telegraph import (
+    TELEGRAPH_AUTHOR_NAME,
+    TelegraphClient,
+    TelegraphError,
+    content_hash,
+    markdown_to_telegraph_nodes,
+    telegraph_short_name,
+)
 
 
 router = APIRouter(prefix="/share-links", tags=["share-links"])
 public_router = APIRouter(tags=["public-share"])
 
 VALID_ITEM_TYPES = {"note", "shortcut"}
+
+
 def _public_html_frame_source() -> str:
     parsed = urlparse(public_html_base_url())
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
@@ -85,6 +103,21 @@ def _response(link: ShareLink, request: Request) -> ShareLinkResponse:
     )
 
 
+def _telegraph_response(page: TelegraphPage) -> TelegraphPageResponse:
+    return TelegraphPageResponse(
+        item_type=page.item_type,
+        item_uuid=str(page.item_uuid),
+        url=page.url,
+        path=page.path,
+        title=page.title,
+        content_hash=page.content_hash,
+        views=page.views,
+        created_at=page.created_at,
+        updated_at=page.updated_at,
+        published_at=page.published_at,
+    )
+
+
 async def _load_owned_item(
     db: AsyncSession,
     user_id: UUID,
@@ -100,6 +133,61 @@ async def _load_owned_item(
         )
     )
     return result.scalar_one_or_none()
+
+
+async def _load_telegraph_page(
+    db: AsyncSession,
+    user_id: UUID,
+    item_type: str,
+    item_uuid: UUID,
+) -> TelegraphPage | None:
+    result = await db.execute(
+        select(TelegraphPage).where(
+            TelegraphPage.user_id == user_id,
+            TelegraphPage.item_type == item_type,
+            TelegraphPage.item_uuid == item_uuid,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+def _item_telegraph_content(item_type: str, item) -> tuple[str, str]:
+    if item_type == "note":
+        return item.title or "Untitled note", item.content or ""
+    parts = [item.value or ""]
+    if item.description:
+        parts.extend(["", "## Description", item.description])
+    for link in public_shortcut_payload(item).get("links", []):
+        label = link.get("label") or link.get("url") or "Link"
+        url = link.get("url") or ""
+        parts.append(f"- [{label}]({url})")
+    return item.name or "Untitled snippet", "\n".join(parts)
+
+
+async def _ensure_telegraph_account(user: User, db: AsyncSession) -> str:
+    if user.telegraph_access_token:
+        return user.telegraph_access_token
+    short_name = telegraph_short_name(user.api_key)
+    try:
+        account = await TelegraphClient().create_account(
+            short_name=short_name,
+            author_name=TELEGRAPH_AUTHOR_NAME,
+            author_url="",
+        )
+    except (httpx.HTTPError, TelegraphError) as exc:
+        raise HTTPException(status_code=502, detail=f"Telegraph account setup failed: {exc}") from exc
+    token = str(account.get("access_token") or "").strip()
+    if not token:
+        raise HTTPException(status_code=502, detail="Telegraph account setup failed")
+    now = datetime.utcnow()
+    user.telegraph_access_token = token
+    user.telegraph_short_name = short_name
+    user.telegraph_author_name = TELEGRAPH_AUTHOR_NAME
+    user.telegraph_author_url = ""
+    user.telegraph_updated_at = now
+    await db.commit()
+    await db.refresh(user)
+    return token
 
 
 async def _load_active_link(
@@ -131,6 +219,92 @@ async def get_share_link(
     uuid_value = _parse_uuid(item_uuid)
     link = await _load_active_link(db, user.id, validated_type, uuid_value)
     return ShareLinkStatusResponse(link=_response(link, request) if link else None)
+
+
+@router.get("/telegraph", response_model=TelegraphStatusResponse)
+async def get_telegraph_page(
+    item_type: str,
+    item_uuid: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    validated_type = _validate_item_type(item_type)
+    uuid_value = _parse_uuid(item_uuid)
+    item = await _load_owned_item(db, user.id, validated_type, uuid_value)
+    if item is None:
+        raise HTTPException(status_code=404, detail="item not found")
+    page = await _load_telegraph_page(db, user.id, validated_type, uuid_value)
+    if not page:
+        return TelegraphStatusResponse(page=None)
+    return TelegraphStatusResponse(page=_telegraph_response(page))
+
+
+@router.post("/telegraph/publish", response_model=TelegraphPageResponse)
+async def publish_telegraph_page(
+    req: TelegraphPublishRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    item_type = _validate_item_type(req.item_type)
+    uuid_value = _parse_uuid(req.item_uuid)
+    item = await _load_owned_item(db, user.id, item_type, uuid_value)
+    if item is None:
+        raise HTTPException(status_code=404, detail="item not found")
+
+    access_token = await _ensure_telegraph_account(user, db)
+    title, markdown = _item_telegraph_content(item_type, item)
+    nodes = markdown_to_telegraph_nodes(title, markdown)
+    digest = content_hash(nodes)
+    page = await _load_telegraph_page(db, user.id, item_type, uuid_value)
+    client = TelegraphClient()
+    try:
+        if page:
+            published = await client.edit_page(
+                access_token=access_token,
+                path=page.path,
+                title=title,
+                content=nodes,
+                author_name=user.telegraph_author_name or TELEGRAPH_AUTHOR_NAME,
+                author_url=user.telegraph_author_url or "",
+            )
+        else:
+            published = await client.create_page(
+                access_token=access_token,
+                title=title,
+                content=nodes,
+                author_name=user.telegraph_author_name or TELEGRAPH_AUTHOR_NAME,
+                author_url=user.telegraph_author_url or "",
+            )
+    except (httpx.HTTPError, TelegraphError) as exc:
+        raise HTTPException(status_code=502, detail=f"Telegraph publish failed: {exc}") from exc
+
+    now = datetime.utcnow()
+    if page:
+        page.path = published.path
+        page.url = published.url
+        page.title = published.title
+        page.content_hash = digest
+        page.views = published.views if published.views is not None else page.views
+        page.updated_at = now
+        page.published_at = now
+    else:
+        page = TelegraphPage(
+            user_id=user.id,
+            item_type=item_type,
+            item_uuid=uuid_value,
+            path=published.path,
+            url=published.url,
+            title=published.title,
+            content_hash=digest,
+            views=published.views,
+            created_at=now,
+            updated_at=now,
+            published_at=now,
+        )
+        db.add(page)
+    await db.commit()
+    await db.refresh(page)
+    return _telegraph_response(page)
 
 
 @router.post("", response_model=ShareLinkResponse)

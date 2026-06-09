@@ -1318,6 +1318,16 @@ async def run_tests():
             ".find(b => b.textContent.trim() === '🔗').click()"
         )
         await wait_until(cdp, "document.body.innerText.includes('Public live link is active')", timeout=3)
+        await wait_until(cdp, "document.body.innerText.includes('Telegra.ph')", timeout=3)
+        await cdp.eval(
+            "[...document.querySelectorAll('.share-link-telegraph-actions button')]"
+            ".find(b => b.textContent.includes('Publish to Telegra.ph')).click()"
+        )
+        await wait_until(cdp, "document.body.innerText.includes('Published snapshot')", timeout=3)
+        telegraph_url = await cdp.eval("document.querySelector('.share-link-telegraph .share-link-input')?.value || ''")
+        assert telegraph_url.startswith('https://telegra.ph/'), telegraph_url
+        commands = await cdp.eval("window.__mockCommandLog.map(x => x.command)")
+        assert 'publish_telegraph_page' in commands, f'commands: {commands!r}'
         await cdp.eval("[...document.querySelectorAll('.share-link-actions button')].find(b => b.textContent === 'Revoke').click()")
         await wait_until(cdp, "!document.body.innerText.includes('Share link')", timeout=3)
     await check('T14d Snippets share link modal', t14d_snippets_share_link_modal)
@@ -2656,12 +2666,12 @@ async def run_tests():
         await wait_until(cdp, "!!document.querySelector('.modal-overlay textarea[placeholder^=\"Value\"]')", timeout=3)
         await wait_until(
             cdp,
-            "[...document.querySelectorAll('.modal-overlay .md-toolbar button')].some(b => b.title === 'Sandbox HTML card')",
+            "[...document.querySelectorAll('.modal-overlay .md-toolbar button')].some(b => b.title === 'Insert HTML from file')",
             timeout=3,
         )
         await cdp.eval(
             "[...document.querySelectorAll('.modal-overlay .md-toolbar button')]"
-            ".find(b => b.title === 'Sandbox HTML card').click()"
+            ".find(b => b.title === 'Insert HTML from file').click()"
         )
         await wait_until(cdp, "!!document.querySelector('.html-upload-overlay')", timeout=3)
         await cdp.eval("document.querySelector('.html-upload-overlay .image-upload-picker button').click()")

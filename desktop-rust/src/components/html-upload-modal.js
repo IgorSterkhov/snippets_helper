@@ -16,7 +16,7 @@ export function openHtmlUploadModal({ onInsert }) {
   const modal = el('div', 'modal image-upload-modal html-upload-modal');
 
   const header = el('div', 'image-upload-header');
-  header.appendChild(el('h3', '', 'Insert HTML'));
+  header.appendChild(el('h3', '', 'Insert HTML from file'));
   const closeBtn = el('button', 'btn-secondary', 'Close');
   closeBtn.addEventListener('click', cleanup);
   header.appendChild(closeBtn);
@@ -24,7 +24,7 @@ export function openHtmlUploadModal({ onInsert }) {
 
   const pickerRow = el('div', 'image-upload-picker');
   const fileLabel = el('div', 'image-upload-file', 'No HTML file selected');
-  const pickBtn = el('button', '', 'Choose HTML');
+  const pickBtn = el('button', '', 'Choose HTML file');
   pickerRow.appendChild(fileLabel);
   pickerRow.appendChild(pickBtn);
   modal.appendChild(pickerRow);
