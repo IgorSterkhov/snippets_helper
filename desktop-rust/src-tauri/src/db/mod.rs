@@ -253,6 +253,7 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             name            TEXT NOT NULL DEFAULT '',
             currency        TEXT NOT NULL DEFAULT 'RUB',
+            kind            TEXT NOT NULL DEFAULT 'monthly' CHECK (kind IN ('monthly', 'project', 'one_time', 'general')),
             sort_order      INTEGER NOT NULL DEFAULT 0,
             created_at      TIMESTAMP NOT NULL,
             updated_at      TIMESTAMP NOT NULL,
@@ -267,6 +268,8 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
             parent_id       INTEGER REFERENCES finance_items(id) ON DELETE CASCADE,
             name            TEXT NOT NULL DEFAULT '',
             amount_cents    INTEGER NOT NULL DEFAULT 0 CHECK (amount_cents >= 0),
+            due_day         INTEGER DEFAULT NULL CHECK (due_day IS NULL OR (due_day >= 1 AND due_day <= 31)),
+            due_date        TEXT DEFAULT NULL,
             note            TEXT NOT NULL DEFAULT '',
             sort_order      INTEGER NOT NULL DEFAULT 0,
             created_at      TIMESTAMP NOT NULL,
@@ -365,6 +368,16 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
          WHERE provider_model IS NULL OR provider_model = ''",
     )
     .ok();
+
+    // Migration (v1.11.0): Finance list types and optional row dates.
+    conn.execute_batch(
+        "ALTER TABLE finance_plans ADD COLUMN kind TEXT NOT NULL DEFAULT 'monthly'",
+    )
+    .ok();
+    conn.execute_batch("ALTER TABLE finance_items ADD COLUMN due_day INTEGER DEFAULT NULL")
+        .ok();
+    conn.execute_batch("ALTER TABLE finance_items ADD COLUMN due_date TEXT DEFAULT NULL")
+        .ok();
 
     // Migration (v1.3.20): per-command shell selector for Exec tab.
     // 'host'  → cmd /c (Win) or sh -c (mac/linux)
@@ -478,8 +491,8 @@ fn seed_finance_defaults(conn: &Connection) -> Result<(), rusqlite::Error> {
     if count == 0 {
         conn.execute(
             "INSERT INTO finance_plans
-                (name, currency, sort_order, created_at, updated_at, uuid, sync_status, user_id)
-             VALUES ('Regular monthly', 'RUB', 0, ?1, ?1, ?2, 'pending', '')",
+                (name, currency, kind, sort_order, created_at, updated_at, uuid, sync_status, user_id)
+             VALUES ('Regular payments', 'RUB', 'monthly', 0, ?1, ?1, ?2, 'pending', '')",
             rusqlite::params![&now, uuid::Uuid::new_v4().to_string()],
         )?;
     }
@@ -648,14 +661,21 @@ mod tests {
     fn test_finance_default_plan_seeded_once() {
         let conn = init_test_db();
         run_migrations(&conn).unwrap();
-        let plans: Vec<(String, String)> = conn
-            .prepare("SELECT name, currency FROM finance_plans WHERE sync_status != 'deleted' ORDER BY sort_order")
+        let plans: Vec<(String, String, String)> = conn
+            .prepare("SELECT name, currency, kind FROM finance_plans WHERE sync_status != 'deleted' ORDER BY sort_order")
             .unwrap()
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
             .unwrap()
             .filter_map(|r| r.ok())
             .collect();
-        assert_eq!(plans, vec![("Regular monthly".to_string(), "RUB".to_string())]);
+        assert_eq!(
+            plans,
+            vec![(
+                "Regular payments".to_string(),
+                "RUB".to_string(),
+                "monthly".to_string()
+            )]
+        );
     }
 
     #[test]

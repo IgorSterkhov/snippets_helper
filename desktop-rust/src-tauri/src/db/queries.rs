@@ -1,4 +1,4 @@
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use regex::Regex;
 use rusqlite::{params, Connection, OptionalExtension, Result, Transaction};
 use serde_json::{Map, Value};
@@ -1264,38 +1264,51 @@ pub fn reorder_exec_commands(conn: &Connection, ids_in_order: &[i64]) -> Result<
 // ── Finance ─────────────────────────────────────────────────
 
 fn read_finance_plan(row: &rusqlite::Row) -> rusqlite::Result<FinancePlan> {
-    let created: String = row.get(4)?;
-    let updated: String = row.get(5)?;
+    let created: String = row.get(5)?;
+    let updated: String = row.get(6)?;
     Ok(FinancePlan {
         id: row.get(0)?,
         name: row.get(1)?,
         currency: row.get(2)?,
-        sort_order: row.get(3)?,
+        kind: row.get(3)?,
+        sort_order: row.get(4)?,
         created_at: parse_dt(&created),
         updated_at: parse_dt(&updated),
-        uuid: row.get(6)?,
-        sync_status: row.get(7)?,
-        user_id: row.get(8)?,
+        uuid: row.get(7)?,
+        sync_status: row.get(8)?,
+        user_id: row.get(9)?,
     })
 }
 
 fn read_finance_item(row: &rusqlite::Row) -> rusqlite::Result<FinanceItem> {
-    let created: String = row.get(7)?;
-    let updated: String = row.get(8)?;
+    let created: String = row.get(9)?;
+    let updated: String = row.get(10)?;
     Ok(FinanceItem {
         id: row.get(0)?,
         plan_id: row.get(1)?,
         parent_id: row.get(2)?,
         name: row.get(3)?,
         amount_cents: row.get(4)?,
-        note: row.get(5)?,
-        sort_order: row.get(6)?,
+        due_day: row.get(5)?,
+        due_date: row.get(6)?,
+        note: row.get(7)?,
+        sort_order: row.get(8)?,
         created_at: parse_dt(&created),
         updated_at: parse_dt(&updated),
-        uuid: row.get(9)?,
-        sync_status: row.get(10)?,
-        user_id: row.get(11)?,
+        uuid: row.get(11)?,
+        sync_status: row.get(12)?,
+        user_id: row.get(13)?,
     })
+}
+
+fn normalize_finance_kind(kind: &str) -> Result<String> {
+    let normalized = kind.trim().to_lowercase().replace('-', "_");
+    match normalized.as_str() {
+        "monthly" | "project" | "one_time" | "general" => Ok(normalized),
+        _ => Err(rusqlite::Error::InvalidParameterName(format!(
+            "invalid finance list kind: {kind}"
+        ))),
+    }
 }
 
 fn validate_non_negative_amount(amount_cents: i64) -> Result<()> {
@@ -1307,9 +1320,36 @@ fn validate_non_negative_amount(amount_cents: i64) -> Result<()> {
     Ok(())
 }
 
+fn validate_due_day(due_day: Option<i32>) -> Result<()> {
+    if let Some(day) = due_day {
+        if !(1..=31).contains(&day) {
+            return Err(rusqlite::Error::InvalidParameterName(
+                "due_day must be between 1 and 31".to_string(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn normalize_due_date(due_date: Option<&str>) -> Result<Option<String>> {
+    let Some(raw) = due_date else {
+        return Ok(None);
+    };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    let date = NaiveDate::parse_from_str(trimmed, "%Y-%m-%d").map_err(|_| {
+        rusqlite::Error::InvalidParameterName(
+            "due_date must be a valid YYYY-MM-DD date".to_string(),
+        )
+    })?;
+    Ok(Some(date.format("%Y-%m-%d").to_string()))
+}
+
 pub fn list_finance_plans(conn: &Connection) -> Result<Vec<FinancePlan>> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, currency, sort_order, created_at, updated_at, uuid, sync_status, user_id
+        "SELECT id, name, currency, kind, sort_order, created_at, updated_at, uuid, sync_status, user_id
          FROM finance_plans
          WHERE sync_status != 'deleted'
          ORDER BY sort_order ASC, name ASC, id ASC",
@@ -1318,7 +1358,13 @@ pub fn list_finance_plans(conn: &Connection) -> Result<Vec<FinancePlan>> {
     rows.collect()
 }
 
-pub fn create_finance_plan(conn: &Connection, name: &str, currency: &str) -> Result<FinancePlan> {
+pub fn create_finance_plan(
+    conn: &Connection,
+    name: &str,
+    currency: &str,
+    kind: &str,
+) -> Result<FinancePlan> {
+    let kind = normalize_finance_kind(kind)?;
     let uuid = Uuid::new_v4().to_string();
     let now = now_str();
     let sort_order: i32 = conn.query_row(
@@ -1330,14 +1376,15 @@ pub fn create_finance_plan(conn: &Connection, name: &str, currency: &str) -> Res
     )?;
     conn.execute(
         "INSERT INTO finance_plans
-            (name, currency, sort_order, created_at, updated_at, uuid, sync_status, user_id)
-         VALUES (?1, ?2, ?3, ?4, ?4, ?5, 'pending', '')",
-        params![name, currency, sort_order, now, uuid],
+            (name, currency, kind, sort_order, created_at, updated_at, uuid, sync_status, user_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6, 'pending', '')",
+        params![name, currency, kind, sort_order, now, uuid],
     )?;
     Ok(FinancePlan {
         id: Some(conn.last_insert_rowid()),
         name: name.to_string(),
         currency: currency.to_string(),
+        kind,
         sort_order,
         created_at: parse_dt(&now),
         updated_at: parse_dt(&now),
@@ -1347,13 +1394,20 @@ pub fn create_finance_plan(conn: &Connection, name: &str, currency: &str) -> Res
     })
 }
 
-pub fn update_finance_plan(conn: &Connection, id: i64, name: &str, currency: &str) -> Result<()> {
+pub fn update_finance_plan(
+    conn: &Connection,
+    id: i64,
+    name: &str,
+    currency: &str,
+    kind: &str,
+) -> Result<()> {
+    let kind = normalize_finance_kind(kind)?;
     let now = now_str();
     conn.execute(
         "UPDATE finance_plans
-         SET name = ?1, currency = ?2, updated_at = ?3, sync_status = 'pending'
-         WHERE id = ?4 AND sync_status != 'deleted'",
-        params![name, currency, now, id],
+         SET name = ?1, currency = ?2, kind = ?3, updated_at = ?4, sync_status = 'pending'
+         WHERE id = ?5 AND sync_status != 'deleted'",
+        params![name, currency, kind, now, id],
     )?;
     Ok(())
 }
@@ -1394,8 +1448,8 @@ pub fn delete_finance_plan(conn: &Connection, id: i64) -> Result<()> {
 
 pub fn list_finance_items(conn: &Connection, plan_id: i64) -> Result<Vec<FinanceItem>> {
     let mut stmt = conn.prepare(
-        "SELECT id, plan_id, parent_id, name, amount_cents, note, sort_order,
-                created_at, updated_at, uuid, sync_status, user_id
+        "SELECT id, plan_id, parent_id, name, amount_cents, due_day, due_date,
+                note, sort_order, created_at, updated_at, uuid, sync_status, user_id
          FROM finance_items
          WHERE plan_id = ?1 AND sync_status != 'deleted'
          ORDER BY parent_id NULLS FIRST, sort_order ASC, name ASC, id ASC",
@@ -1404,13 +1458,13 @@ pub fn list_finance_items(conn: &Connection, plan_id: i64) -> Result<Vec<Finance
     rows.collect()
 }
 
-fn finance_plan_exists(conn: &Connection, id: i64) -> Result<bool> {
-    let count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM finance_plans WHERE id = ?1 AND sync_status != 'deleted'",
+fn finance_plan_kind(conn: &Connection, id: i64) -> Result<Option<String>> {
+    conn.query_row(
+        "SELECT kind FROM finance_plans WHERE id = ?1 AND sync_status != 'deleted'",
         params![id],
         |r| r.get(0),
-    )?;
-    Ok(count > 0)
+    )
+    .optional()
 }
 
 fn finance_item_plan_and_parent_tx(
@@ -1463,10 +1517,14 @@ pub fn create_finance_item(
     parent_id: Option<i64>,
     name: &str,
     amount_cents: i64,
+    due_day: Option<i32>,
+    due_date: Option<&str>,
     note: &str,
 ) -> Result<FinanceItem> {
     validate_non_negative_amount(amount_cents)?;
-    if !finance_plan_exists(conn, plan_id)? {
+    validate_due_day(due_day)?;
+    let due_date = normalize_due_date(due_date)?;
+    if finance_plan_kind(conn, plan_id)?.is_none() {
         return Err(rusqlite::Error::InvalidParameterName(
             "finance plan not found".to_string(),
         ));
@@ -1484,14 +1542,16 @@ pub fn create_finance_item(
     let sort_order = next_finance_item_sort_order(conn, plan_id, parent_id)?;
     conn.execute(
         "INSERT INTO finance_items
-            (plan_id, parent_id, name, amount_cents, note, sort_order,
+            (plan_id, parent_id, name, amount_cents, due_day, due_date, note, sort_order,
              created_at, updated_at, uuid, sync_status, user_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?8, 'pending', '')",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, ?10, 'pending', '')",
         params![
             plan_id,
             parent_id,
             name,
             amount_cents,
+            due_day,
+            due_date,
             note,
             sort_order,
             now,
@@ -1504,6 +1564,8 @@ pub fn create_finance_item(
         parent_id,
         name: name.to_string(),
         amount_cents,
+        due_day,
+        due_date,
         note: note.to_string(),
         sort_order,
         created_at: parse_dt(&now),
@@ -1519,15 +1581,20 @@ pub fn update_finance_item(
     id: i64,
     name: &str,
     amount_cents: i64,
+    due_day: Option<i32>,
+    due_date: Option<&str>,
     note: &str,
 ) -> Result<()> {
     validate_non_negative_amount(amount_cents)?;
+    validate_due_day(due_day)?;
+    let due_date = normalize_due_date(due_date)?;
     let now = now_str();
     conn.execute(
         "UPDATE finance_items
-         SET name = ?1, amount_cents = ?2, note = ?3, updated_at = ?4, sync_status = 'pending'
-         WHERE id = ?5 AND sync_status != 'deleted'",
-        params![name, amount_cents, note, now, id],
+         SET name = ?1, amount_cents = ?2, due_day = ?3, due_date = ?4,
+             note = ?5, updated_at = ?6, sync_status = 'pending'
+         WHERE id = ?7 AND sync_status != 'deleted'",
+        params![name, amount_cents, due_day, due_date, note, now, id],
     )?;
     Ok(())
 }
@@ -3378,15 +3445,17 @@ mod tests {
         let conn = init_test_db();
         let seeded = list_finance_plans(&conn).unwrap();
         assert_eq!(seeded.len(), 1);
-        assert_eq!(seeded[0].name, "Regular monthly");
+        assert_eq!(seeded[0].name, "Regular payments");
         assert_eq!(seeded[0].currency, "RUB");
+        assert_eq!(seeded[0].kind, "monthly");
 
-        let plan = create_finance_plan(&conn, "Project Alpha", "USD").unwrap();
-        update_finance_plan(&conn, plan.id.unwrap(), "Project A", "EUR").unwrap();
+        let plan = create_finance_plan(&conn, "Project Alpha", "USD", "project").unwrap();
+        update_finance_plan(&conn, plan.id.unwrap(), "Project A", "EUR", "one_time").unwrap();
         let plans = list_finance_plans(&conn).unwrap();
         let updated = plans.iter().find(|p| p.id == plan.id).unwrap();
         assert_eq!(updated.name, "Project A");
         assert_eq!(updated.currency, "EUR");
+        assert_eq!(updated.kind, "one_time");
 
         reorder_finance_plans(&conn, &[plan.id.unwrap(), seeded[0].id.unwrap()]).unwrap();
         let plans = list_finance_plans(&conn).unwrap();
@@ -3395,7 +3464,7 @@ mod tests {
         delete_finance_plan(&conn, plan.id.unwrap()).unwrap();
         let plans = list_finance_plans(&conn).unwrap();
         assert_eq!(plans.len(), 1);
-        assert_eq!(plans[0].name, "Regular monthly");
+        assert_eq!(plans[0].name, "Regular payments");
     }
 
     #[test]
@@ -3403,15 +3472,38 @@ mod tests {
         let conn = init_test_db();
         let plan = list_finance_plans(&conn).unwrap()[0].clone();
         let plan_id = plan.id.unwrap();
-        let housing = create_finance_item(&conn, plan_id, None, "Housing", 0, "").unwrap();
-        let internet = create_finance_item(&conn, plan_id, None, "Internet", 50000, "").unwrap();
-        let rent =
-            create_finance_item(&conn, plan_id, housing.id, "Rent", 12000000, "monthly").unwrap();
+        let housing = create_finance_item(&conn, plan_id, None, "Housing", 0, None, None, "")
+            .unwrap();
+        let internet =
+            create_finance_item(&conn, plan_id, None, "Internet", 50000, Some(3), None, "")
+                .unwrap();
+        let rent = create_finance_item(
+            &conn,
+            plan_id,
+            housing.id,
+            "Rent",
+            12000000,
+            Some(21),
+            None,
+            "monthly",
+        )
+        .unwrap();
 
-        update_finance_item(&conn, internet.id.unwrap(), "Internet", 60000, "fiber").unwrap();
+        update_finance_item(
+            &conn,
+            internet.id.unwrap(),
+            "Internet",
+            60000,
+            Some(5),
+            Some("2026-06-10"),
+            "fiber",
+        )
+        .unwrap();
         let items = list_finance_items(&conn, plan_id).unwrap();
         let internet_after = items.iter().find(|i| i.id == internet.id).unwrap();
         assert_eq!(internet_after.amount_cents, 60000);
+        assert_eq!(internet_after.due_day, Some(5));
+        assert_eq!(internet_after.due_date.as_deref(), Some("2026-06-10"));
         assert_eq!(internet_after.note, "fiber");
 
         move_finance_item(&conn, internet.id.unwrap(), housing.id, rent.id).unwrap();
@@ -3431,12 +3523,15 @@ mod tests {
     fn test_finance_move_rejects_descendant_parent_and_cross_plan_parent() {
         let conn = init_test_db();
         let regular = list_finance_plans(&conn).unwrap()[0].clone();
-        let project = create_finance_plan(&conn, "Project", "RUB").unwrap();
+        let project = create_finance_plan(&conn, "Project", "RUB", "project").unwrap();
         let regular_id = regular.id.unwrap();
         let project_id = project.id.unwrap();
-        let parent = create_finance_item(&conn, regular_id, None, "Parent", 0, "").unwrap();
-        let child = create_finance_item(&conn, regular_id, parent.id, "Child", 0, "").unwrap();
-        let foreign = create_finance_item(&conn, project_id, None, "Foreign", 0, "").unwrap();
+        let parent =
+            create_finance_item(&conn, regular_id, None, "Parent", 0, None, None, "").unwrap();
+        let child =
+            create_finance_item(&conn, regular_id, parent.id, "Child", 0, None, None, "").unwrap();
+        let foreign =
+            create_finance_item(&conn, project_id, None, "Foreign", 0, None, None, "").unwrap();
 
         let err = move_finance_item(&conn, parent.id.unwrap(), child.id, None).unwrap_err();
         assert!(err.to_string().contains("descendant"));
@@ -3449,8 +3544,33 @@ mod tests {
     fn test_finance_amount_must_be_non_negative() {
         let conn = init_test_db();
         let plan_id = list_finance_plans(&conn).unwrap()[0].id.unwrap();
-        let err = create_finance_item(&conn, plan_id, None, "Refund", -1, "").unwrap_err();
+        let err =
+            create_finance_item(&conn, plan_id, None, "Refund", -1, None, None, "").unwrap_err();
         assert!(err.to_string().contains("non-negative"));
+    }
+
+    #[test]
+    fn test_finance_dates_are_validated() {
+        let conn = init_test_db();
+        let plan_id = list_finance_plans(&conn).unwrap()[0].id.unwrap();
+
+        let err =
+            create_finance_item(&conn, plan_id, None, "Bad day", 0, Some(32), None, "")
+                .unwrap_err();
+        assert!(err.to_string().contains("due_day"));
+
+        let err = create_finance_item(
+            &conn,
+            plan_id,
+            None,
+            "Bad date",
+            0,
+            None,
+            Some("2026-99-99"),
+            "",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("due_date"));
     }
 
     // ── Task Categories / Statuses ───────────────────────────

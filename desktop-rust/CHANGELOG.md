@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v1.11.0 (2026-06-10)
+
+- **Finance list types and dates:** Finance lists now support `Monthly`,
+  `Project`, `One-time`, and `General` types instead of assuming every list is
+  monthly. The summary label is now neutral (`Total`), rows have a Date column,
+  monthly lists edit day-of-month values, and other list types edit full dates.
+
 ## v1.10.0 (2026-06-10)
 
 - **Finance module:** added a dedicated desktop Finance tab for monthly

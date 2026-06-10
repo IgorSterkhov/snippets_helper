@@ -288,8 +288,9 @@
       {
         id: 1,
         uuid: uuid(),
-        name: 'Regular monthly',
+        name: 'Regular payments',
         currency: 'RUB',
+        kind: 'monthly',
         sort_order: 0,
         created_at: now(),
         updated_at: now(),
@@ -301,6 +302,7 @@
         uuid: uuid(),
         name: 'Project expenses',
         currency: 'RUB',
+        kind: 'project',
         sort_order: 1,
         created_at: now(),
         updated_at: now(),
@@ -317,6 +319,8 @@
         parent_id: null,
         name: 'Housing',
         amount_cents: 0,
+        due_day: null,
+        due_date: null,
         note: '',
         sort_order: 0,
         created_at: now(),
@@ -331,6 +335,8 @@
         parent_id: 1,
         name: 'Rent',
         amount_cents: 12000000,
+        due_day: 21,
+        due_date: null,
         note: 'Monthly',
         sort_order: 0,
         created_at: now(),
@@ -345,6 +351,8 @@
         parent_id: 1,
         name: 'Internet',
         amount_cents: 70000,
+        due_day: 3,
+        due_date: null,
         note: '',
         sort_order: 1,
         created_at: now(),
@@ -359,6 +367,8 @@
         parent_id: null,
         name: 'Subscriptions',
         amount_cents: 0,
+        due_day: null,
+        due_date: null,
         note: '',
         sort_order: 1,
         created_at: now(),
@@ -1159,23 +1169,25 @@
           || Number(a.id) - Number(b.id)
         );
     },
-    async create_finance_plan({ name, currency }) {
+    async create_finance_plan({ name, currency, kind }) {
       const sortOrder = storeGet('finance_plans', [])
         .filter(p => p.sync_status !== 'deleted')
         .reduce((max, p) => Math.max(max, Number(p.sort_order) || 0), -1) + 1;
       return createItem('finance_plans', {
         uuid: uuid(),
-        name: name || 'New plan',
+        name: name || 'New list',
         currency: currency || 'RUB',
+        kind: kind || 'monthly',
         sort_order: sortOrder,
         sync_status: 'pending',
         user_id: 'mock-user',
       });
     },
-    async update_finance_plan({ id, name, currency }) {
+    async update_finance_plan({ id, name, currency, kind }) {
       return updateItem('finance_plans', Number(id), {
-        name: name || 'Untitled plan',
+        name: name || 'Untitled list',
         currency: currency || 'RUB',
+        kind: kind || 'monthly',
         sync_status: 'pending',
       });
     },
@@ -1212,7 +1224,20 @@
           || Number(a.id) - Number(b.id)
         );
     },
-    async create_finance_item({ planId, plan_id, parentId, parent_id, name, amountCents, amount_cents, note }) {
+    async create_finance_item({
+      planId,
+      plan_id,
+      parentId,
+      parent_id,
+      name,
+      amountCents,
+      amount_cents,
+      dueDay,
+      due_day,
+      dueDate,
+      due_date,
+      note,
+    }) {
       const targetPlanId = Number(planId ?? plan_id);
       const targetParentId = parentId ?? parent_id ?? null;
       const normalizedParentId = targetParentId == null ? null : Number(targetParentId);
@@ -1225,24 +1250,56 @@
       const sortOrder = siblings.reduce((max, item) => Math.max(max, Number(item.sort_order) || 0), -1) + 1;
       const amount = Number(amountCents ?? amount_cents ?? 0);
       if (amount < 0) throw new Error('amount_cents must be non-negative');
+      const dayValue = dueDay ?? due_day ?? null;
+      const normalizedDay = dayValue == null || dayValue === '' ? null : Number(dayValue);
+      if (normalizedDay != null && (!Number.isInteger(normalizedDay) || normalizedDay < 1 || normalizedDay > 31)) {
+        throw new Error('due_day must be between 1 and 31');
+      }
+      const normalizedDate = String(dueDate ?? due_date ?? '').trim() || null;
+      if (normalizedDate && !/^\d{4}-\d{2}-\d{2}$/.test(normalizedDate)) {
+        throw new Error('due_date must be a valid YYYY-MM-DD date');
+      }
       return createItem('finance_items', {
         uuid: uuid(),
         plan_id: targetPlanId,
         parent_id: normalizedParentId,
         name: name || 'New item',
         amount_cents: amount,
+        due_day: normalizedDay,
+        due_date: normalizedDate,
         note: note || '',
         sort_order: sortOrder,
         sync_status: 'pending',
         user_id: 'mock-user',
       });
     },
-    async update_finance_item({ id, name, amountCents, amount_cents, note }) {
+    async update_finance_item({
+      id,
+      name,
+      amountCents,
+      amount_cents,
+      dueDay,
+      due_day,
+      dueDate,
+      due_date,
+      note,
+    }) {
       const amount = Number(amountCents ?? amount_cents ?? 0);
       if (amount < 0) throw new Error('amount_cents must be non-negative');
+      const dayValue = dueDay ?? due_day ?? null;
+      const normalizedDay = dayValue == null || dayValue === '' ? null : Number(dayValue);
+      if (normalizedDay != null && (!Number.isInteger(normalizedDay) || normalizedDay < 1 || normalizedDay > 31)) {
+        throw new Error('due_day must be between 1 and 31');
+      }
+      const normalizedDate = String(dueDate ?? due_date ?? '').trim() || null;
+      if (normalizedDate && !/^\d{4}-\d{2}-\d{2}$/.test(normalizedDate)) {
+        throw new Error('due_date must be a valid YYYY-MM-DD date');
+      }
       return updateItem('finance_items', Number(id), {
         name: name || 'Untitled item',
         amount_cents: amount,
+        due_day: normalizedDay,
+        due_date: normalizedDate,
         note: note || '',
         sync_status: 'pending',
       });

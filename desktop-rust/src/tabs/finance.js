@@ -3,6 +3,13 @@ import { showModal } from '../components/modal.js';
 import { showToast } from '../components/toast.js';
 
 const COLLAPSE_KEY = 'finance.collapsed.items';
+const PLAN_KINDS = [
+  { value: 'monthly', label: 'Monthly' },
+  { value: 'project', label: 'Project' },
+  { value: 'one_time', label: 'One-time' },
+  { value: 'general', label: 'General' },
+];
+const PLAN_KIND_LABELS = Object.fromEntries(PLAN_KINDS.map((kind) => [kind.value, kind.label]));
 
 let rootEl = null;
 let state = {
@@ -130,6 +137,19 @@ function injectStyles() {
   border-radius: 999px;
   padding: 2px 6px;
 }
+.finance-plan-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+}
+.finance-plan-kind {
+  color: var(--text-muted);
+  font-size: 11px;
+  border: 1px solid color-mix(in srgb, var(--accent) 36%, var(--border));
+  border-radius: 999px;
+  padding: 2px 6px;
+}
 .finance-main {
   flex: 1;
   min-width: 0;
@@ -139,14 +159,16 @@ function injectStyles() {
 }
 .finance-plan-edit {
   display: grid;
-  grid-template-columns: minmax(160px, 320px) 72px auto;
+  grid-template-columns: minmax(160px, 320px) 72px 120px auto;
   gap: 8px;
   align-items: center;
   min-width: 0;
 }
 .finance-input,
 .finance-money-input,
-.finance-note-input {
+.finance-note-input,
+.finance-date-input,
+.finance-select {
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
@@ -157,6 +179,9 @@ function injectStyles() {
   height: 28px;
   padding: 4px 8px;
   font-size: 12px;
+}
+.finance-select {
+  padding-right: 24px;
 }
 .finance-summary {
   display: grid;
@@ -187,7 +212,7 @@ function injectStyles() {
   padding: 10px 12px 14px;
 }
 .finance-tree {
-  min-width: 760px;
+  min-width: 900px;
   border: 1px solid var(--border);
   border-radius: 8px;
   overflow: hidden;
@@ -196,7 +221,7 @@ function injectStyles() {
 .finance-table-head,
 .finance-row {
   display: grid;
-  grid-template-columns: 24px 28px minmax(220px, 1.7fr) 130px 140px minmax(150px, 1fr) 74px;
+  grid-template-columns: 24px 28px minmax(200px, 1.6fr) 118px 108px 130px minmax(140px, 1fr) 74px;
   align-items: center;
   gap: 0;
 }
@@ -268,6 +293,19 @@ function injectStyles() {
   white-space: nowrap;
   color: var(--text);
 }
+.finance-day-field {
+  display: grid;
+  grid-template-columns: minmax(44px, 1fr) auto;
+  align-items: center;
+  gap: 4px;
+}
+.finance-day-field .finance-date-input {
+  text-align: right;
+}
+.finance-day-suffix {
+  color: var(--text-muted);
+  font-size: 12px;
+}
 .finance-empty {
   padding: 28px;
   text-align: center;
@@ -311,6 +349,15 @@ function currencyOfActivePlan() {
   return state.plans.find((plan) => planId(plan) === state.activePlanId)?.currency || 'RUB';
 }
 
+function activePlanKind() {
+  const kind = state.plans.find((plan) => planId(plan) === state.activePlanId)?.kind;
+  return PLAN_KIND_LABELS[kind] ? kind : 'monthly';
+}
+
+function planKindLabel(kind) {
+  return PLAN_KIND_LABELS[kind] || PLAN_KIND_LABELS.monthly;
+}
+
 function formatMoney(amountCents, currency = 'RUB') {
   const amount = (Number(amountCents) || 0) / 100;
   try {
@@ -340,6 +387,20 @@ function parseMoneyToCents(value) {
 function amountInputValue(amountCents) {
   const amount = (Number(amountCents) || 0) / 100;
   return amount ? String(amount).replace('.', ',') : '';
+}
+
+function dateInputValue(value) {
+  const text = String(value || '').trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : '';
+}
+
+function parseDueDay(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  if (!/^\d{1,2}$/.test(raw)) return undefined;
+  const day = Number(raw);
+  if (!Number.isInteger(day) || day < 1 || day > 31) return undefined;
+  return day;
 }
 
 function loadCollapsed() {
@@ -426,7 +487,11 @@ function isDescendant(sourceId, possibleDescendantId) {
 async function loadAll(selectPlanId = state.activePlanId) {
   state.plans = await call('list_finance_plans');
   if (!state.plans.length) {
-    const created = await call('create_finance_plan', { name: 'Regular monthly', currency: 'RUB' });
+    const created = await call('create_finance_plan', {
+      name: 'Regular payments',
+      currency: 'RUB',
+      kind: 'monthly',
+    });
     state.plans = [created];
   }
   const wanted = normalizeId(selectPlanId);
@@ -463,7 +528,7 @@ function renderSidebar() {
   const addBtn = document.createElement('button');
   addBtn.className = 'finance-icon-btn';
   addBtn.type = 'button';
-  addBtn.title = 'New plan';
+  addBtn.title = 'New list';
   addBtn.textContent = '+';
   addBtn.addEventListener('click', createPlan);
   actions.appendChild(addBtn);
@@ -494,18 +559,24 @@ function renderPlanCard(plan) {
 
   const name = document.createElement('div');
   name.className = 'finance-plan-name';
-  name.textContent = plan.name || 'Untitled plan';
+  name.textContent = plan.name || 'Untitled list';
 
+  const meta = document.createElement('div');
+  meta.className = 'finance-plan-meta';
+  const kind = document.createElement('div');
+  kind.className = 'finance-plan-kind';
+  kind.textContent = planKindLabel(plan.kind);
   const currency = document.createElement('div');
   currency.className = 'finance-plan-currency';
   currency.textContent = plan.currency || 'RUB';
+  meta.append(kind, currency);
 
   card.addEventListener('click', async (event) => {
     if (event.target.closest('.finance-plan-grip')) return;
     await loadAll(id);
   });
 
-  card.append(grip, name, currency);
+  card.append(grip, name, meta);
   return card;
 }
 
@@ -519,7 +590,7 @@ function renderMain() {
   if (!activePlan) {
     const empty = document.createElement('div');
     empty.className = 'finance-empty';
-    empty.textContent = 'Create a plan to start monthly planning.';
+    empty.textContent = 'Create a finance list to start planning.';
     main.appendChild(empty);
     return main;
   }
@@ -538,7 +609,7 @@ function renderMainHeader(plan) {
   if (!plan) {
     const title = document.createElement('div');
     title.className = 'finance-title';
-    title.textContent = 'Monthly planning';
+    title.textContent = 'Finance list';
     header.appendChild(title);
     return header;
   }
@@ -554,6 +625,15 @@ function renderMainHeader(plan) {
   currencyInput.value = plan.currency || 'RUB';
   currencyInput.maxLength = 6;
   currencyInput.placeholder = 'RUB';
+  const kindSelect = document.createElement('select');
+  kindSelect.className = 'finance-select';
+  for (const option of PLAN_KINDS) {
+    const el = document.createElement('option');
+    el.value = option.value;
+    el.textContent = option.label;
+    kindSelect.appendChild(el);
+  }
+  kindSelect.value = PLAN_KIND_LABELS[plan.kind] ? plan.kind : 'monthly';
   const saveBtn = document.createElement('button');
   saveBtn.className = 'finance-small-btn';
   saveBtn.type = 'button';
@@ -562,16 +642,17 @@ function renderMainHeader(plan) {
     try {
       await call('update_finance_plan', {
         id: state.activePlanId,
-        name: nameInput.value.trim() || 'Untitled plan',
+        name: nameInput.value.trim() || 'Untitled list',
         currency: currencyInput.value.trim().toUpperCase() || 'RUB',
+        kind: kindSelect.value,
       });
-      showToast('Finance plan saved', 'success');
+      showToast('Finance list saved', 'success');
       await loadAll(state.activePlanId);
     } catch (err) {
-      showToast(`Failed to save plan: ${err}`, 'error');
+      showToast(`Failed to save list: ${err}`, 'error');
     }
   });
-  edit.append(nameInput, currencyInput, saveBtn);
+  edit.append(nameInput, currencyInput, kindSelect, saveBtn);
 
   const actions = document.createElement('div');
   actions.className = 'finance-header-actions';
@@ -600,7 +681,7 @@ function renderSummary(total, currency) {
   const summary = document.createElement('div');
   summary.className = 'finance-summary';
   const stats = [
-    ['Monthly total', formatMoney(total, currency)],
+    ['Total', formatMoney(total, currency)],
     ['Rows', String(state.items.length)],
     ['Currency', currency || 'RUB'],
   ];
@@ -634,7 +715,7 @@ function renderTree(roots, children, totals) {
   tree.className = 'finance-tree';
   const head = document.createElement('div');
   head.className = 'finance-table-head';
-  ['', '', 'Name', 'Amount', 'Total', 'Note', 'Actions'].forEach((label) => {
+  ['', '', 'Name', 'Amount', 'Date', 'Total', 'Note', 'Actions'].forEach((label) => {
     const cell = document.createElement('div');
     cell.textContent = label;
     head.appendChild(cell);
@@ -658,6 +739,8 @@ function renderItemRow(row, children, totals) {
   rowEl.dataset.id = String(id);
   rowEl.dataset.depth = String(depth);
   rowEl.dataset.parentId = item.parent_id == null ? '' : String(item.parent_id);
+  rowEl.dataset.dueDay = item.due_day == null ? '' : String(item.due_day);
+  rowEl.dataset.dueDate = item.due_date || '';
 
   const gripCell = document.createElement('div');
   const grip = document.createElement('button');
@@ -689,6 +772,7 @@ function renderItemRow(row, children, totals) {
   pad.style.width = `${Math.min(depth, 8) * 18}px`;
   const nameInput = document.createElement('input');
   nameInput.className = 'finance-input';
+  nameInput.dataset.field = 'name';
   nameInput.value = item.name || '';
   nameInput.placeholder = 'Expense item';
   nameInput.addEventListener('change', () => saveItemFromRow(rowEl));
@@ -697,12 +781,40 @@ function renderItemRow(row, children, totals) {
   const amountCell = document.createElement('div');
   const amountInput = document.createElement('input');
   amountInput.className = 'finance-money-input';
+  amountInput.dataset.field = 'amount';
   amountInput.value = amountInputValue(item.amount_cents);
   amountInput.placeholder = '0';
   amountInput.inputMode = 'decimal';
   amountInput.min = '0';
   amountInput.addEventListener('change', () => saveItemFromRow(rowEl));
   amountCell.appendChild(amountInput);
+
+  const dateCell = document.createElement('div');
+  if (activePlanKind() === 'monthly') {
+    const dayWrap = document.createElement('div');
+    dayWrap.className = 'finance-day-field';
+    const dayInput = document.createElement('input');
+    dayInput.className = 'finance-date-input';
+    dayInput.dataset.field = 'due-day';
+    dayInput.value = item.due_day == null ? '' : String(item.due_day);
+    dayInput.placeholder = 'Day';
+    dayInput.inputMode = 'numeric';
+    dayInput.maxLength = 2;
+    dayInput.addEventListener('change', () => saveItemFromRow(rowEl));
+    const suffix = document.createElement('span');
+    suffix.className = 'finance-day-suffix';
+    suffix.textContent = '-е';
+    dayWrap.append(dayInput, suffix);
+    dateCell.appendChild(dayWrap);
+  } else {
+    const dateInput = document.createElement('input');
+    dateInput.className = 'finance-date-input';
+    dateInput.dataset.field = 'due-date';
+    dateInput.type = 'date';
+    dateInput.value = dateInputValue(item.due_date);
+    dateInput.addEventListener('change', () => saveItemFromRow(rowEl));
+    dateCell.appendChild(dateInput);
+  }
 
   const totalCell = document.createElement('div');
   totalCell.className = 'finance-total';
@@ -711,6 +823,7 @@ function renderItemRow(row, children, totals) {
   const noteCell = document.createElement('div');
   const noteInput = document.createElement('input');
   noteInput.className = 'finance-note-input';
+  noteInput.dataset.field = 'note';
   noteInput.value = item.note || '';
   noteInput.placeholder = 'Note';
   noteInput.addEventListener('change', () => saveItemFromRow(rowEl));
@@ -732,16 +845,20 @@ function renderItemRow(row, children, totals) {
   del.addEventListener('click', () => deleteItem(id));
   actionCell.append(addChild, del);
 
-  rowEl.append(gripCell, toggleCell, nameCell, amountCell, totalCell, noteCell, actionCell);
+  rowEl.append(gripCell, toggleCell, nameCell, amountCell, dateCell, totalCell, noteCell, actionCell);
   return rowEl;
 }
 
 async function createPlan() {
   try {
-    const plan = await call('create_finance_plan', { name: 'New plan', currency: 'RUB' });
+    const plan = await call('create_finance_plan', {
+      name: 'New list',
+      currency: 'RUB',
+      kind: 'general',
+    });
     await loadAll(planId(plan));
   } catch (err) {
-    showToast(`Failed to create plan: ${err}`, 'error');
+    showToast(`Failed to create list: ${err}`, 'error');
   }
 }
 
@@ -749,14 +866,14 @@ async function deleteActivePlan() {
   const plan = state.plans.find((p) => planId(p) === state.activePlanId);
   if (!plan) return;
   if (state.plans.length <= 1) {
-    showToast('Keep at least one finance plan', 'error');
+    showToast('Keep at least one finance list', 'error');
     return;
   }
   try {
     const body = document.createElement('div');
-    body.textContent = `Delete "${plan.name || 'Untitled plan'}" and all rows inside it?`;
+    body.textContent = `Delete "${plan.name || 'Untitled list'}" and all rows inside it?`;
     await showModal({
-      title: 'Delete finance plan',
+      title: 'Delete finance list',
       body,
       onConfirm: async () => {
         await call('delete_finance_plan', { id: state.activePlanId });
@@ -765,7 +882,7 @@ async function deleteActivePlan() {
     await loadAll(null);
   } catch (err) {
     if (String(err?.message || err) !== 'cancelled') {
-      showToast(`Failed to delete plan: ${err}`, 'error');
+      showToast(`Failed to delete list: ${err}`, 'error');
     }
   }
 }
@@ -777,6 +894,8 @@ async function createItem(parentId, asGroup) {
       parentId,
       name: asGroup ? 'New group' : 'New item',
       amountCents: 0,
+      dueDay: null,
+      dueDate: null,
       note: '',
     });
     if (parentId != null) {
@@ -796,16 +915,32 @@ async function createItem(parentId, asGroup) {
 
 async function saveItemFromRow(rowEl) {
   const id = Number(rowEl.dataset.id);
-  const inputs = rowEl.querySelectorAll('input');
-  const name = inputs[0]?.value.trim() || 'Untitled item';
-  const amountCents = parseMoneyToCents(inputs[1]?.value || '');
+  const nameInput = rowEl.querySelector('[data-field="name"]');
+  const amountInput = rowEl.querySelector('[data-field="amount"]');
+  const dueDayInput = rowEl.querySelector('[data-field="due-day"]');
+  const dueDateInput = rowEl.querySelector('[data-field="due-date"]');
+  const noteInput = rowEl.querySelector('[data-field="note"]');
+  const name = nameInput?.value.trim() || 'Untitled item';
+  const amountCents = parseMoneyToCents(amountInput?.value || '');
   if (amountCents == null) {
     showToast('Amount must be non-negative', 'error');
     return;
   }
-  const note = inputs[2]?.value.trim() || '';
+  let dueDay = rowEl.dataset.dueDay ? Number(rowEl.dataset.dueDay) : null;
+  let dueDate = rowEl.dataset.dueDate || null;
+  if (dueDayInput) {
+    dueDay = parseDueDay(dueDayInput.value);
+    if (dueDay === undefined) {
+      showToast('Day must be between 1 and 31', 'error');
+      return;
+    }
+  }
+  if (dueDateInput) {
+    dueDate = dueDateInput.value.trim() || null;
+  }
+  const note = noteInput?.value.trim() || '';
   try {
-    await call('update_finance_item', { id, name, amountCents, note });
+    await call('update_finance_item', { id, name, amountCents, dueDay, dueDate, note });
     await loadAll(state.activePlanId);
   } catch (err) {
     showToast(`Failed to save row: ${err}`, 'error');
