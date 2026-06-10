@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## v1.9.2 (2026-06-10)
+
+- **SQL Formatter readability:** `Format SQL` now expands `SELECT` lists one
+  expression per line and splits `WHERE` / `PREWHERE` / `HAVING` conditions
+  across top-level `AND` / `OR` operators. Formatter splitting and keyword
+  casing now skip string literals and comments, so text like `'from x and y'`
+  remains unchanged.
+
 ## v1.9.1 (2026-06-09)
 
 - **Telegra.ph diagnostics:** publishing failures now open a persistent dialog

@@ -5,11 +5,14 @@
 
 export const FORMATTER_HELP_HTML = `
 <p><strong>SQL Formatter</strong> — приводит SQL к читаемому виду:
-разносит по строкам, выравнивает, приводит ключевые слова к одному
-регистру. Поддерживает <code>Jinja2</code>-шаблоны (<code>{{ var }}</code>,
+разносит секции по строкам, раскладывает <code>SELECT</code>-поля по одному
+выражению на строку, переносит условия <code>WHERE</code> /
+<code>PREWHERE</code> / <code>HAVING</code> по верхнеуровневым
+<code>AND</code>/<code>OR</code> и приводит ключевые слова к одному регистру.
+Поддерживает <code>Jinja2</code>-шаблоны (<code>{{ var }}</code>,
 <code>{% if %}</code> — не ломаются). Отдельный режим <strong>Format
-DDL</strong> табулирует колонки <code>CREATE&nbsp;TABLE</code> и
-выбрасывает бэктики.</p>
+DDL</strong> табулирует колонки <code>CREATE&nbsp;TABLE</code> и выбрасывает
+бэктики.</p>
 
 <h4>Кнопки</h4>
 <ul>
@@ -36,8 +39,9 @@ DDL</strong> табулирует колонки <code>CREATE&nbsp;TABLE</code> 
 <h4>Keywords: UPPER / lower</h4>
 <p>Регистр ключевых слов SQL. Применяется к зарезервированным словам
 (<code>SELECT</code>, <code>JOIN</code>, <code>WHERE</code>...) — имена
-таблиц и колонок не трогаются. Строковые литералы и комменты не
-переписываются.</p>
+таблиц и колонок не трогаются. Строковые литералы и комментарии не
+переписываются, поэтому текст вроде <code>'from x and y'</code> остается как
+есть.</p>
 
 <h4>Подсветка синтаксиса</h4>
 <p>Результат рендерится с подсветкой через <code>highlight.js</code>
@@ -48,7 +52,7 @@ DDL</strong> табулирует колонки <code>CREATE&nbsp;TABLE</code> 
 <h4>Пример 1 — обычный SELECT</h4>
 
 <h5>Вход</h5>
-<pre><code>select u.id, u.name, count(o.id) as orders_cnt from users u left join orders o on o.user_id = u.id where u.created_at &gt;= '2024-01-01' group by u.id, u.name;</code></pre>
+<pre><code>select u.id, u.name, count(o.id) as orders_cnt from users u left join orders o on o.user_id = u.id where u.created_at &gt;= '2024-01-01' and u.status = 'active' group by u.id, u.name;</code></pre>
 
 <h5>После Format SQL (UPPER)</h5>
 <pre><code>SELECT
@@ -58,7 +62,9 @@ DDL</strong> табулирует колонки <code>CREATE&nbsp;TABLE</code> 
 FROM users u
 LEFT JOIN orders o
     ON o.user_id = u.id
-WHERE u.created_at &gt;= '2024-01-01'
+WHERE
+    u.created_at &gt;= '2024-01-01'
+    AND u.status = 'active'
 GROUP BY u.id, u.name;</code></pre>
 
 <h4>Пример 2 — DDL с бэктиками</h4>
