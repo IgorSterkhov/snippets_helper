@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## f-20260610-1 (2026-06-10)
+
+- **Notes folder pane resize:** the Notes folder tree panel can now be resized
+  by dragging the divider between folders and notes. The width is persisted on
+  the current desktop installation, double-clicking the divider resets it to
+  the default, and folder rows no longer show nested-folder count badges.
+
 ## v1.11.0 (2026-06-10)
 
 - **Finance list types and dates:** Finance lists now support `Monthly`,

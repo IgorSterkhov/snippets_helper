@@ -19,14 +19,21 @@ let expandedNoteIdx = null;
 let expandMultiplier = 4;
 let aiNoteListenerInstalled = false;
 let activeFolderDrag = null;
+let activeFolderPaneResize = null;
+let folderPaneWidth = 260;
 
 const FOLDER_DRAG_START_PX = 5;
 const FOLDER_DROP_EDGE_RATIO = 0.28;
+const FOLDER_PANE_WIDTH_SETTING_KEY = 'notes.folder_tree_width';
+const FOLDER_PANE_DEFAULT_WIDTH = 260;
+const FOLDER_PANE_MIN_WIDTH = 200;
+const FOLDER_PANE_MAX_WIDTH = 520;
 
 export async function init(container) {
   root = container;
   root.innerHTML = '';
   root.appendChild(buildLayout());
+  await loadFolderPaneWidth();
 
   try {
     const em = await call('get_setting', { key: 'snippet_expand_multiplier' });
@@ -65,6 +72,10 @@ function buildLayout() {
   right.innerHTML = '<p style="padding:16px;color:var(--text-muted)">Select a folder</p>';
 
   body.appendChild(left);
+  const resizer = el('div', { class: 'notes-folder-resizer', title: 'Resize folders panel' });
+  resizer.addEventListener('pointerdown', startFolderPaneResize);
+  resizer.addEventListener('dblclick', resetFolderPaneWidth);
+  body.appendChild(resizer);
   body.appendChild(right);
   wrap.appendChild(body);
 
@@ -74,6 +85,112 @@ function buildLayout() {
   wrap.appendChild(style);
 
   return wrap;
+}
+
+// ── Folder pane resize ─────────────────────────────────────────
+
+function normalizeFolderPaneWidth(raw, fallback = FOLDER_PANE_DEFAULT_WIDTH) {
+  if (raw === null || raw === undefined || raw === '') return fallback;
+  const text = String(raw).trim();
+  if (!text || !/^-?\d+$/.test(text)) return fallback;
+  const value = Number(text);
+  if (!Number.isFinite(value)) return fallback;
+  return Math.max(FOLDER_PANE_MIN_WIDTH, Math.min(FOLDER_PANE_MAX_WIDTH, value));
+}
+
+function applyFolderPaneWidth(width = folderPaneWidth) {
+  folderPaneWidth = normalizeFolderPaneWidth(width, FOLDER_PANE_DEFAULT_WIDTH);
+  const wrap = root && root.querySelector('.notes-wrap');
+  if (wrap) wrap.style.setProperty('--notes-folder-width', `${folderPaneWidth}px`);
+}
+
+async function loadFolderPaneWidth() {
+  try {
+    const raw = await call('get_setting', { key: FOLDER_PANE_WIDTH_SETTING_KEY });
+    applyFolderPaneWidth(normalizeFolderPaneWidth(raw, FOLDER_PANE_DEFAULT_WIDTH));
+  } catch {
+    applyFolderPaneWidth(FOLDER_PANE_DEFAULT_WIDTH);
+  }
+}
+
+async function persistFolderPaneWidth(width) {
+  try {
+    await call('set_setting', {
+      key: FOLDER_PANE_WIDTH_SETTING_KEY,
+      value: String(normalizeFolderPaneWidth(width, FOLDER_PANE_DEFAULT_WIDTH)),
+    });
+  } catch (err) {
+    showToast('Failed to save folder pane width: ' + err, 'error');
+  }
+}
+
+function startFolderPaneResize(event) {
+  if (event.button !== 0) return;
+  const handle = event.currentTarget;
+  const body = handle.closest('.notes-body');
+  const left = body && body.querySelector('.notes-left');
+  if (!body || !left) return;
+
+  if (activeFolderPaneResize) finishFolderPaneResize(false);
+
+  const rect = left.getBoundingClientRect();
+  activeFolderPaneResize = {
+    startX: event.clientX,
+    startWidth: rect.width || folderPaneWidth,
+    handle,
+    body,
+    previousBodyCursor: document.body.style.cursor || '',
+  };
+  handle.classList.add('dragging');
+  body.classList.add('folder-resizing');
+  document.body.style.cursor = 'col-resize';
+  document.addEventListener('pointermove', onFolderPaneResizeMove);
+  document.addEventListener('pointerup', onFolderPaneResizeEnd, { once: true });
+  document.addEventListener('pointercancel', onFolderPaneResizeCancel, { once: true });
+  window.addEventListener('blur', onFolderPaneResizeWindowBlur, { once: true });
+  event.preventDefault();
+}
+
+function onFolderPaneResizeMove(event) {
+  if (!activeFolderPaneResize) return;
+  const nextWidth = activeFolderPaneResize.startWidth + event.clientX - activeFolderPaneResize.startX;
+  applyFolderPaneWidth(nextWidth);
+  event.preventDefault();
+}
+
+function onFolderPaneResizeEnd(event) {
+  if (event) event.preventDefault();
+  finishFolderPaneResize(true);
+}
+
+function onFolderPaneResizeCancel(event) {
+  if (event) event.preventDefault();
+  finishFolderPaneResize(false);
+}
+
+function onFolderPaneResizeWindowBlur() {
+  finishFolderPaneResize(false);
+}
+
+function finishFolderPaneResize(shouldPersist) {
+  if (!activeFolderPaneResize) return;
+  const { handle, body, previousBodyCursor } = activeFolderPaneResize;
+  document.removeEventListener('pointermove', onFolderPaneResizeMove);
+  document.removeEventListener('pointerup', onFolderPaneResizeEnd);
+  document.removeEventListener('pointercancel', onFolderPaneResizeCancel);
+  window.removeEventListener('blur', onFolderPaneResizeWindowBlur);
+  handle.classList.remove('dragging');
+  body.classList.remove('folder-resizing');
+  document.body.style.cursor = previousBodyCursor;
+  activeFolderPaneResize = null;
+  if (shouldPersist) persistFolderPaneWidth(folderPaneWidth);
+}
+
+function resetFolderPaneWidth(event) {
+  event.preventDefault();
+  folderPaneWidth = FOLDER_PANE_DEFAULT_WIDTH;
+  applyFolderPaneWidth(folderPaneWidth);
+  persistFolderPaneWidth(folderPaneWidth);
 }
 
 async function loadPinnedNotes() {
@@ -163,14 +280,6 @@ function buildFolderTree(flatFolders) {
   };
   sortNodes(roots);
   return { roots, map };
-}
-
-function countDescendantFolders(node) {
-  let count = node.children.length;
-  for (const child of node.children) {
-    count += countDescendantFolders(child);
-  }
-  return count;
 }
 
 function getAllDescendantIds(node) {
@@ -272,15 +381,6 @@ function renderFolders() {
     // Folder name
     const nameSpan = el('span', { text: node.name, class: 'folder-name' });
     item.appendChild(nameSpan);
-
-    const meta = el('span', { class: 'folder-meta' });
-    // Sub-folder count badge
-    const totalChildren = countDescendantFolders(node);
-    if (totalChildren > 0) {
-      const badge = el('span', { text: String(totalChildren), class: 'folder-badge' });
-      meta.appendChild(badge);
-    }
-    item.appendChild(meta);
 
     // Actions
     const actions = el('span', { class: 'folder-actions' });
@@ -1161,6 +1261,7 @@ function el(tag, opts = {}) {
 function notesCSS() {
   return `
 .notes-wrap {
+  --notes-folder-width: 260px;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -1172,6 +1273,13 @@ function notesCSS() {
   flex: 1;
   min-height: 0;
   gap: 0;
+  overflow: hidden;
+}
+
+.notes-body.folder-resizing,
+.notes-body.folder-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
 }
 
 .pinned-chips-row {
@@ -1226,16 +1334,50 @@ function notesCSS() {
 }
 
 .notes-left {
-  width: 260px;
-  min-width: 260px;
-  border-right: 1px solid var(--border);
+  width: var(--notes-folder-width, 260px);
+  min-width: var(--notes-folder-width, 260px);
+  max-width: var(--notes-folder-width, 260px);
+  flex: 0 0 var(--notes-folder-width, 260px);
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
+.notes-folder-resizer {
+  flex: 0 0 7px;
+  width: 7px;
+  position: relative;
+  cursor: col-resize;
+  touch-action: none;
+  background: transparent;
+}
+
+.notes-folder-resizer::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 1px;
+  background: var(--border);
+  transition: background 0.15s, left 0.15s, width 0.15s, opacity 0.15s;
+}
+
+.notes-folder-resizer:hover::before,
+.notes-folder-resizer.dragging::before {
+  left: 2px;
+  width: 3px;
+  background: var(--accent);
+  opacity: 0.9;
+}
+
+.notes-folder-resizer.dragging {
+  background: rgba(56, 139, 253, 0.06);
+}
+
 .notes-right {
   flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   padding: 0 16px 16px 16px;
@@ -1365,32 +1507,6 @@ function notesCSS() {
   min-width: 0;
 }
 
-.folder-meta {
-  width: 24px;
-  height: 22px;
-  display: inline-flex;
-  justify-content: flex-end;
-  align-items: center;
-  flex-shrink: 0;
-}
-
-.folder-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  border-radius: 9px;
-  background: var(--bg-tertiary, rgba(128,128,128,0.15));
-  color: var(--text-muted);
-  font-size: 10px;
-  font-weight: 600;
-  flex-shrink: 0;
-  margin-left: 0;
-  transition: opacity 0.15s;
-}
-
 .tree-connector {
   position: absolute;
   top: 0;
@@ -1416,11 +1532,6 @@ function notesCSS() {
 .notes-folder-item:focus-within .folder-actions {
   opacity: 1;
   pointer-events: auto;
-}
-
-.notes-folder-item:hover .folder-badge,
-.notes-folder-item:focus-within .folder-badge {
-  opacity: 0.25;
 }
 
 .notes-folder-drop-line {

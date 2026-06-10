@@ -107,8 +107,8 @@ tree-specific drop model:
 - Render the tree as flat visible rows with `data-id`, `data-parent-id`, and
   `data-depth`.
 - Keep row height stable: reserve fixed zones for grip, disclosure arrow, icon,
-  label, metadata, and actions. Reveal actions with `opacity`/`pointer-events`,
-  not layout-changing `display: none`.
+  label, optional metadata, and actions. Reveal actions with
+  `opacity`/`pointer-events`, not layout-changing `display: none`.
 - Split the target row vertically into `before`, `inside`, and `after` zones.
   `inside` highlights the target row; `before`/`after` use an insertion line.
 - For `after` on an expanded node, place the line after the whole visible
@@ -116,6 +116,26 @@ tree-specific drop model:
   descendant id.
 - Backend commit must be atomic and validate cycles. The UI may prevent obvious
   invalid drops, but the backend remains the source of truth.
+
+### Resizable split panes
+
+**Used in:** Notes folder tree
+
+For split panes that users can resize, keep the behavior local and predictable:
+
+- Store the width in an existing app setting with a dotted per-feature key
+  such as `notes.folder_tree_width`.
+- Keep the current visual width as the default so adding resize does not shift
+  the layout for existing users.
+- Normalize persisted values before applying them: parse as integer, reject
+  empty/NaN/non-finite values, clamp to the supported min/max range, and fall
+  back to the default for invalid values.
+- Apply width through a CSS custom property on the tab root/container rather
+  than rewriting multiple inline styles.
+- Use a narrow Pointer Events divider with `col-resize`; update width live on
+  `pointermove`, persist only on drag end, and clean up document listeners,
+  cursor overrides, and selection locks on both `pointerup` and
+  `pointercancel`.
 
 ---
 
