@@ -1,6 +1,6 @@
 use chrono::{DateTime, NaiveDateTime, Utc};
 use regex::Regex;
-use rusqlite::{params, Connection, Result, Transaction};
+use rusqlite::{params, Connection, OptionalExtension, Result, Transaction};
 use serde_json::{Map, Value};
 use uuid::Uuid;
 
@@ -1255,6 +1255,426 @@ pub fn reorder_exec_commands(conn: &Connection, ids_in_order: &[i64]) -> Result<
         tx.execute(
             "UPDATE exec_commands SET sort_order = ?1 WHERE id = ?2",
             params![idx as i64, id],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+// ── Finance ─────────────────────────────────────────────────
+
+fn read_finance_plan(row: &rusqlite::Row) -> rusqlite::Result<FinancePlan> {
+    let created: String = row.get(4)?;
+    let updated: String = row.get(5)?;
+    Ok(FinancePlan {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        currency: row.get(2)?,
+        sort_order: row.get(3)?,
+        created_at: parse_dt(&created),
+        updated_at: parse_dt(&updated),
+        uuid: row.get(6)?,
+        sync_status: row.get(7)?,
+        user_id: row.get(8)?,
+    })
+}
+
+fn read_finance_item(row: &rusqlite::Row) -> rusqlite::Result<FinanceItem> {
+    let created: String = row.get(7)?;
+    let updated: String = row.get(8)?;
+    Ok(FinanceItem {
+        id: row.get(0)?,
+        plan_id: row.get(1)?,
+        parent_id: row.get(2)?,
+        name: row.get(3)?,
+        amount_cents: row.get(4)?,
+        note: row.get(5)?,
+        sort_order: row.get(6)?,
+        created_at: parse_dt(&created),
+        updated_at: parse_dt(&updated),
+        uuid: row.get(9)?,
+        sync_status: row.get(10)?,
+        user_id: row.get(11)?,
+    })
+}
+
+fn validate_non_negative_amount(amount_cents: i64) -> Result<()> {
+    if amount_cents < 0 {
+        return Err(rusqlite::Error::InvalidParameterName(
+            "amount_cents must be non-negative".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+pub fn list_finance_plans(conn: &Connection) -> Result<Vec<FinancePlan>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, name, currency, sort_order, created_at, updated_at, uuid, sync_status, user_id
+         FROM finance_plans
+         WHERE sync_status != 'deleted'
+         ORDER BY sort_order ASC, name ASC, id ASC",
+    )?;
+    let rows = stmt.query_map([], read_finance_plan)?;
+    rows.collect()
+}
+
+pub fn create_finance_plan(conn: &Connection, name: &str, currency: &str) -> Result<FinancePlan> {
+    let uuid = Uuid::new_v4().to_string();
+    let now = now_str();
+    let sort_order: i32 = conn.query_row(
+        "SELECT COALESCE(MAX(sort_order), -1) + 1
+         FROM finance_plans
+         WHERE sync_status != 'deleted'",
+        [],
+        |r| r.get(0),
+    )?;
+    conn.execute(
+        "INSERT INTO finance_plans
+            (name, currency, sort_order, created_at, updated_at, uuid, sync_status, user_id)
+         VALUES (?1, ?2, ?3, ?4, ?4, ?5, 'pending', '')",
+        params![name, currency, sort_order, now, uuid],
+    )?;
+    Ok(FinancePlan {
+        id: Some(conn.last_insert_rowid()),
+        name: name.to_string(),
+        currency: currency.to_string(),
+        sort_order,
+        created_at: parse_dt(&now),
+        updated_at: parse_dt(&now),
+        uuid,
+        sync_status: "pending".to_string(),
+        user_id: String::new(),
+    })
+}
+
+pub fn update_finance_plan(conn: &Connection, id: i64, name: &str, currency: &str) -> Result<()> {
+    let now = now_str();
+    conn.execute(
+        "UPDATE finance_plans
+         SET name = ?1, currency = ?2, updated_at = ?3, sync_status = 'pending'
+         WHERE id = ?4 AND sync_status != 'deleted'",
+        params![name, currency, now, id],
+    )?;
+    Ok(())
+}
+
+pub fn reorder_finance_plans(conn: &Connection, ids_in_order: &[i64]) -> Result<()> {
+    let now = now_str();
+    let tx = conn.unchecked_transaction()?;
+    for (idx, id) in ids_in_order.iter().enumerate() {
+        tx.execute(
+            "UPDATE finance_plans
+             SET sort_order = ?1, updated_at = ?2, sync_status = 'pending'
+             WHERE id = ?3 AND sync_status != 'deleted'",
+            params![idx as i32, now, id],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+pub fn delete_finance_plan(conn: &Connection, id: i64) -> Result<()> {
+    let now = now_str();
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
+        "UPDATE finance_plans
+         SET sync_status = 'deleted', updated_at = ?1
+         WHERE id = ?2",
+        params![now, id],
+    )?;
+    tx.execute(
+        "UPDATE finance_items
+         SET sync_status = 'deleted', updated_at = ?1
+         WHERE plan_id = ?2",
+        params![now, id],
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
+pub fn list_finance_items(conn: &Connection, plan_id: i64) -> Result<Vec<FinanceItem>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, plan_id, parent_id, name, amount_cents, note, sort_order,
+                created_at, updated_at, uuid, sync_status, user_id
+         FROM finance_items
+         WHERE plan_id = ?1 AND sync_status != 'deleted'
+         ORDER BY parent_id NULLS FIRST, sort_order ASC, name ASC, id ASC",
+    )?;
+    let rows = stmt.query_map(params![plan_id], read_finance_item)?;
+    rows.collect()
+}
+
+fn finance_plan_exists(conn: &Connection, id: i64) -> Result<bool> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM finance_plans WHERE id = ?1 AND sync_status != 'deleted'",
+        params![id],
+        |r| r.get(0),
+    )?;
+    Ok(count > 0)
+}
+
+fn finance_item_plan_and_parent_tx(
+    tx: &Transaction<'_>,
+    id: i64,
+) -> Result<(i64, Option<i64>)> {
+    tx.query_row(
+        "SELECT plan_id, parent_id FROM finance_items WHERE id = ?1 AND sync_status != 'deleted'",
+        params![id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )
+}
+
+fn finance_item_plan(conn: &Connection, id: i64) -> Result<Option<i64>> {
+    conn.query_row(
+        "SELECT plan_id FROM finance_items WHERE id = ?1 AND sync_status != 'deleted'",
+        params![id],
+        |r| r.get(0),
+    )
+    .optional()
+}
+
+fn next_finance_item_sort_order(
+    conn: &Connection,
+    plan_id: i64,
+    parent_id: Option<i64>,
+) -> Result<i32> {
+    if let Some(parent_id) = parent_id {
+        conn.query_row(
+            "SELECT COALESCE(MAX(sort_order), -1) + 1
+             FROM finance_items
+             WHERE plan_id = ?1 AND parent_id = ?2 AND sync_status != 'deleted'",
+            params![plan_id, parent_id],
+            |r| r.get(0),
+        )
+    } else {
+        conn.query_row(
+            "SELECT COALESCE(MAX(sort_order), -1) + 1
+             FROM finance_items
+             WHERE plan_id = ?1 AND parent_id IS NULL AND sync_status != 'deleted'",
+            params![plan_id],
+            |r| r.get(0),
+        )
+    }
+}
+
+pub fn create_finance_item(
+    conn: &Connection,
+    plan_id: i64,
+    parent_id: Option<i64>,
+    name: &str,
+    amount_cents: i64,
+    note: &str,
+) -> Result<FinanceItem> {
+    validate_non_negative_amount(amount_cents)?;
+    if !finance_plan_exists(conn, plan_id)? {
+        return Err(rusqlite::Error::InvalidParameterName(
+            "finance plan not found".to_string(),
+        ));
+    }
+    if let Some(parent_id) = parent_id {
+        if finance_item_plan(conn, parent_id)? != Some(plan_id) {
+            return Err(rusqlite::Error::InvalidParameterName(
+                "parent item must belong to the same plan".to_string(),
+            ));
+        }
+    }
+
+    let uuid = Uuid::new_v4().to_string();
+    let now = now_str();
+    let sort_order = next_finance_item_sort_order(conn, plan_id, parent_id)?;
+    conn.execute(
+        "INSERT INTO finance_items
+            (plan_id, parent_id, name, amount_cents, note, sort_order,
+             created_at, updated_at, uuid, sync_status, user_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?8, 'pending', '')",
+        params![
+            plan_id,
+            parent_id,
+            name,
+            amount_cents,
+            note,
+            sort_order,
+            now,
+            uuid
+        ],
+    )?;
+    Ok(FinanceItem {
+        id: Some(conn.last_insert_rowid()),
+        plan_id,
+        parent_id,
+        name: name.to_string(),
+        amount_cents,
+        note: note.to_string(),
+        sort_order,
+        created_at: parse_dt(&now),
+        updated_at: parse_dt(&now),
+        uuid,
+        sync_status: "pending".to_string(),
+        user_id: String::new(),
+    })
+}
+
+pub fn update_finance_item(
+    conn: &Connection,
+    id: i64,
+    name: &str,
+    amount_cents: i64,
+    note: &str,
+) -> Result<()> {
+    validate_non_negative_amount(amount_cents)?;
+    let now = now_str();
+    conn.execute(
+        "UPDATE finance_items
+         SET name = ?1, amount_cents = ?2, note = ?3, updated_at = ?4, sync_status = 'pending'
+         WHERE id = ?5 AND sync_status != 'deleted'",
+        params![name, amount_cents, note, now, id],
+    )?;
+    Ok(())
+}
+
+fn finance_item_sibling_ids_tx(
+    tx: &Transaction<'_>,
+    plan_id: i64,
+    parent_id: Option<i64>,
+    exclude_id: i64,
+) -> Result<Vec<i64>> {
+    if let Some(parent_id) = parent_id {
+        let mut stmt = tx.prepare(
+            "SELECT id FROM finance_items
+             WHERE plan_id = ?1 AND parent_id = ?2 AND id != ?3 AND sync_status != 'deleted'
+             ORDER BY sort_order ASC, name ASC, id ASC",
+        )?;
+        let rows = stmt.query_map(params![plan_id, parent_id, exclude_id], |row| row.get(0))?;
+        rows.collect()
+    } else {
+        let mut stmt = tx.prepare(
+            "SELECT id FROM finance_items
+             WHERE plan_id = ?1 AND parent_id IS NULL AND id != ?2 AND sync_status != 'deleted'
+             ORDER BY sort_order ASC, name ASC, id ASC",
+        )?;
+        let rows = stmt.query_map(params![plan_id, exclude_id], |row| row.get(0))?;
+        rows.collect()
+    }
+}
+
+fn apply_finance_item_sibling_order_tx(
+    tx: &Transaction<'_>,
+    parent_id: Option<i64>,
+    ordered_ids: &[i64],
+    now: &str,
+) -> Result<()> {
+    for (idx, item_id) in ordered_ids.iter().enumerate() {
+        tx.execute(
+            "UPDATE finance_items
+             SET parent_id = ?1, sort_order = ?2, updated_at = ?3, sync_status = 'pending'
+             WHERE id = ?4 AND sync_status != 'deleted'",
+            params![parent_id, idx as i32, now, item_id],
+        )?;
+    }
+    Ok(())
+}
+
+pub fn move_finance_item(
+    conn: &Connection,
+    id: i64,
+    parent_id: Option<i64>,
+    before_id: Option<i64>,
+) -> Result<()> {
+    let now = now_str();
+    let tx = conn.unchecked_transaction()?;
+    let (plan_id, old_parent_id) = finance_item_plan_and_parent_tx(&tx, id)?;
+
+    if parent_id == Some(id) || before_id == Some(id) {
+        return Err(rusqlite::Error::InvalidParameterName(
+            "finance item cannot be moved into or before itself".to_string(),
+        ));
+    }
+
+    if let Some(new_parent_id) = parent_id {
+        let (parent_plan_id, _) = finance_item_plan_and_parent_tx(&tx, new_parent_id)?;
+        if parent_plan_id != plan_id {
+            return Err(rusqlite::Error::InvalidParameterName(
+                "target parent must belong to the same plan".to_string(),
+            ));
+        }
+        let mut current = Some(new_parent_id);
+        let mut visited = Vec::new();
+        while let Some(current_id) = current {
+            if current_id == id {
+                return Err(rusqlite::Error::InvalidParameterName(
+                    "finance item cannot be moved into its descendant".to_string(),
+                ));
+            }
+            if visited.contains(&current_id) {
+                return Err(rusqlite::Error::InvalidParameterName(
+                    "finance item ancestry contains a cycle".to_string(),
+                ));
+            }
+            visited.push(current_id);
+            let (current_plan_id, next_parent) = finance_item_plan_and_parent_tx(&tx, current_id)?;
+            if current_plan_id != plan_id {
+                return Err(rusqlite::Error::InvalidParameterName(
+                    "finance item ancestry crossed plan boundary".to_string(),
+                ));
+            }
+            current = next_parent;
+        }
+    }
+
+    if let Some(target_before_id) = before_id {
+        let (before_plan_id, before_parent_id) =
+            finance_item_plan_and_parent_tx(&tx, target_before_id)?;
+        if before_plan_id != plan_id || before_parent_id != parent_id {
+            return Err(rusqlite::Error::InvalidParameterName(
+                "before item must belong to the target parent and plan".to_string(),
+            ));
+        }
+    }
+
+    if old_parent_id != parent_id {
+        let old_siblings = finance_item_sibling_ids_tx(&tx, plan_id, old_parent_id, id)?;
+        apply_finance_item_sibling_order_tx(&tx, old_parent_id, &old_siblings, &now)?;
+    }
+
+    let mut new_siblings = finance_item_sibling_ids_tx(&tx, plan_id, parent_id, id)?;
+    let insert_at = before_id
+        .and_then(|target_id| new_siblings.iter().position(|sibling_id| *sibling_id == target_id))
+        .unwrap_or(new_siblings.len());
+    new_siblings.insert(insert_at, id);
+    apply_finance_item_sibling_order_tx(&tx, parent_id, &new_siblings, &now)?;
+
+    tx.commit()?;
+    Ok(())
+}
+
+pub fn delete_finance_item(conn: &Connection, id: i64) -> Result<()> {
+    use std::collections::HashSet;
+
+    let now = now_str();
+    let mut to_delete = vec![id];
+    let mut seen = HashSet::from([id]);
+    let mut i = 0;
+    while i < to_delete.len() {
+        let cur = to_delete[i];
+        let mut stmt = conn.prepare(
+            "SELECT id FROM finance_items WHERE parent_id = ?1 AND sync_status != 'deleted'",
+        )?;
+        let rows = stmt.query_map(params![cur], |r| r.get::<_, i64>(0))?;
+        for row in rows {
+            let child_id = row?;
+            if seen.insert(child_id) {
+                to_delete.push(child_id);
+            }
+        }
+        i += 1;
+    }
+    let tx = conn.unchecked_transaction()?;
+    for item_id in &to_delete {
+        tx.execute(
+            "UPDATE finance_items
+             SET sync_status = 'deleted', updated_at = ?1
+             WHERE id = ?2",
+            params![now, item_id],
         )?;
     }
     tx.commit()?;
@@ -2949,6 +3369,88 @@ mod tests {
         let l = list_exec_commands(&conn, cid).unwrap();
         let order: Vec<i64> = l.iter().map(|c| c.id.unwrap()).collect();
         assert_eq!(order, vec![id3, id1, id2]);
+    }
+
+    // ── Finance ──────────────────────────────────────────────
+
+    #[test]
+    fn test_finance_default_plan_and_crud() {
+        let conn = init_test_db();
+        let seeded = list_finance_plans(&conn).unwrap();
+        assert_eq!(seeded.len(), 1);
+        assert_eq!(seeded[0].name, "Regular monthly");
+        assert_eq!(seeded[0].currency, "RUB");
+
+        let plan = create_finance_plan(&conn, "Project Alpha", "USD").unwrap();
+        update_finance_plan(&conn, plan.id.unwrap(), "Project A", "EUR").unwrap();
+        let plans = list_finance_plans(&conn).unwrap();
+        let updated = plans.iter().find(|p| p.id == plan.id).unwrap();
+        assert_eq!(updated.name, "Project A");
+        assert_eq!(updated.currency, "EUR");
+
+        reorder_finance_plans(&conn, &[plan.id.unwrap(), seeded[0].id.unwrap()]).unwrap();
+        let plans = list_finance_plans(&conn).unwrap();
+        assert_eq!(plans[0].id, plan.id);
+
+        delete_finance_plan(&conn, plan.id.unwrap()).unwrap();
+        let plans = list_finance_plans(&conn).unwrap();
+        assert_eq!(plans.len(), 1);
+        assert_eq!(plans[0].name, "Regular monthly");
+    }
+
+    #[test]
+    fn test_finance_items_crud_move_and_delete_descendants() {
+        let conn = init_test_db();
+        let plan = list_finance_plans(&conn).unwrap()[0].clone();
+        let plan_id = plan.id.unwrap();
+        let housing = create_finance_item(&conn, plan_id, None, "Housing", 0, "").unwrap();
+        let internet = create_finance_item(&conn, plan_id, None, "Internet", 50000, "").unwrap();
+        let rent =
+            create_finance_item(&conn, plan_id, housing.id, "Rent", 12000000, "monthly").unwrap();
+
+        update_finance_item(&conn, internet.id.unwrap(), "Internet", 60000, "fiber").unwrap();
+        let items = list_finance_items(&conn, plan_id).unwrap();
+        let internet_after = items.iter().find(|i| i.id == internet.id).unwrap();
+        assert_eq!(internet_after.amount_cents, 60000);
+        assert_eq!(internet_after.note, "fiber");
+
+        move_finance_item(&conn, internet.id.unwrap(), housing.id, rent.id).unwrap();
+        let children: Vec<String> = list_finance_items(&conn, plan_id)
+            .unwrap()
+            .into_iter()
+            .filter(|item| item.parent_id == housing.id)
+            .map(|item| item.name)
+            .collect();
+        assert_eq!(children, vec!["Internet".to_string(), "Rent".to_string()]);
+
+        delete_finance_item(&conn, housing.id.unwrap()).unwrap();
+        assert!(list_finance_items(&conn, plan_id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_finance_move_rejects_descendant_parent_and_cross_plan_parent() {
+        let conn = init_test_db();
+        let regular = list_finance_plans(&conn).unwrap()[0].clone();
+        let project = create_finance_plan(&conn, "Project", "RUB").unwrap();
+        let regular_id = regular.id.unwrap();
+        let project_id = project.id.unwrap();
+        let parent = create_finance_item(&conn, regular_id, None, "Parent", 0, "").unwrap();
+        let child = create_finance_item(&conn, regular_id, parent.id, "Child", 0, "").unwrap();
+        let foreign = create_finance_item(&conn, project_id, None, "Foreign", 0, "").unwrap();
+
+        let err = move_finance_item(&conn, parent.id.unwrap(), child.id, None).unwrap_err();
+        assert!(err.to_string().contains("descendant"));
+
+        let err = move_finance_item(&conn, child.id.unwrap(), foreign.id, None).unwrap_err();
+        assert!(err.to_string().contains("same plan"));
+    }
+
+    #[test]
+    fn test_finance_amount_must_be_non_negative() {
+        let conn = init_test_db();
+        let plan_id = list_finance_plans(&conn).unwrap()[0].id.unwrap();
+        let err = create_finance_item(&conn, plan_id, None, "Refund", -1, "").unwrap_err();
+        assert!(err.to_string().contains("non-negative"));
     }
 
     // ── Task Categories / Statuses ───────────────────────────

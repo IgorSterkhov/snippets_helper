@@ -170,6 +170,35 @@ pub struct TaskLink {
     pub user_id: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FinancePlan {
+    pub id: Option<i64>,
+    pub name: String,
+    pub currency: String,
+    pub sort_order: i32,
+    pub created_at: NaiveDateTime,
+    pub updated_at: NaiveDateTime,
+    pub uuid: String,
+    pub sync_status: String,
+    pub user_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FinanceItem {
+    pub id: Option<i64>,
+    pub plan_id: i64,
+    pub parent_id: Option<i64>,
+    pub name: String,
+    pub amount_cents: i64,
+    pub note: String,
+    pub sort_order: i32,
+    pub created_at: NaiveDateTime,
+    pub updated_at: NaiveDateTime,
+    pub uuid: String,
+    pub sync_status: String,
+    pub user_id: String,
+}
+
 // ── Local tables ─────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

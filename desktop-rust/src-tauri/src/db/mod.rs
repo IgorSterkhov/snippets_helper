@@ -249,11 +249,40 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
             user_id         TEXT NOT NULL DEFAULT ''
         );
 
+        CREATE TABLE IF NOT EXISTS finance_plans (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            name            TEXT NOT NULL DEFAULT '',
+            currency        TEXT NOT NULL DEFAULT 'RUB',
+            sort_order      INTEGER NOT NULL DEFAULT 0,
+            created_at      TIMESTAMP NOT NULL,
+            updated_at      TIMESTAMP NOT NULL,
+            uuid            TEXT UNIQUE NOT NULL,
+            sync_status     TEXT NOT NULL DEFAULT 'pending',
+            user_id         TEXT NOT NULL DEFAULT ''
+        );
+
+        CREATE TABLE IF NOT EXISTS finance_items (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            plan_id         INTEGER NOT NULL REFERENCES finance_plans(id) ON DELETE CASCADE,
+            parent_id       INTEGER REFERENCES finance_items(id) ON DELETE CASCADE,
+            name            TEXT NOT NULL DEFAULT '',
+            amount_cents    INTEGER NOT NULL DEFAULT 0 CHECK (amount_cents >= 0),
+            note            TEXT NOT NULL DEFAULT '',
+            sort_order      INTEGER NOT NULL DEFAULT 0,
+            created_at      TIMESTAMP NOT NULL,
+            updated_at      TIMESTAMP NOT NULL,
+            uuid            TEXT UNIQUE NOT NULL,
+            sync_status     TEXT NOT NULL DEFAULT 'pending',
+            user_id         TEXT NOT NULL DEFAULT ''
+        );
+
         CREATE INDEX IF NOT EXISTS idx_tasks_sort      ON tasks(is_pinned DESC, sort_order ASC);
         CREATE INDEX IF NOT EXISTS idx_tasks_category  ON tasks(category_id);
         CREATE INDEX IF NOT EXISTS idx_tasks_status    ON tasks(status_id);
         CREATE INDEX IF NOT EXISTS idx_checkboxes_task ON task_checkboxes(task_id, parent_id, sort_order);
         CREATE INDEX IF NOT EXISTS idx_links_task      ON task_links(task_id, sort_order);
+        CREATE INDEX IF NOT EXISTS idx_finance_plans_sort ON finance_plans(sort_order, name);
+        CREATE INDEX IF NOT EXISTS idx_finance_items_plan ON finance_items(plan_id, parent_id, sort_order);
 
         CREATE TABLE IF NOT EXISTS whisper_models (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -354,6 +383,7 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     // when tables are empty, so existing users' custom sets aren't clobbered.
     seed_task_defaults(conn).ok();
     mark_existing_tasks_pending_for_initial_sync(conn).ok();
+    seed_finance_defaults(conn).ok();
 
     Ok(())
 }
@@ -433,6 +463,30 @@ fn seed_task_defaults(conn: &Connection) -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
+fn seed_finance_defaults(conn: &Connection) -> Result<(), rusqlite::Error> {
+    use chrono::Utc;
+    let now = Utc::now()
+        .naive_utc()
+        .format("%Y-%m-%d %H:%M:%S%.f")
+        .to_string();
+
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM finance_plans WHERE sync_status != 'deleted'",
+        [],
+        |r| r.get(0),
+    )?;
+    if count == 0 {
+        conn.execute(
+            "INSERT INTO finance_plans
+                (name, currency, sort_order, created_at, updated_at, uuid, sync_status, user_id)
+             VALUES ('Regular monthly', 'RUB', 0, ?1, ?1, ?2, 'pending', '')",
+            rusqlite::params![&now, uuid::Uuid::new_v4().to_string()],
+        )?;
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 pub fn init_test_db() -> Connection {
     let conn = Connection::open_in_memory().expect("Failed to open in-memory DB");
@@ -471,6 +525,8 @@ mod tests {
             "commit_tags",
             "exec_categories",
             "exec_commands",
+            "finance_items",
+            "finance_plans",
             "note_folders",
             "notes",
             "obfuscation_mappings",
@@ -586,6 +642,20 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM task_categories", [], |r| r.get(0))
             .unwrap();
         assert_eq!(n, 2);
+    }
+
+    #[test]
+    fn test_finance_default_plan_seeded_once() {
+        let conn = init_test_db();
+        run_migrations(&conn).unwrap();
+        let plans: Vec<(String, String)> = conn
+            .prepare("SELECT name, currency FROM finance_plans WHERE sync_status != 'deleted' ORDER BY sort_order")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+        assert_eq!(plans, vec![("Regular monthly".to_string(), "RUB".to_string())]);
     }
 
     #[test]

@@ -9,6 +9,7 @@ pub mod sync_cmd;
 pub mod superset;
 pub mod commits;
 pub mod exec;
+pub mod finance;
 pub mod help;
 pub mod media;
 pub mod module_windows;

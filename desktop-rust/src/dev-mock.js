@@ -284,6 +284,91 @@
     ]);
     storeSet('__seq.task_checkboxes', 2);
 
+    storeSet('finance_plans', [
+      {
+        id: 1,
+        uuid: uuid(),
+        name: 'Regular monthly',
+        currency: 'RUB',
+        sort_order: 0,
+        created_at: now(),
+        updated_at: now(),
+        sync_status: 'pending',
+        user_id: 'mock-user',
+      },
+      {
+        id: 2,
+        uuid: uuid(),
+        name: 'Project expenses',
+        currency: 'RUB',
+        sort_order: 1,
+        created_at: now(),
+        updated_at: now(),
+        sync_status: 'pending',
+        user_id: 'mock-user',
+      },
+    ]);
+    storeSet('__seq.finance_plans', 2);
+    storeSet('finance_items', [
+      {
+        id: 1,
+        uuid: uuid(),
+        plan_id: 1,
+        parent_id: null,
+        name: 'Housing',
+        amount_cents: 0,
+        note: '',
+        sort_order: 0,
+        created_at: now(),
+        updated_at: now(),
+        sync_status: 'pending',
+        user_id: 'mock-user',
+      },
+      {
+        id: 2,
+        uuid: uuid(),
+        plan_id: 1,
+        parent_id: 1,
+        name: 'Rent',
+        amount_cents: 12000000,
+        note: 'Monthly',
+        sort_order: 0,
+        created_at: now(),
+        updated_at: now(),
+        sync_status: 'pending',
+        user_id: 'mock-user',
+      },
+      {
+        id: 3,
+        uuid: uuid(),
+        plan_id: 1,
+        parent_id: 1,
+        name: 'Internet',
+        amount_cents: 70000,
+        note: '',
+        sort_order: 1,
+        created_at: now(),
+        updated_at: now(),
+        sync_status: 'pending',
+        user_id: 'mock-user',
+      },
+      {
+        id: 4,
+        uuid: uuid(),
+        plan_id: 1,
+        parent_id: null,
+        name: 'Subscriptions',
+        amount_cents: 0,
+        note: '',
+        sort_order: 1,
+        created_at: now(),
+        updated_at: now(),
+        sync_status: 'pending',
+        user_id: 'mock-user',
+      },
+    ]);
+    storeSet('__seq.finance_items', 4);
+
     storeSet('__init', true);
   }
 
@@ -1063,6 +1148,201 @@
       storeSet('notes', notes);
     },
     async delete_note({ id }) { deleteItem('notes', id); },
+
+    // ── Finance ─────────────────────────────────────────
+    async list_finance_plans() {
+      return [...storeGet('finance_plans', [])]
+        .filter(p => p.sync_status !== 'deleted')
+        .sort((a, b) =>
+          (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0)
+          || String(a.name || '').localeCompare(String(b.name || ''))
+          || Number(a.id) - Number(b.id)
+        );
+    },
+    async create_finance_plan({ name, currency }) {
+      const sortOrder = storeGet('finance_plans', [])
+        .filter(p => p.sync_status !== 'deleted')
+        .reduce((max, p) => Math.max(max, Number(p.sort_order) || 0), -1) + 1;
+      return createItem('finance_plans', {
+        uuid: uuid(),
+        name: name || 'New plan',
+        currency: currency || 'RUB',
+        sort_order: sortOrder,
+        sync_status: 'pending',
+        user_id: 'mock-user',
+      });
+    },
+    async update_finance_plan({ id, name, currency }) {
+      return updateItem('finance_plans', Number(id), {
+        name: name || 'Untitled plan',
+        currency: currency || 'RUB',
+        sync_status: 'pending',
+      });
+    },
+    async reorder_finance_plans({ ids }) {
+      const order = new Map((ids || []).map((id, index) => [Number(id), index]));
+      const plans = storeGet('finance_plans', []).map(plan => (
+        order.has(Number(plan.id)) && plan.sync_status !== 'deleted'
+          ? { ...plan, sort_order: order.get(Number(plan.id)), updated_at: now(), sync_status: 'pending' }
+          : plan
+      ));
+      storeSet('finance_plans', plans);
+    },
+    async delete_finance_plan({ id }) {
+      const planId = Number(id);
+      storeSet('finance_plans', storeGet('finance_plans', []).map(plan => (
+        Number(plan.id) === planId
+          ? { ...plan, sync_status: 'deleted', updated_at: now() }
+          : plan
+      )));
+      storeSet('finance_items', storeGet('finance_items', []).map(item => (
+        Number(item.plan_id) === planId
+          ? { ...item, sync_status: 'deleted', updated_at: now() }
+          : item
+      )));
+    },
+    async list_finance_items({ planId, plan_id }) {
+      const targetPlanId = Number(planId ?? plan_id);
+      return [...storeGet('finance_items', [])]
+        .filter(item => Number(item.plan_id) === targetPlanId && item.sync_status !== 'deleted')
+        .sort((a, b) =>
+          String(a.parent_id ?? '').localeCompare(String(b.parent_id ?? ''))
+          || (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0)
+          || String(a.name || '').localeCompare(String(b.name || ''))
+          || Number(a.id) - Number(b.id)
+        );
+    },
+    async create_finance_item({ planId, plan_id, parentId, parent_id, name, amountCents, amount_cents, note }) {
+      const targetPlanId = Number(planId ?? plan_id);
+      const targetParentId = parentId ?? parent_id ?? null;
+      const normalizedParentId = targetParentId == null ? null : Number(targetParentId);
+      const siblings = storeGet('finance_items', [])
+        .filter(item =>
+          Number(item.plan_id) === targetPlanId
+          && (item.parent_id ?? null) === normalizedParentId
+          && item.sync_status !== 'deleted'
+        );
+      const sortOrder = siblings.reduce((max, item) => Math.max(max, Number(item.sort_order) || 0), -1) + 1;
+      const amount = Number(amountCents ?? amount_cents ?? 0);
+      if (amount < 0) throw new Error('amount_cents must be non-negative');
+      return createItem('finance_items', {
+        uuid: uuid(),
+        plan_id: targetPlanId,
+        parent_id: normalizedParentId,
+        name: name || 'New item',
+        amount_cents: amount,
+        note: note || '',
+        sort_order: sortOrder,
+        sync_status: 'pending',
+        user_id: 'mock-user',
+      });
+    },
+    async update_finance_item({ id, name, amountCents, amount_cents, note }) {
+      const amount = Number(amountCents ?? amount_cents ?? 0);
+      if (amount < 0) throw new Error('amount_cents must be non-negative');
+      return updateItem('finance_items', Number(id), {
+        name: name || 'Untitled item',
+        amount_cents: amount,
+        note: note || '',
+        sync_status: 'pending',
+      });
+    },
+    async move_finance_item({ id, parentId, parent_id, beforeId, before_id }) {
+      const items = storeGet('finance_items', []);
+      const sourceId = Number(id);
+      const newParentId = parentId ?? parent_id ?? null;
+      const targetParentId = newParentId == null ? null : Number(newParentId);
+      const nextBeforeId = beforeId ?? before_id ?? null;
+      const targetBeforeId = nextBeforeId == null ? null : Number(nextBeforeId);
+      const source = items.find(item => Number(item.id) === sourceId && item.sync_status !== 'deleted');
+      if (!source) throw new Error('finance item not found');
+      if (targetParentId === sourceId || targetBeforeId === sourceId) {
+        throw new Error('finance item cannot be moved into or before itself');
+      }
+      const planId = Number(source.plan_id);
+      if (targetParentId != null) {
+        const parent = items.find(item => Number(item.id) === targetParentId && item.sync_status !== 'deleted');
+        if (!parent || Number(parent.plan_id) !== planId) {
+          throw new Error('target parent must belong to the same plan');
+        }
+        let current = targetParentId;
+        while (current != null) {
+          if (Number(current) === sourceId) {
+            throw new Error('finance item cannot be moved into its descendant');
+          }
+          const parentItem = items.find(item => Number(item.id) === Number(current));
+          current = parentItem ? parentItem.parent_id : null;
+        }
+      }
+      if (targetBeforeId != null) {
+        const before = items.find(item => Number(item.id) === targetBeforeId && item.sync_status !== 'deleted');
+        if (!before || Number(before.plan_id) !== planId || (before.parent_id ?? null) !== targetParentId) {
+          throw new Error('before item must belong to the target parent and plan');
+        }
+      }
+      const oldParentId = source.parent_id ?? null;
+      const normalizeBucket = (bucketParentId, forcedOrder = null) => {
+        const bucket = forcedOrder || items
+          .filter(item =>
+            Number(item.plan_id) === planId
+            && Number(item.id) !== sourceId
+            && (item.parent_id ?? null) === bucketParentId
+            && item.sync_status !== 'deleted'
+          )
+          .sort((a, b) =>
+            (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0)
+            || String(a.name || '').localeCompare(String(b.name || ''))
+            || Number(a.id) - Number(b.id)
+          )
+          .map(item => Number(item.id));
+        bucket.forEach((itemId, index) => {
+          const item = items.find(x => Number(x.id) === itemId);
+          if (!item) return;
+          item.parent_id = bucketParentId;
+          item.sort_order = index;
+          item.updated_at = now();
+          item.sync_status = 'pending';
+        });
+      };
+      if (oldParentId !== targetParentId) normalizeBucket(oldParentId);
+      const newBucket = items
+        .filter(item =>
+          Number(item.plan_id) === planId
+          && Number(item.id) !== sourceId
+          && (item.parent_id ?? null) === targetParentId
+          && item.sync_status !== 'deleted'
+        )
+        .sort((a, b) =>
+          (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0)
+          || String(a.name || '').localeCompare(String(b.name || ''))
+          || Number(a.id) - Number(b.id)
+        )
+        .map(item => Number(item.id));
+      const insertAt = targetBeforeId == null ? newBucket.length : Math.max(0, newBucket.indexOf(targetBeforeId));
+      newBucket.splice(insertAt, 0, sourceId);
+      normalizeBucket(targetParentId, newBucket);
+      storeSet('finance_items', items);
+    },
+    async delete_finance_item({ id }) {
+      const sourceId = Number(id);
+      const items = storeGet('finance_items', []);
+      const toDelete = new Set([sourceId]);
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (const item of items) {
+          if (toDelete.has(Number(item.parent_id)) && !toDelete.has(Number(item.id))) {
+            toDelete.add(Number(item.id));
+            changed = true;
+          }
+        }
+      }
+      storeSet('finance_items', items.map(item => (
+        toDelete.has(Number(item.id))
+          ? { ...item, sync_status: 'deleted', updated_at: now() }
+          : item
+      )));
+    },
 
     // ── Tasks ───────────────────────────────────────────
     async list_task_categories() {

@@ -226,6 +226,17 @@ pub fn run() {
             commands::exec::run_command,
             commands::exec::stop_command,
             commands::exec::list_wsl_distros,
+            // Finance
+            commands::finance::list_finance_plans,
+            commands::finance::create_finance_plan,
+            commands::finance::update_finance_plan,
+            commands::finance::reorder_finance_plans,
+            commands::finance::delete_finance_plan,
+            commands::finance::list_finance_items,
+            commands::finance::create_finance_item,
+            commands::finance::update_finance_item,
+            commands::finance::move_finance_item,
+            commands::finance::delete_finance_item,
             // Help
             commands::help::get_changelog,
             // Repo Search

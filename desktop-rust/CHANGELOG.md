@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## v1.10.0 (2026-06-10)
+
+- **Finance module:** added a dedicated desktop Finance tab for monthly
+  planning. It starts with a `Regular monthly` plan, supports multiple plan
+  cards, nested expense rows, direct amount and aggregate total columns,
+  notes, soft-delete, and drag-and-drop for both plans and nested rows. Finance
+  data is desktop-local in this first release and is not yet synced to API or
+  mobile.
+
 ## v1.9.3 (2026-06-10)
 
 - **Notes folder tree DnD:** the Notes left-panel folder tree now has stable
