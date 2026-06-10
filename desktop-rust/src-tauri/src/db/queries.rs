@@ -1,6 +1,6 @@
 use chrono::{DateTime, NaiveDateTime, Utc};
 use regex::Regex;
-use rusqlite::{params, Connection, Result};
+use rusqlite::{params, Connection, Result, Transaction};
 use serde_json::{Map, Value};
 use uuid::Uuid;
 
@@ -397,6 +397,129 @@ pub fn update_note_folder(
          WHERE id = ?5",
         params![name, sort_order, parent_id, now, id],
     )?;
+    Ok(())
+}
+
+fn note_folder_exists_tx(tx: &Transaction<'_>, id: i64) -> Result<bool> {
+    let count: i64 = tx.query_row(
+        "SELECT COUNT(*) FROM note_folders WHERE id = ?1 AND sync_status != 'deleted'",
+        params![id],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
+}
+
+fn note_folder_parent_tx(tx: &Transaction<'_>, id: i64) -> Result<Option<i64>> {
+    tx.query_row(
+        "SELECT parent_id FROM note_folders WHERE id = ?1 AND sync_status != 'deleted'",
+        params![id],
+        |row| row.get(0),
+    )
+}
+
+fn note_folder_sibling_ids_tx(
+    tx: &Transaction<'_>,
+    parent_id: Option<i64>,
+    exclude_id: i64,
+) -> Result<Vec<i64>> {
+    if let Some(parent_id) = parent_id {
+        let mut stmt = tx.prepare(
+            "SELECT id FROM note_folders
+             WHERE parent_id = ?1 AND id != ?2 AND sync_status != 'deleted'
+             ORDER BY sort_order, name, id",
+        )?;
+        let rows = stmt.query_map(params![parent_id, exclude_id], |row| row.get(0))?;
+        rows.collect()
+    } else {
+        let mut stmt = tx.prepare(
+            "SELECT id FROM note_folders
+             WHERE parent_id IS NULL AND id != ?1 AND sync_status != 'deleted'
+             ORDER BY sort_order, name, id",
+        )?;
+        let rows = stmt.query_map(params![exclude_id], |row| row.get(0))?;
+        rows.collect()
+    }
+}
+
+fn apply_note_folder_sibling_order_tx(
+    tx: &Transaction<'_>,
+    parent_id: Option<i64>,
+    ordered_ids: &[i64],
+    now: &str,
+) -> Result<()> {
+    for (idx, folder_id) in ordered_ids.iter().enumerate() {
+        tx.execute(
+            "UPDATE note_folders
+             SET parent_id = ?1, sort_order = ?2, updated_at = ?3, sync_status = 'pending'
+             WHERE id = ?4 AND sync_status != 'deleted'",
+            params![parent_id, idx as i32, now, folder_id],
+        )?;
+    }
+    Ok(())
+}
+
+pub fn move_note_folder(
+    conn: &Connection,
+    id: i64,
+    parent_id: Option<i64>,
+    before_id: Option<i64>,
+) -> Result<()> {
+    let now = now_str();
+    let tx = conn.unchecked_transaction()?;
+
+    let old_parent_id = note_folder_parent_tx(&tx, id)?;
+    if parent_id == Some(id) || before_id == Some(id) {
+        return Err(rusqlite::Error::InvalidParameterName(
+            "folder cannot be moved into or before itself".to_string(),
+        ));
+    }
+
+    if let Some(new_parent_id) = parent_id {
+        if !note_folder_exists_tx(&tx, new_parent_id)? {
+            return Err(rusqlite::Error::InvalidParameterName(
+                "target parent folder not found".to_string(),
+            ));
+        }
+        let mut current = Some(new_parent_id);
+        let mut visited = Vec::new();
+        while let Some(current_id) = current {
+            if current_id == id {
+                return Err(rusqlite::Error::InvalidParameterName(
+                    "folder cannot be moved into its descendant".to_string(),
+                ));
+            }
+            if visited.contains(&current_id) {
+                return Err(rusqlite::Error::InvalidParameterName(
+                    "folder ancestry contains a cycle".to_string(),
+                ));
+            }
+            visited.push(current_id);
+            current = note_folder_parent_tx(&tx, current_id)?;
+        }
+    }
+
+    if let Some(target_before_id) = before_id {
+        let target_parent_id = note_folder_parent_tx(&tx, target_before_id)?;
+        if target_parent_id != parent_id {
+            return Err(rusqlite::Error::InvalidParameterName(
+                "before folder must belong to the target parent".to_string(),
+            ));
+        }
+    }
+
+    if old_parent_id != parent_id {
+        let old_siblings = note_folder_sibling_ids_tx(&tx, old_parent_id, id)?;
+        apply_note_folder_sibling_order_tx(&tx, old_parent_id, &old_siblings, &now)?;
+    }
+
+    let mut new_siblings = note_folder_sibling_ids_tx(&tx, parent_id, id)?;
+    let insert_at = before_id
+        .and_then(|target_id| new_siblings.iter().position(|sibling_id| *sibling_id == target_id))
+        .unwrap_or(new_siblings.len());
+    new_siblings.insert(insert_at, id);
+    apply_note_folder_sibling_order_tx(&tx, parent_id, &new_siblings, &now)?;
+
+    tx.commit()?;
     Ok(())
 }
 
@@ -2375,6 +2498,73 @@ mod tests {
         delete_note_folder(&conn, f.id.unwrap()).unwrap();
         let list = list_note_folders(&conn).unwrap();
         assert_eq!(list.len(), 0);
+    }
+
+    fn note_folder_names_for_parent(conn: &Connection, parent_id: Option<i64>) -> Vec<String> {
+        list_note_folders(conn)
+            .unwrap()
+            .into_iter()
+            .filter(|folder| folder.parent_id == parent_id)
+            .map(|folder| folder.name)
+            .collect()
+    }
+
+    #[test]
+    fn test_move_note_folder_reorders_root_siblings() {
+        let conn = init_test_db();
+        let a = create_note_folder(&conn, "A", 0, None).unwrap();
+        let _b = create_note_folder(&conn, "B", 1, None).unwrap();
+        let c = create_note_folder(&conn, "C", 2, None).unwrap();
+
+        move_note_folder(&conn, c.id.unwrap(), None, a.id).unwrap();
+
+        assert_eq!(
+            note_folder_names_for_parent(&conn, None),
+            vec!["C".to_string(), "A".to_string(), "B".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_move_note_folder_nests_and_orders_children() {
+        let conn = init_test_db();
+        let parent = create_note_folder(&conn, "Parent", 0, None).unwrap();
+        let first = create_note_folder(&conn, "First", 1, None).unwrap();
+        let second = create_note_folder(&conn, "Second", 2, None).unwrap();
+
+        move_note_folder(&conn, second.id.unwrap(), parent.id, None).unwrap();
+        move_note_folder(&conn, first.id.unwrap(), parent.id, second.id).unwrap();
+
+        assert_eq!(
+            note_folder_names_for_parent(&conn, parent.id),
+            vec!["First".to_string(), "Second".to_string()]
+        );
+        assert_eq!(
+            note_folder_names_for_parent(&conn, None),
+            vec!["Parent".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_move_note_folder_rejects_descendant_parent() {
+        let conn = init_test_db();
+        let parent = create_note_folder(&conn, "Parent", 0, None).unwrap();
+        let child = create_note_folder(&conn, "Child", 0, parent.id).unwrap();
+
+        let err = move_note_folder(&conn, parent.id.unwrap(), child.id, None).unwrap_err();
+
+        assert!(err.to_string().contains("descendant"));
+    }
+
+    #[test]
+    fn test_move_note_folder_requires_before_sibling() {
+        let conn = init_test_db();
+        let parent = create_note_folder(&conn, "Parent", 0, None).unwrap();
+        let child = create_note_folder(&conn, "Child", 0, parent.id).unwrap();
+        let other = create_note_folder(&conn, "Other", 1, None).unwrap();
+
+        let err = move_note_folder(&conn, other.id.unwrap(), None, child.id).unwrap_err();
+
+        assert!(err.to_string().contains("before folder"));
     }
 
     #[test]

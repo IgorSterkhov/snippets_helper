@@ -18,6 +18,10 @@ let expandedFolderIds = new Set();
 let expandedNoteIdx = null;
 let expandMultiplier = 4;
 let aiNoteListenerInstalled = false;
+let activeFolderDrag = null;
+
+const FOLDER_DRAG_START_PX = 5;
+const FOLDER_DROP_EDGE_RATIO = 0.28;
 
 export async function init(container) {
   root = container;
@@ -149,6 +153,15 @@ function buildFolderTree(flatFolders) {
       roots.push(node);
     }
   }
+  const sortNodes = (nodes) => {
+    nodes.sort((a, b) => (
+      (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0)
+      || String(a.name || '').localeCompare(String(b.name || ''))
+      || Number(a.id) - Number(b.id)
+    ));
+    for (const node of nodes) sortNodes(node.children);
+  };
+  sortNodes(roots);
   return { roots, map };
 }
 
@@ -216,18 +229,20 @@ function renderFolders() {
     const item = el('div', {
       class: 'notes-folder-item' + (isActive ? ' active' : ''),
     });
-    item.style.paddingLeft = (10 + depth * 20) + 'px';
+    item.dataset.folderId = String(node.id);
+    item.dataset.parentId = node.parent_id == null ? '' : String(node.parent_id);
+    item.dataset.depth = String(depth);
+    item.style.setProperty('--folder-depth', String(depth));
+    item.style.setProperty('--folder-indent', (6 + depth * 18) + 'px');
 
-    // Tree connector line
-    if (depth > 0) {
-      const connector = el('span', { class: 'tree-connector' });
-      connector.style.left = (depth * 20 - 6) + 'px';
-      item.appendChild(connector);
-      item.style.position = 'relative';
-    }
+    const grip = el('button', { text: '\u22EE', class: 'folder-grip', title: 'Drag folder' });
+    grip.type = 'button';
+    grip.dataset.folderDragHandle = '1';
+    item.appendChild(grip);
 
     // Expand/collapse arrow
-    const arrow = el('span', { class: 'folder-arrow' + (hasChildren ? '' : ' invisible') });
+    const arrow = el('button', { class: 'folder-arrow' + (hasChildren ? '' : ' invisible') });
+    arrow.type = 'button';
     arrow.textContent = isExpanded ? '\u25BC' : '\u25B6';
     if (hasChildren) {
       arrow.classList.add(isExpanded ? 'arrow-expanded' : 'arrow-collapsed');
@@ -258,12 +273,14 @@ function renderFolders() {
     const nameSpan = el('span', { text: node.name, class: 'folder-name' });
     item.appendChild(nameSpan);
 
+    const meta = el('span', { class: 'folder-meta' });
     // Sub-folder count badge
     const totalChildren = countDescendantFolders(node);
     if (totalChildren > 0) {
       const badge = el('span', { text: String(totalChildren), class: 'folder-badge' });
-      item.appendChild(badge);
+      meta.appendChild(badge);
     }
+    item.appendChild(meta);
 
     // Actions
     const actions = el('span', { class: 'folder-actions' });
@@ -278,7 +295,15 @@ function renderFolders() {
     actions.appendChild(deleteBtn);
     item.appendChild(actions);
 
-    item.addEventListener('click', () => selectFolder(node.id));
+    item.addEventListener('click', (event) => {
+      if (item.dataset.dragSuppressClick === '1') {
+        event.preventDefault();
+        event.stopPropagation();
+        delete item.dataset.dragSuppressClick;
+        return;
+      }
+      selectFolder(node.id);
+    });
     list.appendChild(item);
 
     // Render children if expanded
@@ -292,6 +317,258 @@ function renderFolders() {
   for (const r of roots) {
     renderNode(r, 0);
   }
+  installFolderTreeDnd(list);
+}
+
+function installFolderTreeDnd(list) {
+  list.onpointerdown = (event) => {
+    const handle = event.target.closest('[data-folder-drag-handle]');
+    if (!handle || event.button !== 0) return;
+    const source = handle.closest('.notes-folder-item');
+    if (!source) return;
+
+    const startX = event.clientX;
+    const startY = event.clientY;
+    let started = false;
+
+    const onMove = (moveEvent) => {
+      if (!started) {
+        const dx = moveEvent.clientX - startX;
+        const dy = moveEvent.clientY - startY;
+        if (Math.hypot(dx, dy) < FOLDER_DRAG_START_PX) return;
+        moveEvent.preventDefault();
+        startFolderDrag(source, moveEvent);
+        started = !!activeFolderDrag;
+      }
+      if (started) updateFolderDrag(moveEvent);
+    };
+
+    const onUp = async (upEvent) => {
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      if (!started) return;
+      upEvent.preventDefault();
+      try {
+        await commitFolderDrag();
+      } finally {
+        cleanupFolderDrag();
+        source.dataset.dragSuppressClick = '1';
+        setTimeout(() => {
+          if (source.dataset.dragSuppressClick === '1') delete source.dataset.dragSuppressClick;
+        }, 350);
+      }
+    };
+
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+  };
+}
+
+function startFolderDrag(source, event) {
+  const rect = source.getBoundingClientRect();
+  const ghost = source.cloneNode(true);
+  ghost.classList.add('notes-folder-drag-ghost');
+  ghost.style.position = 'fixed';
+  ghost.style.left = rect.left + 'px';
+  ghost.style.top = rect.top + 'px';
+  ghost.style.width = rect.width + 'px';
+  ghost.style.pointerEvents = 'none';
+  ghost.style.zIndex = '10000';
+  for (const child of ghost.querySelectorAll('button')) child.disabled = true;
+  document.body.appendChild(ghost);
+
+  const line = document.createElement('div');
+  line.className = 'notes-folder-drop-line';
+  line.style.display = 'none';
+
+  source.classList.add('folder-drag-source');
+  activeFolderDrag = {
+    source,
+    list: source.closest('#folder-list'),
+    ghost,
+    line,
+    offsetX: event.clientX - rect.left,
+    offsetY: event.clientY - rect.top,
+    intent: null,
+  };
+}
+
+function updateFolderDrag(event) {
+  if (!activeFolderDrag) return;
+  const { ghost } = activeFolderDrag;
+  ghost.style.left = (event.clientX - activeFolderDrag.offsetX) + 'px';
+  ghost.style.top = (event.clientY - activeFolderDrag.offsetY) + 'px';
+
+  const intent = getFolderDropIntent(event.clientX, event.clientY);
+  activeFolderDrag.intent = intent;
+  renderFolderDropIntent(intent);
+}
+
+function getFolderDropIntent(clientX, clientY) {
+  const drag = activeFolderDrag;
+  if (!drag || !drag.list) return null;
+  const listRect = drag.list.getBoundingClientRect();
+  if (clientX < listRect.left || clientX > listRect.right || clientY < listRect.top || clientY > listRect.bottom) {
+    return null;
+  }
+
+  const under = document.elementFromPoint(clientX, clientY);
+  const targetRow = under && under.closest('.notes-folder-item');
+  if (!targetRow || !drag.list.contains(targetRow) || targetRow === drag.source) return null;
+
+  const sourceId = Number(drag.source.dataset.folderId);
+  const targetId = Number(targetRow.dataset.folderId);
+  if (!Number.isFinite(sourceId) || !Number.isFinite(targetId)) return null;
+  if (isDescendantFolder(targetId, sourceId)) return null;
+
+  const rowRect = targetRow.getBoundingClientRect();
+  const relY = rowRect.height > 0 ? (clientY - rowRect.top) / rowRect.height : 0.5;
+  const targetDepth = Number(targetRow.dataset.depth) || 0;
+  const targetParentId = targetRow.dataset.parentId ? Number(targetRow.dataset.parentId) : null;
+
+  if (relY < FOLDER_DROP_EDGE_RATIO) {
+    return {
+      mode: 'before',
+      parentId: targetParentId,
+      beforeId: targetId,
+      lineBefore: targetRow,
+      lineDepth: targetDepth,
+      highlightRow: null,
+    };
+  }
+
+  if (relY > 1 - FOLDER_DROP_EDGE_RATIO) {
+    const branchEndBefore = nextVisibleRowAfterBranch(targetRow);
+    const siblingBeforeId = branchEndBefore
+      && Number(branchEndBefore.dataset.depth) === targetDepth
+      && (branchEndBefore.dataset.parentId ? Number(branchEndBefore.dataset.parentId) : null) === targetParentId
+        ? Number(branchEndBefore.dataset.folderId)
+        : null;
+    return {
+      mode: 'after',
+      parentId: targetParentId,
+      beforeId: siblingBeforeId,
+      lineBefore: branchEndBefore,
+      lineDepth: targetDepth,
+      highlightRow: null,
+    };
+  }
+
+  return {
+    mode: 'inside',
+    parentId: targetId,
+    beforeId: null,
+    lineBefore: null,
+    lineDepth: targetDepth + 1,
+    highlightRow: targetRow,
+  };
+}
+
+function isDescendantFolder(candidateId, ancestorId) {
+  let current = folders.find(f => Number(f.id) === Number(candidateId));
+  while (current && current.parent_id != null) {
+    if (Number(current.parent_id) === Number(ancestorId)) return true;
+    current = folders.find(f => Number(f.id) === Number(current.parent_id));
+  }
+  return false;
+}
+
+function nextVisibleRowAfterBranch(row) {
+  const depth = Number(row.dataset.depth) || 0;
+  let next = row.nextElementSibling;
+  while (next && !next.classList.contains('notes-folder-item')) {
+    next = next.nextElementSibling;
+  }
+  while (next && next.classList.contains('notes-folder-item') && (Number(next.dataset.depth) || 0) > depth) {
+    next = next.nextElementSibling;
+    while (next && !next.classList.contains('notes-folder-item')) {
+      next = next.nextElementSibling;
+    }
+  }
+  return next && next.classList.contains('notes-folder-item') ? next : null;
+}
+
+function renderFolderDropIntent(intent) {
+  if (!activeFolderDrag) return;
+  const { list, line } = activeFolderDrag;
+  for (const row of list.querySelectorAll('.notes-folder-item.folder-drop-inside')) {
+    row.classList.remove('folder-drop-inside');
+  }
+
+  if (!intent) {
+    if (line.parentElement) line.remove();
+    line.style.display = 'none';
+    return;
+  }
+
+  if (intent.mode === 'inside') {
+    if (line.parentElement) line.remove();
+    line.style.display = 'none';
+    if (intent.highlightRow) intent.highlightRow.classList.add('folder-drop-inside');
+    return;
+  }
+
+  line.style.display = '';
+  line.style.setProperty('--folder-drop-depth', String(Math.max(0, intent.lineDepth || 0)));
+  line.style.setProperty('--folder-drop-indent', (28 + Math.max(0, intent.lineDepth || 0) * 18) + 'px');
+  moveFolderDropLine(list, line, intent.lineBefore || null);
+}
+
+function moveFolderDropLine(list, line, beforeRow) {
+  if (line.parentElement === list && line.nextElementSibling === beforeRow) return;
+
+  const tracked = [...list.querySelectorAll('.notes-folder-item'), line].filter(el => el.parentElement === list);
+  const oldTops = new Map();
+  for (const el of tracked) oldTops.set(el, el.getBoundingClientRect().top);
+
+  list.insertBefore(line, beforeRow);
+
+  for (const el of tracked) {
+    if (!el.parentElement) continue;
+    const oldTop = oldTops.get(el);
+    const newTop = el.getBoundingClientRect().top;
+    const delta = oldTop - newTop;
+    if (!delta) continue;
+    el.style.transition = 'none';
+    el.style.transform = `translateY(${delta}px)`;
+    void el.offsetHeight;
+    el.style.transition = 'transform 160ms ease';
+    el.style.transform = '';
+  }
+}
+
+async function commitFolderDrag() {
+  const drag = activeFolderDrag;
+  if (!drag || !drag.intent) return;
+  const sourceId = Number(drag.source.dataset.folderId);
+  const intent = drag.intent;
+  if (!Number.isFinite(sourceId)) return;
+
+  await call('move_note_folder', {
+    id: sourceId,
+    parentId: intent.parentId,
+    beforeId: intent.beforeId,
+  });
+  if (intent.mode === 'inside' && intent.parentId != null) {
+    expandedFolderIds.add(intent.parentId);
+  }
+  await loadFolders();
+}
+
+function cleanupFolderDrag() {
+  if (!activeFolderDrag) return;
+  const { list, source, ghost, line } = activeFolderDrag;
+  if (ghost && ghost.parentElement) ghost.remove();
+  if (line && line.parentElement) line.remove();
+  if (source) source.classList.remove('folder-drag-source');
+  if (list) {
+    for (const row of list.querySelectorAll('.notes-folder-item')) {
+      row.classList.remove('folder-drop-inside');
+      row.style.transition = '';
+      row.style.transform = '';
+    }
+  }
+  activeFolderDrag = null;
 }
 
 function selectFolder(id) {
@@ -982,28 +1259,68 @@ function notesCSS() {
 .notes-folder-list {
   flex: 1;
   overflow-y: auto;
-  padding: 4px 4px;
+  padding: 6px;
 }
 
 .notes-folder-item {
   display: flex;
   align-items: center;
-  padding: 6px 8px;
+  min-height: 30px;
+  padding: 0 6px 0 var(--folder-indent, 6px);
   border-radius: 4px;
   cursor: pointer;
-  transition: background 0.15s;
-  margin-bottom: 1px;
+  transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+  margin-bottom: 2px;
   position: relative;
-  gap: 2px;
+  gap: 4px;
+  border: 1px solid transparent;
+  user-select: none;
 }
 
 .notes-folder-item:hover {
   background: var(--bg-secondary);
+  border-color: var(--border);
 }
 
 .notes-folder-item.active {
   background: var(--bg-tertiary);
-  border-left: 2px solid var(--accent);
+  border-color: rgba(56, 139, 253, 0.55);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.notes-folder-item.folder-drag-source {
+  opacity: 0.38;
+}
+
+.notes-folder-item.folder-drop-inside {
+  background: rgba(56, 139, 253, 0.14);
+  border-color: var(--accent);
+}
+
+.folder-grip {
+  width: 16px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: grab;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  flex-shrink: 0;
+  opacity: 0.62;
+}
+
+.folder-grip:hover {
+  background: var(--bg-tertiary);
+  color: var(--text);
+  opacity: 1;
+}
+
+.folder-grip:active {
+  cursor: grabbing;
 }
 
 .folder-arrow {
@@ -1012,6 +1329,9 @@ function notesCSS() {
   justify-content: center;
   width: 16px;
   height: 16px;
+  padding: 0;
+  border: none;
+  background: transparent;
   font-size: 10px;
   color: var(--text-muted);
   cursor: pointer;
@@ -1029,9 +1349,11 @@ function notesCSS() {
 }
 
 .folder-icon {
+  width: 18px;
   font-size: 13px;
   flex-shrink: 0;
-  margin-right: 2px;
+  text-align: center;
+  margin-right: 0;
 }
 
 .folder-name {
@@ -1040,6 +1362,16 @@ function notesCSS() {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 13px;
+  min-width: 0;
+}
+
+.folder-meta {
+  width: 24px;
+  height: 22px;
+  display: inline-flex;
+  justify-content: flex-end;
+  align-items: center;
+  flex-shrink: 0;
 }
 
 .folder-badge {
@@ -1055,7 +1387,8 @@ function notesCSS() {
   font-size: 10px;
   font-weight: 600;
   flex-shrink: 0;
-  margin-left: 4px;
+  margin-left: 0;
+  transition: opacity 0.15s;
 }
 
 .tree-connector {
@@ -1069,17 +1402,43 @@ function notesCSS() {
 }
 
 .folder-actions {
-  display: none;
+  display: flex;
+  width: 70px;
   gap: 2px;
   flex-shrink: 0;
+  justify-content: flex-end;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
 }
 
-.notes-folder-item:hover .folder-actions {
-  display: flex;
+.notes-folder-item:hover .folder-actions,
+.notes-folder-item:focus-within .folder-actions {
+  opacity: 1;
+  pointer-events: auto;
 }
 
-.notes-folder-item:hover .folder-badge {
-  display: none;
+.notes-folder-item:hover .folder-badge,
+.notes-folder-item:focus-within .folder-badge {
+  opacity: 0.25;
+}
+
+.notes-folder-drop-line {
+  height: 0;
+  border-top: 2px solid var(--accent);
+  margin: 2px 6px 4px var(--folder-drop-indent, 28px);
+  border-radius: 999px;
+  box-shadow: 0 0 0 1px rgba(56, 139, 253, 0.18);
+  pointer-events: none;
+}
+
+.notes-folder-drag-ghost {
+  background: var(--bg-secondary);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  opacity: 0.94;
+  transform: rotate(-0.6deg);
+  box-shadow: 0 16px 32px rgba(0,0,0,0.5);
 }
 
 .btn-icon {

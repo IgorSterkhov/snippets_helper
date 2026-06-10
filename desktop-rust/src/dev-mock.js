@@ -927,9 +927,87 @@
     async force_full_sync() { return { reset: true, pull: { total: 0 } }; },
 
     // ── Notes ───────────────────────────────────────────
-    async list_note_folders() { return storeGet('note_folders', []); },
-    async create_note_folder(args) { return createItem('note_folders', args); },
-    async update_note_folder({ id, ...patch }) { return updateItem('note_folders', id, patch); },
+    async list_note_folders() {
+      return [...storeGet('note_folders', [])].sort((a, b) =>
+        (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0)
+        || String(a.name || '').localeCompare(String(b.name || ''))
+        || Number(a.id) - Number(b.id)
+      );
+    },
+    async create_note_folder({ name, sortOrder, parentId }) {
+      return createItem('note_folders', {
+        name,
+        sort_order: Number(sortOrder) || 0,
+        parent_id: parentId == null ? null : Number(parentId),
+        uuid: uuid(),
+      });
+    },
+    async update_note_folder({ id, name, sortOrder, parentId }) {
+      return updateItem('note_folders', id, {
+        name,
+        sort_order: Number(sortOrder) || 0,
+        parent_id: parentId == null ? null : Number(parentId),
+      });
+    },
+    async move_note_folder({ id, parentId, beforeId }) {
+      const folders = storeGet('note_folders', []);
+      const sourceId = Number(id);
+      const newParentId = parentId == null ? null : Number(parentId);
+      const targetBeforeId = beforeId == null ? null : Number(beforeId);
+      const source = folders.find(f => Number(f.id) === sourceId);
+      if (!source) throw new Error('folder not found');
+      if (newParentId === sourceId || targetBeforeId === sourceId) {
+        throw new Error('folder cannot be moved into or before itself');
+      }
+      if (newParentId != null && !folders.some(f => Number(f.id) === newParentId)) {
+        throw new Error('target parent folder not found');
+      }
+      let current = newParentId;
+      while (current != null) {
+        if (Number(current) === sourceId) {
+          throw new Error('folder cannot be moved into its descendant');
+        }
+        const parent = folders.find(f => Number(f.id) === Number(current));
+        current = parent ? parent.parent_id : null;
+      }
+      if (targetBeforeId != null) {
+        const before = folders.find(f => Number(f.id) === targetBeforeId);
+        if (!before || (before.parent_id ?? null) !== newParentId) {
+          throw new Error('before folder must belong to the target parent');
+        }
+      }
+      const oldParentId = source.parent_id ?? null;
+      const normalizeBucket = (bucketParentId, forcedOrder = null) => {
+        const bucket = forcedOrder || folders
+          .filter(f => Number(f.id) !== sourceId && (f.parent_id ?? null) === bucketParentId)
+          .sort((a, b) =>
+            (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0)
+            || String(a.name || '').localeCompare(String(b.name || ''))
+            || Number(a.id) - Number(b.id)
+          )
+          .map(f => Number(f.id));
+        bucket.forEach((folderId, index) => {
+          const folder = folders.find(f => Number(f.id) === folderId);
+          if (!folder) return;
+          folder.parent_id = bucketParentId;
+          folder.sort_order = index;
+          folder.updated_at = now();
+        });
+      };
+      if (oldParentId !== newParentId) normalizeBucket(oldParentId);
+      const newBucket = folders
+        .filter(f => Number(f.id) !== sourceId && (f.parent_id ?? null) === newParentId)
+        .sort((a, b) =>
+          (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0)
+          || String(a.name || '').localeCompare(String(b.name || ''))
+          || Number(a.id) - Number(b.id)
+        )
+        .map(f => Number(f.id));
+      const insertAt = targetBeforeId == null ? newBucket.length : Math.max(0, newBucket.indexOf(targetBeforeId));
+      newBucket.splice(insertAt, 0, sourceId);
+      normalizeBucket(newParentId, newBucket);
+      storeSet('note_folders', folders);
+    },
     async delete_note_folder({ id }) {
       deleteItem('note_folders', id);
       const notes = storeGet('notes', []).filter(n => n.folder_id !== id);

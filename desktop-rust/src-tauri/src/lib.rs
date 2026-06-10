@@ -181,6 +181,7 @@ pub fn run() {
             commands::notes::list_note_folders,
             commands::notes::create_note_folder,
             commands::notes::update_note_folder,
+            commands::notes::move_note_folder,
             commands::notes::delete_note_folder,
             commands::notes::list_notes,
             commands::notes::create_note,

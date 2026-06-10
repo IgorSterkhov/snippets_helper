@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## v1.9.3 (2026-06-10)
+
+- **Notes folder tree DnD:** the Notes left-panel folder tree now has stable
+  file-explorer-style rows that do not shift on hover. Folders can be dragged
+  by the left grip to reorder siblings or dropped onto another folder to make
+  them children; collapsed targets expand after an inside drop, and the backend
+  commits each move atomically with cycle protection.
+
 ## v1.9.2 (2026-06-10)
 
 - **SQL Formatter readability:** `Format SQL` now expands `SELECT` lists one

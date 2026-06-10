@@ -95,6 +95,28 @@ For simple wrapped chip strips outside Tasks, prefer
 same-size placeholders, two-dimensional target calculation, and FLIP cleanup
 stay consistent across tabs.
 
+### Nested tree rows
+
+**Used in:** Notes folder tree
+
+For nested tree drag-and-drop, use the same Pointer Events foundation, with a
+tree-specific drop model:
+
+- Start dragging only from a fixed grip zone, so normal row clicks remain
+  selection actions.
+- Render the tree as flat visible rows with `data-id`, `data-parent-id`, and
+  `data-depth`.
+- Keep row height stable: reserve fixed zones for grip, disclosure arrow, icon,
+  label, metadata, and actions. Reveal actions with `opacity`/`pointer-events`,
+  not layout-changing `display: none`.
+- Split the target row vertically into `before`, `inside`, and `after` zones.
+  `inside` highlights the target row; `before`/`after` use an insertion line.
+- For `after` on an expanded node, place the line after the whole visible
+  branch. Convert that visual slot to the next visible sibling's id, not to a
+  descendant id.
+- Backend commit must be atomic and validate cycles. The UI may prevent obvious
+  invalid drops, but the backend remains the source of truth.
+
 ---
 
 ## §3 Frontend testing
