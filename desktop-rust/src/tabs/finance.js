@@ -211,6 +211,28 @@ function injectStyles() {
 .finance-select {
   padding-right: 24px;
 }
+.finance-row .finance-input,
+.finance-row .finance-money-input,
+.finance-row .finance-note-input,
+.finance-row .finance-date-input {
+  background: transparent;
+  border-color: transparent;
+}
+.finance-row:hover .finance-input,
+.finance-row:hover .finance-money-input,
+.finance-row:hover .finance-note-input,
+.finance-row:hover .finance-date-input {
+  background: rgba(13, 17, 23, 0.14);
+  border-color: rgba(201, 209, 217, 0.12);
+}
+.finance-row .finance-input:focus,
+.finance-row .finance-money-input:focus,
+.finance-row .finance-note-input:focus,
+.finance-row .finance-date-input:focus {
+  outline: none;
+  background: rgba(13, 17, 23, 0.34);
+  border-color: var(--accent);
+}
 .finance-summary {
   display: grid;
   grid-template-columns: repeat(3, minmax(120px, 1fr));
@@ -720,6 +742,7 @@ function render() {
   if (!rootEl) return;
   rootEl.innerHTML = '';
   rootEl.classList.add('finance-tab');
+  applyFinanceDisplaySettings();
 
   const shell = document.createElement('div');
   shell.className = 'finance-shell';

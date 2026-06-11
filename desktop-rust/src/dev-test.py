@@ -3594,6 +3594,16 @@ async def run_tests():
           return getComputedStyle(row).backgroundImage;
         })()""")
         assert changed_band_style and changed_band_style != 'none', changed_band_style
+        assert '52, 86, 120' in changed_band_style, changed_band_style
+        row_input_style = await cdp.eval("""(() => {
+          const input = document.querySelector('#panel-finance .finance-row[data-id="1"] [data-field="name"]');
+          const style = getComputedStyle(input);
+          return {
+            backgroundColor: style.backgroundColor,
+            borderTopColor: style.borderTopColor,
+          };
+        })()""")
+        assert row_input_style['backgroundColor'] in ('rgba(0, 0, 0, 0)', 'transparent'), row_input_style
         await cdp.eval("document.querySelector('.modal-actions button:last-child').click()")
         await wait_until(cdp, "!document.querySelector('.modal-overlay')", timeout=3)
         saved_order = await cdp.eval(

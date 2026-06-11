@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## f-20260611-5 (2026-06-11)
+
+- **Finance level colors hotfix:** changing Finance display colors now
+  reapplies the active settings during each Finance redraw, including when
+  switching between existing expense lists. Editable row fields no longer draw
+  opaque blocks over the row background, so hierarchy level fills cover the
+  full row.
+
 ## f-20260611-4 (2026-06-11)
 
 - **Finance level color hotfix:** fixed Finance hierarchy level backgrounds
