@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## f-20260611-7 (2026-06-11)
+
+- **Finance color tint hotfix:** Finance level colors now render as generated
+  dark-theme HSL tints that preserve the selected hue. Bright choices such as
+  pink stay visually pink instead of turning into a purple/dark overlay from
+  alpha blending with the app background.
+
 ## f-20260611-6 (2026-06-11)
 
 - **Finance Soft First mapping:** adjusted Finance display settings so Soft

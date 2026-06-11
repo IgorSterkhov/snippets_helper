@@ -3594,18 +3594,22 @@ async def run_tests():
         soft_first_styles = await cdp.eval("""(() => {
           const root = document.querySelector('#panel-finance .finance-row[data-id="1"]');
           const child = document.querySelector('#panel-finance .finance-row[data-id="2"]');
+          const rootStyle = getComputedStyle(root);
+          const childStyle = getComputedStyle(child);
           return {
             rootClass: root.className,
             childClass: child.className,
-            rootBackground: getComputedStyle(root).backgroundImage,
-            childBackground: getComputedStyle(child).backgroundImage,
+            rootBackground: rootStyle.backgroundImage,
+            childBackground: childStyle.backgroundImage,
+            mediumVar: rootStyle.getPropertyValue('--finance-band-medium-bg').trim(),
+            softVar: childStyle.getPropertyValue('--finance-band-soft-bg').trim(),
           };
         })()""")
         assert 'finance-band-slot-1' in soft_first_styles['rootClass'], soft_first_styles
         assert 'finance-band-slot-2' in soft_first_styles['childClass'], soft_first_styles
         assert soft_first_styles['rootBackground'] and soft_first_styles['rootBackground'] != 'none', soft_first_styles
-        assert '35, 69, 103' in soft_first_styles['rootBackground'], soft_first_styles
-        assert '52, 86, 120' in soft_first_styles['childBackground'], soft_first_styles
+        assert soft_first_styles['mediumVar'].startswith('hsl('), soft_first_styles
+        assert soft_first_styles['softVar'].startswith('hsl('), soft_first_styles
         row_input_style = await cdp.eval("""(() => {
           const input = document.querySelector('#panel-finance .finance-row[data-id="1"] [data-field="name"]');
           const style = getComputedStyle(input);
@@ -3637,6 +3641,14 @@ async def run_tests():
             "document.querySelector('#panel-finance .finance-row[data-id=\"1\"]')?.classList.contains('finance-band-slot-0')",
             timeout=3,
         )
+        pink_strong_var = await cdp.eval("""(() => {
+          const root = document.querySelector('#panel-finance .finance-row[data-id="1"]');
+          const strong = document.querySelector('[data-finance-setting="strong-color"]');
+          strong.value = '#ff66cc';
+          strong.dispatchEvent(new Event('input', { bubbles: true }));
+          return getComputedStyle(root).getPropertyValue('--finance-band-strong-bg').trim();
+        })()""")
+        assert pink_strong_var == 'hsl(320 88% 24%)', pink_strong_var
         await cdp.eval("document.querySelector('.modal-actions button:first-child').click()")
         await wait_until(cdp, "!document.querySelector('.modal-overlay')", timeout=3)
         restored = await wait_until(

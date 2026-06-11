@@ -51,15 +51,15 @@ function injectStyles() {
   --finance-band-strong-color: ${DEFAULT_FINANCE_DISPLAY.strongColor};
   --finance-band-medium-color: ${DEFAULT_FINANCE_DISPLAY.mediumColor};
   --finance-band-soft-color: ${DEFAULT_FINANCE_DISPLAY.softColor};
-  --finance-band-strong-bg: rgba(38, 127, 149, 0.24);
-  --finance-band-strong-bg-soft: rgba(38, 127, 149, 0.12);
-  --finance-band-strong-border: rgba(38, 127, 149, 0.34);
-  --finance-band-medium-bg: rgba(33, 106, 125, 0.18);
-  --finance-band-medium-bg-soft: rgba(33, 106, 125, 0.08);
-  --finance-band-medium-border: rgba(33, 106, 125, 0.24);
-  --finance-band-soft-bg: rgba(27, 83, 100, 0.14);
-  --finance-band-soft-bg-soft: rgba(27, 83, 100, 0.05);
-  --finance-band-soft-border: rgba(27, 83, 100, 0.18);
+  --finance-band-strong-bg: hsl(192 53% 24%);
+  --finance-band-strong-bg-soft: hsl(192 44% 17%);
+  --finance-band-strong-border: hsl(192 53% 42%);
+  --finance-band-medium-bg: hsl(193 52% 21%);
+  --finance-band-medium-bg-soft: hsl(193 44% 15%);
+  --finance-band-medium-border: hsl(193 52% 36%);
+  --finance-band-soft-bg: hsl(194 47% 18%);
+  --finance-band-soft-bg-soft: hsl(194 39% 13%);
+  --finance-band-soft-border: hsl(194 47% 30%);
   --finance-row-hover: var(--bg-tertiary);
 }
 .finance-shell {
@@ -540,9 +540,35 @@ function rgbFromHex(hex) {
   };
 }
 
-function rgbaFromHex(hex, alpha) {
+function hslFromHex(hex) {
   const { r, g, b } = rgbFromHex(hex);
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  const r1 = r / 255;
+  const g1 = g / 255;
+  const b1 = b / 255;
+  const max = Math.max(r1, g1, b1);
+  const min = Math.min(r1, g1, b1);
+  const lightness = (max + min) / 2;
+  let hue = 0;
+  let saturation = 0;
+  if (max !== min) {
+    const delta = max - min;
+    saturation = lightness > 0.5 ? delta / (2 - max - min) : delta / (max + min);
+    if (max === r1) hue = (g1 - b1) / delta + (g1 < b1 ? 6 : 0);
+    else if (max === g1) hue = (b1 - r1) / delta + 2;
+    else hue = (r1 - g1) / delta + 4;
+    hue *= 60;
+  }
+  return {
+    h: Math.round(hue),
+    s: Math.round(saturation * 100),
+    l: Math.round(lightness * 100),
+  };
+}
+
+function hslTintFromHex(hex, lightness, saturationScale = 0.9) {
+  const { h, s } = hslFromHex(hex);
+  const saturation = Math.max(36, Math.min(88, Math.round(s * saturationScale)));
+  return `hsl(${h} ${saturation}% ${lightness}%)`;
 }
 
 async function loadFinanceDisplaySettings() {
@@ -570,15 +596,15 @@ function applySettingsToElement(el, settings) {
   el.style.setProperty('--finance-band-strong-color', settings.strongColor);
   el.style.setProperty('--finance-band-medium-color', settings.mediumColor);
   el.style.setProperty('--finance-band-soft-color', settings.softColor);
-  el.style.setProperty('--finance-band-strong-bg', rgbaFromHex(settings.strongColor, 0.24));
-  el.style.setProperty('--finance-band-strong-bg-soft', rgbaFromHex(settings.strongColor, 0.12));
-  el.style.setProperty('--finance-band-strong-border', rgbaFromHex(settings.strongColor, 0.34));
-  el.style.setProperty('--finance-band-medium-bg', rgbaFromHex(settings.mediumColor, 0.18));
-  el.style.setProperty('--finance-band-medium-bg-soft', rgbaFromHex(settings.mediumColor, 0.08));
-  el.style.setProperty('--finance-band-medium-border', rgbaFromHex(settings.mediumColor, 0.24));
-  el.style.setProperty('--finance-band-soft-bg', rgbaFromHex(settings.softColor, 0.14));
-  el.style.setProperty('--finance-band-soft-bg-soft', rgbaFromHex(settings.softColor, 0.05));
-  el.style.setProperty('--finance-band-soft-border', rgbaFromHex(settings.softColor, 0.18));
+  el.style.setProperty('--finance-band-strong-bg', hslTintFromHex(settings.strongColor, 24));
+  el.style.setProperty('--finance-band-strong-bg-soft', hslTintFromHex(settings.strongColor, 17, 0.75));
+  el.style.setProperty('--finance-band-strong-border', hslTintFromHex(settings.strongColor, 42));
+  el.style.setProperty('--finance-band-medium-bg', hslTintFromHex(settings.mediumColor, 21));
+  el.style.setProperty('--finance-band-medium-bg-soft', hslTintFromHex(settings.mediumColor, 15, 0.75));
+  el.style.setProperty('--finance-band-medium-border', hslTintFromHex(settings.mediumColor, 36));
+  el.style.setProperty('--finance-band-soft-bg', hslTintFromHex(settings.softColor, 18));
+  el.style.setProperty('--finance-band-soft-bg-soft', hslTintFromHex(settings.softColor, 13, 0.75));
+  el.style.setProperty('--finance-band-soft-border', hslTintFromHex(settings.softColor, 30));
 }
 
 function applyFinanceDisplaySettings(settings = state.display) {
