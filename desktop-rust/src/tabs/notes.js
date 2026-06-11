@@ -91,11 +91,17 @@ function buildLayout() {
 
 function normalizeFolderPaneWidth(raw, fallback = FOLDER_PANE_DEFAULT_WIDTH) {
   if (raw === null || raw === undefined || raw === '') return fallback;
-  const text = String(raw).trim();
-  if (!text || !/^-?\d+$/.test(text)) return fallback;
-  const value = Number(text);
+  let value;
+  if (typeof raw === 'number') {
+    value = raw;
+  } else {
+    const text = String(raw).trim();
+    if (!text || !/^-?\d+(\.\d+)?$/.test(text)) return fallback;
+    value = Number(text);
+  }
   if (!Number.isFinite(value)) return fallback;
-  return Math.max(FOLDER_PANE_MIN_WIDTH, Math.min(FOLDER_PANE_MAX_WIDTH, value));
+  const rounded = Math.round(value);
+  return Math.max(FOLDER_PANE_MIN_WIDTH, Math.min(FOLDER_PANE_MAX_WIDTH, rounded));
 }
 
 function applyFolderPaneWidth(width = folderPaneWidth) {

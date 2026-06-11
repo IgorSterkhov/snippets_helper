@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## f-20260611-1 (2026-06-11)
+
+- **Notes folder pane resize hotfix:** fixed folder-pane resize jitter where
+  live drag widths could be treated as invalid and snap back to the previous
+  width instead of staying at the dragged position.
+
 ## f-20260610-1 (2026-06-10)
 
 - **Notes folder pane resize:** the Notes folder tree panel can now be resized
