@@ -47,6 +47,27 @@ Before planning or editing, read the relevant existing guidance:
     modules/workflows/provider integrations/API or Tauri command surface, and
     major for incompatible DB/API/sync or removed-workflow changes.
 
+## Dirty Worktree Cleanup
+
+When the worktree has unrelated dirty files, classify them before deciding
+whether to keep, commit, or remove them.
+
+- Preserve anything that looks semantic, task-related, or user-authored. Do not
+  revert those changes without explicit user direction.
+- Automatically remove only mechanically proven noise, for example a mass
+  formatter-only Rust diff. Prove it first by comparing against formatted
+  `HEAD` copies in `/tmp` or an equivalent non-mutating check, and inspect any
+  files that differ from pure formatting.
+- Before removing mechanical noise, save a patch under `/tmp`, then restore
+  only the confirmed noisy paths with a path-scoped command such as
+  `git restore -- <paths>`. Never use broad destructive cleanup such as
+  `git reset --hard`.
+- Useful untracked workflow artifacts, such as missed checkpoint files, should
+  be committed separately from product fixes. Throwaway generated/cache files
+  may be deleted when they are clearly not source artifacts.
+- If classification is ambiguous, stop cleanup and ask the user instead of
+  guessing.
+
 ## Desktop App Notes
 
 The main desktop app is in `desktop-rust/`:
