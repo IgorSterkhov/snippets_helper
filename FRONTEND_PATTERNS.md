@@ -574,3 +574,26 @@ still using normal `<input>` fields for structured columns.
 - Reuse existing backend move commands where possible. Avoid adding a new IPC
   command just to express "create after" if the same result can be achieved by
   create plus existing atomic move/reorder logic.
+
+---
+
+## §19 Level-based tree row banding
+
+**Used in:** Finance expense rows
+
+Use this pattern when every tree row is the same underlying entity, but parent
+rows should read like report subtotals.
+
+- Derive subtotal typography from stored child count, including collapsed
+  children. This keeps chevrons, parent totals, and subtotal emphasis stable.
+- Derive background bands from visible hierarchy depth only, so sibling rows at
+  the same depth look consistent whether they are terminal rows or subtotal
+  rows.
+- Treat depth as a zero-based visible index. If `maxVisibleDepthIndex` is `0`,
+  apply no band. If it is `1`, band only depth `0`. If it is `2`, band depths
+  `0` and `1`.
+- Keep the deepest visible level neutral by default; this makes detail rows
+  quieter and prevents every row from being tinted in shallow trees.
+- For configurable colors, validate stored values as `#RRGGBB` and mix them
+  with the app background in CSS (`color-mix(..., var(--bg))`) so user-selected
+  opaque colors remain readable in dark mode.

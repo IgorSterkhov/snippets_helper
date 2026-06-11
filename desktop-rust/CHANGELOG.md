@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## f-20260611-3 (2026-06-11)
+
+- **Finance report styling:** Finance rows now use one row type visually. Rows
+  with children become subtotal rows automatically, while soft background bands
+  are assigned by visible hierarchy level so a group and a terminal row at the
+  same depth share the same fill treatment. The Finance header now has display
+  settings for level colors and strong-first or soft-first fill order, and the
+  separate `+ Group` action was removed.
+
 ## v1.12.0 (2026-06-11)
 
 - **Finance live sync/share:** Finance lists and nested expense rows now sync

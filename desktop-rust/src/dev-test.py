@@ -3512,6 +3512,129 @@ async def run_tests():
         )
     await check('T26f Ctrl+Tab tracks tasks Focus view', t26f_ctrl_tab_tracks_tasks_focus_view)
 
+    # ── T26g: Finance level bands and display settings ──────
+    async def t26g_finance_level_bands_and_settings():
+        async def seed_finance(items):
+            await cdp.eval(f"""(() => {{
+              localStorage.setItem('mock.finance_items', JSON.stringify({json.dumps(items)}));
+              const settings = JSON.parse(localStorage.getItem('mock.settings') || '{{}}');
+              delete settings['finance.level_band_strong_color'];
+              delete settings['finance.level_band_medium_color'];
+              delete settings['finance.level_band_soft_color'];
+              delete settings['finance.level_band_fill_order'];
+              localStorage.setItem('mock.settings', JSON.stringify(settings));
+            }})()""")
+
+        async def reload_finance():
+            await cdp.send('Page.navigate', url=TEST_URL)
+            await asyncio.sleep(0.8)
+            await wait_until(cdp, "!!document.querySelector('.tab-btn')", timeout=8)
+            await wait_until(cdp, "!!window.__TAURI__ && !!window.__TAURI__.core", timeout=5)
+            await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"finance\"]').click()")
+            await wait_until(cdp, "!!document.querySelector('#panel-finance .finance-row')", timeout=5)
+
+        three_levels = [
+            {'id': 1, 'uuid': 'f1', 'plan_id': 1, 'parent_id': None, 'name': 'Housing', 'amount_cents': 0, 'due_day': None, 'due_date': None, 'note': '', 'sort_order': 0, 'created_at': '2026-01-01T00:00:00Z', 'updated_at': '2026-01-01T00:00:00Z', 'sync_status': 'pending', 'user_id': 'mock-user'},
+            {'id': 2, 'uuid': 'f2', 'plan_id': 1, 'parent_id': 1, 'name': 'Utilities', 'amount_cents': 0, 'due_day': None, 'due_date': None, 'note': '', 'sort_order': 0, 'created_at': '2026-01-01T00:00:00Z', 'updated_at': '2026-01-01T00:00:00Z', 'sync_status': 'pending', 'user_id': 'mock-user'},
+            {'id': 3, 'uuid': 'f3', 'plan_id': 1, 'parent_id': 2, 'name': 'Internet', 'amount_cents': 830000, 'due_day': 15, 'due_date': None, 'note': '', 'sort_order': 0, 'created_at': '2026-01-01T00:00:00Z', 'updated_at': '2026-01-01T00:00:00Z', 'sync_status': 'pending', 'user_id': 'mock-user'},
+            {'id': 4, 'uuid': 'f4', 'plan_id': 1, 'parent_id': 1, 'name': 'Rent', 'amount_cents': 8200000, 'due_day': 3, 'due_date': None, 'note': '', 'sort_order': 1, 'created_at': '2026-01-01T00:00:00Z', 'updated_at': '2026-01-01T00:00:00Z', 'sync_status': 'pending', 'user_id': 'mock-user'},
+        ]
+        await seed_finance(three_levels)
+        await reload_finance()
+
+        header_text = await cdp.eval("document.querySelector('#panel-finance .finance-main-header')?.textContent || ''")
+        assert '+ Group' not in header_text, header_text
+        assert '+ Row' in header_text, header_text
+
+        classes = await cdp.eval("""(() => Object.fromEntries(
+          [...document.querySelectorAll('#panel-finance .finance-row')].map(row => [row.dataset.id, row.className])
+        ))()""")
+        assert 'finance-band-slot-0' in classes['1'], classes
+        assert 'finance-band-slot-1' in classes['2'], classes
+        assert 'finance-band-slot-1' in classes['4'], classes
+        assert 'finance-group-row' in classes['2'], classes
+        assert 'finance-group-row' not in classes['4'], classes
+        assert 'finance-band-slot-' not in classes['3'], classes
+
+        await cdp.eval("""(() => {
+          [...document.querySelectorAll('#panel-finance .finance-header-actions button')]
+            .find(btn => btn.title === 'Finance display settings').click();
+        })()""")
+        await wait_until(cdp, "!!document.querySelector('.modal-overlay .finance-settings-body')", timeout=3)
+        await cdp.eval("""(() => {
+          const strong = document.querySelector('[data-finance-setting="strong-color"]');
+          const medium = document.querySelector('[data-finance-setting="medium-color"]');
+          const soft = document.querySelector('[data-finance-setting="soft-color"]');
+          const order = document.querySelector('[data-finance-setting="fill-order"]');
+          strong.value = '#123456';
+          medium.value = '#234567';
+          soft.value = '#345678';
+          order.value = 'soft_first';
+          strong.dispatchEvent(new Event('input', { bubbles: true }));
+          medium.dispatchEvent(new Event('input', { bubbles: true }));
+          soft.dispatchEvent(new Event('input', { bubbles: true }));
+          order.dispatchEvent(new Event('change', { bubbles: true }));
+        })()""")
+        await wait_until(
+            cdp,
+            "document.querySelector('#panel-finance .finance-row[data-id=\"1\"]')?.classList.contains('finance-band-slot-2')",
+            timeout=3,
+        )
+        await cdp.eval("document.querySelector('.modal-actions button:last-child').click()")
+        await wait_until(cdp, "!document.querySelector('.modal-overlay')", timeout=3)
+        saved_order = await cdp.eval(
+            "JSON.parse(localStorage.getItem('mock.settings') || '{}')['finance.level_band_fill_order']"
+        )
+        assert saved_order == 'soft_first', saved_order
+
+        await cdp.eval("""(() => {
+          [...document.querySelectorAll('#panel-finance .finance-header-actions button')]
+            .find(btn => btn.title === 'Finance display settings').click();
+        })()""")
+        await wait_until(cdp, "!!document.querySelector('.modal-overlay .finance-settings-body')", timeout=3)
+        await cdp.eval("""(() => {
+          const order = document.querySelector('[data-finance-setting="fill-order"]');
+          order.value = 'strong_first';
+          order.dispatchEvent(new Event('change', { bubbles: true }));
+        })()""")
+        await wait_until(
+            cdp,
+            "document.querySelector('#panel-finance .finance-row[data-id=\"1\"]')?.classList.contains('finance-band-slot-0')",
+            timeout=3,
+        )
+        await cdp.eval("document.querySelector('.modal-actions button:first-child').click()")
+        await wait_until(cdp, "!document.querySelector('.modal-overlay')", timeout=3)
+        restored = await wait_until(
+            cdp,
+            "document.querySelector('#panel-finance .finance-row[data-id=\"1\"]')?.classList.contains('finance-band-slot-2')",
+            timeout=3,
+        )
+        assert restored is True
+
+        two_levels = [
+            {**three_levels[0], 'parent_id': None},
+            {**three_levels[3], 'parent_id': 1},
+        ]
+        await seed_finance(two_levels)
+        await reload_finance()
+        two_level_classes = await cdp.eval("""(() => Object.fromEntries(
+          [...document.querySelectorAll('#panel-finance .finance-row')].map(row => [row.dataset.id, row.className])
+        ))()""")
+        assert 'finance-band-slot-' in two_level_classes['1'], two_level_classes
+        assert 'finance-band-slot-' not in two_level_classes['4'], two_level_classes
+
+        one_level = [
+            {**three_levels[0], 'parent_id': None},
+            {**three_levels[3], 'parent_id': None},
+        ]
+        await seed_finance(one_level)
+        await reload_finance()
+        one_level_classes = await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-row')]
+          .map(row => row.className).join('\\n'))()""")
+        assert 'finance-band-slot-' not in one_level_classes, one_level_classes
+
+    await check('T26g Finance level bands and settings', t26g_finance_level_bands_and_settings)
+
     # ── T27: Detached module windows ───────────────────────
     async def t27_detached_module_context_menu_and_standalone_boot():
         await cdp.send('Page.navigate', url=TEST_URL)

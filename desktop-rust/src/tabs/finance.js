@@ -4,6 +4,19 @@ import { openShareLinkModal } from '../components/share-link-modal.js';
 import { showToast } from '../components/toast.js';
 
 const COLLAPSE_KEY = 'finance.collapsed.items';
+const FINANCE_DISPLAY_SETTINGS = {
+  strongColor: 'finance.level_band_strong_color',
+  mediumColor: 'finance.level_band_medium_color',
+  softColor: 'finance.level_band_soft_color',
+  fillOrder: 'finance.level_band_fill_order',
+};
+const DEFAULT_FINANCE_DISPLAY = {
+  strongColor: '#267f95',
+  mediumColor: '#216a7d',
+  softColor: '#1b5364',
+  fillOrder: 'strong_first',
+};
+const FINANCE_FILL_ORDERS = new Set(['strong_first', 'soft_first']);
 const PLAN_KINDS = [
   { value: 'monthly', label: 'Monthly' },
   { value: 'project', label: 'Project' },
@@ -20,6 +33,7 @@ let state = {
   collapsed: new Set(),
   itemDrag: null,
   planDrag: null,
+  display: { ...DEFAULT_FINANCE_DISPLAY },
 };
 
 let stylesInjected = false;
@@ -34,6 +48,9 @@ function injectStyles() {
   display: flex;
   flex-direction: column;
   color: var(--text);
+  --finance-band-strong-color: ${DEFAULT_FINANCE_DISPLAY.strongColor};
+  --finance-band-medium-color: ${DEFAULT_FINANCE_DISPLAY.mediumColor};
+  --finance-band-soft-color: ${DEFAULT_FINANCE_DISPLAY.softColor};
 }
 .finance-shell {
   flex: 1;
@@ -243,11 +260,35 @@ function injectStyles() {
   border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
   position: relative;
 }
+.finance-row.finance-band-slot-0 {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--finance-band-strong-color) 24%, var(--bg)),
+    color-mix(in srgb, var(--finance-band-strong-color) 12%, var(--bg))
+  );
+  border-bottom-color: color-mix(in srgb, var(--finance-band-strong-color) 34%, var(--border));
+}
+.finance-row.finance-band-slot-1 {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--finance-band-medium-color) 18%, var(--bg)),
+    color-mix(in srgb, var(--finance-band-medium-color) 8%, var(--bg))
+  );
+  border-bottom-color: color-mix(in srgb, var(--finance-band-medium-color) 24%, var(--border));
+}
+.finance-row.finance-band-slot-2 {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--finance-band-soft-color) 14%, var(--bg)),
+    color-mix(in srgb, var(--finance-band-soft-color) 5%, var(--bg))
+  );
+  border-bottom-color: color-mix(in srgb, var(--finance-band-soft-color) 18%, var(--border));
+}
 .finance-row:last-child {
   border-bottom: 0;
 }
 .finance-row:hover {
-  background: var(--bg-hover);
+  background-color: var(--bg-hover);
 }
 .finance-row.drop-before::before,
 .finance-row.drop-after::after {
@@ -294,6 +335,16 @@ function injectStyles() {
   white-space: nowrap;
   color: var(--text);
 }
+.finance-group-row .finance-name-input {
+  font-weight: 700;
+}
+.finance-group-row .finance-total {
+  color: color-mix(in srgb, var(--finance-band-strong-color) 36%, var(--text));
+  font-weight: 780;
+}
+.finance-group-row[data-depth="0"] .finance-name-input {
+  font-size: 13px;
+}
 .finance-day-field {
   display: grid;
   grid-template-columns: minmax(44px, 1fr) auto;
@@ -330,6 +381,76 @@ function injectStyles() {
   border-radius: 7px;
   margin: 0 0 2px;
 }
+.finance-settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: min(520px, 74vw);
+}
+.finance-settings-grid {
+  display: grid;
+  grid-template-columns: 1fr 92px;
+  gap: 10px;
+  align-items: center;
+}
+.finance-settings-label {
+  color: var(--text);
+  font-size: 12px;
+}
+.finance-settings-help {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.finance-color-input {
+  width: 100%;
+  height: 30px;
+  padding: 0;
+}
+.finance-settings-preview {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg);
+}
+.finance-preview-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 112px;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  font-size: 12px;
+}
+.finance-preview-row:last-child {
+  border-bottom: 0;
+}
+.finance-preview-row.finance-band-slot-0 {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--finance-band-strong-color) 24%, var(--bg)),
+    color-mix(in srgb, var(--finance-band-strong-color) 12%, var(--bg))
+  );
+}
+.finance-preview-row.finance-band-slot-1 {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--finance-band-medium-color) 18%, var(--bg)),
+    color-mix(in srgb, var(--finance-band-medium-color) 8%, var(--bg))
+  );
+}
+.finance-preview-row.finance-band-slot-2 {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--finance-band-soft-color) 14%, var(--bg)),
+    color-mix(in srgb, var(--finance-band-soft-color) 5%, var(--bg))
+  );
+}
+.finance-preview-total {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
 `;
   document.head.appendChild(style);
 }
@@ -357,6 +478,65 @@ function activePlanKind() {
 
 function planKindLabel(kind) {
   return PLAN_KIND_LABELS[kind] || PLAN_KIND_LABELS.monthly;
+}
+
+function normalizeHexColor(value, fallback) {
+  const text = String(value || '').trim();
+  return /^#[0-9a-f]{6}$/i.test(text) ? text : fallback;
+}
+
+function normalizeFillOrder(value) {
+  const text = String(value || '').trim();
+  return FINANCE_FILL_ORDERS.has(text) ? text : DEFAULT_FINANCE_DISPLAY.fillOrder;
+}
+
+function normalizeFinanceDisplaySettings(raw = {}) {
+  return {
+    strongColor: normalizeHexColor(raw.strongColor, DEFAULT_FINANCE_DISPLAY.strongColor),
+    mediumColor: normalizeHexColor(raw.mediumColor, DEFAULT_FINANCE_DISPLAY.mediumColor),
+    softColor: normalizeHexColor(raw.softColor, DEFAULT_FINANCE_DISPLAY.softColor),
+    fillOrder: normalizeFillOrder(raw.fillOrder),
+  };
+}
+
+async function loadFinanceDisplaySettings() {
+  try {
+    const [strongColor, mediumColor, softColor, fillOrder] = await Promise.all([
+      call('get_setting', { key: FINANCE_DISPLAY_SETTINGS.strongColor }),
+      call('get_setting', { key: FINANCE_DISPLAY_SETTINGS.mediumColor }),
+      call('get_setting', { key: FINANCE_DISPLAY_SETTINGS.softColor }),
+      call('get_setting', { key: FINANCE_DISPLAY_SETTINGS.fillOrder }),
+    ]);
+    state.display = normalizeFinanceDisplaySettings({
+      strongColor,
+      mediumColor,
+      softColor,
+      fillOrder,
+    });
+  } catch {
+    state.display = { ...DEFAULT_FINANCE_DISPLAY };
+  }
+  applyFinanceDisplaySettings();
+}
+
+function applySettingsToElement(el, settings) {
+  if (!el) return;
+  el.style.setProperty('--finance-band-strong-color', settings.strongColor);
+  el.style.setProperty('--finance-band-medium-color', settings.mediumColor);
+  el.style.setProperty('--finance-band-soft-color', settings.softColor);
+}
+
+function applyFinanceDisplaySettings(settings = state.display) {
+  applySettingsToElement(rootEl, settings);
+}
+
+function bandSlotForDepth(depth, maxDepth, display = state.display) {
+  if (!Number.isFinite(depth) || !Number.isFinite(maxDepth) || maxDepth <= 0) return null;
+  if (depth >= maxDepth) return null;
+  if (display.fillOrder === 'soft_first') {
+    return Math.max(0, 2 - depth);
+  }
+  return Math.min(2, depth);
 }
 
 function formatMoney(amountCents, currency = 'RUB') {
@@ -618,7 +798,7 @@ function renderMainHeader(plan) {
   const edit = document.createElement('div');
   edit.className = 'finance-plan-edit';
   const nameInput = document.createElement('input');
-  nameInput.className = 'finance-input';
+  nameInput.className = 'finance-input finance-name-input';
   nameInput.dataset.planField = 'name';
   nameInput.value = plan.name || '';
   nameInput.placeholder = 'Plan name';
@@ -655,6 +835,12 @@ function renderMainHeader(plan) {
 
   const actions = document.createElement('div');
   actions.className = 'finance-header-actions';
+  const settingsBtn = document.createElement('button');
+  settingsBtn.className = 'finance-small-btn';
+  settingsBtn.type = 'button';
+  settingsBtn.title = 'Finance display settings';
+  settingsBtn.textContent = '⚙';
+  settingsBtn.addEventListener('click', openFinanceDisplaySettings);
   const shareBtn = document.createElement('button');
   shareBtn.className = 'finance-small-btn';
   shareBtn.type = 'button';
@@ -665,18 +851,13 @@ function renderMainHeader(plan) {
   addRow.className = 'finance-small-btn';
   addRow.type = 'button';
   addRow.textContent = '+ Row';
-  addRow.addEventListener('click', () => createItem(null, false));
-  const addGroup = document.createElement('button');
-  addGroup.className = 'finance-small-btn';
-  addGroup.type = 'button';
-  addGroup.textContent = '+ Group';
-  addGroup.addEventListener('click', () => createItem(null, true));
+  addRow.addEventListener('click', () => createItem(null));
   const delPlan = document.createElement('button');
   delPlan.className = 'finance-small-btn';
   delPlan.type = 'button';
   delPlan.textContent = 'Del';
   delPlan.addEventListener('click', deleteActivePlan);
-  actions.append(shareBtn, addRow, addGroup, delPlan);
+  actions.append(settingsBtn, shareBtn, addRow, delPlan);
 
   header.append(edit, actions);
   return header;
@@ -698,6 +879,113 @@ async function saveActivePlanHeaderFromDom() {
   });
   const plan = state.plans.find((item) => planId(item) === state.activePlanId) || {};
   return { ...plan, name, currency, kind };
+}
+
+function financeDisplaySettingsFromModal(body) {
+  return normalizeFinanceDisplaySettings({
+    strongColor: body.querySelector('[data-finance-setting="strong-color"]')?.value,
+    mediumColor: body.querySelector('[data-finance-setting="medium-color"]')?.value,
+    softColor: body.querySelector('[data-finance-setting="soft-color"]')?.value,
+    fillOrder: body.querySelector('[data-finance-setting="fill-order"]')?.value,
+  });
+}
+
+function renderFinanceSettingsPreview(preview, settings) {
+  if (!preview) return;
+  applySettingsToElement(preview, settings);
+  preview.innerHTML = '';
+  const rows = [
+    { depth: 0, maxDepth: 2, label: 'Housing', total: '96 500', group: true },
+    { depth: 1, maxDepth: 2, label: 'Utilities', total: '14 500', group: true },
+    { depth: 2, maxDepth: 2, label: 'Internet', total: '8 300', group: false },
+  ];
+  for (const row of rows) {
+    const el = document.createElement('div');
+    const classes = ['finance-preview-row'];
+    const slot = bandSlotForDepth(row.depth, row.maxDepth, settings);
+    if (slot != null) classes.push(`finance-band-slot-${slot}`);
+    el.className = classes.join(' ');
+    const name = document.createElement('div');
+    name.style.paddingLeft = `${row.depth * 18}px`;
+    name.style.fontWeight = row.group ? '700' : '500';
+    name.textContent = row.label;
+    const total = document.createElement('div');
+    total.className = 'finance-preview-total';
+    total.textContent = row.total;
+    el.append(name, total);
+    preview.appendChild(el);
+  }
+}
+
+function openFinanceDisplaySettings() {
+  const initial = { ...state.display };
+  let draft = { ...state.display };
+  const body = document.createElement('div');
+  body.className = 'finance-settings-body';
+  body.innerHTML = `
+    <div class="finance-settings-help">
+      Background fill is assigned by row depth, not by whether a row has children.
+      The deepest visible level stays neutral.
+    </div>
+    <div class="finance-settings-grid">
+      <label class="finance-settings-label" for="finance-band-strong">Strong fill</label>
+      <input id="finance-band-strong" class="finance-color-input" data-finance-setting="strong-color" type="color" value="${draft.strongColor}">
+      <label class="finance-settings-label" for="finance-band-medium">Medium fill</label>
+      <input id="finance-band-medium" class="finance-color-input" data-finance-setting="medium-color" type="color" value="${draft.mediumColor}">
+      <label class="finance-settings-label" for="finance-band-soft">Soft fill</label>
+      <input id="finance-band-soft" class="finance-color-input" data-finance-setting="soft-color" type="color" value="${draft.softColor}">
+      <label class="finance-settings-label" for="finance-band-order">Fill order</label>
+      <select id="finance-band-order" data-finance-setting="fill-order">
+        <option value="strong_first">Strong first</option>
+        <option value="soft_first">Soft first</option>
+      </select>
+    </div>
+    <div class="finance-settings-preview" aria-label="Finance level fill preview"></div>
+  `;
+  const orderSelect = body.querySelector('[data-finance-setting="fill-order"]');
+  orderSelect.value = draft.fillOrder;
+  const preview = body.querySelector('.finance-settings-preview');
+  renderFinanceSettingsPreview(preview, draft);
+
+  function applyDraft({ rerender = false } = {}) {
+    draft = financeDisplaySettingsFromModal(body);
+    state.display = { ...draft };
+    applyFinanceDisplaySettings(draft);
+    renderFinanceSettingsPreview(preview, draft);
+    if (rerender) render();
+  }
+
+  for (const input of body.querySelectorAll('[data-finance-setting$="color"]')) {
+    input.addEventListener('input', () => applyDraft());
+  }
+  orderSelect.addEventListener('change', () => applyDraft({ rerender: true }));
+
+  showModal({
+    title: 'Finance — display settings',
+    body,
+    onConfirm: async () => {
+      draft = financeDisplaySettingsFromModal(body);
+      await Promise.all([
+        call('set_setting', { key: FINANCE_DISPLAY_SETTINGS.strongColor, value: draft.strongColor }),
+        call('set_setting', { key: FINANCE_DISPLAY_SETTINGS.mediumColor, value: draft.mediumColor }),
+        call('set_setting', { key: FINANCE_DISPLAY_SETTINGS.softColor, value: draft.softColor }),
+        call('set_setting', { key: FINANCE_DISPLAY_SETTINGS.fillOrder, value: draft.fillOrder }),
+      ]);
+      state.display = { ...draft };
+      applyFinanceDisplaySettings();
+      render();
+      showToast('Finance display settings saved', 'success');
+    },
+    onCancel: () => {
+      state.display = { ...initial };
+      applyFinanceDisplaySettings(initial);
+      render();
+    },
+  }).catch((err) => {
+    if (String(err?.message || err) !== 'cancelled') {
+      showToast(`Failed to update display settings: ${err}`, 'error');
+    }
+  });
 }
 
 async function shareActivePlan(plan) {
@@ -756,7 +1044,7 @@ function renderTree(roots, children, totals) {
   if (!state.items.length) {
     const empty = document.createElement('div');
     empty.className = 'finance-empty';
-    empty.textContent = 'No expense rows yet. Add a row or group.';
+    empty.textContent = 'No expense rows yet. Add a row.';
     wrap.appendChild(empty);
     return wrap;
   }
@@ -773,19 +1061,24 @@ function renderTree(roots, children, totals) {
   tree.appendChild(head);
 
   const rows = flattenVisible(roots, children);
+  const maxDepth = rows.reduce((max, row) => Math.max(max, row.depth), 0);
   for (const row of rows) {
-    tree.appendChild(renderItemRow(row, children, totals));
+    tree.appendChild(renderItemRow(row, children, totals, maxDepth));
   }
   wrap.appendChild(tree);
   return wrap;
 }
 
-function renderItemRow(row, children, totals) {
+function renderItemRow(row, children, totals, maxDepth) {
   const { item, depth } = row;
   const id = itemId(item);
   const childCount = (children.get(id) || []).length;
   const rowEl = document.createElement('div');
-  rowEl.className = 'finance-row';
+  const classes = ['finance-row'];
+  if (childCount > 0) classes.push('finance-group-row');
+  const bandSlot = bandSlotForDepth(depth, maxDepth);
+  if (bandSlot != null) classes.push(`finance-band-slot-${bandSlot}`);
+  rowEl.className = classes.join(' ');
   rowEl.dataset.id = String(id);
   rowEl.dataset.depth = String(depth);
   rowEl.dataset.parentId = item.parent_id == null ? '' : String(item.parent_id);
@@ -887,7 +1180,7 @@ function renderItemRow(row, children, totals) {
   addChild.type = 'button';
   addChild.title = 'Add child row';
   addChild.textContent = '+';
-  addChild.addEventListener('click', () => createItem(id, false));
+  addChild.addEventListener('click', () => createItem(id));
   const del = document.createElement('button');
   del.className = 'finance-icon-btn';
   del.type = 'button';
@@ -1086,12 +1379,12 @@ async function deleteActivePlan() {
   }
 }
 
-async function createItem(parentId, asGroup) {
+async function createItem(parentId) {
   try {
     const created = await call('create_finance_item', {
       planId: state.activePlanId,
       parentId,
-      name: asGroup ? 'New group' : 'New item',
+      name: 'New row',
       amountCents: 0,
       dueDay: null,
       dueDate: null,
@@ -1332,6 +1625,7 @@ export async function init(container) {
   rootEl.classList.add('finance-tab');
   rootEl.innerHTML = '<div class="loading">Loading finance...</div>';
   try {
+    await loadFinanceDisplaySettings();
     await loadAll();
   } catch (err) {
     rootEl.innerHTML = '';
