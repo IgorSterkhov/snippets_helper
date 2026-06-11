@@ -20,6 +20,15 @@ const TABS = [
   { id: 'ai', label: 'AI', icon: 'AI', loader: (el) => import('./tabs/ai/ai-main.js').then(m => m.init(el)) },
 ];
 
+const SIDEBAR_GROUPS = [
+  {
+    id: 'dev',
+    label: 'DEV',
+    icon: '&lt;/&gt;',
+    childIds: ['sql', 'superset', 'commits', 'repo-search'],
+  },
+];
+
 function getStandaloneRequest() {
   const params = new URLSearchParams(window.location.search);
   if (params.get('standalone') !== '1') {
@@ -109,7 +118,7 @@ async function main() {
   await checkFirstRun();
 
   app.innerHTML = '';
-  const tabContainer = new TabContainer(app, TABS);
+  const tabContainer = new TabContainer(app, TABS, { groups: SIDEBAR_GROUPS });
   const objectViewTabs = new Set(['shortcuts', 'notes', 'tasks']);
   const viewHistory = installViewHistory({ tabContainer, tabs: TABS });
   for (const tab of TABS) {

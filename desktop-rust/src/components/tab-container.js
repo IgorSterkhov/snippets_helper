@@ -23,12 +23,23 @@ function renderTabIcon(icon) {
 }
 
 export class TabContainer {
-  constructor(containerEl, tabs) {
+  constructor(containerEl, tabs, options = {}) {
     this.tabs = tabs;
+    this.groups = options.groups || [];
     this.loadedTabs = new Set();
     this.activeTabId = null;
     this.panels = {};
     this.buttons = {};
+    this.groupButtons = {};
+    this.groupChildren = {};
+    this.groupExpanded = {};
+    this.childToGroup = {};
+    for (const group of this.groups) {
+      this.groupExpanded[group.id] = false;
+      for (const tabId of group.childIds || []) {
+        this.childToGroup[tabId] = group.id;
+      }
+    }
 
     // Create tab bar (vertical sidebar)
     this.tabBar = document.createElement('div');
@@ -39,16 +50,19 @@ export class TabContainer {
     this.contentArea.className = 'tab-content';
 
     // Build tab buttons and panels
+    const renderedGroups = new Set();
     for (const tab of tabs) {
-      // Button
-      const btn = document.createElement('button');
-      btn.className = 'tab-btn';
-      btn.dataset.tabId = tab.id;
-      const iconHtml = renderTabIcon(tab.icon);
-      btn.innerHTML = `${iconHtml}<span class="tab-label">${tab.label}</span>`;
-      btn.addEventListener('click', () => this.activate(tab.id));
-      this.tabBar.appendChild(btn);
-      this.buttons[tab.id] = btn;
+      const groupId = this.childToGroup[tab.id];
+      if (groupId) {
+        if (!renderedGroups.has(groupId)) {
+          const group = this.groups.find(g => g.id === groupId);
+          if (group) this.createGroup(group);
+          renderedGroups.add(groupId);
+        }
+      } else {
+        const btn = this.createTabButton(tab);
+        this.tabBar.appendChild(btn);
+      }
 
       // Panel
       const panel = document.createElement('div');
@@ -62,6 +76,75 @@ export class TabContainer {
 
     containerEl.appendChild(this.tabBar);
     containerEl.appendChild(this.contentArea);
+    this.applyGroupStates();
+  }
+
+  createTabButton(tab, extraClass = '') {
+    const btn = document.createElement('button');
+    btn.className = `tab-btn${extraClass ? ' ' + extraClass : ''}`;
+    btn.dataset.tabId = tab.id;
+    const iconHtml = renderTabIcon(tab.icon);
+    btn.innerHTML = `${iconHtml}<span class="tab-label">${tab.label}</span>`;
+    btn.addEventListener('click', () => this.activate(tab.id));
+    this.buttons[tab.id] = btn;
+    return btn;
+  }
+
+  createGroup(group) {
+    const wrap = document.createElement('div');
+    wrap.className = 'tab-group';
+    wrap.dataset.groupId = group.id;
+
+    const btn = document.createElement('button');
+    btn.className = 'tab-btn tab-group-btn';
+    btn.dataset.groupId = group.id;
+    btn.innerHTML = `${renderTabIcon(group.icon)}<span class="tab-label">${group.label}</span>`;
+    btn.addEventListener('click', () => this.toggleGroup(group.id));
+    wrap.appendChild(btn);
+    this.groupButtons[group.id] = btn;
+
+    const children = document.createElement('div');
+    children.className = 'tab-group-children';
+    for (const tabId of group.childIds || []) {
+      const tab = this.tabs.find(t => t.id === tabId);
+      if (!tab) continue;
+      children.appendChild(this.createTabButton(tab, 'tab-group-child'));
+    }
+    wrap.appendChild(children);
+    this.groupChildren[group.id] = children;
+    this.tabBar.appendChild(wrap);
+  }
+
+  toggleGroup(groupId) {
+    const group = this.groups.find(g => g.id === groupId);
+    if (!group) return;
+    if ((group.childIds || []).includes(this.activeTabId)) {
+      this.groupExpanded[groupId] = true;
+    } else {
+      this.groupExpanded[groupId] = !this.groupExpanded[groupId];
+    }
+    this.applyGroupStates();
+  }
+
+  applyGroupStates() {
+    for (const group of this.groups) {
+      const hasActiveChild = (group.childIds || []).includes(this.activeTabId);
+      const expanded = hasActiveChild || !!this.groupExpanded[group.id];
+      const btn = this.groupButtons[group.id];
+      const children = this.groupChildren[group.id];
+      if (btn) {
+        btn.classList.toggle('has-active-child', hasActiveChild);
+        btn.classList.toggle('expanded', expanded);
+        btn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+      }
+      if (children) {
+        children.classList.toggle('expanded', expanded);
+        children.setAttribute('aria-hidden', expanded ? 'false' : 'true');
+        for (const childButton of children.querySelectorAll('.tab-btn')) {
+          childButton.tabIndex = expanded ? 0 : -1;
+        }
+      }
+    }
   }
 
   async activate(tabId) {
@@ -82,6 +165,14 @@ export class TabContainer {
     this.buttons[tabId].classList.add('active');
     this.panels[tabId].style.display = '';
     this.activeTabId = tabId;
+    for (const group of this.groups) {
+      if ((group.childIds || []).includes(tabId)) {
+        this.groupExpanded[group.id] = true;
+      } else {
+        this.groupExpanded[group.id] = false;
+      }
+    }
+    this.applyGroupStates();
 
     // Lazy-load if first time
     if (!this.loadedTabs.has(tabId)) {

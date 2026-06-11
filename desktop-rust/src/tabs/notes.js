@@ -20,6 +20,7 @@ let expandMultiplier = 4;
 let aiNoteListenerInstalled = false;
 let activeFolderDrag = null;
 let activeFolderPaneResize = null;
+let activeFolderContextMenu = null;
 let folderPaneWidth = 260;
 
 const FOLDER_DRAG_START_PX = 5;
@@ -332,9 +333,10 @@ async function loadFolders() {
 function renderFolders() {
   const list = root.querySelector('#folder-list');
   if (!list) return;
+  closeFolderContextMenu();
   list.innerHTML = '';
 
-  const { roots, map } = buildFolderTree(folders);
+  const { roots } = buildFolderTree(folders);
 
   function renderNode(node, depth) {
     const hasChildren = node.children.length > 0;
@@ -388,19 +390,6 @@ function renderFolders() {
     const nameSpan = el('span', { text: node.name, class: 'folder-name' });
     item.appendChild(nameSpan);
 
-    // Actions
-    const actions = el('span', { class: 'folder-actions' });
-    const addSubBtn = el('button', { text: '+', class: 'btn-icon', title: 'Add sub-folder' });
-    addSubBtn.addEventListener('click', (e) => { e.stopPropagation(); onAddFolder(node.id); });
-    const renameBtn = el('button', { text: '\u270E', class: 'btn-icon', title: 'Rename' });
-    renameBtn.addEventListener('click', (e) => { e.stopPropagation(); onRenameFolder(node); });
-    const deleteBtn = el('button', { text: '\u2715', class: 'btn-icon btn-icon-danger', title: 'Delete' });
-    deleteBtn.addEventListener('click', (e) => { e.stopPropagation(); onDeleteFolder(node); });
-    actions.appendChild(addSubBtn);
-    actions.appendChild(renameBtn);
-    actions.appendChild(deleteBtn);
-    item.appendChild(actions);
-
     item.addEventListener('click', (event) => {
       if (item.dataset.dragSuppressClick === '1') {
         event.preventDefault();
@@ -410,6 +399,7 @@ function renderFolders() {
       }
       selectFolder(node.id);
     });
+    item.addEventListener('contextmenu', (event) => showFolderContextMenu(event, node));
     list.appendChild(item);
 
     // Render children if expanded
@@ -424,6 +414,74 @@ function renderFolders() {
     renderNode(r, 0);
   }
   installFolderTreeDnd(list);
+}
+
+function closeFolderContextMenu() {
+  if (activeFolderContextMenu) {
+    activeFolderContextMenu.remove();
+    activeFolderContextMenu = null;
+  }
+  document.removeEventListener('click', closeFolderContextMenu);
+  document.removeEventListener('keydown', onFolderContextMenuKeydown, true);
+  window.removeEventListener('blur', closeFolderContextMenu);
+}
+
+function onFolderContextMenuKeydown(event) {
+  if (event.key !== 'Escape') return;
+  event.preventDefault();
+  event.stopPropagation();
+  closeFolderContextMenu();
+}
+
+function positionFolderContextMenu(menu, event) {
+  const margin = 8;
+  const rect = menu.getBoundingClientRect();
+  const left = Math.min(
+    Math.max(margin, event.clientX),
+    Math.max(margin, window.innerWidth - rect.width - margin),
+  );
+  const top = Math.min(
+    Math.max(margin, event.clientY),
+    Math.max(margin, window.innerHeight - rect.height - margin),
+  );
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+}
+
+function addFolderContextMenuButton(menu, label, action, danger = false) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.textContent = label;
+  if (danger) button.classList.add('danger');
+  button.addEventListener('click', async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    closeFolderContextMenu();
+    await action();
+  });
+  menu.appendChild(button);
+}
+
+function showFolderContextMenu(event, folder) {
+  event.preventDefault();
+  event.stopPropagation();
+  closeFolderContextMenu();
+
+  const menu = document.createElement('div');
+  menu.className = 'notes-folder-context-menu';
+  menu.addEventListener('click', (e) => e.stopPropagation());
+  addFolderContextMenuButton(menu, 'Add sub-folder', () => onAddFolder(folder.id));
+  addFolderContextMenuButton(menu, 'Rename', () => onRenameFolder(folder));
+  addFolderContextMenuButton(menu, 'Delete', () => onDeleteFolder(folder), true);
+  document.body.appendChild(menu);
+  activeFolderContextMenu = menu;
+  positionFolderContextMenu(menu, event);
+
+  setTimeout(() => {
+    document.addEventListener('click', closeFolderContextMenu);
+    document.addEventListener('keydown', onFolderContextMenuKeydown, true);
+    window.addEventListener('blur', closeFolderContextMenu);
+  }, 0);
 }
 
 function installFolderTreeDnd(list) {
@@ -1523,23 +1581,6 @@ function notesCSS() {
   opacity: 0.7;
 }
 
-.folder-actions {
-  display: flex;
-  width: 70px;
-  gap: 2px;
-  flex-shrink: 0;
-  justify-content: flex-end;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.15s;
-}
-
-.notes-folder-item:hover .folder-actions,
-.notes-folder-item:focus-within .folder-actions {
-  opacity: 1;
-  pointer-events: auto;
-}
-
 .notes-folder-drop-line {
   height: 0;
   border-top: 2px solid var(--accent);
@@ -1558,30 +1599,42 @@ function notesCSS() {
   box-shadow: 0 16px 32px rgba(0,0,0,0.5);
 }
 
-.btn-icon {
-  background: transparent;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  padding: 2px 6px;
-  font-size: 13px;
-  border-radius: 4px;
-  min-width: 0;
-}
-
-.btn-icon:hover {
-  background: var(--bg-tertiary);
-  color: var(--text);
-}
-
-.btn-icon-danger:hover {
-  color: var(--danger);
-}
-
 .btn-small {
   padding: 4px 10px;
   font-size: 16px;
   line-height: 1;
+}
+
+.notes-folder-context-menu {
+  position: fixed;
+  z-index: 10000;
+  min-width: 150px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.36);
+}
+
+.notes-folder-context-menu button {
+  width: 100%;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 7px 9px;
+  text-align: left;
+}
+
+.notes-folder-context-menu button:hover {
+  background: var(--bg-tertiary);
+}
+
+.notes-folder-context-menu button.danger:hover {
+  color: var(--danger);
 }
 
 .notes-list {

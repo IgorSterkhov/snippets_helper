@@ -139,11 +139,35 @@ For split panes that users can resize, keep the behavior local and predictable:
 
 ---
 
-## §3 Frontend testing
+## §3 Sidebar module groups
+
+**Used in:** Main sidebar DEV group
+
+When grouping main sidebar modules:
+
+- Keep every real module as a normal tab with its own panel id and
+  `TabContainer.buttons[tabId]` entry. Grouping is a rendering concern, not a
+  replacement for tab identity.
+- Do not give group buttons `.tab-btn.active`; existing code and tests use
+  `.tab-btn.active` as the active real module. Use separate classes such as
+  `.expanded` and `.has-active-child`.
+- Put group expand/collapse in `TabContainer.activate()` so direct clicks,
+  restored last tab, Ctrl+Tab, AI navigation, and other programmatic activation
+  all produce the same sidebar state.
+- A manually expanded group may stay open while no other module is activated,
+  but switching to any non-group child should collapse it.
+- Hidden child buttons should not be mouse or keyboard targets while collapsed:
+  use `pointer-events: none`, `aria-hidden`, and `tabIndex = -1`.
+- Keep child buttons in the DOM with their usual `data-tab-id` selectors so
+  tests, Ctrl+Tab, and command-driven navigation can still activate them.
+
+---
+
+## §4 Frontend testing
 
 **Before committing any frontend change**, run these checks. All three must pass.
 
-### 3a. `node --check` — syntax validation
+### 4a. `node --check` — syntax validation
 
 Catches syntax errors (missing brackets, stray commas, etc.) instantly without executing code.
 
@@ -153,7 +177,7 @@ node --check path/to/file.js && echo "OK"
 
 Run on every changed JS file. No runtime required, no imports resolved — pure parse check.
 
-### 3b. Duplicate export detection
+### 4b. Duplicate export detection
 
 ES modules reject duplicate exports of the same name, but `node --check` does NOT catch this (it only parses). The symptom: tab loader catches the error and shows "Failed to load tab", which masks the real cause.
 
@@ -177,7 +201,7 @@ function resetCollapseState() { ... }           // line 14 — plain function
 export { loadCheckboxes, isCollapsed, resetCollapseState };  // line 580 — only export
 ```
 
-### 3c. `dev-test.py` — integration test suite
+### 4c. `dev-test.py` — integration test suite
 
 Runs the app through a headless browser mock (Chromium via CDP) with mocked Tauri backend. Covers tab loading, modal interactions, and core user flows.
 
@@ -188,7 +212,7 @@ cd desktop-rust/src && python3 dev-test.py
 
 If any test fails — debug before committing. The test uses `desktop-rust/src/dev-mock.js` which registers all Tauri command stubs; new commands need a corresponding mock entry there.
 
-### 3d. CI monitoring after release tag
+### 4d. CI monitoring after release tag
 
 After pushing a release tag (`f-*` or `v*`), the CI workflow triggers automatically. Monitor it and report the result — do NOT assume it succeeded.
 
@@ -207,7 +231,7 @@ For `f-*` releases: 3 assets expected (frontend zip, `frontend-version.json`, `l
 
 ---
 
-## §4 Two-column layout — avoid CSS Grid in Tauri WebView2
+## §5 Two-column layout — avoid CSS Grid in Tauri WebView2
 
 **Used in:** Tasks tab (two-col card layout)
 
@@ -230,7 +254,7 @@ For `f-*` releases: 3 assets expected (frontend zip, `frontend-version.json`, `l
 
 ---
 
-## §5 Markdown code block rendering
+## §6 Markdown code block rendering
 
 **Used in:** Snippets tab rendered Code, Description, and Obsidian Note views.
 
@@ -255,7 +279,7 @@ typed blocks such as `bash` and `sql`, an untyped `plain` block, and copy output
 
 ---
 
-## §6 Focus split view
+## §7 Focus split view
 
 **Used in:** Tasks tab Focus view
 
@@ -274,7 +298,7 @@ editor without removing global filters.
 
 ---
 
-## §7 Persisted local UI state
+## §8 Persisted local UI state
 
 **Used in:** Tasks tab checkbox collapse state
 
@@ -293,7 +317,7 @@ between devices.
 
 ---
 
-## §8 Derived key chips and clouds
+## §9 Derived key chips and clouds
 
 **Used in:** Snippets tab (Key Cloud, Related snippets)
 
@@ -344,7 +368,7 @@ names or titles and does not need a persisted taxonomy.
 
 ---
 
-## §9 Local list sort modes
+## §10 Local list sort modes
 
 **Used in:** Snippets tab left panel
 
@@ -364,7 +388,7 @@ changing backend APIs.
 
 ---
 
-## §10 Persistent error diagnostics
+## §11 Persistent error diagnostics
 
 **Used in:** Notes/Snippets image upload modal
 
@@ -384,7 +408,7 @@ technical context from the user.
 
 ---
 
-## §11 Sandboxed HTML Cards
+## §12 Sandboxed HTML Cards
 
 **Used in:** Notes/Snippets Markdown previews and public share pages
 
@@ -406,7 +430,7 @@ HTML artifact such as a generated presentation.
 
 ---
 
-## §12 External snapshot publishing
+## §13 External snapshot publishing
 
 **Used in:** Notes/Snippets Telegra.ph publishing
 
@@ -428,7 +452,7 @@ Use this pattern when an item can be exported to a third-party public page:
 
 ---
 
-## §13 Native media preview fallback
+## §14 Native media preview fallback
 
 **Used in:** Notes/Snippets image upload modal, desktop Markdown Figure Cards
 
@@ -447,7 +471,7 @@ Use this pattern for server media URLs under `/snippets-media/`.
 
 ---
 
-## §14 Image upload variant preview
+## §15 Image upload variant preview
 
 **Used in:** Notes/Snippets Markdown image upload modal
 
@@ -465,7 +489,7 @@ preview connected:
 
 ---
 
-## §15 Contenteditable list boundary navigation
+## §16 Contenteditable list boundary navigation
 
 **Used in:** Tasks checkbox text rows
 
@@ -487,7 +511,7 @@ boundaries.
 
 ---
 
-## §16 Ctrl+Tab recent view history
+## §17 Ctrl+Tab recent view history
 
 **Used in:** Main desktop shell, Snippets, Tasks, Notes
 

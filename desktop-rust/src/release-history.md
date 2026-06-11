@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## f-20260611-2 (2026-06-11)
+
+- **Notes folder row actions:** folder rows no longer reserve a wide inline
+  action-button area. Add sub-folder, Rename, and Delete moved to a right-click
+  context menu, leaving more room for folder names.
+- **DEV sidebar group:** SQL, Superset, Commits, and Search are grouped under a
+  compact DEV button in the main sidebar. The group expands on click or when a
+  grouped module is active, including Ctrl+Tab/programmatic activation, and
+  collapses again after switching to another module.
+
 ## f-20260611-1 (2026-06-11)
 
 - **Notes folder pane resize hotfix:** fixed folder-pane resize jitter where
