@@ -15,6 +15,10 @@ import {
   getModifiedTaskCategoriesSince, getModifiedTaskStatusesSince, getModifiedTasksSince,
   getModifiedTaskCheckboxesSince, getModifiedTaskLinksSince,
 } from '../db/taskRepo';
+import {
+  buildUpsertFinancePlan, buildUpsertFinanceItem,
+  getModifiedFinancePlansSince, getModifiedFinanceItemsSince,
+} from '../db/financeRepo';
 
 const BUILDERS = {
   shortcuts: buildUpsertSnippet,
@@ -26,6 +30,8 @@ const BUILDERS = {
   tasks: buildUpsertTask,
   task_checkboxes: buildUpsertTaskCheckbox,
   task_links: buildUpsertTaskLink,
+  finance_plans: buildUpsertFinancePlan,
+  finance_items: buildUpsertFinanceItem,
 };
 
 const TABLE_ORDER = [
@@ -38,6 +44,8 @@ const TABLE_ORDER = [
   'tasks',
   'task_checkboxes',
   'task_links',
+  'finance_plans',
+  'finance_items',
 ];
 
 function shouldApplyPulledRow(table, row) {
@@ -47,10 +55,14 @@ function shouldApplyPulledRow(table, row) {
   if ((table === 'task_checkboxes' || table === 'task_links') && !row.task_uuid) {
     return false;
   }
+  if (table === 'finance_items' && !row.plan_uuid) {
+    return false;
+  }
   return true;
 }
 
 let syncing = false;
+let currentSyncPromise = null;
 const listeners = new Set();
 
 export function subscribeSyncStatus(cb) {
@@ -66,7 +78,7 @@ function emit(payload) {
 
 export async function countPendingChanges() {
   const since = await getLastSyncAt();
-  const [s, t, n, f, tc, ts, task, cb, links] = await Promise.all([
+  const [s, t, n, f, tc, ts, task, cb, links, fp, fi] = await Promise.all([
     getModifiedSnippetsSince(since),
     getModifiedTagsSince(since),
     getModifiedNotesSince(since),
@@ -76,8 +88,10 @@ export async function countPendingChanges() {
     getModifiedTasksSince(since),
     getModifiedTaskCheckboxesSince(since),
     getModifiedTaskLinksSince(since),
+    getModifiedFinancePlansSince(since),
+    getModifiedFinanceItemsSince(since),
   ]);
-  return s.length + t.length + n.length + f.length + tc.length + ts.length + task.length + cb.length + links.length;
+  return s.length + t.length + n.length + f.length + tc.length + ts.length + task.length + cb.length + links.length + fp.length + fi.length;
 }
 
 async function emitPending() {
@@ -122,47 +136,57 @@ function applyPulledChanges(changes) {
 }
 
 export async function performSync() {
-  if (syncing) return;
-  syncing = true;
-  emit({ type: 'syncing', value: true });
+  if (currentSyncPromise) return currentSyncPromise;
 
-  try {
-    const lastSync = await getLastSyncAt();
+  currentSyncPromise = (async () => {
+    syncing = true;
+    emit({ type: 'syncing', value: true });
 
-    // 1. Pull server changes and apply them in a single transaction.
-    const pullResult = await syncPull(lastSync);
-    await applyPulledChanges(pullResult.changes);
+    try {
+      const lastSync = await getLastSyncAt();
 
-    // 2. Push local changes.
-    const changes = {};
-    const localSnippets = await getModifiedSnippetsSince(lastSync);
-    if (localSnippets.length) changes.shortcuts = localSnippets;
-    const localTags = await getModifiedTagsSince(lastSync);
-    if (localTags.length) changes.snippet_tags = localTags;
-    const localNotes = await getModifiedNotesSince(lastSync);
-    if (localNotes.length) changes.notes = localNotes;
-    const localFolders = await getModifiedFoldersSince(lastSync);
-    if (localFolders.length) changes.note_folders = localFolders;
-    const localTaskCategories = await getModifiedTaskCategoriesSince(lastSync);
-    if (localTaskCategories.length) changes.task_categories = localTaskCategories;
-    const localTaskStatuses = await getModifiedTaskStatusesSince(lastSync);
-    if (localTaskStatuses.length) changes.task_statuses = localTaskStatuses;
-    const localTasks = await getModifiedTasksSince(lastSync);
-    if (localTasks.length) changes.tasks = localTasks;
-    const localTaskCheckboxes = await getModifiedTaskCheckboxesSince(lastSync);
-    if (localTaskCheckboxes.length) changes.task_checkboxes = localTaskCheckboxes;
-    const localTaskLinks = await getModifiedTaskLinksSince(lastSync);
-    if (localTaskLinks.length) changes.task_links = localTaskLinks;
+      // 1. Pull server changes and apply them in a single transaction.
+      const pullResult = await syncPull(lastSync);
+      await applyPulledChanges(pullResult.changes);
 
-    if (Object.keys(changes).length > 0) {
-      await syncPush(changes);
+      // 2. Push local changes.
+      const changes = {};
+      const localSnippets = await getModifiedSnippetsSince(lastSync);
+      if (localSnippets.length) changes.shortcuts = localSnippets;
+      const localTags = await getModifiedTagsSince(lastSync);
+      if (localTags.length) changes.snippet_tags = localTags;
+      const localNotes = await getModifiedNotesSince(lastSync);
+      if (localNotes.length) changes.notes = localNotes;
+      const localFolders = await getModifiedFoldersSince(lastSync);
+      if (localFolders.length) changes.note_folders = localFolders;
+      const localTaskCategories = await getModifiedTaskCategoriesSince(lastSync);
+      if (localTaskCategories.length) changes.task_categories = localTaskCategories;
+      const localTaskStatuses = await getModifiedTaskStatusesSince(lastSync);
+      if (localTaskStatuses.length) changes.task_statuses = localTaskStatuses;
+      const localTasks = await getModifiedTasksSince(lastSync);
+      if (localTasks.length) changes.tasks = localTasks;
+      const localTaskCheckboxes = await getModifiedTaskCheckboxesSince(lastSync);
+      if (localTaskCheckboxes.length) changes.task_checkboxes = localTaskCheckboxes;
+      const localTaskLinks = await getModifiedTaskLinksSince(lastSync);
+      if (localTaskLinks.length) changes.task_links = localTaskLinks;
+      const localFinancePlans = await getModifiedFinancePlansSince(lastSync);
+      if (localFinancePlans.length) changes.finance_plans = localFinancePlans;
+      const localFinanceItems = await getModifiedFinanceItemsSince(lastSync);
+      if (localFinanceItems.length) changes.finance_items = localFinanceItems;
+
+      if (Object.keys(changes).length > 0) {
+        await syncPush(changes);
+      }
+
+      // 3. Update last sync time and emit pending count.
+      await setLastSyncAt(pullResult.server_time);
+      await emitPending();
+    } finally {
+      syncing = false;
+      currentSyncPromise = null;
+      emit({ type: 'syncing', value: false });
     }
+  })();
 
-    // 3. Update last sync time and emit pending count.
-    await setLastSyncAt(pullResult.server_time);
-    await emitPending();
-  } finally {
-    syncing = false;
-    emit({ type: 'syncing', value: false });
-  }
+  return currentSyncPromise;
 }

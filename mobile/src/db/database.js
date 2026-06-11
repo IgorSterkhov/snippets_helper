@@ -6,6 +6,7 @@ SQLite.enablePromise(true);
 let db = null;
 const TASKS_INITIAL_SYNC_BACKFILL_KEY = 'tasks_initial_sync_backfill_v3';
 const PINNED_SNIPPETS_SYNC_BACKFILL_KEY = 'pinned_snippets_sync_backfill_v1';
+const FINANCE_SYNC_ENABLED_BACKFILL_KEY = 'finance_sync_enabled_backfill_v2';
 
 export function getDB() {
   return db;
@@ -129,6 +130,14 @@ async function runMigrations() {
     await setLastSyncAt(null).catch(() => {});
     await setSyncMetaValue(TASKS_INITIAL_SYNC_BACKFILL_KEY, new Date().toISOString()).catch(() => {});
   }
+
+  const hasFinanceBackfill = await syncMetaKeyExists(db, FINANCE_SYNC_ENABLED_BACKFILL_KEY);
+  if (!hasFinanceBackfill) {
+    // Finance sync was added after the mobile sync cursor already existed.
+    // Force one full pull so existing server Finance rows are fetched.
+    await setLastSyncAt(null).catch(() => {});
+    await setSyncMetaValue(FINANCE_SYNC_ENABLED_BACKFILL_KEY, new Date().toISOString()).catch(() => {});
+  }
 }
 
 export async function initDB() {
@@ -249,6 +258,40 @@ export async function initDB() {
         task_uuid TEXT NOT NULL,
         url TEXT NOT NULL DEFAULT '',
         label TEXT,
+        sort_order INTEGER DEFAULT 0,
+        created_at TEXT,
+        updated_at TEXT NOT NULL,
+        is_deleted INTEGER DEFAULT 0
+      )
+    `);
+
+    tx.executeSql(`
+      CREATE TABLE IF NOT EXISTS finance_plans (
+        uuid TEXT PRIMARY KEY,
+        id INTEGER,
+        name TEXT NOT NULL,
+        currency TEXT NOT NULL DEFAULT 'RUB',
+        kind TEXT NOT NULL DEFAULT 'monthly',
+        sort_order INTEGER DEFAULT 0,
+        created_at TEXT,
+        updated_at TEXT NOT NULL,
+        is_deleted INTEGER DEFAULT 0
+      )
+    `);
+
+    tx.executeSql(`
+      CREATE TABLE IF NOT EXISTS finance_items (
+        uuid TEXT PRIMARY KEY,
+        id INTEGER,
+        plan_id INTEGER,
+        plan_uuid TEXT NOT NULL,
+        parent_id INTEGER,
+        parent_uuid TEXT,
+        name TEXT NOT NULL DEFAULT '',
+        amount_cents INTEGER NOT NULL DEFAULT 0,
+        due_day INTEGER,
+        due_date TEXT,
+        note TEXT NOT NULL DEFAULT '',
         sort_order INTEGER DEFAULT 0,
         created_at TEXT,
         updated_at TEXT NOT NULL,
