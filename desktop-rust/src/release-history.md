@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## f-20260611-4 (2026-06-11)
+
+- **Finance level color hotfix:** fixed Finance hierarchy level backgrounds
+  not rendering in the desktop WebView. Level band colors now use explicit
+  translucent fills from the selected settings, and the Finance smoke test now
+  verifies the computed row background instead of only checking CSS classes.
+
 ## f-20260611-3 (2026-06-11)
 
 - **Finance report styling:** Finance rows now use one row type visually. Rows

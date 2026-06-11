@@ -3555,6 +3555,15 @@ async def run_tests():
         assert 'finance-group-row' in classes['2'], classes
         assert 'finance-group-row' not in classes['4'], classes
         assert 'finance-band-slot-' not in classes['3'], classes
+        band_style = await cdp.eval("""(() => {
+          const row = document.querySelector('#panel-finance .finance-row[data-id="1"]');
+          const style = getComputedStyle(row);
+          return {
+            backgroundImage: style.backgroundImage,
+            borderBottomColor: style.borderBottomColor,
+          };
+        })()""")
+        assert band_style['backgroundImage'] and band_style['backgroundImage'] != 'none', band_style
 
         await cdp.eval("""(() => {
           [...document.querySelectorAll('#panel-finance .finance-header-actions button')]
@@ -3580,6 +3589,11 @@ async def run_tests():
             "document.querySelector('#panel-finance .finance-row[data-id=\"1\"]')?.classList.contains('finance-band-slot-2')",
             timeout=3,
         )
+        changed_band_style = await cdp.eval("""(() => {
+          const row = document.querySelector('#panel-finance .finance-row[data-id="1"]');
+          return getComputedStyle(row).backgroundImage;
+        })()""")
+        assert changed_band_style and changed_band_style != 'none', changed_band_style
         await cdp.eval("document.querySelector('.modal-actions button:last-child').click()")
         await wait_until(cdp, "!document.querySelector('.modal-overlay')", timeout=3)
         saved_order = await cdp.eval(

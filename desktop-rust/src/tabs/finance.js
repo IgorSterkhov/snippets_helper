@@ -51,12 +51,22 @@ function injectStyles() {
   --finance-band-strong-color: ${DEFAULT_FINANCE_DISPLAY.strongColor};
   --finance-band-medium-color: ${DEFAULT_FINANCE_DISPLAY.mediumColor};
   --finance-band-soft-color: ${DEFAULT_FINANCE_DISPLAY.softColor};
+  --finance-band-strong-bg: rgba(38, 127, 149, 0.24);
+  --finance-band-strong-bg-soft: rgba(38, 127, 149, 0.12);
+  --finance-band-strong-border: rgba(38, 127, 149, 0.34);
+  --finance-band-medium-bg: rgba(33, 106, 125, 0.18);
+  --finance-band-medium-bg-soft: rgba(33, 106, 125, 0.08);
+  --finance-band-medium-border: rgba(33, 106, 125, 0.24);
+  --finance-band-soft-bg: rgba(27, 83, 100, 0.14);
+  --finance-band-soft-bg-soft: rgba(27, 83, 100, 0.05);
+  --finance-band-soft-border: rgba(27, 83, 100, 0.18);
+  --finance-row-hover: var(--bg-tertiary);
 }
 .finance-shell {
   flex: 1;
   min-height: 0;
   display: flex;
-  background: var(--bg);
+  background: var(--bg-primary);
 }
 .finance-sidebar {
   width: 264px;
@@ -96,7 +106,7 @@ function injectStyles() {
   padding: 0 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--bg);
+  background: var(--bg-primary);
   color: var(--text);
   cursor: pointer;
   font-size: 12px;
@@ -123,7 +133,7 @@ function injectStyles() {
   cursor: pointer;
 }
 .finance-plan-card:hover {
-  background: var(--bg-hover);
+  background: var(--finance-row-hover);
 }
 .finance-plan-card.active {
   background: color-mix(in srgb, var(--accent) 18%, var(--bg-secondary));
@@ -192,7 +202,7 @@ function injectStyles() {
   box-sizing: border-box;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--bg);
+  background: var(--bg-primary);
   color: var(--text);
   height: 28px;
   padding: 4px 8px;
@@ -234,7 +244,7 @@ function injectStyles() {
   border: 1px solid var(--border);
   border-radius: 8px;
   overflow: hidden;
-  background: var(--bg);
+  background: var(--bg-primary);
 }
 .finance-table-head,
 .finance-row {
@@ -263,32 +273,32 @@ function injectStyles() {
 .finance-row.finance-band-slot-0 {
   background: linear-gradient(
     90deg,
-    color-mix(in srgb, var(--finance-band-strong-color) 24%, var(--bg)),
-    color-mix(in srgb, var(--finance-band-strong-color) 12%, var(--bg))
+    var(--finance-band-strong-bg),
+    var(--finance-band-strong-bg-soft)
   );
-  border-bottom-color: color-mix(in srgb, var(--finance-band-strong-color) 34%, var(--border));
+  border-bottom-color: var(--finance-band-strong-border);
 }
 .finance-row.finance-band-slot-1 {
   background: linear-gradient(
     90deg,
-    color-mix(in srgb, var(--finance-band-medium-color) 18%, var(--bg)),
-    color-mix(in srgb, var(--finance-band-medium-color) 8%, var(--bg))
+    var(--finance-band-medium-bg),
+    var(--finance-band-medium-bg-soft)
   );
-  border-bottom-color: color-mix(in srgb, var(--finance-band-medium-color) 24%, var(--border));
+  border-bottom-color: var(--finance-band-medium-border);
 }
 .finance-row.finance-band-slot-2 {
   background: linear-gradient(
     90deg,
-    color-mix(in srgb, var(--finance-band-soft-color) 14%, var(--bg)),
-    color-mix(in srgb, var(--finance-band-soft-color) 5%, var(--bg))
+    var(--finance-band-soft-bg),
+    var(--finance-band-soft-bg-soft)
   );
-  border-bottom-color: color-mix(in srgb, var(--finance-band-soft-color) 18%, var(--border));
+  border-bottom-color: var(--finance-band-soft-border);
 }
 .finance-row:last-child {
   border-bottom: 0;
 }
 .finance-row:hover {
-  background-color: var(--bg-hover);
+  background-color: var(--finance-row-hover);
 }
 .finance-row.drop-before::before,
 .finance-row.drop-after::after {
@@ -306,7 +316,7 @@ function injectStyles() {
 .finance-row.drop-inside {
   outline: 1px solid var(--accent);
   outline-offset: -3px;
-  background: color-mix(in srgb, var(--accent) 12%, var(--bg));
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-primary));
 }
 .finance-toggle {
   width: 22px;
@@ -339,7 +349,7 @@ function injectStyles() {
   font-weight: 700;
 }
 .finance-group-row .finance-total {
-  color: color-mix(in srgb, var(--finance-band-strong-color) 36%, var(--text));
+  color: var(--finance-band-strong-color);
   font-weight: 780;
 }
 .finance-group-row[data-depth="0"] .finance-name-input {
@@ -411,7 +421,7 @@ function injectStyles() {
   border: 1px solid var(--border);
   border-radius: 8px;
   overflow: hidden;
-  background: var(--bg);
+  background: var(--bg-primary);
 }
 .finance-preview-row {
   display: grid;
@@ -428,22 +438,22 @@ function injectStyles() {
 .finance-preview-row.finance-band-slot-0 {
   background: linear-gradient(
     90deg,
-    color-mix(in srgb, var(--finance-band-strong-color) 24%, var(--bg)),
-    color-mix(in srgb, var(--finance-band-strong-color) 12%, var(--bg))
+    var(--finance-band-strong-bg),
+    var(--finance-band-strong-bg-soft)
   );
 }
 .finance-preview-row.finance-band-slot-1 {
   background: linear-gradient(
     90deg,
-    color-mix(in srgb, var(--finance-band-medium-color) 18%, var(--bg)),
-    color-mix(in srgb, var(--finance-band-medium-color) 8%, var(--bg))
+    var(--finance-band-medium-bg),
+    var(--finance-band-medium-bg-soft)
   );
 }
 .finance-preview-row.finance-band-slot-2 {
   background: linear-gradient(
     90deg,
-    color-mix(in srgb, var(--finance-band-soft-color) 14%, var(--bg)),
-    color-mix(in srgb, var(--finance-band-soft-color) 5%, var(--bg))
+    var(--finance-band-soft-bg),
+    var(--finance-band-soft-bg-soft)
   );
 }
 .finance-preview-total {
@@ -499,6 +509,20 @@ function normalizeFinanceDisplaySettings(raw = {}) {
   };
 }
 
+function rgbFromHex(hex) {
+  const normalized = normalizeHexColor(hex, '#000000').slice(1);
+  return {
+    r: parseInt(normalized.slice(0, 2), 16),
+    g: parseInt(normalized.slice(2, 4), 16),
+    b: parseInt(normalized.slice(4, 6), 16),
+  };
+}
+
+function rgbaFromHex(hex, alpha) {
+  const { r, g, b } = rgbFromHex(hex);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 async function loadFinanceDisplaySettings() {
   try {
     const [strongColor, mediumColor, softColor, fillOrder] = await Promise.all([
@@ -524,6 +548,15 @@ function applySettingsToElement(el, settings) {
   el.style.setProperty('--finance-band-strong-color', settings.strongColor);
   el.style.setProperty('--finance-band-medium-color', settings.mediumColor);
   el.style.setProperty('--finance-band-soft-color', settings.softColor);
+  el.style.setProperty('--finance-band-strong-bg', rgbaFromHex(settings.strongColor, 0.24));
+  el.style.setProperty('--finance-band-strong-bg-soft', rgbaFromHex(settings.strongColor, 0.12));
+  el.style.setProperty('--finance-band-strong-border', rgbaFromHex(settings.strongColor, 0.34));
+  el.style.setProperty('--finance-band-medium-bg', rgbaFromHex(settings.mediumColor, 0.18));
+  el.style.setProperty('--finance-band-medium-bg-soft', rgbaFromHex(settings.mediumColor, 0.08));
+  el.style.setProperty('--finance-band-medium-border', rgbaFromHex(settings.mediumColor, 0.24));
+  el.style.setProperty('--finance-band-soft-bg', rgbaFromHex(settings.softColor, 0.14));
+  el.style.setProperty('--finance-band-soft-bg-soft', rgbaFromHex(settings.softColor, 0.05));
+  el.style.setProperty('--finance-band-soft-border', rgbaFromHex(settings.softColor, 0.18));
 }
 
 function applyFinanceDisplaySettings(settings = state.display) {
