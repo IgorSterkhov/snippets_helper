@@ -589,7 +589,10 @@ function bandSlotForDepth(depth, maxDepth, display = state.display) {
   if (!Number.isFinite(depth) || !Number.isFinite(maxDepth) || maxDepth <= 0) return null;
   if (depth >= maxDepth) return null;
   if (display.fillOrder === 'soft_first') {
-    return Math.max(0, 2 - depth);
+    const levelsAboveNeutral = maxDepth - depth;
+    if (levelsAboveNeutral >= 3) return 0;
+    if (levelsAboveNeutral === 2) return 1;
+    return 2;
   }
   return Math.min(2, depth);
 }
@@ -981,7 +984,9 @@ function openFinanceDisplaySettings() {
   body.innerHTML = `
     <div class="finance-settings-help">
       Background fill is assigned by row depth, not by whether a row has children.
-      The deepest visible level stays neutral.
+      The deepest visible level stays neutral. Strong First starts from the
+      top level; Soft First assigns fills from the bottom up, so the last
+      colored level is Soft.
     </div>
     <div class="finance-settings-grid">
       <label class="finance-settings-label" for="finance-band-strong">Strong fill</label>

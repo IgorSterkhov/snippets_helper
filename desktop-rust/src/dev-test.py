@@ -3514,15 +3514,17 @@ async def run_tests():
 
     # ── T26g: Finance level bands and display settings ──────
     async def t26g_finance_level_bands_and_settings():
-        async def seed_finance(items):
+        async def seed_finance(items, reset_settings=True):
             await cdp.eval(f"""(() => {{
               localStorage.setItem('mock.finance_items', JSON.stringify({json.dumps(items)}));
-              const settings = JSON.parse(localStorage.getItem('mock.settings') || '{{}}');
-              delete settings['finance.level_band_strong_color'];
-              delete settings['finance.level_band_medium_color'];
-              delete settings['finance.level_band_soft_color'];
-              delete settings['finance.level_band_fill_order'];
-              localStorage.setItem('mock.settings', JSON.stringify(settings));
+              if ({json.dumps(reset_settings)}) {{
+                const settings = JSON.parse(localStorage.getItem('mock.settings') || '{{}}');
+                delete settings['finance.level_band_strong_color'];
+                delete settings['finance.level_band_medium_color'];
+                delete settings['finance.level_band_soft_color'];
+                delete settings['finance.level_band_fill_order'];
+                localStorage.setItem('mock.settings', JSON.stringify(settings));
+              }}
             }})()""")
 
         async def reload_finance():
@@ -3586,15 +3588,24 @@ async def run_tests():
         })()""")
         await wait_until(
             cdp,
-            "document.querySelector('#panel-finance .finance-row[data-id=\"1\"]')?.classList.contains('finance-band-slot-2')",
+            "document.querySelector('#panel-finance .finance-row[data-id=\"1\"]')?.classList.contains('finance-band-slot-1')",
             timeout=3,
         )
-        changed_band_style = await cdp.eval("""(() => {
-          const row = document.querySelector('#panel-finance .finance-row[data-id="1"]');
-          return getComputedStyle(row).backgroundImage;
+        soft_first_styles = await cdp.eval("""(() => {
+          const root = document.querySelector('#panel-finance .finance-row[data-id="1"]');
+          const child = document.querySelector('#panel-finance .finance-row[data-id="2"]');
+          return {
+            rootClass: root.className,
+            childClass: child.className,
+            rootBackground: getComputedStyle(root).backgroundImage,
+            childBackground: getComputedStyle(child).backgroundImage,
+          };
         })()""")
-        assert changed_band_style and changed_band_style != 'none', changed_band_style
-        assert '52, 86, 120' in changed_band_style, changed_band_style
+        assert 'finance-band-slot-1' in soft_first_styles['rootClass'], soft_first_styles
+        assert 'finance-band-slot-2' in soft_first_styles['childClass'], soft_first_styles
+        assert soft_first_styles['rootBackground'] and soft_first_styles['rootBackground'] != 'none', soft_first_styles
+        assert '35, 69, 103' in soft_first_styles['rootBackground'], soft_first_styles
+        assert '52, 86, 120' in soft_first_styles['childBackground'], soft_first_styles
         row_input_style = await cdp.eval("""(() => {
           const input = document.querySelector('#panel-finance .finance-row[data-id="1"] [data-field="name"]');
           const style = getComputedStyle(input);
@@ -3630,7 +3641,7 @@ async def run_tests():
         await wait_until(cdp, "!document.querySelector('.modal-overlay')", timeout=3)
         restored = await wait_until(
             cdp,
-            "document.querySelector('#panel-finance .finance-row[data-id=\"1\"]')?.classList.contains('finance-band-slot-2')",
+            "document.querySelector('#panel-finance .finance-row[data-id=\"1\"]')?.classList.contains('finance-band-slot-1')",
             timeout=3,
         )
         assert restored is True
@@ -3639,19 +3650,33 @@ async def run_tests():
             {**three_levels[0], 'parent_id': None},
             {**three_levels[3], 'parent_id': 1},
         ]
-        await seed_finance(two_levels)
+        await seed_finance(two_levels, reset_settings=False)
         await reload_finance()
         two_level_classes = await cdp.eval("""(() => Object.fromEntries(
           [...document.querySelectorAll('#panel-finance .finance-row')].map(row => [row.dataset.id, row.className])
         ))()""")
-        assert 'finance-band-slot-' in two_level_classes['1'], two_level_classes
+        assert 'finance-band-slot-2' in two_level_classes['1'], two_level_classes
         assert 'finance-band-slot-' not in two_level_classes['4'], two_level_classes
+
+        four_levels = [
+            *three_levels,
+            {'id': 5, 'uuid': 'f5', 'plan_id': 1, 'parent_id': 3, 'name': 'Provider', 'amount_cents': 120000, 'due_day': 20, 'due_date': None, 'note': '', 'sort_order': 0, 'created_at': '2026-01-01T00:00:00Z', 'updated_at': '2026-01-01T00:00:00Z', 'sync_status': 'pending', 'user_id': 'mock-user'},
+        ]
+        await seed_finance(four_levels, reset_settings=False)
+        await reload_finance()
+        four_level_classes = await cdp.eval("""(() => Object.fromEntries(
+          [...document.querySelectorAll('#panel-finance .finance-row')].map(row => [row.dataset.id, row.className])
+        ))()""")
+        assert 'finance-band-slot-0' in four_level_classes['1'], four_level_classes
+        assert 'finance-band-slot-1' in four_level_classes['2'], four_level_classes
+        assert 'finance-band-slot-2' in four_level_classes['3'], four_level_classes
+        assert 'finance-band-slot-' not in four_level_classes['5'], four_level_classes
 
         one_level = [
             {**three_levels[0], 'parent_id': None},
             {**three_levels[3], 'parent_id': None},
         ]
-        await seed_finance(one_level)
+        await seed_finance(one_level, reset_settings=False)
         await reload_finance()
         one_level_classes = await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-row')]
           .map(row => row.className).join('\\n'))()""")

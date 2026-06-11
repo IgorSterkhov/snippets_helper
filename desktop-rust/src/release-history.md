@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## f-20260611-6 (2026-06-11)
+
+- **Finance Soft First mapping:** adjusted Finance display settings so Soft
+  First assigns level colors from the bottom up: two visible levels use
+  `Soft / neutral`, three use `Medium / Soft / neutral`, and four or more use
+  `Strong / Medium / Soft / neutral`.
+
 ## f-20260611-5 (2026-06-11)
 
 - **Finance level colors hotfix:** changing Finance display colors now
