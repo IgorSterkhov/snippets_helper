@@ -2045,6 +2045,31 @@ pub fn get_task_checkbox_id_by_uuid(conn: &Connection, uuid: &str) -> Result<Opt
     get_id_by_uuid(conn, "task_checkboxes", uuid)
 }
 
+pub fn get_finance_plan_uuid_by_id(conn: &Connection, id: i64) -> Result<Option<String>> {
+    get_uuid_by_id(conn, "finance_plans", id)
+}
+
+pub fn get_finance_item_uuid_by_id(conn: &Connection, id: i64) -> Result<Option<String>> {
+    get_uuid_by_id(conn, "finance_items", id)
+}
+
+pub fn get_finance_plan_id_by_uuid(conn: &Connection, uuid: &str) -> Result<Option<i64>> {
+    get_id_by_uuid(conn, "finance_plans", uuid)
+}
+
+pub fn get_finance_item_id_by_uuid(conn: &Connection, uuid: &str) -> Result<Option<i64>> {
+    get_id_by_uuid(conn, "finance_items", uuid)
+}
+
+pub fn get_finance_item_plan_id_by_id(conn: &Connection, id: i64) -> Result<Option<i64>> {
+    conn.query_row(
+        "SELECT plan_id FROM finance_items WHERE id = ?1 AND sync_status != 'deleted'",
+        params![id],
+        |r| r.get(0),
+    )
+    .optional()
+}
+
 pub fn set_task_checkbox_parent_if_not_newer(
     conn: &Connection,
     uuid: &str,
@@ -2055,6 +2080,23 @@ pub fn set_task_checkbox_parent_if_not_newer(
         normalize_dt_string(incoming_updated_at).unwrap_or_else(|| incoming_updated_at.to_string());
     conn.execute(
         "UPDATE task_checkboxes
+         SET parent_id = ?1
+         WHERE uuid = ?2 AND updated_at <= ?3",
+        params![parent_id, uuid, incoming_updated_at],
+    )?;
+    Ok(())
+}
+
+pub fn set_finance_item_parent_if_not_newer(
+    conn: &Connection,
+    uuid: &str,
+    parent_id: i64,
+    incoming_updated_at: &str,
+) -> Result<()> {
+    let incoming_updated_at =
+        normalize_dt_string(incoming_updated_at).unwrap_or_else(|| incoming_updated_at.to_string());
+    conn.execute(
+        "UPDATE finance_items
          SET parent_id = ?1
          WHERE uuid = ?2 AND updated_at <= ?3",
         params![parent_id, uuid, incoming_updated_at],

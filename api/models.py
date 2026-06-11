@@ -269,6 +269,60 @@ class TaskLink(Base):
     __table_args__ = (Index("idx_task_links_user_updated", "user_id", "updated_at"),)
 
 
+class FinancePlan(Base):
+    __tablename__ = "finance_plans"
+
+    uuid: Mapped[uuid_mod.UUID] = mapped_column(Uuid, primary_key=True, default=uuid_mod.uuid4)
+    user_id: Mapped[uuid_mod.UUID] = mapped_column(Uuid, ForeignKey("users.id"), nullable=False)
+    id: Mapped[int | None] = mapped_column(Integer)
+    name: Mapped[str] = mapped_column(String, nullable=False, default="")
+    currency: Mapped[str] = mapped_column(String, nullable=False, default="RUB")
+    kind: Mapped[str] = mapped_column(String, nullable=False, default="monthly")
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('monthly', 'project', 'one_time', 'general')",
+            name="ck_finance_plans_kind",
+        ),
+        Index("idx_finance_plans_user_updated", "user_id", "updated_at"),
+    )
+
+
+class FinanceItem(Base):
+    __tablename__ = "finance_items"
+
+    uuid: Mapped[uuid_mod.UUID] = mapped_column(Uuid, primary_key=True, default=uuid_mod.uuid4)
+    user_id: Mapped[uuid_mod.UUID] = mapped_column(Uuid, ForeignKey("users.id"), nullable=False)
+    id: Mapped[int | None] = mapped_column(Integer)
+    plan_id: Mapped[int | None] = mapped_column(Integer)
+    plan_uuid: Mapped[uuid_mod.UUID | None] = mapped_column(Uuid)
+    parent_id: Mapped[int | None] = mapped_column(Integer)
+    parent_uuid: Mapped[uuid_mod.UUID | None] = mapped_column(Uuid)
+    name: Mapped[str] = mapped_column(String, nullable=False, default="")
+    amount_cents: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    due_day: Mapped[int | None] = mapped_column(Integer)
+    due_date: Mapped[str | None] = mapped_column(String(10))
+    note: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    __table_args__ = (
+        CheckConstraint("amount_cents >= 0", name="ck_finance_items_amount_non_negative"),
+        CheckConstraint(
+            "due_day IS NULL OR (due_day >= 1 AND due_day <= 31)",
+            name="ck_finance_items_due_day",
+        ),
+        Index("idx_finance_items_user_updated", "user_id", "updated_at"),
+        Index("idx_finance_items_plan", "user_id", "plan_uuid", "parent_uuid", "sort_order"),
+    )
+
+
 class ShareLink(Base):
     __tablename__ = "share_links"
 
@@ -282,7 +336,10 @@ class ShareLink(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime)
 
     __table_args__ = (
-        CheckConstraint("item_type IN ('note', 'shortcut')", name="ck_share_links_item_type"),
+        CheckConstraint(
+            "item_type IN ('note', 'shortcut', 'finance_plan')",
+            name="ck_share_links_item_type",
+        ),
         Index("idx_share_links_token", "token"),
         Index("idx_share_links_owner_item", "user_id", "item_type", "item_uuid"),
         Index(
@@ -410,4 +467,6 @@ TABLE_MODELS = {
     "tasks": Task,
     "task_checkboxes": TaskCheckbox,
     "task_links": TaskLink,
+    "finance_plans": FinancePlan,
+    "finance_items": FinanceItem,
 }

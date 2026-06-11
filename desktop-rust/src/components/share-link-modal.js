@@ -34,14 +34,16 @@ export async function openShareLinkModal({
 
   let link = null;
   let telegraphPage = null;
+  const supportsTelegraph = itemType === 'note' || itemType === 'shortcut';
   try {
-    const [linkResult, telegraphResult] = await Promise.allSettled([
-      call('get_share_link', { itemType, itemUuid }),
-      call('get_telegraph_page', { itemType, itemUuid }),
-    ]);
+    const requests = [call('get_share_link', { itemType, itemUuid })];
+    if (supportsTelegraph) requests.push(call('get_telegraph_page', { itemType, itemUuid }));
+    const [linkResult, telegraphResult] = await Promise.allSettled(requests);
     if (linkResult.status === 'rejected') throw linkResult.reason;
     link = linkResult.value;
-    telegraphPage = telegraphResult.status === 'fulfilled' ? telegraphResult.value : null;
+    telegraphPage = supportsTelegraph && telegraphResult?.status === 'fulfilled'
+      ? telegraphResult.value
+      : null;
   } catch (err) {
     showShareError(
       'Share link load failed',
@@ -105,6 +107,7 @@ export async function openShareLinkModal({
 
   function renderTelegraphSection() {
     telegraphSection.innerHTML = '';
+    if (!supportsTelegraph) return;
     const titleRow = document.createElement('div');
     titleRow.className = 'share-link-section-title';
     titleRow.textContent = 'Telegra.ph';

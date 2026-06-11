@@ -2,6 +2,7 @@ from api.share_utils import (
     build_public_url,
     generate_share_token,
     public_note_payload,
+    public_finance_plan_payload,
     public_shortcut_payload,
     render_share_html,
 )
@@ -241,6 +242,42 @@ def test_render_share_html_preserves_plain_shortcut_value_as_code_block():
         }
     )
     assert "<pre><code id='share-code'>kubectl apply -f deploy.yaml</code></pre>" in rendered
+
+
+def test_render_share_html_renders_finance_plan_tree_and_totals():
+    plan = Row(name="Regular payments", currency="RUB", kind="monthly")
+    parent = Row(
+        uuid="11111111-1111-4111-8111-111111111111",
+        parent_uuid=None,
+        name="Дом",
+        amount_cents=10000,
+        due_day=3,
+        due_date=None,
+        note="",
+        sort_order=0,
+    )
+    child = Row(
+        uuid="22222222-2222-4222-8222-222222222222",
+        parent_uuid=parent.uuid,
+        name="Интернет",
+        amount_cents=50000,
+        due_day=21,
+        due_date=None,
+        note="",
+        sort_order=0,
+    )
+
+    payload = public_finance_plan_payload(plan, [child, parent])
+    rendered = render_share_html(payload)
+
+    assert payload["type"] == "finance_plan"
+    assert payload["total_cents"] == 60000
+    assert "Regular payments" in rendered
+    assert "finance-share-table" in rendered
+    assert "Дом" in rendered
+    assert "Интернет" in rendered
+    assert "600 RUB" in rendered
+    assert "--depth:1" in rendered
 
 
 def test_render_share_html_rejects_unsafe_image_url_scheme():

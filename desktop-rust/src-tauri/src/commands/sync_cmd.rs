@@ -1,7 +1,7 @@
-use tauri::State;
-use crate::db::{DbState, queries};
+use crate::db::{queries, DbState};
 use crate::sync::client::SyncClient;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
+use tauri::State;
 
 #[tauri::command]
 pub async fn trigger_sync(state: State<'_, DbState>) -> Result<Value, String> {
@@ -13,12 +13,12 @@ pub async fn trigger_sync(state: State<'_, DbState>) -> Result<Value, String> {
     // Read sync settings while holding the lock briefly
     let (api_url, api_key, ca_cert) = {
         let conn = state.lock_recover();
-        let url = queries::get_setting(&conn, &computer_id, "sync_api_url")
-            .map_err(|e| e.to_string())?;
-        let key = queries::get_setting(&conn, &computer_id, "sync_api_key")
-            .map_err(|e| e.to_string())?;
-        let cert = queries::get_setting(&conn, &computer_id, "sync_ca_cert")
-            .map_err(|e| e.to_string())?;
+        let url =
+            queries::get_setting(&conn, &computer_id, "sync_api_url").map_err(|e| e.to_string())?;
+        let key =
+            queries::get_setting(&conn, &computer_id, "sync_api_key").map_err(|e| e.to_string())?;
+        let cert =
+            queries::get_setting(&conn, &computer_id, "sync_ca_cert").map_err(|e| e.to_string())?;
         (url, key, cert)
     };
 
@@ -30,15 +30,23 @@ pub async fn trigger_sync(state: State<'_, DbState>) -> Result<Value, String> {
     // Ensure user_id is saved (needed for pull to fill user_id on rows)
     let needs_user_id = {
         let conn = state.lock_recover();
-        queries::get_setting(&conn, &computer_id, "sync_user_id").ok().flatten().is_none()
+        queries::get_setting(&conn, &computer_id, "sync_user_id")
+            .ok()
+            .flatten()
+            .is_none()
     };
     if needs_user_id {
         let http = reqwest::Client::builder()
             .danger_accept_invalid_certs(true)
             .timeout(std::time::Duration::from_secs(10))
-            .build().map_err(|e| e.to_string())?;
-        if let Ok(resp) = http.get(format!("{}/v1/auth/me", url.trim_end_matches('/')))
-            .bearer_auth(&key).send().await {
+            .build()
+            .map_err(|e| e.to_string())?;
+        if let Ok(resp) = http
+            .get(format!("{}/v1/auth/me", url.trim_end_matches('/')))
+            .bearer_auth(&key)
+            .send()
+            .await
+        {
             if let Ok(data) = resp.json::<serde_json::Value>().await {
                 if let Some(uid) = data.get("user_id").and_then(|v| v.as_str()) {
                     let conn = state.lock_recover();
@@ -60,7 +68,11 @@ pub async fn trigger_sync(state: State<'_, DbState>) -> Result<Value, String> {
 }
 
 #[tauri::command]
-pub async fn register_sync(state: State<'_, DbState>, api_url: String, name: String) -> Result<Value, String> {
+pub async fn register_sync(
+    state: State<'_, DbState>,
+    api_url: String,
+    name: String,
+) -> Result<Value, String> {
     let computer_id = hostname::get()
         .unwrap_or_default()
         .to_string_lossy()
@@ -69,15 +81,15 @@ pub async fn register_sync(state: State<'_, DbState>, api_url: String, name: Str
     // Build HTTP client that accepts self-signed certs
     let ca_cert = {
         let conn = state.lock_recover();
-        queries::get_setting(&conn, &computer_id, "sync_ca_cert")
-            .map_err(|e| e.to_string())?
+        queries::get_setting(&conn, &computer_id, "sync_ca_cert").map_err(|e| e.to_string())?
     };
 
     let mut builder = reqwest::Client::builder().timeout(std::time::Duration::from_secs(30));
     if let Some(ref path) = ca_cert {
         if std::path::Path::new(path).is_file() {
             let pem = std::fs::read(path).map_err(|e| format!("read CA cert: {e}"))?;
-            let cert = reqwest::Certificate::from_pem(&pem).map_err(|e| format!("parse CA cert: {e}"))?;
+            let cert =
+                reqwest::Certificate::from_pem(&pem).map_err(|e| format!("parse CA cert: {e}"))?;
             builder = builder.add_root_certificate(cert);
         } else if api_url.starts_with("https://") {
             builder = builder.danger_accept_invalid_certs(true);
@@ -86,7 +98,9 @@ pub async fn register_sync(state: State<'_, DbState>, api_url: String, name: Str
         builder = builder.danger_accept_invalid_certs(true);
     }
 
-    let client = builder.build().map_err(|e| format!("build http client: {e}"))?;
+    let client = builder
+        .build()
+        .map_err(|e| format!("build http client: {e}"))?;
     let url = format!("{}/v1/auth/register", api_url.trim_end_matches('/'));
 
     let resp = client
@@ -100,7 +114,10 @@ pub async fn register_sync(state: State<'_, DbState>, api_url: String, name: Str
         return Err(format!("HTTP {}", resp.status()));
     }
 
-    let data: Value = resp.json().await.map_err(|e| format!("parse response: {e}"))?;
+    let data: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("parse response: {e}"))?;
     Ok(data)
 }
 
@@ -125,10 +142,12 @@ pub async fn check_for_update(state: State<'_, DbState>) -> Result<Value, String
 
     // Read GitHub token from settings (needed for private repos)
     let github_token = {
-        let computer_id = hostname::get().unwrap_or_default().to_string_lossy().to_string();
+        let computer_id = hostname::get()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
         let conn = state.lock_recover();
-        queries::get_setting(&conn, &computer_id, "github_token")
-            .map_err(|e| e.to_string())?
+        queries::get_setting(&conn, &computer_id, "github_token").map_err(|e| e.to_string())?
     };
 
     let client = reqwest::Client::builder()
@@ -156,7 +175,10 @@ pub async fn check_for_update(state: State<'_, DbState>) -> Result<Value, String
         return Err(format!("GitHub API returned HTTP {}", resp.status()));
     }
 
-    let releases: Vec<Value> = resp.json().await.map_err(|e| format!("parse GitHub response: {e}"))?;
+    let releases: Vec<Value> = resp
+        .json()
+        .await
+        .map_err(|e| format!("parse GitHub response: {e}"))?;
 
     let platform_suffix = if cfg!(target_os = "windows") {
         "x64-setup.exe"
@@ -175,12 +197,16 @@ pub async fn check_for_update(state: State<'_, DbState>) -> Result<Value, String
     for rel in &releases {
         let raw_tag = rel.get("tag_name").and_then(|v| v.as_str()).unwrap_or("");
         if !raw_tag.starts_with('v') {
-            continue;   // skip f-* and other non-native tags
+            continue; // skip f-* and other non-native tags
         }
         let stripped = raw_tag.trim_start_matches('v').to_string();
         if tag.is_empty() {
             tag = stripped.clone();
-            html_url = rel.get("html_url").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            html_url = rel
+                .get("html_url")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             download_url = html_url.clone();
         }
         if let Some(assets) = rel.get("assets").and_then(|v| v.as_array()) {
@@ -188,8 +214,13 @@ pub async fn check_for_update(state: State<'_, DbState>) -> Result<Value, String
                 if let Some(name) = asset.get("name").and_then(|v| v.as_str()) {
                     if name.ends_with(platform_suffix) {
                         tag = stripped.clone();
-                        html_url = rel.get("html_url").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                        download_url = asset.get("browser_download_url")
+                        html_url = rel
+                            .get("html_url")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        download_url = asset
+                            .get("browser_download_url")
                             .and_then(|v| v.as_str())
                             .unwrap_or(&html_url)
                             .to_string();
@@ -199,7 +230,9 @@ pub async fn check_for_update(state: State<'_, DbState>) -> Result<Value, String
                 }
             }
         }
-        if asset_ready { break; }
+        if asset_ready {
+            break;
+        }
         // Remember the newest v-tag even if the asset isn't ready yet (build in progress)
         if latest_v_tag_without_asset.is_none() {
             latest_v_tag_without_asset = Some(stripped);
@@ -207,7 +240,9 @@ pub async fn check_for_update(state: State<'_, DbState>) -> Result<Value, String
     }
     // Fallback: if no v-tag has the asset, at least report what's newest.
     if tag.is_empty() {
-        if let Some(t) = latest_v_tag_without_asset { tag = t; }
+        if let Some(t) = latest_v_tag_without_asset {
+            tag = t;
+        }
     }
 
     let has_update = version_is_newer(&current_version, &tag);
@@ -234,7 +269,8 @@ pub async fn force_full_sync(state: State<'_, DbState>) -> Result<Value, String>
         conn.execute(
             "DELETE FROM app_settings WHERE computer_id = ?1 AND setting_key = 'last_sync_at'",
             rusqlite::params![computer_id],
-        ).map_err(|e| e.to_string())?;
+        )
+        .map_err(|e| e.to_string())?;
     }
 
     // Now do normal sync
@@ -250,12 +286,12 @@ pub async fn debug_sync(state: State<'_, DbState>) -> Result<Value, String> {
 
     let (api_url, api_key, ca_cert) = {
         let conn = state.lock_recover();
-        let url = queries::get_setting(&conn, &computer_id, "sync_api_url")
-            .map_err(|e| e.to_string())?;
-        let key = queries::get_setting(&conn, &computer_id, "sync_api_key")
-            .map_err(|e| e.to_string())?;
-        let cert = queries::get_setting(&conn, &computer_id, "sync_ca_cert")
-            .map_err(|e| e.to_string())?;
+        let url =
+            queries::get_setting(&conn, &computer_id, "sync_api_url").map_err(|e| e.to_string())?;
+        let key =
+            queries::get_setting(&conn, &computer_id, "sync_api_key").map_err(|e| e.to_string())?;
+        let cert =
+            queries::get_setting(&conn, &computer_id, "sync_ca_cert").map_err(|e| e.to_string())?;
         (url, key, cert)
     };
 
@@ -269,31 +305,35 @@ pub async fn debug_sync(state: State<'_, DbState>) -> Result<Value, String> {
     };
 
     // Check auth
-    let client = SyncClient::new(&url, &key, ca_cert.as_deref())?;
+    let _client = SyncClient::new(&url, &key, ca_cert.as_deref())?;
     let http = reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
         .timeout(std::time::Duration::from_secs(10))
-        .build().map_err(|e| e.to_string())?;
+        .build()
+        .map_err(|e| e.to_string())?;
 
     let auth_resp = http
         .get(format!("{}/v1/auth/me", url.trim_end_matches('/')))
         .bearer_auth(&key)
-        .send().await.map_err(|e| format!("auth request: {e}"))?;
+        .send()
+        .await
+        .map_err(|e| format!("auth request: {e}"))?;
     let auth_status = auth_resp.status().as_u16();
     let auth_body: Value = auth_resp.json().await.unwrap_or(json!(null));
 
     // Try pull with CURRENT last_sync_at
     let last_sync = {
         let conn = state.lock_recover();
-        queries::get_setting(&conn, &computer_id, "last_sync_at")
-            .map_err(|e| e.to_string())?
+        queries::get_setting(&conn, &computer_id, "last_sync_at").map_err(|e| e.to_string())?
     };
 
     let pull_resp = http
         .post(format!("{}/v1/sync/pull", url.trim_end_matches('/')))
         .bearer_auth(&key)
         .json(&json!({"last_sync_at": last_sync}))
-        .send().await.map_err(|e| format!("pull request: {e}"))?;
+        .send()
+        .await
+        .map_err(|e| format!("pull request: {e}"))?;
     let pull_status = pull_resp.status().as_u16();
     let pull_body: Value = pull_resp.json().await.unwrap_or(json!(null));
 
@@ -302,7 +342,9 @@ pub async fn debug_sync(state: State<'_, DbState>) -> Result<Value, String> {
         .post(format!("{}/v1/sync/pull", url.trim_end_matches('/')))
         .bearer_auth(&key)
         .json(&json!({"last_sync_at": null}))
-        .send().await.map_err(|e| format!("full pull request: {e}"))?;
+        .send()
+        .await
+        .map_err(|e| format!("full pull request: {e}"))?;
     let full_pull_status = full_pull_resp.status().as_u16();
     let full_pull_body: Value = full_pull_resp.json().await.unwrap_or(json!(null));
 
@@ -322,10 +364,14 @@ pub async fn debug_sync(state: State<'_, DbState>) -> Result<Value, String> {
             "tasks",
             "task_checkboxes",
             "task_links",
+            "finance_plans",
+            "finance_items",
         ] {
-            let count: i64 = conn.query_row(
-                &format!("SELECT COUNT(*) FROM {}", table), [], |row| row.get(0)
-            ).unwrap_or(0);
+            let count: i64 = conn
+                .query_row(&format!("SELECT COUNT(*) FROM {}", table), [], |row| {
+                    row.get(0)
+                })
+                .unwrap_or(0);
             counts.insert(table.to_string(), json!(count));
         }
         counts
@@ -363,11 +409,8 @@ pub async fn debug_sync(state: State<'_, DbState>) -> Result<Value, String> {
 
 /// Compare semver strings: returns true if `latest` is strictly newer than `current`.
 fn version_is_newer(current: &str, latest: &str) -> bool {
-    let parse = |s: &str| -> Vec<u64> {
-        s.split('.')
-            .filter_map(|p| p.parse::<u64>().ok())
-            .collect()
-    };
+    let parse =
+        |s: &str| -> Vec<u64> { s.split('.').filter_map(|p| p.parse::<u64>().ok()).collect() };
     let c = parse(current);
     let l = parse(latest);
     for i in 0..c.len().max(l.len()) {

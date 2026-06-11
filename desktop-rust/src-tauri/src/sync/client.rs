@@ -4,8 +4,8 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Mutex;
 
-use crate::db::queries;
 use super::schema::SYNCED_TABLES;
+use crate::db::queries;
 
 pub struct SyncClient {
     client: Client,
@@ -38,7 +38,9 @@ impl SyncClient {
             builder = builder.danger_accept_invalid_certs(true);
         }
 
-        let client = builder.build().map_err(|e| format!("build http client: {e}"))?;
+        let client = builder
+            .build()
+            .map_err(|e| format!("build http client: {e}"))?;
 
         Ok(Self {
             client,
@@ -93,7 +95,10 @@ impl SyncClient {
         let pushed: Map<String, Value> = pending_names
             .into_iter()
             .map(|(table, names)| {
-                (table, Value::Array(names.into_iter().map(Value::String).collect()))
+                (
+                    table,
+                    Value::Array(names.into_iter().map(Value::String).collect()),
+                )
             })
             .collect();
 
@@ -103,7 +108,14 @@ impl SyncClient {
     fn collect_pending(
         &self,
         conn: &rusqlite::Connection,
-    ) -> Result<(Map<String, Value>, HashMap<String, Vec<String>>, HashMap<String, Vec<String>>), String> {
+    ) -> Result<
+        (
+            Map<String, Value>,
+            HashMap<String, Vec<String>>,
+            HashMap<String, Vec<String>>,
+        ),
+        String,
+    > {
         let mut changes: Map<String, Value> = Map::new();
         let mut deleted_uuids: HashMap<String, Vec<String>> = HashMap::new();
         let mut pending_names: HashMap<String, Vec<String>> = HashMap::new();
@@ -121,13 +133,9 @@ impl SyncClient {
 
             for row in pending {
                 let mut row_data = row.clone();
-                let obj = row_data
-                    .as_object_mut()
-                    .ok_or("row is not an object")?;
+                let obj = row_data.as_object_mut().ok_or("row is not an object")?;
 
-                // Extract display name for the log
                 let display_name = Self::extract_display_name(table, obj);
-                table_names.push(display_name);
 
                 let is_deleted = obj
                     .get("sync_status")
@@ -153,9 +161,7 @@ impl SyncClient {
                             .map_err(|e| format!("get_folder_uuid_by_id: {e}"))?;
                         obj.insert(
                             "folder_uuid".to_string(),
-                            folder_uuid
-                                .map(Value::String)
-                                .unwrap_or(Value::Null),
+                            folder_uuid.map(Value::String).unwrap_or(Value::Null),
                         );
                     }
                 }
@@ -210,6 +216,30 @@ impl SyncClient {
                     }
                 }
 
+                if table == "finance_items" {
+                    let Some(plan_id) = obj.get("plan_id").and_then(|v| v.as_i64()) else {
+                        continue;
+                    };
+                    let plan_uuid = queries::get_finance_plan_uuid_by_id(conn, plan_id)
+                        .map_err(|e| format!("get_finance_plan_uuid_by_id: {e}"))?;
+                    let Some(plan_uuid) = plan_uuid else {
+                        continue;
+                    };
+                    obj.insert("plan_uuid".to_string(), Value::String(plan_uuid));
+
+                    if let Some(parent_id) = obj.get("parent_id").and_then(|v| v.as_i64()) {
+                        let parent_uuid = queries::get_finance_item_uuid_by_id(conn, parent_id)
+                            .map_err(|e| format!("get_finance_item_uuid_by_id: {e}"))?;
+                        obj.insert(
+                            "parent_uuid".to_string(),
+                            parent_uuid.map(Value::String).unwrap_or(Value::Null),
+                        );
+                    } else {
+                        obj.insert("parent_uuid".to_string(), Value::Null);
+                    }
+                }
+
+                table_names.push(display_name);
                 rows_to_push.push(row_data);
             }
 
@@ -244,6 +274,7 @@ impl SyncClient {
                     .collect()
             })
             .unwrap_or_default();
+        let accepted_by_table = result.get("accepted_uuids").and_then(|v| v.as_object());
 
         // Mark synced and purge deleted
         for (table, rows) in changes {
@@ -251,14 +282,34 @@ impl SyncClient {
                 Some(a) => a,
                 None => continue,
             };
+            let accepted_for_table: Option<HashSet<String>> = accepted_by_table
+                .and_then(|by_table| by_table.get(table))
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                });
+            let requires_explicit_acceptance =
+                table == "finance_plans" || table == "finance_items";
+            let is_accepted = |uuid: &str| -> bool {
+                if let Some(accepted) = &accepted_for_table {
+                    accepted.contains(uuid)
+                } else {
+                    !requires_explicit_acceptance
+                }
+            };
 
             // Collect (uuid, updated_at) for non-deleted, non-conflicted rows
             let synced: Vec<(String, String)> = rows_arr
                 .iter()
                 .filter(|r| {
                     let uuid = r.get("uuid").and_then(|v| v.as_str()).unwrap_or("");
-                    let is_del = r.get("is_deleted").and_then(|v| v.as_bool()).unwrap_or(false);
-                    !is_del && !conflict_uuids.contains(uuid)
+                    let is_del = r
+                        .get("is_deleted")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    !is_del && !conflict_uuids.contains(uuid) && is_accepted(uuid)
                 })
                 .filter_map(|r| {
                     let uuid = r.get("uuid").and_then(|v| v.as_str())?.to_string();
@@ -276,7 +327,7 @@ impl SyncClient {
             if let Some(del) = deleted_uuids.get(table.as_str()) {
                 let confirmed: Vec<String> = del
                     .iter()
-                    .filter(|u| !conflict_uuids.contains(u.as_str()))
+                    .filter(|u| !conflict_uuids.contains(u.as_str()) && is_accepted(u.as_str()))
                     .cloned()
                     .collect();
                 if !confirmed.is_empty() {
@@ -338,7 +389,10 @@ impl SyncClient {
         let pulled: Map<String, Value> = pulled_names
             .into_iter()
             .map(|(table, names)| {
-                (table, Value::Array(names.into_iter().map(Value::String).collect()))
+                (
+                    table,
+                    Value::Array(names.into_iter().map(Value::String).collect()),
+                )
             })
             .collect();
 
@@ -370,7 +424,10 @@ impl SyncClient {
                 };
 
                 let mut rows_owned: Vec<Value> = rows.clone();
-                let mut deferred_checkbox_parent_updates: Vec<(String, String, String)> = Vec::new();
+                let mut deferred_checkbox_parent_updates: Vec<(String, String, String)> =
+                    Vec::new();
+                let mut deferred_finance_parent_updates: Vec<(String, String, String)> =
+                    Vec::new();
 
                 // Collect display names from pulled rows
                 let mut table_names: Vec<String> = Vec::new();
@@ -386,10 +443,14 @@ impl SyncClient {
                 // Ensure user_id is set on every row (server may not include it)
                 // Read user_id from auth settings
                 let user_id = queries::get_setting(conn, computer_id, "sync_user_id")
-                    .ok().flatten().unwrap_or_default();
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default();
                 for row in &mut rows_owned {
                     if let Some(obj) = row.as_object_mut() {
-                        if !obj.contains_key("user_id") || obj.get("user_id").map(|v| v.is_null()).unwrap_or(false) {
+                        if !obj.contains_key("user_id")
+                            || obj.get("user_id").map(|v| v.is_null()).unwrap_or(false)
+                        {
                             obj.insert("user_id".to_string(), Value::String(user_id.clone()));
                         }
                     }
@@ -399,12 +460,13 @@ impl SyncClient {
                 if table == "notes" {
                     for row in &mut rows_owned {
                         if let Some(obj) = row.as_object_mut() {
-                            if let Some(fuuid) =
-                                obj.get("folder_uuid").and_then(|v| v.as_str()).map(String::from)
+                            if let Some(fuuid) = obj
+                                .get("folder_uuid")
+                                .and_then(|v| v.as_str())
+                                .map(String::from)
                             {
-                                let folder_id =
-                                    queries::get_folder_id_by_uuid(conn, &fuuid)
-                                        .map_err(|e| format!("get_folder_id_by_uuid: {e}"))?;
+                                let folder_id = queries::get_folder_id_by_uuid(conn, &fuuid)
+                                    .map_err(|e| format!("get_folder_id_by_uuid: {e}"))?;
                                 obj.insert(
                                     "folder_id".to_string(),
                                     folder_id
@@ -462,7 +524,9 @@ impl SyncClient {
                         else {
                             return false;
                         };
-                        let task_id = queries::get_task_id_by_uuid(conn, &task_uuid).ok().flatten();
+                        let task_id = queries::get_task_id_by_uuid(conn, &task_uuid)
+                            .ok()
+                            .flatten();
                         let Some(task_id) = task_id else {
                             return false;
                         };
@@ -482,12 +546,15 @@ impl SyncClient {
                                     updated_at.to_string(),
                                 ));
                             }
-                            let parent_id = queries::get_task_checkbox_id_by_uuid(conn, &parent_uuid)
-                                .ok()
-                                .flatten();
+                            let parent_id =
+                                queries::get_task_checkbox_id_by_uuid(conn, &parent_uuid)
+                                    .ok()
+                                    .flatten();
                             obj.insert(
                                 "parent_id".to_string(),
-                                parent_id.map(|v| Value::Number(v.into())).unwrap_or(Value::Null),
+                                parent_id
+                                    .map(|v| Value::Number(v.into()))
+                                    .unwrap_or(Value::Null),
                             );
                         }
                         true
@@ -511,11 +578,75 @@ impl SyncClient {
                         else {
                             return false;
                         };
-                        let task_id = queries::get_task_id_by_uuid(conn, &task_uuid).ok().flatten();
+                        let task_id = queries::get_task_id_by_uuid(conn, &task_uuid)
+                            .ok()
+                            .flatten();
                         let Some(task_id) = task_id else {
                             return false;
                         };
                         obj.insert("task_id".to_string(), Value::Number(task_id.into()));
+                        true
+                    });
+                    let skipped = before.saturating_sub(rows_owned.len());
+                    if skipped > 0 {
+                        skipped_counts.insert(table.to_string(), skipped);
+                    }
+                }
+
+                if table == "finance_items" {
+                    let before = rows_owned.len();
+                    rows_owned.retain_mut(|row| {
+                        let Some(obj) = row.as_object_mut() else {
+                            return false;
+                        };
+                        let Some(plan_uuid) = obj
+                            .get("plan_uuid")
+                            .and_then(|v| v.as_str())
+                            .map(String::from)
+                        else {
+                            return false;
+                        };
+                        let plan_id = queries::get_finance_plan_id_by_uuid(conn, &plan_uuid)
+                            .ok()
+                            .flatten();
+                        let Some(plan_id) = plan_id else {
+                            return false;
+                        };
+                        obj.insert("plan_id".to_string(), Value::Number(plan_id.into()));
+
+                        if let Some(parent_uuid) = obj
+                            .get("parent_uuid")
+                            .and_then(|v| v.as_str())
+                            .map(String::from)
+                        {
+                            if let (Some(uuid), Some(updated_at)) = (
+                                obj.get("uuid").and_then(|v| v.as_str()),
+                                obj.get("updated_at").and_then(|v| v.as_str()),
+                            ) {
+                                deferred_finance_parent_updates.push((
+                                    uuid.to_string(),
+                                    parent_uuid.clone(),
+                                    updated_at.to_string(),
+                                ));
+                            }
+                            let parent_id = queries::get_finance_item_id_by_uuid(conn, &parent_uuid)
+                                .ok()
+                                .flatten()
+                                .filter(|parent_id| {
+                                    queries::get_finance_item_plan_id_by_id(conn, *parent_id)
+                                        .ok()
+                                        .flatten()
+                                        == Some(plan_id)
+                                });
+                            obj.insert(
+                                "parent_id".to_string(),
+                                parent_id
+                                    .map(|v| Value::Number(v.into()))
+                                    .unwrap_or(Value::Null),
+                            );
+                        } else {
+                            obj.insert("parent_id".to_string(), Value::Null);
+                        }
                         true
                     });
                     let skipped = before.saturating_sub(rows_owned.len());
@@ -533,14 +664,34 @@ impl SyncClient {
                             .map_err(|e| format!("get_task_checkbox_id_by_uuid: {e}"))?;
                         if let Some(parent_id) = parent_id {
                             queries::set_task_checkbox_parent_if_not_newer(
-                                conn,
-                                uuid,
-                                parent_id,
-                                updated_at,
+                                conn, uuid, parent_id, updated_at,
                             )
-                            .map_err(|e| {
-                                format!("set_task_checkbox_parent_if_not_newer: {e}")
-                            })?;
+                            .map_err(|e| format!("set_task_checkbox_parent_if_not_newer: {e}"))?;
+                        }
+                    }
+                }
+
+                if table == "finance_items" {
+                    for (uuid, parent_uuid, updated_at) in &deferred_finance_parent_updates {
+                        let parent_id = queries::get_finance_item_id_by_uuid(conn, parent_uuid)
+                            .map_err(|e| format!("get_finance_item_id_by_uuid: {e}"))?;
+                        let child_id = queries::get_finance_item_id_by_uuid(conn, uuid)
+                            .map_err(|e| format!("get_finance_item_id_by_uuid: {e}"))?;
+                        if let (Some(parent_id), Some(child_id)) = (parent_id, child_id) {
+                            let parent_plan_id =
+                                queries::get_finance_item_plan_id_by_id(conn, parent_id)
+                                    .map_err(|e| format!("get_finance_item_plan_id_by_id: {e}"))?;
+                            let child_plan_id =
+                                queries::get_finance_item_plan_id_by_id(conn, child_id)
+                                    .map_err(|e| format!("get_finance_item_plan_id_by_id: {e}"))?;
+                            if parent_plan_id.is_some() && parent_plan_id == child_plan_id {
+                                queries::set_finance_item_parent_if_not_newer(
+                                    conn, uuid, parent_id, updated_at,
+                                )
+                                .map_err(|e| {
+                                    format!("set_finance_item_parent_if_not_newer: {e}")
+                                })?;
+                            }
                         }
                     }
                 }
@@ -568,8 +719,13 @@ impl SyncClient {
     /// Extract a human-readable display name from a row for sync logging.
     fn extract_display_name(table: &str, obj: &Map<String, Value>) -> String {
         let name_field = match table {
-            "shortcuts" | "note_folders" | "snippet_tags" | "task_categories"
-            | "task_statuses" => "name",
+            "shortcuts"
+            | "note_folders"
+            | "snippet_tags"
+            | "task_categories"
+            | "task_statuses"
+            | "finance_plans"
+            | "finance_items" => "name",
             "notes" | "tasks" => "title",
             "task_checkboxes" => "text",
             "sql_macrosing_templates" => "template_name",
@@ -649,7 +805,10 @@ mod tests {
 
     #[test]
     fn extract_display_name_falls_back_to_uuid() {
-        let obj = json!({ "uuid": "abcdef0123456789" }).as_object().unwrap().clone();
+        let obj = json!({ "uuid": "abcdef0123456789" })
+            .as_object()
+            .unwrap()
+            .clone();
         assert_eq!(SyncClient::extract_display_name("tasks", &obj), "abcdef01");
     }
 
@@ -663,10 +822,11 @@ mod tests {
         assert!(got.ends_with("..."));
         assert!(got.chars().count() <= 40);
 
-        let checkbox = json!({ "text": "Проверить вложенный чекбокс синхронизации ✅✅✅✅✅✅✅✅✅✅" })
-            .as_object()
-            .unwrap()
-            .clone();
+        let checkbox =
+            json!({ "text": "Проверить вложенный чекбокс синхронизации ✅✅✅✅✅✅✅✅✅✅" })
+                .as_object()
+                .unwrap()
+                .clone();
         let got = SyncClient::extract_display_name("task_checkboxes", &checkbox);
         assert!(got.ends_with("..."));
         assert!(got.chars().count() <= 40);
@@ -675,7 +835,10 @@ mod tests {
             .as_object()
             .unwrap()
             .clone();
-        assert_eq!(SyncClient::extract_display_name("task_links", &link), "Трекер");
+        assert_eq!(
+            SyncClient::extract_display_name("task_links", &link),
+            "Трекер"
+        );
     }
 
     #[test]
@@ -767,10 +930,9 @@ mod tests {
         let (_pulled, skipped) = client.apply_pull(&conn, "pc-test", &result).unwrap();
         assert!(skipped.is_empty());
 
-        let task_id =
-            queries::get_task_id_by_uuid(&conn, "33333333-3333-4333-8333-333333333333")
-                .unwrap()
-                .unwrap();
+        let task_id = queries::get_task_id_by_uuid(&conn, "33333333-3333-4333-8333-333333333333")
+            .unwrap()
+            .unwrap();
         let link_task_id: i64 = conn
             .query_row(
                 "SELECT task_id FROM task_links WHERE uuid = ?1",
@@ -780,12 +942,10 @@ mod tests {
             .unwrap();
         assert_eq!(link_task_id, task_id);
 
-        let parent_id = queries::get_task_checkbox_id_by_uuid(
-            &conn,
-            "11111111-1111-4111-8111-111111111111",
-        )
-        .unwrap()
-        .unwrap();
+        let parent_id =
+            queries::get_task_checkbox_id_by_uuid(&conn, "11111111-1111-4111-8111-111111111111")
+                .unwrap()
+                .unwrap();
         let child_parent_id: Option<i64> = conn
             .query_row(
                 "SELECT parent_id FROM task_checkboxes WHERE uuid = ?1",
@@ -794,5 +954,85 @@ mod tests {
             )
             .unwrap();
         assert_eq!(child_parent_id, Some(parent_id));
+    }
+
+    #[test]
+    fn apply_pull_maps_finance_uuid_relationships() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        run_migrations(&conn).unwrap();
+
+        let client = SyncClient::new("http://localhost", "test-key", None).unwrap();
+        let result = json!({
+            "changes": {
+                "finance_items": [
+                    {
+                        "uuid": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                        "plan_uuid": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+                        "parent_uuid": null,
+                        "name": "Housing",
+                        "amount_cents": 10000,
+                        "due_day": 3,
+                        "due_date": null,
+                        "note": "",
+                        "sort_order": 0,
+                        "created_at": "2026-06-11T00:00:02",
+                        "updated_at": "2026-06-11T00:00:02",
+                        "is_deleted": false
+                    },
+                    {
+                        "uuid": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                        "plan_uuid": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+                        "parent_uuid": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                        "name": "Internet",
+                        "amount_cents": 50000,
+                        "due_day": 21,
+                        "due_date": null,
+                        "note": "",
+                        "sort_order": 0,
+                        "created_at": "2026-06-11T00:00:03",
+                        "updated_at": "2026-06-11T00:00:03",
+                        "is_deleted": false
+                    }
+                ],
+                "finance_plans": [
+                    {
+                        "uuid": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+                        "name": "Regular payments",
+                        "currency": "RUB",
+                        "kind": "monthly",
+                        "sort_order": 0,
+                        "created_at": "2026-06-11T00:00:01",
+                        "updated_at": "2026-06-11T00:00:01",
+                        "is_deleted": false
+                    }
+                ]
+            },
+            "server_time": "2026-06-11T00:00:10"
+        });
+
+        let (_pulled, skipped) = client.apply_pull(&conn, "pc-test", &result).unwrap();
+        assert!(skipped.is_empty());
+
+        let plan_id = queries::get_finance_plan_id_by_uuid(
+            &conn,
+            "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        )
+        .unwrap()
+        .unwrap();
+        let parent_id = queries::get_finance_item_id_by_uuid(
+            &conn,
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        )
+        .unwrap()
+        .unwrap();
+        let child: (i64, Option<i64>) = conn
+            .query_row(
+                "SELECT plan_id, parent_id FROM finance_items WHERE uuid = ?1",
+                ["bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(child.0, plan_id);
+        assert_eq!(child.1, Some(parent_id));
     }
 }

@@ -127,6 +127,8 @@ class ConflictInfo(BaseModel):
 class PushResponse(BaseModel):
     status: str = "ok"
     accepted: int = 0
+    accepted_uuids: dict[str, list[str]] = {}
+    rejected_uuids: dict[str, list[str]] = {}
     conflicts: list[ConflictInfo] = []
 
 

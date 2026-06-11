@@ -65,6 +65,85 @@ def public_shortcut_payload(row) -> dict:
     }
 
 
+def _finance_kind_label(kind: str | None) -> str:
+    return {
+        "monthly": "Monthly",
+        "project": "Project",
+        "one_time": "One-time",
+        "general": "General",
+    }.get(kind or "", "General")
+
+
+def public_finance_plan_payload(plan, rows) -> dict:
+    by_uuid = {}
+    children: dict[str | None, list[dict]] = {}
+    for row in rows:
+        uuid = str(row.uuid)
+        parent_uuid = str(row.parent_uuid) if row.parent_uuid else None
+        item = {
+            "uuid": uuid,
+            "parent_uuid": parent_uuid,
+            "name": row.name or "",
+            "amount_cents": int(row.amount_cents or 0),
+            "due_day": row.due_day,
+            "due_date": row.due_date,
+            "note": row.note or "",
+            "sort_order": int(row.sort_order or 0),
+        }
+        by_uuid[uuid] = item
+
+    for item in by_uuid.values():
+        parent_uuid = item["parent_uuid"] if item["parent_uuid"] in by_uuid else None
+        item["parent_uuid"] = parent_uuid
+        children.setdefault(parent_uuid, []).append(item)
+
+    def sort_items(items: list[dict]) -> list[dict]:
+        return sorted(items, key=lambda it: (it["sort_order"], it["name"], it["uuid"]))
+
+    def total_for(item: dict, stack: set[str] | None = None) -> int:
+        stack = stack or set()
+        uuid = item["uuid"]
+        if uuid in stack:
+            return int(item["amount_cents"] or 0)
+        next_stack = set(stack)
+        next_stack.add(uuid)
+        total = int(item["amount_cents"] or 0)
+        for child in children.get(uuid, []):
+            total += total_for(child, next_stack)
+        return total
+
+    rendered_rows = []
+
+    def visit(item: dict, depth: int, stack: set[str] | None = None) -> None:
+        stack = stack or set()
+        uuid = item["uuid"]
+        if uuid in stack:
+            return
+        next_stack = set(stack)
+        next_stack.add(uuid)
+        rendered_rows.append({
+            **item,
+            "depth": depth,
+            "total_cents": total_for(item),
+        })
+        for child in sort_items(children.get(uuid, [])):
+            visit(child, depth + 1, next_stack)
+
+    roots = sort_items(children.get(None, []))
+    for root in roots:
+        visit(root, 0)
+
+    return {
+        "type": "finance_plan",
+        "title": plan.name or "Finance list",
+        "currency": plan.currency or "RUB",
+        "kind": plan.kind or "general",
+        "kind_label": _finance_kind_label(plan.kind),
+        "total_cents": sum(total_for(root) for root in roots),
+        "items": rendered_rows,
+    }
+
+
 IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)\)")
 LINK_RE = re.compile(r"(?<!!)\[([^\]]+)\]\(([^)\s]+)\)")
 CODE_SPAN_RE = re.compile(r"`([^`\n]+)`")
@@ -365,6 +444,66 @@ def _is_markdown_like(text: str) -> bool:
     return bool(MARKDOWN_MARKER_RE.search(text or "")) or _has_pipe_table(text or "")
 
 
+def _format_money_cents(amount_cents: int, currency: str) -> str:
+    amount = (int(amount_cents or 0)) / 100
+    text = f"{amount:,.2f}".replace(",", " ")
+    if text.endswith(".00"):
+        text = text[:-3]
+    return f"{text} {currency or ''}".strip()
+
+
+def _finance_date_text(item: dict, kind: str) -> str:
+    if kind == "monthly":
+        day = item.get("due_day")
+        return f"{day}-е" if day else ""
+    return str(item.get("due_date") or "")
+
+
+def _render_finance_share(payload: dict) -> str:
+    currency = str(payload.get("currency") or "RUB")
+    kind = str(payload.get("kind") or "general")
+    meta = " · ".join(
+        part for part in [payload.get("kind_label") or "General", currency] if part
+    )
+    rows_html = []
+    for item in payload.get("items") or []:
+        depth = max(0, int(item.get("depth") or 0))
+        name = html.escape(item.get("name") or "Untitled item")
+        note = html.escape(item.get("note") or "")
+        date_text = html.escape(_finance_date_text(item, kind))
+        amount = html.escape(_format_money_cents(item.get("amount_cents") or 0, currency))
+        total = html.escape(_format_money_cents(item.get("total_cents") or 0, currency))
+        rows_html.append(
+            "<tr>"
+            f"<td><span class='finance-indent' style='--depth:{depth}'></span>{name}</td>"
+            f"<td class='money'>{amount}</td>"
+            f"<td>{date_text}</td>"
+            f"<td class='money strong'>{total}</td>"
+            f"<td>{note}</td>"
+            "</tr>"
+        )
+    if rows_html:
+        table = (
+            "<div class='share-table-scroll'>"
+            "<table class='finance-share-table'>"
+            "<thead><tr><th>Name</th><th>Amount</th><th>Date</th><th>Total</th><th>Note</th></tr></thead>"
+            f"<tbody>{''.join(rows_html)}</tbody>"
+            "</table>"
+            "</div>"
+        )
+    else:
+        table = "<div class='share-empty'>No expense rows.</div>"
+    total = html.escape(_format_money_cents(payload.get("total_cents") or 0, currency))
+    return (
+        f"<div class='share-meta'>{html.escape(meta)}</div>"
+        "<section class='finance-share-summary'>"
+        "<div class='finance-share-total-label'>Total</div>"
+        f"<div class='finance-share-total'>{total}</div>"
+        "</section>"
+        f"{table}"
+    )
+
+
 def _render_markdown(text: str) -> str:
     text, references = _extract_reference_definitions(text or "")
     output: list[str] = []
@@ -494,7 +633,9 @@ def render_share_html(payload: dict) -> str:
     title = payload.get("title") or payload.get("name") or "Shared item"
     safe_title = html.escape(title)
 
-    if payload.get("type") == "shortcut":
+    if payload.get("type") == "finance_plan":
+        body = _render_finance_share(payload)
+    elif payload.get("type") == "shortcut":
         value = payload.get("value", "")
         description = payload.get("description", "")
         description_html = (
@@ -554,6 +695,17 @@ def render_share_html(payload: dict) -> str:
     .share-markdown th, .share-markdown td {{ border: 1px solid #30363d; padding: 7px 10px; vertical-align: top; }}
     .share-markdown th {{ background: #161b22; color: #f0f6fc; font-weight: 700; }}
     .share-markdown td {{ color: #c9d1d9; }}
+    .share-meta {{ color: #8b949e; margin: -10px 0 18px; font-size: 13px; }}
+    .share-empty {{ border: 1px dashed #30363d; border-radius: 8px; padding: 22px; color: #8b949e; text-align: center; }}
+    .finance-share-summary {{ border: 1px solid #30363d; border-radius: 8px; padding: 12px 14px; margin: 0 0 14px; background: #161b22; }}
+    .finance-share-total-label {{ color: #8b949e; font-size: 12px; margin-bottom: 4px; }}
+    .finance-share-total {{ color: #f0f6fc; font-size: 24px; font-weight: 750; }}
+    .finance-share-table {{ width: 100%; min-width: 760px; border-collapse: collapse; background: #0d1117; }}
+    .finance-share-table th, .finance-share-table td {{ border: 1px solid #30363d; padding: 8px 10px; vertical-align: top; }}
+    .finance-share-table th {{ background: #161b22; color: #f0f6fc; font-weight: 700; text-align: left; }}
+    .finance-share-table .money {{ text-align: right; white-space: nowrap; }}
+    .finance-share-table .strong {{ color: #f0f6fc; font-weight: 700; }}
+    .finance-indent {{ display: inline-block; width: calc(var(--depth) * 18px); }}
     .figure-card {{ margin: 14px 0; border: 1px solid #30363d; border-radius: 8px; overflow: hidden; background: #161b22; }}
     .figure-card img {{ display: block; max-width: 100%; height: auto; margin: 0 auto; }}
     .figure-card figcaption {{ border-top: 1px solid #30363d; padding: 8px 10px; color: #8b949e; font-size: 13px; }}

@@ -1,5 +1,6 @@
 import { call } from '../tauri-api.js';
 import { showModal } from '../components/modal.js';
+import { openShareLinkModal } from '../components/share-link-modal.js';
 import { showToast } from '../components/toast.js';
 
 const COLLAPSE_KEY = 'finance.collapsed.items';
@@ -618,15 +619,18 @@ function renderMainHeader(plan) {
   edit.className = 'finance-plan-edit';
   const nameInput = document.createElement('input');
   nameInput.className = 'finance-input';
+  nameInput.dataset.planField = 'name';
   nameInput.value = plan.name || '';
   nameInput.placeholder = 'Plan name';
   const currencyInput = document.createElement('input');
   currencyInput.className = 'finance-input';
+  currencyInput.dataset.planField = 'currency';
   currencyInput.value = plan.currency || 'RUB';
   currencyInput.maxLength = 6;
   currencyInput.placeholder = 'RUB';
   const kindSelect = document.createElement('select');
   kindSelect.className = 'finance-select';
+  kindSelect.dataset.planField = 'kind';
   for (const option of PLAN_KINDS) {
     const el = document.createElement('option');
     el.value = option.value;
@@ -640,12 +644,7 @@ function renderMainHeader(plan) {
   saveBtn.textContent = 'Save';
   saveBtn.addEventListener('click', async () => {
     try {
-      await call('update_finance_plan', {
-        id: state.activePlanId,
-        name: nameInput.value.trim() || 'Untitled list',
-        currency: currencyInput.value.trim().toUpperCase() || 'RUB',
-        kind: kindSelect.value,
-      });
+      await saveActivePlanHeaderFromDom();
       showToast('Finance list saved', 'success');
       await loadAll(state.activePlanId);
     } catch (err) {
@@ -656,6 +655,12 @@ function renderMainHeader(plan) {
 
   const actions = document.createElement('div');
   actions.className = 'finance-header-actions';
+  const shareBtn = document.createElement('button');
+  shareBtn.className = 'finance-small-btn';
+  shareBtn.type = 'button';
+  shareBtn.title = 'Share public link';
+  shareBtn.textContent = '🔗';
+  shareBtn.addEventListener('click', () => shareActivePlan(plan));
   const addRow = document.createElement('button');
   addRow.className = 'finance-small-btn';
   addRow.type = 'button';
@@ -671,10 +676,55 @@ function renderMainHeader(plan) {
   delPlan.type = 'button';
   delPlan.textContent = 'Del';
   delPlan.addEventListener('click', deleteActivePlan);
-  actions.append(addRow, addGroup, delPlan);
+  actions.append(shareBtn, addRow, addGroup, delPlan);
 
   header.append(edit, actions);
   return header;
+}
+
+async function saveActivePlanHeaderFromDom() {
+  if (!state.activePlanId || !rootEl) return null;
+  const nameInput = rootEl.querySelector('[data-plan-field="name"]');
+  const currencyInput = rootEl.querySelector('[data-plan-field="currency"]');
+  const kindSelect = rootEl.querySelector('[data-plan-field="kind"]');
+  const name = nameInput?.value.trim() || 'Untitled list';
+  const currency = currencyInput?.value.trim().toUpperCase() || 'RUB';
+  const kind = kindSelect?.value || activePlanKind();
+  await call('update_finance_plan', {
+    id: state.activePlanId,
+    name,
+    currency,
+    kind,
+  });
+  const plan = state.plans.find((item) => planId(item) === state.activePlanId) || {};
+  return { ...plan, name, currency, kind };
+}
+
+async function shareActivePlan(plan) {
+  if (!plan?.uuid) {
+    showToast('Sync this finance list before sharing', 'error');
+    return;
+  }
+  try {
+    const saved = await saveActivePlanHeaderFromDom();
+    await call('trigger_sync');
+    await loadAll(state.activePlanId);
+    const active = state.plans.find((item) => planId(item) === state.activePlanId) || saved || plan;
+    await openShareLinkModal({
+      itemType: 'finance_plan',
+      itemUuid: active.uuid || plan.uuid,
+      title: active.name || plan.name || 'Finance list',
+      onBeforeCreate: async () => {
+        const current = await saveActivePlanHeaderFromDom();
+        return {
+          itemUuid: current?.uuid || active.uuid || plan.uuid,
+          title: current?.name || active.name || plan.name || 'Finance list',
+        };
+      },
+    });
+  } catch (err) {
+    showToast(`Failed to prepare share link: ${err}`, 'error');
+  }
 }
 
 function renderSummary(total, currency) {
@@ -776,6 +826,7 @@ function renderItemRow(row, children, totals) {
   nameInput.value = item.name || '';
   nameInput.placeholder = 'Expense item';
   nameInput.addEventListener('change', () => saveItemFromRow(rowEl));
+  nameInput.addEventListener('keydown', (event) => onFinanceNameKeydown(event, rowEl));
   nameCell.append(pad, nameInput);
 
   const amountCell = document.createElement('div');
@@ -847,6 +898,154 @@ function renderItemRow(row, children, totals) {
 
   rowEl.append(gripCell, toggleCell, nameCell, amountCell, dateCell, totalCell, noteCell, actionCell);
   return rowEl;
+}
+
+function sortedItemsForParent(parentId) {
+  return state.items
+    .filter((item) => normalizeId(item.parent_id) === normalizeId(parentId))
+    .sort((a, b) =>
+      (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0)
+      || String(a.name || '').localeCompare(String(b.name || ''))
+      || itemId(a) - itemId(b));
+}
+
+function focusFinanceRowName(id, atEnd = false) {
+  setTimeout(() => {
+    const input = rootEl?.querySelector(`.finance-row[data-id="${id}"] [data-field="name"]`);
+    if (!input) return;
+    input.focus();
+    const offset = atEnd ? input.value.length : 0;
+    try {
+      input.setSelectionRange(offset, offset);
+    } catch {
+      input.select?.();
+    }
+    input.scrollIntoView?.({ block: 'nearest' });
+  }, 0);
+}
+
+function focusFinanceNameNeighbor(input, direction) {
+  const row = input.closest('.finance-row');
+  if (!row || !rootEl) return false;
+  const rows = [...rootEl.querySelectorAll('.finance-row')];
+  const index = rows.indexOf(row);
+  const target = rows[index + (direction === 'previous' ? -1 : 1)];
+  const targetInput = target?.querySelector('[data-field="name"]');
+  if (!targetInput) return false;
+  targetInput.focus();
+  try {
+    targetInput.setSelectionRange(0, 0);
+  } catch {
+    targetInput.select?.();
+  }
+  return true;
+}
+
+async function createItemAfter(rowEl) {
+  const currentId = Number(rowEl.dataset.id);
+  const current = state.items.find((item) => itemId(item) === currentId);
+  const parentId = current ? normalizeId(current.parent_id) : null;
+  const created = await call('create_finance_item', {
+    planId: state.activePlanId,
+    parentId,
+    name: '',
+    amountCents: 0,
+    dueDay: null,
+    dueDate: null,
+    note: '',
+  });
+
+  if (parentId != null) {
+    state.collapsed.delete(Number(parentId));
+    saveCollapsed();
+  }
+
+  if (current) {
+    const siblings = sortedItemsForParent(parentId).filter((item) => itemId(item) !== itemId(created));
+    const currentIndex = siblings.findIndex((item) => itemId(item) === currentId);
+    const beforeId = currentIndex >= 0 ? itemId(siblings[currentIndex + 1]) : null;
+    await call('move_finance_item', {
+      id: itemId(created),
+      parentId,
+      beforeId,
+    });
+  }
+
+  await loadAll(state.activePlanId);
+  focusFinanceRowName(itemId(created));
+}
+
+async function indentFinanceItem(rowEl) {
+  const id = Number(rowEl.dataset.id);
+  const item = state.items.find((entry) => itemId(entry) === id);
+  if (!item) return;
+  const siblings = sortedItemsForParent(item.parent_id);
+  const index = siblings.findIndex((entry) => itemId(entry) === id);
+  if (index <= 0) return;
+  const parent = siblings[index - 1];
+  const parentId = itemId(parent);
+  state.collapsed.delete(parentId);
+  saveCollapsed();
+  await call('move_finance_item', {
+    id,
+    parentId,
+    beforeId: null,
+  });
+  await loadAll(state.activePlanId);
+  focusFinanceRowName(id);
+}
+
+async function outdentFinanceItem(rowEl) {
+  const id = Number(rowEl.dataset.id);
+  const item = state.items.find((entry) => itemId(entry) === id);
+  if (!item || item.parent_id == null) return;
+  const parent = state.items.find((entry) => itemId(entry) === normalizeId(item.parent_id));
+  const newParentId = parent ? normalizeId(parent.parent_id) : null;
+  const parentSiblings = sortedItemsForParent(newParentId);
+  const parentIndex = parentSiblings.findIndex((entry) => itemId(entry) === normalizeId(item.parent_id));
+  const beforeId = parentIndex >= 0 ? itemId(parentSiblings[parentIndex + 1]) : null;
+  await call('move_finance_item', {
+    id,
+    parentId: newParentId,
+    beforeId,
+  });
+  await loadAll(state.activePlanId);
+  focusFinanceRowName(id);
+}
+
+async function onFinanceNameKeydown(event, rowEl) {
+  if (event.isComposing) return;
+  const input = event.currentTarget;
+  if (event.key === 'ArrowUp') {
+    if (input.selectionStart === 0 && input.selectionEnd === 0 && focusFinanceNameNeighbor(input, 'previous')) {
+      event.preventDefault();
+    }
+    return;
+  }
+  if (event.key === 'ArrowDown') {
+    const end = input.value.length;
+    if (input.selectionStart === end && input.selectionEnd === end && focusFinanceNameNeighbor(input, 'next')) {
+      event.preventDefault();
+    }
+    return;
+  }
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault();
+    if (!(await saveItemFromRow(rowEl))) return;
+    await createItemAfter(rowEl);
+    return;
+  }
+  if (event.key === 'Tab' && !event.shiftKey) {
+    event.preventDefault();
+    if (!(await saveItemFromRow(rowEl))) return;
+    await indentFinanceItem(rowEl);
+    return;
+  }
+  if (event.key === 'Tab' && event.shiftKey) {
+    event.preventDefault();
+    if (!(await saveItemFromRow(rowEl))) return;
+    await outdentFinanceItem(rowEl);
+  }
 }
 
 async function createPlan() {
@@ -924,7 +1123,7 @@ async function saveItemFromRow(rowEl) {
   const amountCents = parseMoneyToCents(amountInput?.value || '');
   if (amountCents == null) {
     showToast('Amount must be non-negative', 'error');
-    return;
+    return false;
   }
   let dueDay = rowEl.dataset.dueDay ? Number(rowEl.dataset.dueDay) : null;
   let dueDate = rowEl.dataset.dueDate || null;
@@ -932,7 +1131,7 @@ async function saveItemFromRow(rowEl) {
     dueDay = parseDueDay(dueDayInput.value);
     if (dueDay === undefined) {
       showToast('Day must be between 1 and 31', 'error');
-      return;
+      return false;
     }
   }
   if (dueDateInput) {
@@ -942,8 +1141,10 @@ async function saveItemFromRow(rowEl) {
   try {
     await call('update_finance_item', { id, name, amountCents, dueDay, dueDate, note });
     await loadAll(state.activePlanId);
+    return true;
   } catch (err) {
     showToast(`Failed to save row: ${err}`, 'error');
+    return false;
   }
 }
 

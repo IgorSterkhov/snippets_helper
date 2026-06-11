@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## v1.12.0 (2026-06-11)
+
+- **Finance live sync/share:** Finance lists and nested expense rows now sync
+  through the API with UUID-based plan and parent relationships. Finance lists
+  can be shared through live public links that render the current server copy
+  as a read-only hierarchical expense table.
+- **Finance keyboard editing:** row names now support task-like keyboard
+  editing: Enter creates the next same-level row, Tab/Shift+Tab changes
+  nesting, and ArrowUp/ArrowDown move between visible rows at text boundaries.
+
 ## f-20260611-2 (2026-06-11)
 
 - **Notes folder row actions:** folder rows no longer reserve a wide inline

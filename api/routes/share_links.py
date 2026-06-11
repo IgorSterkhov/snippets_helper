@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.auth import get_current_user
 from api.database import get_db
 from api.media_utils import public_html_base_url
-from api.models import Note, ShareLink, Shortcut, TelegraphPage, User
+from api.models import FinanceItem, FinancePlan, Note, ShareLink, Shortcut, TelegraphPage, User
 from api.schemas import (
     ShareLinkRequest,
     ShareLinkResponse,
@@ -25,6 +25,7 @@ from api.share_utils import (
     build_public_url,
     generate_share_token,
     public_note_payload,
+    public_finance_plan_payload,
     public_shortcut_payload,
     render_share_html,
 )
@@ -41,7 +42,8 @@ from api.telegraph import (
 router = APIRouter(prefix="/share-links", tags=["share-links"])
 public_router = APIRouter(tags=["public-share"])
 
-VALID_ITEM_TYPES = {"note", "shortcut"}
+VALID_ITEM_TYPES = {"note", "shortcut", "finance_plan"}
+TELEGRAPH_ITEM_TYPES = {"note", "shortcut"}
 
 
 def _public_html_frame_source() -> str:
@@ -75,7 +77,13 @@ PUBLIC_SHARE_HEADERS = {
 
 def _validate_item_type(item_type: str) -> str:
     if item_type not in VALID_ITEM_TYPES:
-        raise HTTPException(status_code=400, detail="item_type must be note or shortcut")
+        raise HTTPException(status_code=400, detail="item_type must be note, shortcut, or finance_plan")
+    return item_type
+
+
+def _validate_telegraph_item_type(item_type: str) -> str:
+    if item_type not in TELEGRAPH_ITEM_TYPES:
+        raise HTTPException(status_code=400, detail="Telegra.ph supports only note or shortcut")
     return item_type
 
 
@@ -124,7 +132,12 @@ async def _load_owned_item(
     item_type: str,
     item_uuid: UUID,
 ):
-    model = Note if item_type == "note" else Shortcut
+    model_by_type = {
+        "note": Note,
+        "shortcut": Shortcut,
+        "finance_plan": FinancePlan,
+    }
+    model = model_by_type[item_type]
     result = await db.execute(
         select(model).where(
             model.uuid == item_uuid,
@@ -228,7 +241,7 @@ async def get_telegraph_page(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    validated_type = _validate_item_type(item_type)
+    validated_type = _validate_telegraph_item_type(item_type)
     uuid_value = _parse_uuid(item_uuid)
     item = await _load_owned_item(db, user.id, validated_type, uuid_value)
     if item is None:
@@ -245,7 +258,7 @@ async def publish_telegraph_page(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    item_type = _validate_item_type(req.item_type)
+    item_type = _validate_telegraph_item_type(req.item_type)
     uuid_value = _parse_uuid(req.item_uuid)
     item = await _load_owned_item(db, user.id, item_type, uuid_value)
     if item is None:
@@ -389,6 +402,16 @@ async def _public_payload(token: str, db: AsyncSession) -> dict:
         raise HTTPException(status_code=404, detail="not found")
     if link.item_type == "note":
         return public_note_payload(row)
+    if link.item_type == "finance_plan":
+        result = await db.execute(
+            select(FinanceItem).where(
+                FinanceItem.user_id == link.user_id,
+                FinanceItem.plan_uuid == link.item_uuid,
+                FinanceItem.is_deleted == False,  # noqa: E712
+            )
+        )
+        items = result.scalars().all()
+        return public_finance_plan_payload(row, items)
     return public_shortcut_payload(row)
 
 

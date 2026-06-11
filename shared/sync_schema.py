@@ -40,4 +40,14 @@ SYNCED_TABLES = {
         'data_fields': ['id', 'name', 'patterns', 'color', 'sort_order'],
         'pk': 'id',
     },
+    'finance_plans': {
+        'data_fields': ['id', 'name', 'currency', 'kind', 'sort_order', 'created_at'],
+        'pk': 'id',
+    },
+    'finance_items': {
+        'data_fields': ['id', 'plan_id', 'plan_uuid', 'parent_id', 'parent_uuid',
+                        'name', 'amount_cents', 'due_day', 'due_date', 'note',
+                        'sort_order', 'created_at'],
+        'pk': 'id',
+    },
 }

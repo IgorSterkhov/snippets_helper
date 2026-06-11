@@ -549,3 +549,28 @@ in global `Ctrl+Tab` switching.
    list gets polluted with same-tab placeholders.
 6. The controller must ignore active `.modal-overlay` dialogs for the entire
    shortcut flow, not only for overlay rendering.
+
+---
+
+## §18 Tree-table row keyboard editing
+
+**Used in:** Finance expense rows
+
+Use this pattern when a nested tree table should edit like an outliner while
+still using normal `<input>` fields for structured columns.
+
+- Scope the outliner shortcuts to the primary text/name input only. Numeric,
+  date, select, and note fields should keep normal form behavior unless the
+  feature explicitly needs spreadsheet navigation.
+- `Enter` creates a new sibling row with the same parent and places it directly
+  after the current row among that parent's children.
+- `Tab` nests the current row under the previous sibling when valid.
+- `Shift+Tab` moves the row one level up, placing it after the former parent.
+- `ArrowUp` / `ArrowDown` move focus between visible rendered rows only when
+  `selectionStart`/`selectionEnd` are both at the absolute start or end of the
+  input value.
+- Save or validate the current row before structural commands. If validation
+  fails, do not create or move rows.
+- Reuse existing backend move commands where possible. Avoid adding a new IPC
+  command just to express "create after" if the same result can be achieved by
+  create plus existing atomic move/reorder logic.

@@ -12,6 +12,8 @@ pub const SYNCED_TABLES: &[&str] = &[
     "tasks",
     "task_checkboxes",
     "task_links",
+    "finance_plans",
+    "finance_items",
 ];
 
 /// Columns present on every synced table (uuid, updated_at, sync_status, user_id).
@@ -77,6 +79,18 @@ pub fn data_columns(table: &str) -> &'static [&'static str] {
             "created_at",
         ],
         "task_links" => &["task_id", "url", "label", "sort_order", "created_at"],
+        "finance_plans" => &["name", "currency", "kind", "sort_order", "created_at"],
+        "finance_items" => &[
+            "plan_id",
+            "parent_id",
+            "name",
+            "amount_cents",
+            "due_day",
+            "due_date",
+            "note",
+            "sort_order",
+            "created_at",
+        ],
         _ => &[],
     }
 }
