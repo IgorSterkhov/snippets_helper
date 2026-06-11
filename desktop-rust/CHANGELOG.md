@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## f-20260611-8 (2026-06-11)
+
+- **Finance header polish:** Finance list name, currency, and list type now
+  autosave like Tasks instead of requiring a separate Save button. The header
+  was tightened into a cleaner control bar with a subtle save status, and
+  finance rows were made more compact for denser expense lists.
+
 ## f-20260611-7 (2026-06-11)
 
 - **Finance color tint hotfix:** Finance level colors now render as generated

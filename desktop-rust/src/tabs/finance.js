@@ -17,6 +17,7 @@ const DEFAULT_FINANCE_DISPLAY = {
   fillOrder: 'strong_first',
 };
 const FINANCE_FILL_ORDERS = new Set(['strong_first', 'soft_first']);
+const FINANCE_HEADER_AUTOSAVE_DELAY_MS = 650;
 const PLAN_KINDS = [
   { value: 'monthly', label: 'Monthly' },
   { value: 'project', label: 'Project' },
@@ -34,6 +35,7 @@ let state = {
   itemDrag: null,
   planDrag: null,
   display: { ...DEFAULT_FINANCE_DISPLAY },
+  headerSaveTimer: null,
 };
 
 let stylesInjected = false;
@@ -87,6 +89,11 @@ function injectStyles() {
   justify-content: space-between;
   gap: 10px;
 }
+.finance-main-header-plan {
+  min-height: 50px;
+  padding: 8px 12px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bg-secondary) 78%, transparent), var(--bg-primary));
+}
 .finance-title {
   font-size: 15px;
   font-weight: 650;
@@ -102,7 +109,7 @@ function injectStyles() {
 .finance-icon-btn,
 .finance-small-btn {
   min-width: 28px;
-  height: 28px;
+  height: 26px;
   padding: 0 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -114,6 +121,11 @@ function injectStyles() {
 .finance-icon-btn:hover,
 .finance-small-btn:hover {
   border-color: var(--accent);
+}
+.finance-primary-btn {
+  border-color: color-mix(in srgb, var(--accent) 52%, var(--border));
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-primary));
+  font-weight: 650;
 }
 .finance-plan-list {
   flex: 1;
@@ -187,10 +199,12 @@ function injectStyles() {
 }
 .finance-plan-edit {
   display: grid;
-  grid-template-columns: minmax(160px, 320px) 72px 120px auto;
-  gap: 8px;
+  grid-template-columns: minmax(220px, 1fr) 74px 122px 58px;
+  gap: 7px;
   align-items: center;
   min-width: 0;
+  flex: 1;
+  max-width: 740px;
 }
 .finance-input,
 .finance-money-input,
@@ -204,12 +218,34 @@ function injectStyles() {
   border-radius: 6px;
   background: var(--bg-primary);
   color: var(--text);
-  height: 28px;
-  padding: 4px 8px;
+  height: 24px;
+  padding: 2px 7px;
   font-size: 12px;
+}
+.finance-plan-edit .finance-input,
+.finance-plan-edit .finance-select {
+  background: color-mix(in srgb, var(--bg-secondary) 76%, var(--bg-primary));
+}
+.finance-plan-edit .finance-name-input {
+  height: 28px;
+  font-size: 14px;
+  font-weight: 750;
 }
 .finance-select {
   padding-right: 24px;
+}
+.finance-autosave-status {
+  min-width: 54px;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-align: right;
+  white-space: nowrap;
+}
+.finance-autosave-status.saving {
+  color: var(--accent-hover);
+}
+.finance-autosave-status.failed {
+  color: var(--danger);
 }
 .finance-row .finance-input,
 .finance-row .finance-money-input,
@@ -237,13 +273,13 @@ function injectStyles() {
   display: grid;
   grid-template-columns: repeat(3, minmax(120px, 1fr));
   gap: 8px;
-  padding: 10px 12px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--border);
 }
 .finance-stat {
   border: 1px solid var(--border);
   border-radius: 7px;
-  padding: 8px 10px;
+  padding: 7px 10px;
   background: var(--bg-secondary);
 }
 .finance-stat-label {
@@ -252,14 +288,14 @@ function injectStyles() {
   margin-bottom: 4px;
 }
 .finance-stat-value {
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 700;
 }
 .finance-table-wrap {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 10px 12px 14px;
+  padding: 8px 10px 12px;
 }
 .finance-tree {
   min-width: 900px;
@@ -276,7 +312,7 @@ function injectStyles() {
   gap: 0;
 }
 .finance-table-head {
-  min-height: 34px;
+  min-height: 30px;
   color: var(--text-muted);
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border);
@@ -285,10 +321,10 @@ function injectStyles() {
 }
 .finance-table-head > div,
 .finance-row > div {
-  padding: 0 8px;
+  padding: 0 6px;
 }
 .finance-row {
-  min-height: 38px;
+  min-height: 32px;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
   position: relative;
 }
@@ -342,11 +378,19 @@ function injectStyles() {
 }
 .finance-toggle {
   width: 22px;
-  height: 24px;
+  height: 22px;
   border: 0;
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
+}
+.finance-row .finance-row-grip {
+  height: 22px;
+}
+.finance-row .finance-icon-btn {
+  min-width: 24px;
+  height: 24px;
+  padding: 0 6px;
 }
 .finance-toggle:disabled {
   cursor: default;
@@ -839,6 +883,12 @@ function renderPlanCard(plan) {
 
   card.addEventListener('click', async (event) => {
     if (event.target.closest('.finance-plan-grip')) return;
+    if (id === state.activePlanId) return;
+    try {
+      await saveActivePlanHeaderFromDom();
+    } catch {
+      return;
+    }
     await loadAll(id);
   });
 
@@ -879,6 +929,7 @@ function renderMainHeader(plan) {
     header.appendChild(title);
     return header;
   }
+  header.classList.add('finance-main-header-plan');
 
   const edit = document.createElement('div');
   edit.className = 'finance-plan-edit';
@@ -903,20 +954,30 @@ function renderMainHeader(plan) {
     kindSelect.appendChild(el);
   }
   kindSelect.value = PLAN_KIND_LABELS[plan.kind] ? plan.kind : 'monthly';
-  const saveBtn = document.createElement('button');
-  saveBtn.className = 'finance-small-btn';
-  saveBtn.type = 'button';
-  saveBtn.textContent = 'Save';
-  saveBtn.addEventListener('click', async () => {
-    try {
-      await saveActivePlanHeaderFromDom();
-      showToast('Finance list saved', 'success');
-      await loadAll(state.activePlanId);
-    } catch (err) {
-      showToast(`Failed to save list: ${err}`, 'error');
-    }
-  });
-  edit.append(nameInput, currencyInput, kindSelect, saveBtn);
+  const saveStatus = document.createElement('div');
+  saveStatus.className = 'finance-autosave-status';
+  saveStatus.dataset.financeAutosaveStatus = 'true';
+  saveStatus.textContent = 'Saved';
+
+  const bindHeaderTextSave = (input) => {
+    input.addEventListener('input', () => {
+      if (input === currencyInput) input.value = input.value.toUpperCase();
+      scheduleActivePlanHeaderSave();
+    });
+    input.addEventListener('change', () => commitActivePlanHeader().catch(() => {}));
+    input.addEventListener('blur', () => commitActivePlanHeader().catch(() => {}));
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        input.blur();
+      }
+    });
+  };
+  bindHeaderTextSave(nameInput);
+  bindHeaderTextSave(currencyInput);
+  kindSelect.addEventListener('change', () => commitActivePlanHeader({ reloadAfter: true }).catch(() => {}));
+
+  edit.append(nameInput, currencyInput, kindSelect, saveStatus);
 
   const actions = document.createElement('div');
   actions.className = 'finance-header-actions';
@@ -933,14 +994,15 @@ function renderMainHeader(plan) {
   shareBtn.textContent = '🔗';
   shareBtn.addEventListener('click', () => shareActivePlan(plan));
   const addRow = document.createElement('button');
-  addRow.className = 'finance-small-btn';
+  addRow.className = 'finance-small-btn finance-primary-btn';
   addRow.type = 'button';
   addRow.textContent = '+ Row';
   addRow.addEventListener('click', () => createItem(null));
   const delPlan = document.createElement('button');
   delPlan.className = 'finance-small-btn';
   delPlan.type = 'button';
-  delPlan.textContent = 'Del';
+  delPlan.title = 'Delete finance list';
+  delPlan.textContent = '🗑';
   delPlan.addEventListener('click', deleteActivePlan);
   actions.append(settingsBtn, shareBtn, addRow, delPlan);
 
@@ -950,20 +1012,97 @@ function renderMainHeader(plan) {
 
 async function saveActivePlanHeaderFromDom() {
   if (!state.activePlanId || !rootEl) return null;
+  clearFinanceHeaderSaveTimer();
+  const draft = readActivePlanHeaderDraft();
+  const plan = state.plans.find((item) => planId(item) === state.activePlanId) || {};
+  if (
+    String(plan.name || '') === draft.name
+    && String(plan.currency || 'RUB') === draft.currency
+    && (PLAN_KIND_LABELS[plan.kind] ? plan.kind : 'monthly') === draft.kind
+  ) {
+    setFinanceAutosaveStatus('saved');
+    return { ...plan, ...draft };
+  }
+  setFinanceAutosaveStatus('saving');
+  try {
+    await call('update_finance_plan', {
+      id: state.activePlanId,
+      name: draft.name,
+      currency: draft.currency,
+      kind: draft.kind,
+    });
+  } catch (err) {
+    setFinanceAutosaveStatus('failed');
+    throw err;
+  }
+  const saved = { ...plan, ...draft };
+  updateActivePlanLocal(saved);
+  setFinanceAutosaveStatus('saved');
+  return saved;
+}
+
+function clearFinanceHeaderSaveTimer() {
+  if (state.headerSaveTimer) {
+    clearTimeout(state.headerSaveTimer);
+    state.headerSaveTimer = null;
+  }
+}
+
+function setFinanceAutosaveStatus(status) {
+  const el = rootEl?.querySelector('[data-finance-autosave-status]');
+  if (!el) return;
+  el.classList.toggle('saving', status === 'saving');
+  el.classList.toggle('failed', status === 'failed');
+  if (status === 'saving') el.textContent = 'Saving...';
+  else if (status === 'failed') el.textContent = 'Failed';
+  else if (status === 'editing') el.textContent = 'Editing';
+  else el.textContent = 'Saved';
+}
+
+function readActivePlanHeaderDraft() {
   const nameInput = rootEl.querySelector('[data-plan-field="name"]');
   const currencyInput = rootEl.querySelector('[data-plan-field="currency"]');
   const kindSelect = rootEl.querySelector('[data-plan-field="kind"]');
   const name = nameInput?.value.trim() || 'Untitled list';
   const currency = currencyInput?.value.trim().toUpperCase() || 'RUB';
   const kind = kindSelect?.value || activePlanKind();
-  await call('update_finance_plan', {
-    id: state.activePlanId,
-    name,
-    currency,
-    kind,
-  });
-  const plan = state.plans.find((item) => planId(item) === state.activePlanId) || {};
-  return { ...plan, name, currency, kind };
+  return { name, currency, kind };
+}
+
+function updateActivePlanLocal(plan) {
+  state.plans = state.plans.map((item) => (
+    planId(item) === state.activePlanId ? { ...item, ...plan } : item
+  ));
+  const card = rootEl?.querySelector(`.finance-plan-card[data-id="${state.activePlanId}"]`);
+  card?.querySelector('.finance-plan-name')?.replaceChildren(document.createTextNode(plan.name || 'Untitled list'));
+  const currency = card?.querySelector('.finance-plan-currency');
+  if (currency) currency.textContent = plan.currency || 'RUB';
+  const kind = card?.querySelector('.finance-plan-kind');
+  if (kind) kind.textContent = planKindLabel(plan.kind);
+}
+
+function scheduleActivePlanHeaderSave() {
+  clearFinanceHeaderSaveTimer();
+  setFinanceAutosaveStatus('editing');
+  state.headerSaveTimer = setTimeout(async () => {
+    try {
+      await saveActivePlanHeaderFromDom();
+    } catch (err) {
+      setFinanceAutosaveStatus('failed');
+      showToast(`Failed to save list: ${err}`, 'error');
+    }
+  }, FINANCE_HEADER_AUTOSAVE_DELAY_MS);
+}
+
+async function commitActivePlanHeader({ reloadAfter = false } = {}) {
+  try {
+    await saveActivePlanHeaderFromDom();
+    if (reloadAfter) await loadAll(state.activePlanId);
+  } catch (err) {
+    setFinanceAutosaveStatus('failed');
+    showToast(`Failed to save list: ${err}`, 'error');
+    throw err;
+  }
 }
 
 function financeDisplaySettingsFromModal(body) {
@@ -1272,7 +1411,7 @@ function renderItemRow(row, children, totals, maxDepth) {
   del.className = 'finance-icon-btn';
   del.type = 'button';
   del.title = 'Delete row';
-  del.textContent = 'Del';
+  del.textContent = '🗑';
   del.addEventListener('click', () => deleteItem(id));
   actionCell.append(addChild, del);
 
@@ -1430,6 +1569,7 @@ async function onFinanceNameKeydown(event, rowEl) {
 
 async function createPlan() {
   try {
+    await saveActivePlanHeaderFromDom();
     const plan = await call('create_finance_plan', {
       name: 'New list',
       currency: 'RUB',

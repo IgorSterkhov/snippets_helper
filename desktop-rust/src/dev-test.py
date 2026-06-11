@@ -3547,6 +3547,38 @@ async def run_tests():
         header_text = await cdp.eval("document.querySelector('#panel-finance .finance-main-header')?.textContent || ''")
         assert '+ Group' not in header_text, header_text
         assert '+ Row' in header_text, header_text
+        save_button_count = await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-main-header button')]
+          .filter(btn => btn.textContent.trim() === 'Save').length)()""")
+        assert save_button_count == 0, save_button_count
+        compact_metrics = await cdp.eval("""(() => {
+          const row = document.querySelector('#panel-finance .finance-row');
+          const input = row?.querySelector('[data-field="name"]');
+          const status = document.querySelector('#panel-finance [data-finance-autosave-status]');
+          return {
+            rowHeight: parseFloat(getComputedStyle(row).minHeight),
+            inputHeight: parseFloat(getComputedStyle(input).height),
+            statusText: status?.textContent.trim() || '',
+          };
+        })()""")
+        assert compact_metrics['rowHeight'] <= 32, compact_metrics
+        assert compact_metrics['inputHeight'] <= 24, compact_metrics
+        assert compact_metrics['statusText'] == 'Saved', compact_metrics
+
+        await cdp.eval("""(() => {
+          const input = document.querySelector('#panel-finance [data-plan-field="name"]');
+          input.value = 'Autosaved expenses';
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        })()""")
+        await wait_until(
+            cdp,
+            "JSON.parse(localStorage.getItem('mock.finance_plans') || '[]').some(p => p.id === 1 && p.name === 'Autosaved expenses')",
+            timeout=4,
+        )
+        await wait_until(
+            cdp,
+            "document.querySelector('#panel-finance [data-finance-autosave-status]')?.textContent.trim() === 'Saved'",
+            timeout=4,
+        )
 
         classes = await cdp.eval("""(() => Object.fromEntries(
           [...document.querySelectorAll('#panel-finance .finance-row')].map(row => [row.dataset.id, row.className])
