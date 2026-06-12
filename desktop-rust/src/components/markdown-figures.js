@@ -99,6 +99,11 @@ function openImageViewer({ title, identitySrc, displaySrc }) {
   const actions = document.createElement('div');
   actions.className = 'markdown-image-viewer-actions';
 
+  const zoomLabel = document.createElement('span');
+  zoomLabel.className = 'markdown-image-viewer-zoom-label';
+  zoomLabel.textContent = '100%';
+  actions.appendChild(zoomLabel);
+
   const actualBtn = document.createElement('button');
   actualBtn.type = 'button';
   actualBtn.textContent = 'Actual size';
@@ -114,8 +119,11 @@ function openImageViewer({ title, identitySrc, displaySrc }) {
 
   const body = document.createElement('div');
   body.className = 'markdown-image-viewer-body fit';
+  body.tabIndex = 0;
+  body.title = 'Ctrl + mouse wheel to zoom. Drag to pan.';
   const image = document.createElement('img');
   image.alt = title || '';
+  image.draggable = false;
   image.src = displaySrc || identitySrc;
   body.appendChild(image);
 
@@ -129,21 +137,161 @@ function openImageViewer({ title, identitySrc, displaySrc }) {
   overlay.appendChild(modal);
   document.body.appendChild(overlay);
 
-  function setMode(actual) {
-    body.classList.toggle('actual', actual);
-    body.classList.toggle('fit', !actual);
-    actualBtn.textContent = actual ? 'Fit' : 'Actual size';
+  const state = {
+    scale: 1,
+    fitScale: 1,
+    panX: 0,
+    panY: 0,
+    mode: 'fit',
+    dragging: false,
+    dragStartX: 0,
+    dragStartY: 0,
+    panStartX: 0,
+    panStartY: 0,
+    pointerId: null,
+  };
+
+  const minScale = 0.1;
+  const maxScale = 8;
+
+  function naturalSize() {
+    return {
+      width: Math.max(1, image.naturalWidth || image.width || 1),
+      height: Math.max(1, image.naturalHeight || image.height || 1),
+    };
   }
 
-  let actual = false;
+  function computeFitScale() {
+    const rect = body.getBoundingClientRect();
+    const size = naturalSize();
+    const availableW = Math.max(1, rect.width - 28);
+    const availableH = Math.max(1, rect.height - 28);
+    const next = Math.min(1, availableW / size.width, availableH / size.height);
+    return Number.isFinite(next) && next > 0 ? next : 1;
+  }
+
+  function clamp(value, min, max) {
+    return Math.min(max, Math.max(min, value));
+  }
+
+  function clampPan() {
+    const rect = body.getBoundingClientRect();
+    const size = naturalSize();
+    const scaledW = size.width * state.scale;
+    const scaledH = size.height * state.scale;
+    const slack = 80;
+    const maxX = scaledW <= rect.width
+      ? Math.max(0, (rect.width - scaledW) / 2)
+      : (scaledW - rect.width) / 2 + slack;
+    const maxY = scaledH <= rect.height
+      ? Math.max(0, (rect.height - scaledH) / 2)
+      : (scaledH - rect.height) / 2 + slack;
+    state.panX = clamp(state.panX, -maxX, maxX);
+    state.panY = clamp(state.panY, -maxY, maxY);
+  }
+
+  function applyTransform() {
+    clampPan();
+    body.classList.toggle('actual', state.mode === 'actual');
+    body.classList.toggle('fit', state.mode === 'fit');
+    body.classList.toggle('custom', state.mode === 'custom');
+    image.style.transform = `translate(calc(-50% + ${state.panX}px), calc(-50% + ${state.panY}px)) scale(${state.scale})`;
+    zoomLabel.textContent = `${Math.round(state.scale * 100)}%`;
+    actualBtn.textContent = state.mode === 'fit' ? 'Actual size' : 'Fit';
+  }
+
+  function setMode(mode) {
+    state.mode = mode;
+    state.fitScale = computeFitScale();
+    state.scale = mode === 'actual' ? 1 : state.fitScale;
+    state.panX = 0;
+    state.panY = 0;
+    applyTransform();
+  }
+
+  function recalculateFit() {
+    state.fitScale = computeFitScale();
+    if (state.mode === 'fit') {
+      state.scale = state.fitScale;
+      state.panX = 0;
+      state.panY = 0;
+    }
+    applyTransform();
+  }
+
+  function zoomAt(clientX, clientY, nextScale) {
+    const rect = body.getBoundingClientRect();
+    const cursorX = Number.isFinite(clientX) ? clientX - rect.left - (rect.width / 2) : 0;
+    const cursorY = Number.isFinite(clientY) ? clientY - rect.top - (rect.height / 2) : 0;
+    const imageX = (cursorX - state.panX) / state.scale;
+    const imageY = (cursorY - state.panY) / state.scale;
+    state.scale = clamp(nextScale, minScale, maxScale);
+    state.panX = cursorX - (imageX * state.scale);
+    state.panY = cursorY - (imageY * state.scale);
+    state.mode = 'custom';
+    applyTransform();
+  }
+
+  function onWheel(event) {
+    if (!event.ctrlKey) return;
+    event.preventDefault();
+    const factor = Math.exp(-event.deltaY * 0.0015);
+    zoomAt(event.clientX, event.clientY, state.scale * factor);
+  }
+
+  function endDrag() {
+    if (!state.dragging) return;
+    state.dragging = false;
+    state.pointerId = null;
+    body.classList.remove('dragging');
+  }
+
+  function onPointerDown(event) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    body.focus({ preventScroll: true });
+    state.dragging = true;
+    state.pointerId = event.pointerId;
+    state.dragStartX = event.clientX;
+    state.dragStartY = event.clientY;
+    state.panStartX = state.panX;
+    state.panStartY = state.panY;
+    body.classList.add('dragging');
+    try {
+      body.setPointerCapture(event.pointerId);
+    } catch {}
+  }
+
+  function onPointerMove(event) {
+    if (!state.dragging || event.pointerId !== state.pointerId) return;
+    event.preventDefault();
+    state.panX = state.panStartX + (event.clientX - state.dragStartX);
+    state.panY = state.panStartY + (event.clientY - state.dragStartY);
+    state.mode = state.mode === 'fit' ? 'custom' : state.mode;
+    applyTransform();
+  }
+
   actualBtn.addEventListener('click', () => {
-    actual = !actual;
-    setMode(actual);
+    setMode(state.mode === 'fit' ? 'actual' : 'fit');
   });
+  image.addEventListener('dragstart', (event) => event.preventDefault());
+  image.addEventListener('load', recalculateFit);
+  body.addEventListener('wheel', onWheel, { passive: false });
+  body.addEventListener('pointerdown', onPointerDown);
+  body.addEventListener('pointermove', onPointerMove);
+  body.addEventListener('pointerup', endDrag);
+  body.addEventListener('pointercancel', endDrag);
+
+  const resizeObserver = typeof ResizeObserver === 'function'
+    ? new ResizeObserver(recalculateFit)
+    : null;
+  resizeObserver?.observe(body);
+  requestAnimationFrame(recalculateFit);
 
   function close() {
     overlay.remove();
     document.removeEventListener('keydown', onKeydown);
+    resizeObserver?.disconnect();
   }
 
   function onKeydown(event) {

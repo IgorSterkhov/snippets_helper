@@ -613,5 +613,10 @@ When Markdown images are rendered as Figure Cards:
 - Make both the image and a small overlay zoom button open the same viewer.
 - Default to a fit-to-viewport mode, with an `Actual size` toggle for inspecting
   the optimized saved file at its natural dimensions.
-- Use a normal modal overlay with Escape and backdrop close; actual-size mode
-  may scroll inside the viewer body.
+- Use a transform-based viewport instead of scrollbars when interactive
+  inspection is needed: `Ctrl + wheel` should zoom around the cursor, drag
+  should pan the image, and Fit/Actual controls should reset both zoom and pan
+  to predictable states.
+- Use a normal modal overlay with Escape and backdrop close; the viewer body
+  should keep overflow hidden and expose large images through pan/zoom instead
+  of nested scrollbars.

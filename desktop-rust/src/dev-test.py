@@ -2905,6 +2905,98 @@ async def run_tests():
         await cdp.eval("window.__mockRemoteMediaPreviews = false;")
     await check('T21f Snippets remote media previews use native fallback', t21f_snippets_remote_media_preview_native_fallback)
 
+    # ── T21f2: Figure Card viewer supports Ctrl-wheel zoom + pan ─
+    async def t21f2_markdown_figure_viewer_zoom_pan():
+        await close_modals()
+        await cdp.eval("""(async () => {
+          document.querySelector('#viewer-test-host')?.remove();
+          const host = document.createElement('div');
+          host.id = 'viewer-test-host';
+          host.className = 'markdown-body';
+          const img = document.createElement('img');
+          img.alt = 'zoom-pan-test';
+          img.src = 'data:image/svg+xml,' + encodeURIComponent(
+            '<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1200">' +
+            '<rect width="2000" height="1200" fill="#123456"/>' +
+            '<rect x="240" y="220" width="1520" height="760" fill="#d7ebff"/>' +
+            '</svg>'
+          );
+          const p = document.createElement('p');
+          p.appendChild(img);
+          host.appendChild(p);
+          document.body.appendChild(host);
+          const mod = await import('./components/markdown-figures.js');
+          mod.enhanceMarkdownFigures(host);
+          host.querySelector('.markdown-figure-card img').click();
+        })()""")
+        await wait_until(
+            cdp,
+            "document.querySelector('.markdown-image-viewer-body img')?.naturalWidth > 0",
+            timeout=3,
+        )
+        before = await cdp.eval("""(() => {
+          const transform = document.querySelector('.markdown-image-viewer-body img').style.transform;
+          return Number((transform.match(/scale\\(([^)]+)\\)/) || [])[1] || 0);
+        })()""")
+        after = await cdp.eval("""(() => {
+          const body = document.querySelector('.markdown-image-viewer-body');
+          const img = body.querySelector('img');
+          const rect = body.getBoundingClientRect();
+          body.dispatchEvent(new WheelEvent('wheel', {
+            bubbles: true,
+            cancelable: true,
+            ctrlKey: true,
+            deltaY: -900,
+            clientX: rect.left + rect.width / 2,
+            clientY: rect.top + rect.height / 2,
+          }));
+          const transform = img.style.transform;
+          return Number((transform.match(/scale\\(([^)]+)\\)/) || [])[1] || 0);
+        })()""")
+        assert after > before, f'scale did not increase: before={before}, after={after}'
+        pan_x = await cdp.eval("""(() => {
+          const body = document.querySelector('.markdown-image-viewer-body');
+          const img = body.querySelector('img');
+          const rect = body.getBoundingClientRect();
+          const startX = rect.left + rect.width / 2;
+          const startY = rect.top + rect.height / 2;
+          body.dispatchEvent(new PointerEvent('pointerdown', {
+            bubbles: true,
+            cancelable: true,
+            button: 0,
+            buttons: 1,
+            pointerId: 101,
+            clientX: startX,
+            clientY: startY,
+          }));
+          body.dispatchEvent(new PointerEvent('pointermove', {
+            bubbles: true,
+            cancelable: true,
+            button: 0,
+            buttons: 1,
+            pointerId: 101,
+            clientX: startX + 48,
+            clientY: startY + 16,
+          }));
+          body.dispatchEvent(new PointerEvent('pointerup', {
+            bubbles: true,
+            cancelable: true,
+            button: 0,
+            pointerId: 101,
+            clientX: startX + 48,
+            clientY: startY + 16,
+          }));
+          const transform = img.style.transform;
+          return Number((transform.match(/translate\\(calc\\(-50% \\+ ([^p]+)px\\)/) || [])[1] || 0);
+        })()""")
+        assert pan_x > 10, f'pan offset did not change: {pan_x}'
+        await cdp.eval(
+            "[...document.querySelectorAll('.markdown-image-viewer-actions button')]"
+            ".find(b => b.textContent.trim() === 'Close').click();"
+            "document.querySelector('#viewer-test-host')?.remove();"
+        )
+    await check('T21f2 Markdown figure viewer supports zoom and pan', t21f2_markdown_figure_viewer_zoom_pan)
+
     # ── T21g: Image preview shows variant title + arrows ─────
     async def t21g_image_preview_variant_navigation():
         await close_modals()

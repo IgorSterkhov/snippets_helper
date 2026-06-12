@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## f-20260612-1 (2026-06-12)
+
+- **Image viewer zoom/pan:** Figure Card image viewer in Snippets and Notes
+  now supports `Ctrl + mouse wheel` zooming around the cursor and drag-to-pan
+  inside the modal, while Fit and Actual size reset the view predictably.
+
 ## v1.13.0 (2026-06-12)
 
 - **Snippet image viewer:** Figure Card images in Snippets and Notes now open
