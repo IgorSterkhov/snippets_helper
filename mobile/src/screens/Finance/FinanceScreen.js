@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   RefreshControl,
   ScrollView,
@@ -106,6 +107,13 @@ function bandBackground(slot, colors) {
   return colors.card;
 }
 
+function formatDueHint(item, planKind) {
+  if (planKind === 'monthly') {
+    return item?.due_day ? `${item.due_day}-е` : '';
+  }
+  return item?.due_date || '';
+}
+
 export default function FinanceScreen() {
   const { colors } = useTheme();
   const [plans, setPlans] = useState([]);
@@ -113,6 +121,7 @@ export default function FinanceScreen() {
   const [items, setItems] = useState([]);
   const [collapsedIds, setCollapsedIds] = useState(new Set());
   const [reorderItemUuid, setReorderItemUuid] = useState(null);
+  const [editingItemUuid, setEditingItemUuid] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [shareVisible, setShareVisible] = useState(false);
   const [sharePreparing, setSharePreparing] = useState(false);
@@ -365,6 +374,7 @@ export default function FinanceScreen() {
             return next;
           });
           if (deletedIds.has(reorderItemUuid)) setReorderItemUuid(null);
+          if (deletedIds.has(editingItemUuid)) setEditingItemUuid(null);
         },
       },
     ]);
@@ -416,6 +426,15 @@ export default function FinanceScreen() {
     }
   };
 
+  const closeItemEditor = useCallback(async () => {
+    setEditingItemUuid(null);
+    try {
+      await flushPendingSaves();
+    } catch (e) {
+      Alert.alert('Finance save failed', String(e?.message || e));
+    }
+  }, [flushPendingSaves]);
+
   const flatRows = useMemo(() => flattenFinanceTree(items, { collapsedIds }), [items, collapsedIds]);
   const maxDepth = useMemo(() => flatRows.reduce((max, row) => Math.max(max, row.depth), 0), [flatRows]);
   const totals = useMemo(() => computeFinanceTotals(items), [items]);
@@ -425,6 +444,9 @@ export default function FinanceScreen() {
     : { up: false, down: false, left: false, right: false };
   const reorderItem = reorderItemUuid
     ? items.find((item) => item.uuid === reorderItemUuid && !item.is_deleted)
+    : null;
+  const editingItem = editingItemUuid
+    ? items.find((item) => item.uuid === editingItemUuid && !item.is_deleted)
     : null;
 
   return (
@@ -552,10 +574,7 @@ export default function FinanceScreen() {
                   isCollapsed={collapsedIds.has(row.item.uuid)}
                   isSelected={reorderItemUuid === row.item.uuid}
                   onToggleCollapse={toggleCollapse}
-                  onPatchItem={patchItem}
-                  onAddChild={createItem}
-                  onDelete={removeItem}
-                  onSelectReorder={setReorderItemUuid}
+                  onOpenEditor={setEditingItemUuid}
                 />
               ))
             ) : (
@@ -594,6 +613,29 @@ export default function FinanceScreen() {
         </View>
       ) : null}
 
+      <FinanceItemEditorSheet
+        visible={!!editingItem}
+        item={editingItem}
+        colors={colors}
+        currency={currency}
+        planKind={activePlan?.kind || 'monthly'}
+        total={editingItem ? totals.totals.get(editingItem.uuid) || 0 : 0}
+        onClose={closeItemEditor}
+        onPatchItem={patchItem}
+        onAddChild={async (uuid) => {
+          await createItem(uuid);
+          setEditingItemUuid(null);
+        }}
+        onMove={(uuid) => {
+          setReorderItemUuid(uuid);
+          setEditingItemUuid(null);
+        }}
+        onDelete={(item) => {
+          setEditingItemUuid(null);
+          removeItem(item);
+        }}
+      />
+
       <ShareLinkSheet
         visible={shareVisible}
         itemType="finance_plan"
@@ -614,22 +656,98 @@ function FinanceRow({
   isCollapsed,
   isSelected,
   onToggleCollapse,
-  onPatchItem,
-  onAddChild,
-  onDelete,
-  onSelectReorder,
+  onOpenEditor,
 }) {
   const { item, depth, hasChildren, hiddenDescendantCount } = row;
   const bandSlot = financeBandSlotForDepth(depth, maxDepth, 'soft_first');
   const backgroundColor = isSelected ? colors.primaryLight : bandBackground(bandSlot, colors);
+  const dueLabel = formatDueHint(item, planKind);
+  const directAmount = Number(item.amount_cents) || 0;
+  const showDirectAmount = hasChildren && directAmount > 0 && directAmount !== total;
+
+  return (
+    <TouchableOpacity
+      style={[
+        s.rowCard,
+        { borderColor: isSelected ? colors.primary : colors.border, backgroundColor },
+      ]}
+      activeOpacity={0.82}
+      onPress={() => onOpenEditor(item.uuid)}
+    >
+      <TouchableOpacity
+        style={s.compactCollapseHit}
+        onPress={() => onToggleCollapse(item.uuid, hasChildren)}
+        activeOpacity={hasChildren ? 0.7 : 1}
+      >
+        <Text style={[s.compactCollapseText, { color: hasChildren ? colors.primary : colors.textMuted }]}>
+          {hasChildren ? (isCollapsed ? '▸' : '▾') : '·'}
+        </Text>
+      </TouchableOpacity>
+      <View style={[s.compactMain, depth ? { paddingLeft: Math.min(depth * INDENT_STEP, MAX_INDENT) } : null]}>
+        <View style={s.compactTitleRow}>
+          <Text
+            style={[
+              s.compactTitle,
+              hasChildren && s.compactGroupTitle,
+              { color: colors.text },
+            ]}
+            numberOfLines={1}
+          >
+            {item.name || 'Без названия'}
+          </Text>
+          {hiddenDescendantCount ? (
+            <Text style={[s.compactHiddenCount, { color: colors.textMuted }]}>{hiddenDescendantCount}</Text>
+          ) : null}
+        </View>
+        {item.note || dueLabel ? (
+          <Text style={[s.compactHint, { color: colors.textMuted }]} numberOfLines={1}>
+            {[dueLabel, item.note].filter(Boolean).join(' · ')}
+          </Text>
+        ) : null}
+      </View>
+      <View style={s.compactAmounts}>
+        <Text style={[s.compactTotal, hasChildren && s.compactGroupTotal, { color: colors.text }]} numberOfLines={1}>
+          {formatMoney(total, currency)}
+        </Text>
+        {showDirectAmount ? (
+          <Text style={[s.compactDirectAmount, { color: colors.textMuted }]} numberOfLines={1}>
+            + {formatMoney(directAmount, currency)}
+          </Text>
+        ) : null}
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+function FinanceItemEditorSheet({
+  visible,
+  item,
+  colors,
+  currency,
+  planKind,
+  total,
+  onClose,
+  onPatchItem,
+  onAddChild,
+  onMove,
+  onDelete,
+}) {
+  const [amountText, setAmountText] = useState('');
+
+  useEffect(() => {
+    setAmountText(amountInputValue(item?.amount_cents || 0));
+  }, [item?.uuid]);
+
+  if (!item) return null;
+
   const dueValue = planKind === 'monthly'
     ? (item.due_day == null ? '' : String(item.due_day))
     : (item.due_date || '');
 
   const handleAmountChange = (text) => {
+    setAmountText(text);
     const cents = parseMoneyToCents(text);
-    if (cents == null) return;
-    onPatchItem(item.uuid, { amount_cents: cents });
+    if (cents != null) onPatchItem(item.uuid, { amount_cents: cents });
   };
 
   const handleDateChange = (text) => {
@@ -643,86 +761,86 @@ function FinanceRow({
   };
 
   return (
-    <View
-      style={[
-        s.rowCard,
-        { borderColor: isSelected ? colors.primary : colors.border, backgroundColor },
-      ]}
-    >
-      <View style={s.rowTop}>
-        <TouchableOpacity
-          style={[s.collapseBtn, { borderColor: colors.border }]}
-          onPress={() => onToggleCollapse(item.uuid, hasChildren)}
-          activeOpacity={hasChildren ? 0.7 : 1}
-        >
-          <Text style={[s.collapseText, { color: hasChildren ? colors.primary : colors.textMuted }]}>
-            {hasChildren ? (isCollapsed ? '▸' : '▾') : '·'}
-          </Text>
-        </TouchableOpacity>
-        <View style={[s.nameWrap, depth ? { paddingLeft: Math.min(depth * INDENT_STEP, MAX_INDENT) } : null]}>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <KeyboardAvoidingView
+        style={s.sheetRoot}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <TouchableOpacity style={s.sheetBackdrop} activeOpacity={1} onPress={onClose} />
+        <View style={[s.sheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View style={s.sheetHandle} />
+          <View style={s.sheetHeader}>
+            <Text style={[s.sheetTitle, { color: colors.text }]} numberOfLines={1}>
+              {item.name || 'Строка затрат'}
+            </Text>
+            <Text style={[s.sheetTotal, { color: colors.textSecondary }]}>
+              {formatMoney(total, currency)}
+            </Text>
+          </View>
+
           <TextInput
-            style={[
-              s.rowNameInput,
-              hasChildren && s.rowNameGroup,
-              { color: colors.text, borderColor: colors.border },
-            ]}
+            style={[s.sheetNameInput, { color: colors.text, borderColor: colors.border }]}
             value={item.name || ''}
             onChangeText={(name) => onPatchItem(item.uuid, { name })}
             placeholder="Название"
             placeholderTextColor={colors.textMuted}
             multiline
           />
-        </View>
-        {hiddenDescendantCount ? (
-          <Text style={[s.hiddenCount, { color: colors.textMuted }]}>{hiddenDescendantCount}</Text>
-        ) : null}
-      </View>
 
-      <View style={s.rowFields}>
-        <View style={s.fieldBlock}>
-          <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Amount</Text>
-          <TextInput
-            style={[s.fieldInput, { color: colors.text, borderColor: colors.border }]}
-            defaultValue={amountInputValue(item.amount_cents)}
-            onChangeText={handleAmountChange}
-            onEndEditing={(event) => handleAmountChange(event.nativeEvent.text)}
-            keyboardType="decimal-pad"
-            placeholder="0"
-            placeholderTextColor={colors.textMuted}
-          />
-        </View>
-        <View style={s.fieldBlock}>
-          <Text style={[s.fieldLabel, { color: colors.textMuted }]}>{planKind === 'monthly' ? 'Day' : 'Date'}</Text>
-          <TextInput
-            style={[s.fieldInput, { color: colors.text, borderColor: colors.border }]}
-            value={dueValue}
-            onChangeText={handleDateChange}
-            keyboardType={planKind === 'monthly' ? 'number-pad' : 'default'}
-            placeholder={planKind === 'monthly' ? '21' : 'YYYY-MM-DD'}
-            placeholderTextColor={colors.textMuted}
-          />
-        </View>
-        <View style={s.totalBlock}>
-          <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Total</Text>
-          <Text style={[s.rowTotal, hasChildren && s.rowTotalGroup, { color: colors.text }]} numberOfLines={1}>
-            {formatMoney(total, currency)}
-          </Text>
-        </View>
-      </View>
+          <View style={s.sheetFields}>
+            <FieldLabelInput
+              label="Amount"
+              value={amountText}
+              colors={colors}
+              onChangeText={handleAmountChange}
+              keyboardType="decimal-pad"
+              placeholder="0"
+            />
+            <FieldLabelInput
+              label={planKind === 'monthly' ? 'Day' : 'Date'}
+              value={dueValue}
+              colors={colors}
+              onChangeText={handleDateChange}
+              keyboardType={planKind === 'monthly' ? 'number-pad' : 'default'}
+              placeholder={planKind === 'monthly' ? '21' : 'YYYY-MM-DD'}
+            />
+          </View>
 
+          <TextInput
+            style={[s.sheetNoteInput, { color: colors.textSecondary, borderColor: colors.border }]}
+            value={item.note || ''}
+            onChangeText={(note) => onPatchItem(item.uuid, { note })}
+            placeholder="Note"
+            placeholderTextColor={colors.textMuted}
+            multiline
+          />
+
+          <View style={s.sheetActions}>
+            <SmallAction label="+ child" colors={colors} onPress={() => onAddChild(item.uuid)} />
+            <SmallAction label="Move" colors={colors} onPress={() => onMove(item.uuid)} />
+            <SmallAction label="Delete" colors={colors} onPress={() => onDelete(item)} danger />
+            <TouchableOpacity style={[s.sheetDoneBtn, { backgroundColor: colors.primary }]} onPress={onClose}>
+              <Text style={s.sheetDoneText}>OK</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+function FieldLabelInput({ label, value, colors, onChangeText, keyboardType, placeholder }) {
+  return (
+    <View style={s.sheetFieldBlock}>
+      <Text style={[s.sheetFieldLabel, { color: colors.textMuted }]}>{label}</Text>
       <TextInput
-        style={[s.noteInput, { color: colors.textSecondary, borderColor: colors.border }]}
-        value={item.note || ''}
-        onChangeText={(note) => onPatchItem(item.uuid, { note })}
-        placeholder="Note"
+        style={[s.sheetFieldInput, { color: colors.text, borderColor: colors.border }]}
+        value={value}
+        onChangeText={onChangeText}
+        keyboardType={keyboardType}
+        placeholder={placeholder}
         placeholderTextColor={colors.textMuted}
       />
-
-      <View style={s.rowActions}>
-        <SmallAction label="+ child" colors={colors} onPress={() => onAddChild(item.uuid)} />
-        <SmallAction label="Move" colors={colors} onPress={() => onSelectReorder(isSelected ? null : item.uuid)} active={isSelected} />
-        <SmallAction label="Del" colors={colors} onPress={() => onDelete(item)} danger />
-      </View>
     </View>
   );
 }
@@ -788,25 +906,63 @@ const s = StyleSheet.create({
   rowsHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 4, paddingBottom: 6 },
   sectionTitle: { fontSize: 12, fontWeight: '800', textTransform: 'uppercase' },
   linkAction: { fontSize: 13, fontWeight: '700' },
-  rowCard: { borderWidth: 1, borderRadius: 8, marginHorizontal: 12, marginVertical: 4, padding: 8 },
-  rowTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
-  collapseBtn: { width: 28, height: 28, borderRadius: 6, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  collapseText: { fontSize: 16, lineHeight: 18, fontWeight: '800' },
-  nameWrap: { flex: 1, minWidth: 0 },
-  rowNameInput: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 6, fontSize: 14, minHeight: 32 },
-  rowNameGroup: { fontWeight: '800' },
-  hiddenCount: { fontSize: 11, fontWeight: '700', paddingTop: 7 },
-  rowFields: { flexDirection: 'row', gap: 7, marginTop: 8 },
-  fieldBlock: { flex: 0.78 },
-  totalBlock: { flex: 1.08 },
-  fieldLabel: { fontSize: 10, fontWeight: '800', textTransform: 'uppercase', marginBottom: 3 },
-  fieldInput: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 6, minHeight: 34, fontSize: 13 },
-  rowTotal: { fontSize: 13, fontWeight: '700', paddingTop: 8 },
-  rowTotalGroup: { fontWeight: '800' },
-  noteInput: { marginTop: 8, borderWidth: 1, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 6, fontSize: 12 },
-  rowActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 8 },
+  rowCard: {
+    minHeight: 48,
+    borderWidth: 1,
+    borderRadius: 7,
+    marginHorizontal: 10,
+    marginVertical: 2,
+    paddingHorizontal: 6,
+    paddingVertical: 5,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  compactCollapseHit: { width: 24, height: 34, alignItems: 'center', justifyContent: 'center' },
+  compactCollapseText: { fontSize: 15, lineHeight: 17, fontWeight: '800' },
+  compactMain: { flex: 1, minWidth: 0 },
+  compactTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  compactTitle: { flex: 1, minWidth: 0, fontSize: 13, fontWeight: '650' },
+  compactGroupTitle: { fontWeight: '800' },
+  compactHiddenCount: { fontSize: 10, fontWeight: '800' },
+  compactHint: { marginTop: 1, fontSize: 10.5, lineHeight: 13 },
+  compactAmounts: { minWidth: 92, maxWidth: 132, alignItems: 'flex-end' },
+  compactTotal: { fontSize: 12.5, fontWeight: '750' },
+  compactGroupTotal: { fontWeight: '800' },
+  compactDirectAmount: { marginTop: 1, fontSize: 10.5, lineHeight: 12 },
   smallAction: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 9, paddingVertical: 6 },
   smallActionText: { fontSize: 12, fontWeight: '700' },
+  sheetRoot: { flex: 1, justifyContent: 'flex-end' },
+  sheetBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.45)' },
+  sheet: {
+    borderTopWidth: 1,
+    borderTopLeftRadius: 14,
+    borderTopRightRadius: 14,
+    paddingHorizontal: 14,
+    paddingTop: 8,
+    paddingBottom: 14,
+    gap: 10,
+  },
+  sheetHandle: {
+    alignSelf: 'center',
+    width: 38,
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: 'rgba(140, 150, 160, 0.55)',
+    marginBottom: 2,
+  },
+  sheetHeader: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 },
+  sheetTitle: { flex: 1, minWidth: 0, fontSize: 15, fontWeight: '800' },
+  sheetTotal: { fontSize: 12, fontWeight: '700' },
+  sheetNameInput: { borderWidth: 1, borderRadius: 7, paddingHorizontal: 9, paddingVertical: 7, minHeight: 36, fontSize: 14, fontWeight: '700' },
+  sheetFields: { flexDirection: 'row', gap: 8 },
+  sheetFieldBlock: { flex: 1 },
+  sheetFieldLabel: { fontSize: 10, fontWeight: '800', textTransform: 'uppercase', marginBottom: 3 },
+  sheetFieldInput: { borderWidth: 1, borderRadius: 7, paddingHorizontal: 9, paddingVertical: 7, minHeight: 36, fontSize: 13 },
+  sheetNoteInput: { borderWidth: 1, borderRadius: 7, paddingHorizontal: 9, paddingVertical: 7, minHeight: 42, maxHeight: 90, fontSize: 12 },
+  sheetActions: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 7 },
+  sheetDoneBtn: { marginLeft: 'auto', borderRadius: 7, paddingHorizontal: 16, paddingVertical: 8 },
+  sheetDoneText: { color: '#fff', fontSize: 12, fontWeight: '800' },
   emptyBox: { margin: 16, borderWidth: 1, borderStyle: 'dashed', borderRadius: 8, padding: 20, alignItems: 'center' },
   emptyText: { fontSize: 14, marginBottom: 12 },
   emptyAction: { borderRadius: 8, paddingHorizontal: 14, paddingVertical: 10 },

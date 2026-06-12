@@ -61,6 +61,13 @@ Rows:
 - rows at upper visible depths receive soft background bands using the same
   depth rules as desktop;
 - deepest visible depth stays neutral.
+- Main Finance rows must be compact report rows, not full inline edit forms:
+  - target visual height is roughly 44-56 px for ordinary rows;
+  - row shows collapse control, title, optional note/date hint, and amount/total;
+  - row action buttons and full field labels are not shown in the main list;
+  - tapping a row opens a bottom-sheet style editor for full editing.
+- The row editor sheet contains name, amount, date/day, note, add child, move,
+  and delete actions.
 
 Mobile structure editing:
 
@@ -72,6 +79,8 @@ Mobile structure editing:
   - outdent to parent level.
 - Add child/sibling actions should be available without hidden desktop-only
   hover behavior.
+- In compact mode these actions live in the row editor sheet, not permanently
+  in every visible list row.
 
 ## Data Model
 

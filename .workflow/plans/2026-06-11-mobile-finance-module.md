@@ -39,6 +39,7 @@
   - items;
   - collapsed row IDs;
   - reorder selected row UUID;
+  - editor selected row UUID;
   - share sheet visibility.
 - Header:
   - title;
@@ -53,14 +54,18 @@
   - currency;
   - type buttons.
 - Row editor:
-  - name input;
-  - amount input in major currency units;
-  - date/day input depending on plan kind;
-  - note input;
-  - aggregate total;
-  - child/sibling/delete controls.
+  - keep the main row as a compact read/report row;
+  - show title, optional note/date hint, direct amount, and aggregate total;
+  - remove inline field labels and permanent action buttons from the main row;
+  - open a bottom-sheet modal for editing name, amount, date/day, and note;
+  - place add child, move, and delete controls inside the bottom sheet.
+- Editor sheet save semantics:
+  - edits update local state immediately through `patchItem`;
+  - persistence remains debounced through the existing item save queue;
+  - closing the sheet flushes pending saves for predictable sync/share behavior.
 - Reorder mode:
-  - selecting a row exposes up/down/left/right actions;
+  - selecting Move in the sheet closes the sheet and exposes the existing
+    up/down/left/right reorder toolbar;
   - invalid moves are disabled.
 - Share:
   - call sync and wait for the active sync operation before opening
