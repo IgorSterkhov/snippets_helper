@@ -62,7 +62,7 @@ Rows:
   depth rules as desktop;
 - deepest visible depth stays neutral.
 - Main Finance rows must be compact report rows, not full inline edit forms:
-  - target visual height is roughly 44-56 px for ordinary rows;
+  - target visual height is roughly 38-46 px for ordinary rows;
   - row shows collapse control, title, optional note/date hint, and amount/total;
   - row action buttons and full field labels are not shown in the main list;
   - tapping a row opens a bottom-sheet style editor for full editing.
