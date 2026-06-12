@@ -597,3 +597,21 @@ rows should read like report subtotals.
 - For configurable colors, validate stored values as `#RRGGBB` and mix them
   with the app background in CSS (`color-mix(..., var(--bg))`) so user-selected
   opaque colors remain readable in dark mode.
+
+---
+
+## §20 Markdown Figure Image Viewer
+
+**Used in:** Snippets and Notes Markdown previews
+
+When Markdown images are rendered as Figure Cards:
+
+- Build the viewer behavior in the shared Markdown figure enhancer, not in
+  individual tabs, so Snippets and Notes stay consistent.
+- Keep the saved media URL as the image identity/caption source, but display
+  the native data-url preview fallback when remote media is blocked by WebView.
+- Make both the image and a small overlay zoom button open the same viewer.
+- Default to a fit-to-viewport mode, with an `Actual size` toggle for inspecting
+  the optimized saved file at its natural dimensions.
+- Use a normal modal overlay with Escape and backdrop close; actual-size mode
+  may scroll inside the viewer body.

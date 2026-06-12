@@ -26,10 +26,135 @@ export function enhanceMarkdownFigures(root) {
     } else {
       img.before(figure);
     }
-    figure.appendChild(img);
+    const media = document.createElement('div');
+    media.className = 'markdown-figure-media';
+    media.appendChild(img);
+    const zoomBtn = document.createElement('button');
+    zoomBtn.type = 'button';
+    zoomBtn.className = 'markdown-figure-zoom';
+    zoomBtn.textContent = '⌕';
+    zoomBtn.title = 'Open original-size image';
+    zoomBtn.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      openImageViewerFromFigure(img, originalSrc, caption.textContent);
+    });
+    media.appendChild(zoomBtn);
+    img.addEventListener('click', (event) => {
+      event.preventDefault();
+      openImageViewerFromFigure(img, originalSrc, caption.textContent);
+    });
+    figure.appendChild(media);
     figure.appendChild(caption);
     hydrateNativeMediaPreview(img, originalSrc);
   }
+}
+
+async function openImageViewerFromFigure(img, originalSrc, title) {
+  const identitySrc = img.dataset.originalSrc || originalSrc || img.getAttribute('src') || '';
+  const displaySrc = await resolveDisplaySrc(img, identitySrc);
+  openImageViewer({
+    title: title || imageName(identitySrc) || 'image',
+    identitySrc,
+    displaySrc,
+  });
+}
+
+async function resolveDisplaySrc(img, identitySrc) {
+  const currentSrc = img.getAttribute('src') || '';
+  if (currentSrc.startsWith('data:')) return currentSrc;
+  if (isSnippetsMediaUrl(identitySrc)) {
+    try {
+      if (!mediaPreviewCache.has(identitySrc)) {
+        mediaPreviewCache.set(
+          identitySrc,
+          call('get_media_preview_data_url', { previewUrl: identitySrc }).then((res) => res?.data_url || '')
+        );
+      }
+      const dataUrl = await mediaPreviewCache.get(identitySrc);
+      if (dataUrl) return dataUrl;
+    } catch {}
+  }
+  return currentSrc || identitySrc;
+}
+
+function openImageViewer({ title, identitySrc, displaySrc }) {
+  const existing = document.querySelector('.markdown-image-viewer-overlay');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay markdown-image-viewer-overlay';
+
+  const modal = document.createElement('div');
+  modal.className = 'markdown-image-viewer-modal';
+
+  const header = document.createElement('div');
+  header.className = 'markdown-image-viewer-header';
+
+  const label = document.createElement('div');
+  label.className = 'markdown-image-viewer-title';
+  label.textContent = title || 'image';
+  header.appendChild(label);
+
+  const actions = document.createElement('div');
+  actions.className = 'markdown-image-viewer-actions';
+
+  const actualBtn = document.createElement('button');
+  actualBtn.type = 'button';
+  actualBtn.textContent = 'Actual size';
+  actualBtn.title = 'Toggle fit and actual saved-file size';
+  actions.appendChild(actualBtn);
+
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.textContent = 'Close';
+  closeBtn.title = 'Close image viewer';
+  actions.appendChild(closeBtn);
+  header.appendChild(actions);
+
+  const body = document.createElement('div');
+  body.className = 'markdown-image-viewer-body fit';
+  const image = document.createElement('img');
+  image.alt = title || '';
+  image.src = displaySrc || identitySrc;
+  body.appendChild(image);
+
+  const meta = document.createElement('div');
+  meta.className = 'markdown-image-viewer-meta';
+  meta.textContent = identitySrc || '';
+
+  modal.appendChild(header);
+  modal.appendChild(body);
+  modal.appendChild(meta);
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+
+  function setMode(actual) {
+    body.classList.toggle('actual', actual);
+    body.classList.toggle('fit', !actual);
+    actualBtn.textContent = actual ? 'Fit' : 'Actual size';
+  }
+
+  let actual = false;
+  actualBtn.addEventListener('click', () => {
+    actual = !actual;
+    setMode(actual);
+  });
+
+  function close() {
+    overlay.remove();
+    document.removeEventListener('keydown', onKeydown);
+  }
+
+  function onKeydown(event) {
+    if (event.key === 'Escape') close();
+  }
+
+  closeBtn.addEventListener('click', close);
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) close();
+  });
+  document.addEventListener('keydown', onKeydown);
 }
 
 function renderHtmlCard(img, originalSrc) {

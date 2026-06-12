@@ -39,6 +39,11 @@ function getStandaloneRequest() {
   return { standalone: true, moduleId, tab };
 }
 
+function getMicroPickerRequest() {
+  const params = new URLSearchParams(window.location.search);
+  return params.get('micro_picker') === '1';
+}
+
 function closeModuleContextMenu() {
   document.querySelector('.module-context-menu')?.remove();
 }
@@ -108,6 +113,13 @@ async function mountStandaloneModule(app, request) {
 
 async function main() {
   const app = document.getElementById('app');
+  if (getMicroPickerRequest()) {
+    const { init } = await import('./components/snippet-micro-picker.js');
+    await init(app);
+    setTimeout(() => call('confirm_frontend_boot').catch(() => {}), 5000);
+    return;
+  }
+
   const standaloneRequest = getStandaloneRequest();
   if (standaloneRequest.standalone) {
     await mountStandaloneModule(app, standaloneRequest);
@@ -218,6 +230,7 @@ async function main() {
 
 document.addEventListener('keydown', async (e) => {
   if (e.key === 'Escape') {
+    if (getMicroPickerRequest()) return;
     if (document.body.classList.contains('standalone-module-window')) return;
     // Don't hide if a modal is open -- modal handles its own Escape
     if (document.querySelector('.modal-overlay')) return;

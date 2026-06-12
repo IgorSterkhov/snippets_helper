@@ -38,6 +38,34 @@ function prefixLines(textarea, prefix) {
   textarea.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
+function toggleQuoteLines(textarea) {
+  const start = textarea.selectionStart;
+  const end = textarea.selectionEnd;
+  const { lineStart, lineEnd } = getLineBounds(textarea, start, end);
+  const block = textarea.value.substring(lineStart, lineEnd);
+  const lines = block.split('\n');
+  const meaningful = lines.filter(line => line.trim().length > 0);
+  const shouldUnquote = meaningful.length > 0
+    && meaningful.every(line => /^(\s*)>\s?/.test(line));
+  let selectionDelta = 0;
+  const replacement = lines.map((line) => {
+    if (shouldUnquote) {
+      const next = line.replace(/^(\s*)>\s?/, '$1');
+      selectionDelta += next.length - line.length;
+      return next;
+    }
+    if (line.trim().length === 0) return line;
+    selectionDelta += 2;
+    return `> ${line}`;
+  }).join('\n');
+
+  textarea.setRangeText(replacement, lineStart, lineEnd, 'select');
+  const nextEnd = Math.max(lineStart, lineEnd + selectionDelta);
+  textarea.setSelectionRange(lineStart, nextEnd);
+  textarea.focus();
+  textarea.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
 function insertAtCursor(textarea, text) {
   const start = textarea.selectionStart;
   textarea.setRangeText(text, start, start, 'end');
@@ -205,7 +233,7 @@ function getButtons(textarea, options = {}) {
     },
     {
       label: '>', title: 'Quote',
-      action: () => prefixLines(textarea, '> '),
+      action: () => toggleQuoteLines(textarea),
     },
     'sep',
     {

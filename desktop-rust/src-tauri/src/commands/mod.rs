@@ -12,6 +12,7 @@ pub mod exec;
 pub mod finance;
 pub mod help;
 pub mod media;
+pub mod micro_picker;
 pub mod module_windows;
 pub mod repo_search;
 pub mod vps;

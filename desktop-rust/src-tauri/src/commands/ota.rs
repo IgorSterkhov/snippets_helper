@@ -246,7 +246,11 @@ pub async fn apply_frontend_update(app: AppHandle, version: String) -> Result<()
 
 fn reload_frontend_windows(app: &AppHandle) {
     for (label, window) in app.webview_windows() {
-        if label == "main" || label == "whisper-overlay" || label.starts_with("module_") {
+        if label == "main"
+            || label == "whisper-overlay"
+            || label == crate::commands::micro_picker::picker_label()
+            || label.starts_with("module_")
+        {
             let _ = window.reload();
         }
     }

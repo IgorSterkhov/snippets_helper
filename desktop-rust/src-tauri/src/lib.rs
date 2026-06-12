@@ -178,6 +178,9 @@ pub fn run() {
             commands::media::get_media_preview_data_url,
             commands::media::delete_media_asset,
             commands::media::select_media_variant,
+            commands::micro_picker::open_snippet_micro_picker,
+            commands::micro_picker::close_snippet_micro_picker,
+            commands::micro_picker::insert_snippet_micro_picker_text,
             commands::notes::list_note_folders,
             commands::notes::create_note_folder,
             commands::notes::update_note_folder,
@@ -434,6 +437,49 @@ pub fn run() {
                     write_log(&format!(
                         "whisper global hotkey '{}' registration failed: {}",
                         whisper_hotkey, e
+                    ));
+                }
+            }
+
+            // Code snippet micro picker. Keep registration non-fatal: users may
+            // already have Ctrl+Alt+K owned by an IDE or OS-level tool.
+            {
+                use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+                let db_state = app.state::<db::DbState>();
+                let conn = db_state.lock_recover();
+                let picker_hotkey = db::queries::get_setting(
+                    &conn,
+                    &computer_id,
+                    "snippets.micro_picker_hotkey",
+                )
+                .ok()
+                .flatten()
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| commands::micro_picker::default_hotkey().to_string());
+                drop(conn);
+                let register_result = app.global_shortcut().on_shortcut(
+                    picker_hotkey.as_str(),
+                    move |app, _shortcut, event| {
+                        if event.state() == ShortcutState::Pressed {
+                            let app_clone = app.clone();
+                            tauri::async_runtime::spawn(async move {
+                                if let Err(err) =
+                                    commands::micro_picker::open_snippet_micro_picker(app_clone)
+                                        .await
+                                {
+                                    append_log(&format!(
+                                        "snippet micro picker hotkey failed: {}",
+                                        err
+                                    ));
+                                }
+                            });
+                        }
+                    },
+                );
+                if let Err(e) = register_result {
+                    append_log(&format!(
+                        "snippet micro picker hotkey '{}' registration failed: {}",
+                        picker_hotkey, e
                     ));
                 }
             }

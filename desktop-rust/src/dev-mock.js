@@ -155,8 +155,34 @@
         created_at: now(),
         updated_at: now(),
       },
+      {
+        id: 9,
+        uuid: uuid(),
+        name: 'code_picker_alpha',
+        value: 'console.log("alpha");',
+        description: 'Picker sample',
+        links: [],
+        obsidian_note: null,
+        is_pinned: false,
+        pinned_sort_order: 0,
+        created_at: now(),
+        updated_at: now(),
+      },
+      {
+        id: 10,
+        uuid: uuid(),
+        name: 'code_picker_beta',
+        value: 'const beta = true;',
+        description: 'Picker sample',
+        links: [],
+        obsidian_note: null,
+        is_pinned: false,
+        pinned_sort_order: 0,
+        created_at: now(),
+        updated_at: now(),
+      },
     ]);
-    storeSet('__seq.shortcuts', 8);
+    storeSet('__seq.shortcuts', 10);
 
     storeSet('note_folders', [
       { id: 1, name: 'Inbox', sort_order: 0, parent_id: null },
@@ -878,6 +904,17 @@
     async open_module_window({ moduleId }) {
       window.__mockOpenedModuleWindows = window.__mockOpenedModuleWindows || [];
       window.__mockOpenedModuleWindows.push(moduleId);
+    },
+    async open_snippet_micro_picker() {
+      window.__mockSnippetMicroPickerOpened = true;
+    },
+    async close_snippet_micro_picker() {
+      window.__mockSnippetMicroPickerClosed = true;
+    },
+    async insert_snippet_micro_picker_text({ text }) {
+      window.__mockClipboardText = text;
+      try { await navigator.clipboard.writeText(text); } catch {}
+      return { method: 'copy', message: 'Mock snippet copied to clipboard.' };
     },
 
     // ── Obsidian ────────────────────────────────────────

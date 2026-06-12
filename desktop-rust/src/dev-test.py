@@ -19,18 +19,29 @@ from contextlib import contextmanager
 import websockets
 from urllib.request import urlopen
 
-SRC_DIR = os.path.dirname(os.path.abspath(__file__))
-HTTP_PORT = 8765
-CDP_PORT = 9222
-TEST_URL = f"http://localhost:{HTTP_PORT}/dev.html"
-
-
 def free_port(p):
     try:
         with socket.socket() as s: s.bind(('', p))
         return True
     except OSError:
         return False
+
+
+def pick_port(env_name, preferred):
+    raw = os.environ.get(env_name)
+    if raw:
+        return int(raw)
+    if free_port(preferred):
+        return preferred
+    with socket.socket() as s:
+        s.bind(('', 0))
+        return s.getsockname()[1]
+
+
+SRC_DIR = os.path.dirname(os.path.abspath(__file__))
+HTTP_PORT = pick_port('DEV_TEST_HTTP_PORT', 8765)
+CDP_PORT = pick_port('DEV_TEST_CDP_PORT', 9222)
+TEST_URL = f"http://localhost:{HTTP_PORT}/dev.html"
 
 
 @contextmanager
@@ -47,6 +58,11 @@ def http_server():
         yield
     finally:
         os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            proc.wait(timeout=5)
 
 
 @contextmanager
@@ -74,6 +90,11 @@ def chrome_cdp():
         yield
     finally:
         os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            proc.wait(timeout=5)
         subprocess.run(['rm', '-rf', user_data], check=False)
 
 

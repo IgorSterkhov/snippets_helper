@@ -1,6 +1,6 @@
 [package]
 name = "keyboard-helper"
-version = "1.12.0"
+version = "1.13.0"
 edition = "2021"
 
 [dependencies]
@@ -48,6 +48,9 @@ sysinfo = "0.30"
 # Windows uses taskkill /T /F shelled out from std::process::Command.
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
 
 [profile.release]
 lto = "thin"

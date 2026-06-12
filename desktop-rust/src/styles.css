@@ -944,6 +944,9 @@ button:hover, .btn:hover {
   background: var(--bg-secondary);
   overflow: hidden;
 }
+.markdown-figure-media {
+  position: relative;
+}
 .markdown-figure-card img {
   display: block;
   max-width: 100%;
@@ -951,11 +954,119 @@ button:hover, .btn:hover {
   margin: 0 auto;
   cursor: zoom-in;
 }
+.markdown-figure-zoom {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(255,255,255,0.22);
+  border-radius: 999px;
+  background: rgba(13,17,23,0.72);
+  color: #f0f6fc;
+  font-size: 16px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-in;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 120ms ease, transform 120ms ease, background 120ms ease;
+}
+.markdown-figure-media:hover .markdown-figure-zoom,
+.markdown-figure-zoom:focus-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+.markdown-figure-zoom:hover {
+  background: rgba(13,17,23,0.9);
+}
 .markdown-figure-card figcaption {
   border-top: 1px solid var(--border);
   padding: 7px 10px;
   color: var(--text-muted);
   font-size: 12px;
+}
+.markdown-image-viewer-overlay {
+  z-index: 12000;
+}
+.markdown-image-viewer-modal {
+  width: min(1120px, 96vw);
+  height: min(860px, 92vh);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 18px 50px rgba(0,0,0,0.42);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.markdown-image-viewer-header {
+  min-height: 44px;
+  padding: 8px 10px 8px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.markdown-image-viewer-title {
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.markdown-image-viewer-actions {
+  display: flex;
+  gap: 8px;
+}
+.markdown-image-viewer-actions button {
+  height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+.markdown-image-viewer-body {
+  flex: 1;
+  min-height: 0;
+  background: #0d1117;
+  overflow: auto;
+}
+.markdown-image-viewer-body.fit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px;
+}
+.markdown-image-viewer-body.fit img {
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
+.markdown-image-viewer-body.actual {
+  padding: 18px;
+}
+.markdown-image-viewer-body.actual img {
+  max-width: none;
+  max-height: none;
+  width: auto;
+  height: auto;
+}
+.markdown-image-viewer-meta {
+  border-top: 1px solid var(--border);
+  padding: 6px 10px;
+  color: var(--text-muted);
+  font-size: 11px;
+  background: var(--bg-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .markdown-html-card {
   margin: 12px 0;
@@ -1497,6 +1608,165 @@ button:hover, .btn:hover {
   width: 1px;
   background: var(--border);
   margin: 2px 4px;
+}
+
+/* ── Snippet Micro Picker ─────────────────────────────────── */
+
+body.snippet-micro-picker-window {
+  margin: 0;
+  background: transparent;
+  overflow: hidden;
+}
+
+.snippet-micro-picker-root {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.snippet-micro-picker {
+  width: 100%;
+  height: 100%;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 18px 45px rgba(0,0,0,0.42);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.snippet-micro-picker-header {
+  height: 36px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 0 12px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+}
+
+.snippet-micro-picker-title {
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.snippet-micro-picker-close {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 5px;
+  font-size: 13px;
+}
+
+.snippet-micro-picker-input {
+  flex-shrink: 0;
+  margin: 10px 10px 8px;
+  height: 34px;
+  font-size: 14px;
+  font-family: 'SF Mono','Cascadia Code','Fira Code',monospace;
+}
+
+.snippet-micro-picker-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(210px, 0.95fr) minmax(260px, 1.2fr);
+  gap: 8px;
+  padding: 0 10px 8px;
+}
+
+.snippet-micro-picker-list,
+.snippet-micro-picker-preview {
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  overflow: auto;
+}
+
+.snippet-micro-picker-list {
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+}
+
+.snippet-micro-picker-row {
+  width: 100%;
+  min-height: 34px;
+  padding: 5px 7px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  text-align: left;
+  gap: 2px;
+}
+
+.snippet-micro-picker-row:hover,
+.snippet-micro-picker-row.active {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+}
+
+.snippet-micro-picker-row-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 650;
+  font-family: 'SF Mono','Cascadia Code','Fira Code',monospace;
+}
+
+.snippet-micro-picker-row-meta {
+  min-height: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.snippet-micro-picker-preview {
+  margin: 0;
+  padding: 10px;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.45;
+  font-family: 'SF Mono','Cascadia Code','Fira Code',monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.snippet-micro-picker-empty {
+  padding: 16px 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.snippet-micro-picker-status {
+  flex-shrink: 0;
+  height: 28px;
+  padding: 0 12px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+}
+
+.snippet-micro-picker-status[data-error="1"] {
+  color: var(--danger);
 }
 
 /* ── Image Upload Modal ───────────────────────────────────── */

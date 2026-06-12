@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## v1.13.0 (2026-06-12)
+
+- **Snippet image viewer:** Figure Card images in Snippets and Notes now open
+  a dedicated viewer with Fit and Actual size modes, using the same native
+  media fallback that keeps server images visible in the desktop WebView.
+- **Markdown quote toggle:** the existing `>` toolbar action now toggles
+  blockquotes for selected lines in snippet value/description editors and note
+  content, instead of only adding another quote prefix.
+- **Code snippet micro picker:** new global `Ctrl+Alt+K` hotkey opens a compact
+  always-on-top picker for snippets whose names start with `code_`, with token
+  search, preview, Enter insert on Windows, and copy-only fallback when external
+  focus restore is unavailable.
+- **Smoke-test stability:** desktop CDP smoke tests now choose free ports when
+  defaults are busy and wait for Chrome/http-server shutdown before removing
+  temporary browser profiles.
+
 ## f-20260611-8 (2026-06-11)
 
 - **Finance header polish:** Finance list name, currency, and list type now
