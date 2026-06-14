@@ -6,6 +6,7 @@ import {
   financeBandSlotForDepth,
   flattenFinanceTree,
   getFinanceItemMoveAvailability,
+  maxFinanceTreeDepth,
   moveFinanceItemInTree,
 } from '../../src/db/financeRepo';
 import { getDB } from '../../src/db/database';
@@ -111,6 +112,19 @@ describe('financeRepo', () => {
     expect(financeBandSlotForDepth(0, 2, 'soft_first')).toBe(1);
     expect(financeBandSlotForDepth(1, 2, 'soft_first')).toBe(2);
     expect(financeBandSlotForDepth(2, 2, 'soft_first')).toBeNull();
+  });
+
+  test('band slots use full tree depth when rows are collapsed', () => {
+    const rows = [
+      { uuid: 'root', plan_uuid: 'plan', parent_uuid: null, name: 'Root', sort_order: 0, is_deleted: 0 },
+      { uuid: 'child', plan_uuid: 'plan', parent_uuid: 'root', name: 'Child', sort_order: 0, is_deleted: 0 },
+      { uuid: 'grand', plan_uuid: 'plan', parent_uuid: 'child', name: 'Grand', sort_order: 0, is_deleted: 0 },
+    ];
+    const collapsed = flattenFinanceTree(rows, { collapsedIds: new Set(['root']) });
+
+    expect(collapsed.map(({ item, depth }) => [item.uuid, depth])).toEqual([['root', 0]]);
+    expect(maxFinanceTreeDepth(rows)).toBe(2);
+    expect(financeBandSlotForDepth(collapsed[0].depth, maxFinanceTreeDepth(rows), 'soft_first')).toBe(1);
   });
 
   test('deleteFinancePlan soft deletes plan and all items by plan_uuid', async () => {

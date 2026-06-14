@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from uuid import UUID
 from fastapi import APIRouter, Depends
 from sqlalchemy import select, update
@@ -12,6 +12,8 @@ from api.schemas import (
 from api.auth import get_current_user
 
 router = APIRouter(prefix="/sync", tags=["sync"])
+
+SYNC_PULL_CURSOR_SAFETY_SECONDS = 30
 
 
 def _get_data_columns(model):
@@ -58,6 +60,30 @@ def _parse_optional_uuid(value) -> UUID | None:
 def _normalize_finance_kind(value) -> str | None:
     kind = str(value or "monthly").strip().lower().replace("-", "_")
     return kind if kind in {"monthly", "project", "one_time", "general"} else None
+
+
+def _accepted_updated_at(client_updated: datetime | None, accepted_at: datetime) -> datetime:
+    """Use one timestamp both as conflict marker and pull cursor.
+
+    Existing clients send local edit timestamps, but pull cursors advance using
+    server_time. Promoting accepted rows to at least server accept time prevents
+    rows from being permanently skipped when another device already advanced its
+    cursor past the editing device's local timestamp before the push arrived.
+    """
+    if client_updated is None or client_updated < accepted_at:
+        return accepted_at
+    return client_updated
+
+
+def _pull_server_time(now: datetime | None = None) -> datetime:
+    """Return a conservative cursor watermark for pull responses.
+
+    Clients use server_time as their next `last_sync_at`. A small lookback keeps
+    the cursor behind in-flight pushes whose rows may not be visible to the
+    current SELECT yet. Duplicate rows in that window are safe because clients
+    upsert by UUID.
+    """
+    return (now or datetime.utcnow()) - timedelta(seconds=SYNC_PULL_CURSOR_SAFETY_SECONDS)
 
 
 def _valid_finance_item_values(extra: dict) -> bool:
@@ -254,14 +280,15 @@ async def push(
                     continue
 
                 # Update existing row
+                accepted_updated_at = _accepted_updated_at(client_updated, datetime.utcnow())
                 if is_deleted:
                     existing.is_deleted = True
-                    existing.updated_at = client_updated or datetime.utcnow()
+                    existing.updated_at = accepted_updated_at
                 else:
                     for key, val in extra.items():
                         if hasattr(existing, key) and key not in ("uuid", "user_id"):
                             setattr(existing, key, val)
-                    existing.updated_at = client_updated or datetime.utcnow()
+                    existing.updated_at = accepted_updated_at
                     existing.is_deleted = False
                 accepted += 1
                 accepted_uuids.setdefault(table_name, []).append(str(row_uuid))
@@ -271,7 +298,7 @@ async def push(
                 for key, val in extra.items():
                     if hasattr(new_row, key) and key not in ("uuid", "user_id"):
                         setattr(new_row, key, val)
-                new_row.updated_at = client_updated or datetime.utcnow()
+                new_row.updated_at = _accepted_updated_at(client_updated, datetime.utcnow())
                 new_row.is_deleted = is_deleted
                 db.add(new_row)
                 accepted += 1
@@ -294,7 +321,7 @@ async def pull(
     db: AsyncSession = Depends(get_db),
 ):
     """Return changes since client's last sync timestamp."""
-    server_time = datetime.utcnow()
+    server_time = _pull_server_time()
     changes: dict[str, list[dict]] = {}
 
     # Strip timezone info: DB uses TIMESTAMP WITHOUT TIME ZONE

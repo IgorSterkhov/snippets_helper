@@ -27,6 +27,7 @@ import {
   getFinancePlans,
   getNextFinanceItemSortOrder,
   getNextFinancePlanSortOrder,
+  maxFinanceTreeDepth,
   moveFinanceItemInTree,
   upsertFinanceItem,
   upsertFinanceItems,
@@ -436,7 +437,7 @@ export default function FinanceScreen() {
   }, [flushPendingSaves]);
 
   const flatRows = useMemo(() => flattenFinanceTree(items, { collapsedIds }), [items, collapsedIds]);
-  const maxDepth = useMemo(() => flatRows.reduce((max, row) => Math.max(max, row.depth), 0), [flatRows]);
+  const maxDepth = useMemo(() => maxFinanceTreeDepth(items), [items]);
   const totals = useMemo(() => computeFinanceTotals(items), [items]);
   const currency = activePlan?.currency || 'RUB';
   const reorderMoveState = reorderItemUuid

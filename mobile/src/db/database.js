@@ -7,6 +7,7 @@ let db = null;
 const TASKS_INITIAL_SYNC_BACKFILL_KEY = 'tasks_initial_sync_backfill_v3';
 const PINNED_SNIPPETS_SYNC_BACKFILL_KEY = 'pinned_snippets_sync_backfill_v1';
 const FINANCE_SYNC_ENABLED_BACKFILL_KEY = 'finance_sync_enabled_backfill_v2';
+const FINANCE_SYNC_CURSOR_REPAIR_BACKFILL_KEY = 'finance_sync_cursor_repair_backfill_v1';
 
 export function getDB() {
   return db;
@@ -137,6 +138,15 @@ async function runMigrations() {
     // Force one full pull so existing server Finance rows are fetched.
     await setLastSyncAt(null).catch(() => {});
     await setSyncMetaValue(FINANCE_SYNC_ENABLED_BACKFILL_KEY, new Date().toISOString()).catch(() => {});
+  }
+
+  const hasFinanceCursorRepairBackfill = await syncMetaKeyExists(db, FINANCE_SYNC_CURSOR_REPAIR_BACKFILL_KEY);
+  if (!hasFinanceCursorRepairBackfill) {
+    // Server-side Finance rows could previously keep old client updated_at
+    // values while mobile advanced last_sync_at to server_time. Force one full
+    // pull after the cursor repair so already-skipped Finance rows are fetched.
+    await setLastSyncAt(null).catch(() => {});
+    await setSyncMetaValue(FINANCE_SYNC_CURSOR_REPAIR_BACKFILL_KEY, new Date().toISOString()).catch(() => {});
   }
 }
 

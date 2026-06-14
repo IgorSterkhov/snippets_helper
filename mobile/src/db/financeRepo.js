@@ -303,6 +303,24 @@ export function maxVisibleFinanceDepth(flatRows = []) {
   return flatRows.reduce((max, row) => Math.max(max, Number(row.depth) || 0), 0);
 }
 
+export function maxFinanceTreeDepth(items = []) {
+  const { roots, children } = buildFinanceTree(items);
+  let maxDepth = 0;
+
+  function visit(item, depth, stack = new Set()) {
+    if (!item || stack.has(item.uuid)) return;
+    maxDepth = Math.max(maxDepth, depth);
+    const nextStack = new Set(stack);
+    nextStack.add(item.uuid);
+    for (const child of children.get(item.uuid) || []) {
+      visit(child, depth + 1, nextStack);
+    }
+  }
+
+  for (const root of roots) visit(root, 0);
+  return maxDepth;
+}
+
 export function financeBandSlotForDepth(depth, maxDepth, fillOrder = 'strong_first') {
   if (!Number.isFinite(depth) || !Number.isFinite(maxDepth) || maxDepth <= 0) return null;
   if (depth >= maxDepth) return null;
