@@ -3841,6 +3841,178 @@ async def run_tests():
 
     await check('T26g Finance level bands and settings', t26g_finance_level_bands_and_settings)
 
+    # ── T26h: Finance row editing preserves viewport/focus ──
+    async def t26h_finance_row_editing_scroll_and_placeholder():
+        async def seed_finance(items):
+            await cdp.eval(f"""(() => {{
+              localStorage.setItem('mock.finance_plans', JSON.stringify([{{
+                id: 1,
+                uuid: 'fp1',
+                name: 'Large edit test',
+                currency: 'RUB',
+                kind: 'monthly',
+                sort_order: 0,
+                created_at: '2026-01-01T00:00:00Z',
+                updated_at: '2026-01-01T00:00:00Z',
+                sync_status: 'pending',
+                user_id: 'mock-user',
+              }}]));
+              localStorage.setItem('__seq.finance_plans', '1');
+              localStorage.setItem('mock.finance_items', JSON.stringify({json.dumps(items)}));
+              localStorage.setItem('__seq.finance_items', String({max([item["id"] for item in items], default=0)}));
+            }})()""")
+
+        async def reload_finance():
+            await cdp.send('Page.navigate', url=TEST_URL)
+            await asyncio.sleep(0.8)
+            await wait_until(cdp, "!!document.querySelector('.tab-btn')", timeout=8)
+            await wait_until(cdp, "!!window.__TAURI__ && !!window.__TAURI__.core", timeout=5)
+            await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"finance\"]').click()")
+            await wait_until(cdp, "!!document.querySelector('#panel-finance .finance-row')", timeout=5)
+
+        long_items = [
+            {
+                'id': i,
+                'uuid': f'fi{i}',
+                'plan_id': 1,
+                'parent_id': None,
+                'name': f'Row {i:02d}',
+                'amount_cents': i * 100,
+                'due_day': None,
+                'due_date': None,
+                'note': '',
+                'sort_order': i,
+                'created_at': '2026-01-01T00:00:00Z',
+                'updated_at': '2026-01-01T00:00:00Z',
+                'sync_status': 'pending',
+                'user_id': 'mock-user',
+            }
+            for i in range(1, 65)
+        ]
+        await seed_finance(long_items)
+        await reload_finance()
+        before_scroll = await cdp.eval("""(() => {
+          const wrap = document.querySelector('#panel-finance .finance-table-wrap');
+          const row = document.querySelector('#panel-finance .finance-row[data-id="64"]');
+          const amount = row.querySelector('[data-field="amount"]');
+          wrap.scrollTop = wrap.scrollHeight;
+          amount.focus();
+          amount.value = '123,45';
+          amount.setSelectionRange(amount.value.length, amount.value.length);
+          return wrap.scrollTop;
+        })()""")
+        assert before_scroll > 80, before_scroll
+        await cdp.eval("""(() => {
+          const amount = document.querySelector('#panel-finance .finance-row[data-id="64"] [data-field="amount"]');
+          amount.dispatchEvent(new KeyboardEvent('keydown', {
+            key: 'Enter',
+            code: 'Enter',
+            bubbles: true,
+            cancelable: true,
+          }));
+        })()""")
+        await wait_until(
+            cdp,
+            "JSON.parse(localStorage.getItem('mock.finance_items') || '[]').some(item => item.id === 64 && item.amount_cents === 12345)",
+            timeout=4,
+        )
+        after_save = await wait_until(
+            cdp,
+            """(() => {
+              const wrap = document.querySelector('#panel-finance .finance-table-wrap');
+              const active = document.activeElement;
+              return active?.closest?.('.finance-row')?.dataset.id === '64'
+                && active?.dataset.field === 'amount'
+                && wrap.scrollTop > 80
+                && {
+                  scrollTop: wrap.scrollTop,
+                  field: active.dataset.field,
+                  rowId: active.closest('.finance-row').dataset.id,
+                  selectionStart: active.selectionStart,
+                  selectionEnd: active.selectionEnd,
+                };
+            })()""",
+            timeout=4,
+        )
+        assert after_save['scrollTop'] >= before_scroll - 4, after_save
+        assert after_save['rowId'] == '64', after_save
+        assert after_save['field'] == 'amount', after_save
+        assert after_save['selectionStart'] == after_save['selectionEnd'], after_save
+
+        base_items = [
+            {**long_items[0], 'id': 1, 'uuid': 'base1', 'name': 'Parent', 'sort_order': 0},
+            {**long_items[1], 'id': 2, 'uuid': 'base2', 'name': 'Next root', 'sort_order': 1},
+        ]
+        await seed_finance(base_items)
+        await reload_finance()
+        await cdp.eval("""(() => {
+          const input = document.querySelector('#panel-finance .finance-row[data-id="1"] [data-field="name"]');
+          input.focus();
+          input.setSelectionRange(input.value.length, input.value.length);
+          input.dispatchEvent(new KeyboardEvent('keydown', {
+            key: 'Enter',
+            code: 'Enter',
+            bubbles: true,
+            cancelable: true,
+          }));
+        })()""")
+        created_id = await wait_until(
+            cdp,
+            """(() => {
+              const items = JSON.parse(localStorage.getItem('mock.finance_items') || '[]');
+              const created = items.find(item => item.id > 2);
+              return created && String(created.id);
+            })()""",
+            timeout=4,
+        )
+        await wait_until(
+            cdp,
+            f"document.activeElement?.closest?.('.finance-row')?.dataset.id === '{created_id}'",
+            timeout=4,
+        )
+        await cdp.eval(f"""(() => {{
+          const input = document.querySelector('#panel-finance .finance-row[data-id="{created_id}"] [data-field="name"]');
+          input.value = '';
+          input.dispatchEvent(new Event('input', {{ bubbles: true }}));
+          input.dispatchEvent(new KeyboardEvent('keydown', {{
+            key: 'Tab',
+            code: 'Tab',
+            bubbles: true,
+            cancelable: true,
+          }}));
+        }})()""")
+        await wait_until(
+            cdp,
+            f"""(() => {{
+              const item = JSON.parse(localStorage.getItem('mock.finance_items') || '[]')
+                .find(entry => String(entry.id) === '{created_id}');
+              return item?.parent_id === 1 && item?.name === 'Untitled item';
+            }})()""",
+            timeout=4,
+        )
+        placeholder_focus = await wait_until(
+            cdp,
+            f"""(() => {{
+              const active = document.activeElement;
+              return active?.closest?.('.finance-row')?.dataset.id === '{created_id}'
+                && active?.dataset.field === 'name'
+                && active.value === 'Untitled item'
+                && active.selectionStart === 0
+                && active.selectionEnd === active.value.length
+                && {{
+                  value: active.value,
+                  selectionStart: active.selectionStart,
+                  selectionEnd: active.selectionEnd,
+                }};
+            }})()""",
+            timeout=4,
+        )
+        assert placeholder_focus['value'] == 'Untitled item', placeholder_focus
+        assert placeholder_focus['selectionStart'] == 0, placeholder_focus
+        assert placeholder_focus['selectionEnd'] == len('Untitled item'), placeholder_focus
+
+    await check('T26h Finance row editing preserves scroll and placeholder selection', t26h_finance_row_editing_scroll_and_placeholder)
+
     # ── T27: Detached module windows ───────────────────────
     async def t27_detached_module_context_menu_and_standalone_boot():
         await cdp.send('Page.navigate', url=TEST_URL)

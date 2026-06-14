@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## f-20260614-1 (2026-06-14)
+
+- **Finance row editing fixes:** saving an amount in a long Finance list now
+  preserves the row list scroll position and active amount field, and
+  keyboard-created placeholder row names are selected after Tab indent so
+  typing replaces `Untitled item`.
+
 ## f-20260612-1 (2026-06-12)
 
 - **Image viewer zoom/pan:** Figure Card image viewer in Snippets and Notes

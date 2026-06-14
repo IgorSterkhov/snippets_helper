@@ -18,6 +18,7 @@ const DEFAULT_FINANCE_DISPLAY = {
 };
 const FINANCE_FILL_ORDERS = new Set(['strong_first', 'soft_first']);
 const FINANCE_HEADER_AUTOSAVE_DELAY_MS = 650;
+const FINANCE_PLACEHOLDER_ITEM_NAME = 'Untitled item';
 const PLAN_KINDS = [
   { value: 'monthly', label: 'Monthly' },
   { value: 'project', label: 'Project' },
@@ -1357,6 +1358,7 @@ function renderItemRow(row, children, totals, maxDepth) {
   amountInput.inputMode = 'decimal';
   amountInput.min = '0';
   amountInput.addEventListener('change', () => saveItemFromRow(rowEl));
+  amountInput.addEventListener('keydown', (event) => onFinanceValueKeydown(event, rowEl));
   amountCell.appendChild(amountInput);
 
   const dateCell = document.createElement('div');
@@ -1428,12 +1430,60 @@ function sortedItemsForParent(parentId) {
       || itemId(a) - itemId(b));
 }
 
-function focusFinanceRowName(id, atEnd = false) {
+function captureFinanceViewport(rowEl = null) {
+  const wrap = rootEl?.querySelector('.finance-table-wrap');
+  const active = rootEl?.contains(document.activeElement) ? document.activeElement : null;
+  const activeRow = active?.closest?.('.finance-row') || rowEl;
+  const selectionStart = Number.isInteger(active?.selectionStart) ? active.selectionStart : null;
+  const selectionEnd = Number.isInteger(active?.selectionEnd) ? active.selectionEnd : null;
+  return {
+    scrollTop: wrap?.scrollTop ?? 0,
+    scrollLeft: wrap?.scrollLeft ?? 0,
+    rowId: activeRow?.dataset?.id || rowEl?.dataset?.id || null,
+    field: active?.dataset?.field || null,
+    selectionStart,
+    selectionEnd,
+  };
+}
+
+function restoreFinanceViewport(snapshot) {
+  if (!snapshot) return;
+  setTimeout(() => {
+    const wrap = rootEl?.querySelector('.finance-table-wrap');
+    const input = snapshot.rowId && snapshot.field
+      ? rootEl?.querySelector(`.finance-row[data-id="${snapshot.rowId}"] [data-field="${snapshot.field}"]`)
+      : null;
+    if (input) {
+      input.focus?.({ preventScroll: true });
+      if (snapshot.selectionStart != null && snapshot.selectionEnd != null) {
+        try {
+          input.setSelectionRange(snapshot.selectionStart, snapshot.selectionEnd);
+        } catch {}
+      }
+    }
+    if (wrap) {
+      wrap.scrollTop = snapshot.scrollTop;
+      wrap.scrollLeft = snapshot.scrollLeft;
+    }
+  }, 0);
+}
+
+function isFinancePlaceholderName(value) {
+  return String(value || '').trim() === FINANCE_PLACEHOLDER_ITEM_NAME;
+}
+
+function focusFinanceRowName(id, options = {}) {
+  const opts = typeof options === 'boolean' ? { atEnd: options } : options;
   setTimeout(() => {
     const input = rootEl?.querySelector(`.finance-row[data-id="${id}"] [data-field="name"]`);
     if (!input) return;
-    input.focus();
-    const offset = atEnd ? input.value.length : 0;
+    input.focus({ preventScroll: true });
+    if (opts.selectAll || (opts.selectPlaceholder && isFinancePlaceholderName(input.value))) {
+      input.select?.();
+      input.scrollIntoView?.({ block: 'nearest' });
+      return;
+    }
+    const offset = opts.atEnd ? input.value.length : 0;
     try {
       input.setSelectionRange(offset, offset);
     } catch {
@@ -1491,7 +1541,7 @@ async function createItemAfter(rowEl) {
   }
 
   await loadAll(state.activePlanId);
-  focusFinanceRowName(itemId(created));
+  focusFinanceRowName(itemId(created), { selectAll: true });
 }
 
 async function indentFinanceItem(rowEl) {
@@ -1511,7 +1561,7 @@ async function indentFinanceItem(rowEl) {
     beforeId: null,
   });
   await loadAll(state.activePlanId);
-  focusFinanceRowName(id);
+  focusFinanceRowName(id, { selectPlaceholder: true });
 }
 
 async function outdentFinanceItem(rowEl) {
@@ -1529,7 +1579,7 @@ async function outdentFinanceItem(rowEl) {
     beforeId,
   });
   await loadAll(state.activePlanId);
-  focusFinanceRowName(id);
+  focusFinanceRowName(id, { selectPlaceholder: true });
 }
 
 async function onFinanceNameKeydown(event, rowEl) {
@@ -1565,6 +1615,13 @@ async function onFinanceNameKeydown(event, rowEl) {
     if (!(await saveItemFromRow(rowEl))) return;
     await outdentFinanceItem(rowEl);
   }
+}
+
+async function onFinanceValueKeydown(event, rowEl) {
+  if (event.isComposing) return;
+  if (event.key !== 'Enter' || event.shiftKey) return;
+  event.preventDefault();
+  await saveItemFromRow(rowEl);
 }
 
 async function createPlan() {
@@ -1633,6 +1690,7 @@ async function createItem(parentId) {
 }
 
 async function saveItemFromRow(rowEl) {
+  const viewport = captureFinanceViewport(rowEl);
   const id = Number(rowEl.dataset.id);
   const nameInput = rowEl.querySelector('[data-field="name"]');
   const amountInput = rowEl.querySelector('[data-field="amount"]');
@@ -1661,6 +1719,7 @@ async function saveItemFromRow(rowEl) {
   try {
     await call('update_finance_item', { id, name, amountCents, dueDay, dueDate, note });
     await loadAll(state.activePlanId);
+    restoreFinanceViewport(viewport);
     return true;
   } catch (err) {
     showToast(`Failed to save row: ${err}`, 'error');
