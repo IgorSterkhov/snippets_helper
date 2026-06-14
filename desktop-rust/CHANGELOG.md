@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## f-20260614-2 (2026-06-14)
+
+- **Finance collapse color fix:** desktop Finance level backgrounds now use the
+  full expense tree depth instead of only visible rows, so collapsing all
+  children no longer makes top-level rows lose their color bands.
+
 ## f-20260614-1 (2026-06-14)
 
 - **Finance row editing fixes:** saving an amount in a long Finance list now

@@ -3713,6 +3713,27 @@ async def run_tests():
         assert band_style['backgroundImage'] and band_style['backgroundImage'] != 'none', band_style
 
         await cdp.eval("""(() => {
+          document.querySelector('#panel-finance .finance-row[data-id="1"] .finance-toggle')?.click();
+        })()""")
+        await wait_until(
+            cdp,
+            "document.querySelectorAll('#panel-finance .finance-row').length === 1",
+            timeout=3,
+        )
+        collapsed_root_class = await cdp.eval(
+            "document.querySelector('#panel-finance .finance-row[data-id=\"1\"]')?.className || ''"
+        )
+        assert 'finance-band-slot-0' in collapsed_root_class, collapsed_root_class
+        await cdp.eval("""(() => {
+          document.querySelector('#panel-finance .finance-row[data-id="1"] .finance-toggle')?.click();
+        })()""")
+        await wait_until(
+            cdp,
+            "document.querySelectorAll('#panel-finance .finance-row').length === 4",
+            timeout=3,
+        )
+
+        await cdp.eval("""(() => {
           [...document.querySelectorAll('#panel-finance .finance-header-actions button')]
             .find(btn => btn.title === 'Finance display settings').click();
         })()""")

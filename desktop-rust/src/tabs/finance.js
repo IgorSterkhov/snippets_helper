@@ -780,6 +780,20 @@ function flattenVisible(roots, children) {
   return rows;
 }
 
+function maxTreeDepth(roots, children) {
+  let maxDepth = 0;
+  function visit(item, depth, stack = new Set()) {
+    const id = itemId(item);
+    if (id == null || stack.has(id)) return;
+    maxDepth = Math.max(maxDepth, depth);
+    const nextStack = new Set(stack);
+    nextStack.add(id);
+    for (const child of children.get(id) || []) visit(child, depth + 1, nextStack);
+  }
+  for (const root of roots) visit(root, 0);
+  return maxDepth;
+}
+
 function isDescendant(sourceId, possibleDescendantId) {
   let current = state.items.find((item) => itemId(item) === possibleDescendantId);
   const seen = new Set();
@@ -1288,7 +1302,7 @@ function renderTree(roots, children, totals) {
   tree.appendChild(head);
 
   const rows = flattenVisible(roots, children);
-  const maxDepth = rows.reduce((max, row) => Math.max(max, row.depth), 0);
+  const maxDepth = maxTreeDepth(roots, children);
   for (const row of rows) {
     tree.appendChild(renderItemRow(row, children, totals, maxDepth));
   }
