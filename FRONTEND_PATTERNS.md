@@ -642,3 +642,22 @@ Use this pattern when a modal edits user content and closing it can lose work.
 - When adding a restore prompt with more than two choices, use `showModal`
   button labels plus `extraActions` so keyboard Escape handling and modal
   stacking stay consistent.
+
+---
+
+## §22 Module Header Help and Settings
+
+**Used in:** Tasks, Whisper, Repo Search
+
+When a module has local help or settings:
+
+- Put `?` Help and `⚙` Settings controls in the module header, next to the
+  module title. Do not place module-wide settings inside a sub-tab toolbar.
+- Keep sub-tab toolbars focused on the active workflow, such as search inputs,
+  filters, or table actions.
+- Use the shared `helpButton` / help modal pattern for module help content.
+- Settings with potentially long lists should open a bounded modal with a
+  scrollable body (`max-height` on the modal and `overflow:auto` on the body).
+- If settings can open nested add/edit dialogs, keep a reference to the active
+  settings body and refresh that body after add/edit/remove, instead of querying
+  an old inline panel selector.

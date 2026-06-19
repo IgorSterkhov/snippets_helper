@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## f-20260619-2 (2026-06-19)
+
+- **Repo Search header settings/help:** Repo Search now has standard module
+  header Help and Settings buttons, and repository settings open in a
+  scrollable modal instead of an inline Search-panel drawer.
+
 ## f-20260619-1 (2026-06-19)
 
 - **Snippet editor drafts:** the Snippets editor now autosaves a local draft

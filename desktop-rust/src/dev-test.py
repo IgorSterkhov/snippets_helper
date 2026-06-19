@@ -1208,6 +1208,60 @@ async def run_tests():
         assert 'Scoped' in badge and '1 repo' in badge, badge
     await check('T13b group tab scopes search calls', t13b_group_tab_scopes_search_calls)
 
+    # ── T13c: Repo Search header owns help/settings ──────────
+    async def t13c_repo_search_header_settings_help():
+        await cdp.eval("""(async () => {
+          const repos = [];
+          for (let i = 0; i < 36; i++) {
+            repos.push({
+              name: `repo-${String(i).padStart(2, '0')}`,
+              path: `/home/dev/repo-${String(i).padStart(2, '0')}`,
+              color: '#3b82f6',
+              group_id: null,
+            });
+          }
+          localStorage.setItem('mock.repo_groups', JSON.stringify([]));
+          localStorage.setItem('mock.repos', JSON.stringify(repos));
+          document.querySelector('.tab-btn[data-tab-id="repo-search"]').click();
+          await (window.__rsRefreshAfterGroupDelete && window.__rsRefreshAfterGroupDelete());
+        })()""")
+        await wait_until(cdp, "!!document.querySelector('#panel-repo-search .rs-module-header')", timeout=4)
+        title = await cdp.eval("document.querySelector('#panel-repo-search .rs-module-header h2')?.textContent.trim()")
+        assert title == 'Repo Search', title
+        has_help = await cdp.eval("!!document.querySelector('#panel-repo-search .rs-module-header .sql-help-btn')")
+        has_settings = await cdp.eval("!!document.querySelector('#panel-repo-search .rs-module-header .rs-settings-btn')")
+        assert has_help and has_settings, 'missing module header help/settings'
+        old_settings = await cdp.eval("!!document.querySelector('#panel-repo-search #rs-search-panel .rs-gear-btn')")
+        assert not old_settings, 'settings gear should not remain in search toolbar'
+        inner_tabs = await cdp.eval("[...document.querySelectorAll('#panel-repo-search .rs-inner-tab')].map(x => x.textContent.trim())")
+        assert inner_tabs == ['Search', 'Manage'], inner_tabs
+
+        await cdp.eval("document.querySelector('#panel-repo-search .rs-module-header .sql-help-btn').click()")
+        await wait_until(cdp, "!!document.querySelector('.sql-help-modal')", timeout=3)
+        help_text = await cdp.eval("document.querySelector('.sql-help-body')?.textContent || ''")
+        assert 'Repo Search' in help_text and 'Manage tab' in help_text, help_text[:120]
+        await cdp.eval("[...document.querySelectorAll('.sql-help-modal button')].find(x => x.textContent.trim() === 'Close').click()")
+        await wait_until(cdp, "!document.querySelector('.sql-help-modal')", timeout=3)
+
+        await cdp.eval("document.querySelector('#panel-repo-search .rs-module-header .rs-settings-btn').click()")
+        await wait_until(cdp, "!!document.querySelector('.rs-settings-modal')", timeout=3)
+        metrics = await cdp.eval("""(() => {
+          const body = document.querySelector('.rs-settings-modal-body');
+          const style = getComputedStyle(body);
+          return {
+            overflowY: style.overflowY,
+            scrollHeight: body.scrollHeight,
+            clientHeight: body.clientHeight,
+            repoRows: document.querySelectorAll('.rs-settings-modal .rs-path-item').length,
+          };
+        })()""")
+        assert metrics['overflowY'] == 'auto', metrics
+        assert metrics['scrollHeight'] > metrics['clientHeight'], metrics
+        assert metrics['repoRows'] == 36, metrics
+        await cdp.eval("[...document.querySelectorAll('.rs-settings-modal .rs-modal-actions button')].find(x => x.textContent.trim() === 'Close').click()")
+        await wait_until(cdp, "!document.querySelector('.rs-settings-modal')", timeout=3)
+    await check('T13c Repo Search header help/settings', t13c_repo_search_header_settings_help)
+
     # ── T14: expand/collapse file card ───────────────────────
     async def t14_expand_collapse_file_card():
         # Ensure we're on the Search inner tab

@@ -3,6 +3,8 @@ import { showToast } from '../components/toast.js';
 import { showModal } from '../components/modal.js';
 import { ALL_ICONS, iconKey, renderIcon } from '../icons/index.js';
 import { installWrappedChipDnd } from '../components/wrapped-chip-dnd.js';
+import { helpButton } from './sql/sql-help.js';
+import { REPO_SEARCH_HELP_HTML } from './repo-search/help-content.js';
 
 let root = null;
 let searchType = 'files';   // files | content | git
@@ -11,7 +13,8 @@ let sortMode = 'name';      // name | date
 let results = [];
 let contentResults = [];
 let gitResults = [];
-let settingsOpen = false;
+let settingsModalBody = null;
+let settingsModalOverlay = null;
 let activeRepos = new Set();  // names of selected repos
 let allRepos = [];            // RepoEntry[]
 let allGroups = [];           // RepoGroup[]
@@ -91,7 +94,27 @@ function hasUngroupedRepos() {
 function buildLayout() {
   const wrap = el('div', { class: 'rs-wrap' });
 
-  // Top bar: search input + type selector + settings gear
+  const moduleHeader = el('div', { class: 'rs-module-header' });
+  moduleHeader.appendChild(el('h2', { text: 'Repo Search' }));
+
+  const moduleActions = el('div', { class: 'rs-module-actions' });
+  const helpBtn = helpButton('Repo Search — справка', REPO_SEARCH_HELP_HTML);
+  helpBtn.classList.add('rs-header-icon-btn');
+  moduleActions.appendChild(helpBtn);
+
+  const settingsBtn = el('button', {
+    text: '\u2699',
+    class: 'rs-header-icon-btn rs-settings-btn',
+    title: 'Settings',
+  });
+  settingsBtn.type = 'button';
+  settingsBtn.addEventListener('click', openRepoSearchSettings);
+  moduleActions.appendChild(settingsBtn);
+
+  moduleHeader.appendChild(moduleActions);
+  wrap.appendChild(moduleHeader);
+
+  // Top bar: search input + type selector
   const topBar = el('div', { class: 'rs-topbar' });
 
   // Pill-shaped search field: icon + input + clear-button wrapped in a
@@ -164,18 +187,6 @@ function buildLayout() {
   }
   topBar.appendChild(typeGroup);
 
-  // Settings gear
-  const gearBtn = el('button', { text: '\u2699', class: 'rs-gear-btn', title: 'Settings' });
-  gearBtn.addEventListener('click', () => {
-    settingsOpen = !settingsOpen;
-    const panel = root.querySelector('#rs-settings-panel');
-    if (panel) {
-      panel.style.display = settingsOpen ? '' : 'none';
-      if (settingsOpen) loadSettingsPanel();
-    }
-  });
-  topBar.appendChild(gearBtn);
-
   // topBar is appended to searchPanel (created below, after the chip strip)
 
   const tabStrip = el('div', { class: 'rs-tab-strip', id: 'rs-tab-strip' });
@@ -205,11 +216,6 @@ function buildLayout() {
 
   // Move topBar into search panel (was deferred above)
   searchPanel.appendChild(topBar);
-
-  // Settings panel (collapsible) — inside search panel
-  const settingsPanel = el('div', { class: 'rs-settings-panel', id: 'rs-settings-panel' });
-  settingsPanel.style.display = 'none';
-  searchPanel.appendChild(settingsPanel);
 
   // Sort bar — inside search panel
   const sortBar = el('div', { class: 'rs-sortbar' });
@@ -993,7 +999,9 @@ async function removeRepo(name) {
     await call('remove_repo', { name });
     allRepos = allRepos.filter(r => r.name !== name);
     activeRepos.delete(name);
+    renderTabStrip();
     renderRepoChips();
+    loadSettingsPanel();
     showToast('Repo removed', 'success');
   } catch (e) {
     showToast('Error: ' + e, 'error');
@@ -1106,8 +1114,7 @@ function showAddRepoModal(existing = null) {
         activeRepos.add(name);
         showToast('Repo added', 'success');
       }
-      renderRepoChips();
-      loadSettingsPanel();
+      await reloadAndRerender();
       overlay.remove();
     } catch (e) {
       showToast('Error: ' + e, 'error');
@@ -1255,6 +1262,7 @@ async function reloadAndRerender() {
   }
   renderTabStrip();
   renderRepoChips();
+  loadSettingsPanel();
 }
 
 function showGroupContextMenu(x, y, group) {
@@ -1343,21 +1351,79 @@ async function showEditRepoModal(repo) {
         await call('update_repo', { oldName: repo.name, name, path: repo.path, color, groupId });
       },
     });
-    allRepos = await call('list_repos');
-    renderTabStrip();
-    renderRepoChips();
+    await reloadAndRerender();
   } catch { /* cancelled */ }
 }
 
-// ── Settings Panel ─────────────────────────────────────────
+// ── Settings Modal ─────────────────────────────────────────
 
-async function loadSettingsPanel() {
-  const panel = root.querySelector('#rs-settings-panel');
+function openRepoSearchSettings() {
+  if (settingsModalOverlay) {
+    const modal = settingsModalOverlay.querySelector('.rs-settings-modal');
+    if (modal) modal.focus();
+    return;
+  }
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay rs-modal-overlay';
+
+  const modal = document.createElement('div');
+  modal.className = 'modal rs-settings-modal';
+  modal.tabIndex = -1;
+
+  const header = el('div', { class: 'rs-modal-header' });
+  header.appendChild(el('h3', { text: 'Repo Search Settings' }));
+  const closeBtn = el('button', { text: '\u2715', class: 'btn-secondary rs-modal-close' });
+  header.appendChild(closeBtn);
+  modal.appendChild(header);
+
+  const body = el('div', { class: 'rs-settings-modal-body' });
+  modal.appendChild(body);
+
+  const actions = el('div', { class: 'rs-modal-actions' });
+  const doneBtn = el('button', { text: 'Close' });
+  actions.appendChild(doneBtn);
+  modal.appendChild(actions);
+
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+
+  settingsModalOverlay = overlay;
+  settingsModalBody = body;
+  loadSettingsPanel();
+  setTimeout(() => modal.focus(), 0);
+
+  function close() {
+    if (settingsModalOverlay !== overlay) return;
+    overlay.remove();
+    settingsModalOverlay = null;
+    settingsModalBody = null;
+    document.removeEventListener('keydown', onKey, true);
+  }
+
+  function onKey(e) {
+    if (e.key !== 'Escape') return;
+    const overlays = document.querySelectorAll('.modal-overlay');
+    if (overlays[overlays.length - 1] !== overlay) return;
+    e.stopPropagation();
+    close();
+  }
+
+  closeBtn.addEventListener('click', close);
+  doneBtn.addEventListener('click', close);
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) close();
+  });
+  document.addEventListener('keydown', onKey, true);
+}
+
+function loadSettingsPanel() {
+  const panel = settingsModalBody;
   if (!panel) return;
   panel.innerHTML = '';
 
   const header = el('div', { class: 'rs-settings-header' });
-  header.appendChild(el('span', { text: 'Settings', class: 'rs-settings-title' }));
+  header.appendChild(el('span', { text: 'Repositories and search options', class: 'rs-settings-title' }));
   panel.appendChild(header);
 
   // Repo list
@@ -1374,13 +1440,12 @@ async function loadSettingsPanel() {
     item.appendChild(el('span', { text: r.path, class: 'rs-path-text' }));
     const editBtn = el('button', { text: '\u270E', class: 'rs-path-edit', title: 'Edit' });
     editBtn.addEventListener('click', () => {
-      showAddRepoModal(r);
+      showEditRepoModal(r);
     });
     item.appendChild(editBtn);
     const removeBtn = el('button', { text: '\u2715', class: 'rs-path-remove', title: 'Remove' });
     removeBtn.addEventListener('click', async () => {
       await removeRepo(r.name);
-      loadSettingsPanel();
     });
     item.appendChild(removeBtn);
     list.appendChild(item);
@@ -2327,6 +2392,47 @@ function css() {
   height: 100%;
   position: relative;
 }
+.rs-module-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px 0;
+  flex-shrink: 0;
+}
+.rs-module-header h2 {
+  margin: 0;
+  font-size: 17px;
+  line-height: 24px;
+}
+.rs-module-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.rs-header-icon-btn,
+.rs-module-header .sql-help-btn {
+  width: 24px;
+  height: 24px;
+  min-width: 0;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.rs-header-icon-btn:hover,
+.rs-module-header .sql-help-btn:hover {
+  color: var(--accent, #3b82f6);
+  border-color: var(--accent, #3b82f6);
+  background: rgba(59, 130, 246, 0.08);
+}
 .rs-topbar {
   display: flex;
   align-items: center;
@@ -2452,20 +2558,6 @@ function css() {
   background: var(--accent);
   color: #fff;
 }
-.rs-gear-btn {
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px 10px;
-  font-size: 16px;
-  cursor: pointer;
-  color: var(--text-muted);
-  transition: color 0.15s;
-}
-.rs-gear-btn:hover {
-  color: var(--text);
-  background: var(--bg-secondary);
-}
 /* Repo chips bar */
 .rs-repo-bar {
   display: flex;
@@ -2527,12 +2619,20 @@ function css() {
   color: var(--accent);
   border-color: var(--accent);
 }
-/* Settings panel */
-.rs-settings-panel {
-  border-bottom: 1px solid var(--border);
-  padding: 10px 12px;
-  background: var(--bg-secondary);
-  flex-shrink: 0;
+/* Settings modal */
+.rs-settings-modal {
+  max-width: 760px;
+  width: 94%;
+  max-height: 84vh;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+}
+.rs-settings-modal-body {
+  padding: 14px 16px;
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
 }
 .rs-settings-header {
   margin-bottom: 8px;
