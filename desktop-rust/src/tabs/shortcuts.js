@@ -51,6 +51,8 @@ const SNIPPET_SEARCH_SCOPES = new Set(['name', 'full']);
 const SNIPPETS_SHOW_TAGS_SETTING_KEY = 'snippets_show_tags_panel';
 const SNIPPETS_SHOW_PINNED_SETTING_KEY = 'snippets_show_pinned_panel';
 const SNIPPET_HISTORY_BRANCH_LIMIT = 10;
+const SNIPPET_NEW_DRAFT_KEY = 'snippet_editor_draft_new_v1';
+const SNIPPET_EDIT_DRAFT_PREFIX = 'snippet_editor_draft_edit_v1_';
 let keyCloudAlgorithm = readKeyCloudAlgorithm();
 let keyCloudCache = null;
 let keyCloudBuildPromise = null;
@@ -134,7 +136,7 @@ export async function init(container) {
   addBtn.textContent = '+';
   addBtn.title = 'Add shortcut';
   addBtn.style.cssText = 'min-width:32px;height:32px;padding:0;font-size:18px';
-  addBtn.addEventListener('click', () => openEditor(null));
+  addBtn.addEventListener('click', () => openNewSnippetEditor());
   header.appendChild(addBtn);
 
   container.appendChild(header);
@@ -766,6 +768,192 @@ function hasText(value) {
   return !!(value && String(value).trim());
 }
 
+function getSnippetDraftKey(shortcut) {
+  return shortcut?.id != null
+    ? SNIPPET_EDIT_DRAFT_PREFIX + String(shortcut.id)
+    : SNIPPET_NEW_DRAFT_KEY;
+}
+
+function normalizeEditorLinks(links) {
+  return (Array.isArray(links) ? links : [])
+    .map(link => ({
+      title: String(link?.title || ''),
+      url: String(link?.url || ''),
+    }))
+    .filter(link => link.title.trim() || link.url.trim());
+}
+
+function normalizeEditorSnapshot(snapshot = {}) {
+  return {
+    name: String(snapshot.name || ''),
+    value: String(snapshot.value || ''),
+    description: String(snapshot.description || ''),
+    links: normalizeEditorLinks(snapshot.links),
+  };
+}
+
+function emptySnippetSnapshot() {
+  return normalizeEditorSnapshot();
+}
+
+function snippetSnapshotFromShortcut(shortcut) {
+  return normalizeEditorSnapshot({
+    name: shortcut?.name || '',
+    value: shortcut?.value || '',
+    description: shortcut?.description || '',
+    links: parseLinks(shortcut || {}),
+  });
+}
+
+function snippetSnapshotsEqual(a, b) {
+  return JSON.stringify(normalizeEditorSnapshot(a)) === JSON.stringify(normalizeEditorSnapshot(b));
+}
+
+function snippetSnapshotHasContent(snapshot) {
+  const s = normalizeEditorSnapshot(snapshot);
+  return !!(
+    s.name.trim()
+    || s.value
+    || s.description.trim()
+    || s.links.some(link => link.title.trim() || link.url.trim())
+  );
+}
+
+function readSnippetDraft(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const snapshot = normalizeEditorSnapshot(parsed?.snapshot || parsed);
+    if (!snippetSnapshotHasContent(snapshot)) return null;
+    return {
+      snapshot,
+      updatedAt: parsed?.updatedAt || parsed?.timestamp || '',
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeSnippetDraft(key, snapshot, initialSnapshot) {
+  const normalized = normalizeEditorSnapshot(snapshot);
+  try {
+    if (!snippetSnapshotHasContent(normalized) || snippetSnapshotsEqual(normalized, initialSnapshot)) {
+      localStorage.removeItem(key);
+      return;
+    }
+    localStorage.setItem(key, JSON.stringify({
+      updatedAt: new Date().toISOString(),
+      snapshot: normalized,
+    }));
+  } catch {
+    // Best-effort local protection only. Save must not be blocked by storage.
+  }
+}
+
+function clearSnippetDraft(key) {
+  try { localStorage.removeItem(key); } catch {}
+}
+
+function formatSnippetDraftTime(updatedAt) {
+  if (!updatedAt) return 'recently';
+  const date = new Date(updatedAt);
+  if (!Number.isFinite(date.getTime())) return 'recently';
+  return date.toLocaleString([], {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+async function chooseSnippetDraft(draft, title) {
+  const body = document.createElement('div');
+  body.style.cssText = 'display:flex;flex-direction:column;gap:8px;font-size:13px;line-height:1.45;color:var(--text)';
+
+  const intro = document.createElement('p');
+  intro.style.margin = '0';
+  intro.textContent = `Found an unsaved local draft from ${formatSnippetDraftTime(draft.updatedAt)}.`;
+  body.appendChild(intro);
+
+  const hint = document.createElement('p');
+  hint.style.cssText = 'margin:0;color:var(--text-muted)';
+  hint.textContent = 'Drafts stay on this desktop and are cleared after a successful save or explicit discard.';
+  body.appendChild(hint);
+
+  try {
+    return await showModal({
+      title,
+      body,
+      cancelText: 'Start empty',
+      confirmText: 'Restore',
+      onConfirm: () => 'restore',
+      extraActions: [{
+        text: 'Discard draft',
+        className: 'btn-danger',
+        onClick: () => 'discard',
+      }],
+    });
+  } catch {
+    return 'empty';
+  }
+}
+
+async function confirmDiscardSnippetChanges() {
+  const body = document.createElement('div');
+  body.style.cssText = 'display:flex;flex-direction:column;gap:8px;font-size:13px;line-height:1.45;color:var(--text)';
+
+  const text = document.createElement('p');
+  text.style.margin = '0';
+  text.textContent = 'This snippet has unsaved changes. Discard them and close the editor?';
+  body.appendChild(text);
+
+  const hint = document.createElement('p');
+  hint.style.cssText = 'margin:0;color:var(--text-muted)';
+  hint.textContent = 'Choose Continue editing to keep the editor open.';
+  body.appendChild(hint);
+
+  try {
+    await showModal({
+      title: 'Discard unsaved changes?',
+      body,
+      cancelText: 'Continue editing',
+      confirmText: 'Discard',
+      onConfirm: () => true,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function openNewSnippetEditor() {
+  const draft = readSnippetDraft(SNIPPET_NEW_DRAFT_KEY);
+  if (!draft) {
+    openEditor(null);
+    return;
+  }
+
+  const choice = await chooseSnippetDraft(draft, 'Unsaved snippet draft');
+  if (choice === 'discard') clearSnippetDraft(SNIPPET_NEW_DRAFT_KEY);
+  openEditor(null, choice === 'restore' ? { draftSnapshot: draft.snapshot } : {});
+}
+
+async function openExistingSnippetEditor(shortcut) {
+  const key = getSnippetDraftKey(shortcut);
+  const savedSnapshot = snippetSnapshotFromShortcut(shortcut);
+  const draft = readSnippetDraft(key);
+  if (!draft || snippetSnapshotsEqual(draft.snapshot, savedSnapshot)) {
+    openEditor(shortcut);
+    return;
+  }
+
+  const choice = await chooseSnippetDraft(draft, 'Unsaved edit draft');
+  if (choice === 'discard') clearSnippetDraft(key);
+  openEditor(shortcut, choice === 'restore' ? { draftSnapshot: draft.snapshot } : {});
+}
+
 function isMarkdownLike(text) {
   return /(?:^#{1,6}\s|\*\*|__|\[.+\]\(.+\)|```|^\s*[-*]\s|\|.+\|)/m.test(text || '');
 }
@@ -1274,7 +1462,7 @@ function renderDetail() {
   const editBtn = document.createElement('button');
   editBtn.textContent = 'Edit';
   editBtn.style.cssText = 'padding:4px 10px;font-size:11px;font-weight:500;background:transparent;color:var(--text-muted);border:1px solid var(--border);border-radius:4px;cursor:pointer';
-  editBtn.addEventListener('click', () => openEditor(shortcut));
+  editBtn.addEventListener('click', () => openExistingSnippetEditor(shortcut));
 
   const delBtn = document.createElement('button');
   delBtn.textContent = 'Del';
@@ -2603,8 +2791,12 @@ function focusWhenVisible(el) {
   }, 0);
 }
 
-function openEditor(shortcut) {
+function openEditor(shortcut, options = {}) {
   const isEdit = shortcut !== null;
+  const initialSnapshot = isEdit ? snippetSnapshotFromShortcut(shortcut) : emptySnippetSnapshot();
+  const draftSnapshot = options.draftSnapshot ? normalizeEditorSnapshot(options.draftSnapshot) : null;
+  const editorSnapshot = draftSnapshot || initialSnapshot;
+  const draftKey = getSnippetDraftKey(shortcut);
 
   const form = document.createElement('div');
   form.style.cssText = 'display:flex;flex-direction:column;gap:12px';
@@ -2612,13 +2804,13 @@ function openEditor(shortcut) {
   const nameInput = document.createElement('input');
   nameInput.type = 'text';
   nameInput.placeholder = 'Name';
-  nameInput.value = isEdit ? shortcut.name : '';
+  nameInput.value = editorSnapshot.name;
   form.appendChild(nameInput);
 
   const valueInput = document.createElement('textarea');
   valueInput.placeholder = 'Value (text to copy)';
   valueInput.rows = 6;
-  valueInput.value = isEdit ? shortcut.value : '';
+  valueInput.value = editorSnapshot.value;
   form.appendChild(valueInput);
   attachToolbar(valueInput, { enableImageUpload: true });
 
@@ -2645,7 +2837,7 @@ function openEditor(shortcut) {
 
   const descBadge = document.createElement('span');
   descBadge.className = 'snippet-editor-desc-badge';
-  descBadge.textContent = isEdit && hasText(shortcut.description) ? 'filled' : 'empty';
+  descBadge.textContent = hasText(editorSnapshot.description) ? 'filled' : 'empty';
   descBadge.style.cssText = 'margin-left:auto;background:var(--bg-tertiary);padding:1px 6px;border-radius:8px;font-size:10px;color:var(--text-muted)';
   descToggle.appendChild(descBadge);
 
@@ -2655,7 +2847,7 @@ function openEditor(shortcut) {
   const descInput = document.createElement('textarea');
   descInput.placeholder = 'Description (optional — documentation, notes, context)';
   descInput.rows = 3;
-  descInput.value = isEdit ? shortcut.description : '';
+  descInput.value = editorSnapshot.description;
   descBody.appendChild(descInput);
   attachToolbar(descInput, { enableImageUpload: true });
 
@@ -2672,6 +2864,7 @@ function openEditor(shortcut) {
 
   descInput.addEventListener('input', () => {
     descBadge.textContent = hasText(descInput.value) ? 'filled' : 'empty';
+    persistCurrentDraft();
   });
 
   descSection.appendChild(descToggle);
@@ -2689,7 +2882,20 @@ function openEditor(shortcut) {
   linksContainer.style.cssText = 'display:flex;flex-direction:column;gap:6px';
   form.appendChild(linksContainer);
 
-  let currentLinks = isEdit ? parseLinks(shortcut) : [];
+  let currentLinks = editorSnapshot.links.map(link => ({ ...link }));
+
+  function getCurrentSnapshot() {
+    return normalizeEditorSnapshot({
+      name: nameInput.value,
+      value: valueInput.value,
+      description: descInput.value,
+      links: currentLinks,
+    });
+  }
+
+  function persistCurrentDraft() {
+    writeSnippetDraft(draftKey, getCurrentSnapshot(), initialSnapshot);
+  }
 
   function renderLinkRows() {
     linksContainer.innerHTML = '';
@@ -2702,7 +2908,10 @@ function openEditor(shortcut) {
       titleIn.placeholder = 'Title';
       titleIn.value = link.title || '';
       titleIn.style.cssText = 'flex:1;min-width:0';
-      titleIn.addEventListener('input', () => { currentLinks[idx].title = titleIn.value; });
+      titleIn.addEventListener('input', () => {
+        currentLinks[idx].title = titleIn.value;
+        persistCurrentDraft();
+      });
       row.appendChild(titleIn);
 
       const urlIn = document.createElement('input');
@@ -2710,7 +2919,10 @@ function openEditor(shortcut) {
       urlIn.placeholder = 'URL';
       urlIn.value = link.url || '';
       urlIn.style.cssText = 'flex:2;min-width:0';
-      urlIn.addEventListener('input', () => { currentLinks[idx].url = urlIn.value; });
+      urlIn.addEventListener('input', () => {
+        currentLinks[idx].url = urlIn.value;
+        persistCurrentDraft();
+      });
       row.appendChild(urlIn);
 
       const removeBtn = document.createElement('button');
@@ -2720,6 +2932,7 @@ function openEditor(shortcut) {
       removeBtn.addEventListener('click', () => {
         currentLinks.splice(idx, 1);
         renderLinkRows();
+        persistCurrentDraft();
       });
       row.appendChild(removeBtn);
 
@@ -2736,8 +2949,12 @@ function openEditor(shortcut) {
   addLinkBtn.addEventListener('click', () => {
     currentLinks.push({ title: '', url: '' });
     renderLinkRows();
+    persistCurrentDraft();
   });
   form.appendChild(addLinkBtn);
+
+  nameInput.addEventListener('input', persistCurrentDraft);
+  valueInput.addEventListener('input', persistCurrentDraft);
 
   // Obsidian note actions
   if (isEdit && shortcut.obsidian_note && shortcut.obsidian_note.trim()) {
@@ -2812,8 +3029,8 @@ function openEditor(shortcut) {
       const validLinks = currentLinks.filter(l => l.url && l.url.trim());
       const links = JSON.stringify(validLinks);
 
-      if (!name) { showToast('Name is required', 'error'); return; }
-      if (!value) { showToast('Value is required', 'error'); return; }
+      if (!name) throw new Error('Name is required');
+      if (!value) throw new Error('Value is required');
 
       try {
         if (isEdit) {
@@ -2823,13 +3040,30 @@ function openEditor(shortcut) {
           await call('create_shortcut', { name, value, description, links });
           showToast('Shortcut created', 'success');
         }
+        clearSnippetDraft(draftKey);
         await loadShortcuts();
       } catch (err) {
-        showToast('Error: ' + err, 'error');
+        throw new Error('Error: ' + err);
       }
     },
+    onCancel: async () => {
+      if (snippetSnapshotsEqual(getCurrentSnapshot(), initialSnapshot)) return true;
+      const discard = await confirmDiscardSnippetChanges();
+      if (!discard) return false;
+      clearSnippetDraft(draftKey);
+      return true;
+    },
   }).catch(() => {});
-  if (!isEdit) focusWhenVisible(nameInput);
+  if (!isEdit && !draftSnapshot) {
+    focusWhenVisible(nameInput);
+  } else if (!isEdit && draftSnapshot) {
+    setTimeout(() => {
+      try {
+        valueInput.focus();
+        valueInput.setSelectionRange(valueInput.value.length, valueInput.value.length);
+      } catch {}
+    }, 0);
+  }
 }
 
 function confirmDelete(shortcut) {

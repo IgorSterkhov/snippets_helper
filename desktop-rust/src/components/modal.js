@@ -1,4 +1,12 @@
-export function showModal({ title, body, onConfirm, onCancel }) {
+export function showModal({
+  title,
+  body,
+  onConfirm,
+  onCancel,
+  confirmText = 'Confirm',
+  cancelText = 'Cancel',
+  extraActions = [],
+}) {
   return new Promise((resolve, reject) => {
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
@@ -29,12 +37,19 @@ export function showModal({ title, body, onConfirm, onCancel }) {
 
     const cancelBtn = document.createElement('button');
     cancelBtn.className = 'btn-secondary';
-    cancelBtn.textContent = 'Cancel';
+    cancelBtn.textContent = cancelText;
 
     const confirmBtn = document.createElement('button');
-    confirmBtn.textContent = 'Confirm';
+    confirmBtn.textContent = confirmText;
 
     actions.appendChild(cancelBtn);
+    for (const action of extraActions || []) {
+      const actionBtn = document.createElement('button');
+      actionBtn.className = action.className || 'btn-secondary';
+      actionBtn.textContent = action.text || 'Action';
+      actionBtn.addEventListener('click', () => attemptExtraAction(action));
+      actions.appendChild(actionBtn);
+    }
     actions.appendChild(confirmBtn);
     modal.appendChild(actions);
     overlay.appendChild(modal);
@@ -42,33 +57,79 @@ export function showModal({ title, body, onConfirm, onCancel }) {
 
     let busy = false;
 
+    function setBusy(next) {
+      busy = !!next;
+      for (const button of actions.querySelectorAll('button')) {
+        button.disabled = busy;
+      }
+    }
+
+    function showError(err) {
+      errorEl.textContent = String(err?.message || err);
+      errorEl.style.display = '';
+    }
+
     async function attemptConfirm() {
       if (busy) return;
+      let result;
       if (onConfirm) {
-        busy = true;
-        confirmBtn.disabled = true;
-        cancelBtn.disabled = true;
+        setBusy(true);
         errorEl.style.display = 'none';
         errorEl.textContent = '';
         try {
-          await onConfirm();
+          result = await onConfirm();
+          if (result === false) {
+            setBusy(false);
+            return;
+          }
         } catch (err) {
-          busy = false;
-          confirmBtn.disabled = false;
-          cancelBtn.disabled = false;
-          errorEl.textContent = String(err?.message || err);
-          errorEl.style.display = '';
+          setBusy(false);
+          showError(err);
           return;
         }
       }
       cleanup();
-      resolve();
+      resolve(result);
     }
 
-    function doCancel() {
+    async function attemptExtraAction(action) {
       if (busy) return;
+      setBusy(true);
+      errorEl.style.display = 'none';
+      errorEl.textContent = '';
+      try {
+        const result = action.onClick ? await action.onClick() : undefined;
+        if (result === false) {
+          setBusy(false);
+          return;
+        }
+        cleanup();
+        resolve(result);
+      } catch (err) {
+        setBusy(false);
+        showError(err);
+      }
+    }
+
+    async function doCancel() {
+      if (busy) return;
+      if (onCancel) {
+        setBusy(true);
+        errorEl.style.display = 'none';
+        errorEl.textContent = '';
+        try {
+          const result = await onCancel();
+          if (result === false) {
+            setBusy(false);
+            return;
+          }
+        } catch (err) {
+          setBusy(false);
+          showError(err);
+          return;
+        }
+      }
       cleanup();
-      if (onCancel) onCancel();
       reject(new Error('cancelled'));
     }
 

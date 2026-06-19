@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## f-20260619-1 (2026-06-19)
+
+- **Snippet editor drafts:** the Snippets editor now autosaves a local draft
+  while typing, asks before discarding unsaved changes on Escape or Cancel, and
+  offers to restore the draft the next time New/Edit is opened.
+
 ## f-20260614-2 (2026-06-14)
 
 - **Finance collapse color fix:** desktop Finance level backgrounds now use the

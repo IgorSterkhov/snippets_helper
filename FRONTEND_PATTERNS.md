@@ -586,12 +586,12 @@ rows should read like report subtotals.
 
 - Derive subtotal typography from stored child count, including collapsed
   children. This keeps chevrons, parent totals, and subtotal emphasis stable.
-- Derive background bands from visible hierarchy depth only, so sibling rows at
-  the same depth look consistent whether they are terminal rows or subtotal
-  rows.
-- Treat depth as a zero-based visible index. If `maxVisibleDepthIndex` is `0`,
-  apply no band. If it is `1`, band only depth `0`. If it is `2`, band depths
-  `0` and `1`.
+- Derive background bands from the full stored hierarchy depth, not only the
+  currently visible rows. Collapsing every branch must not make top-level rows
+  lose their bands.
+- Treat depth as a zero-based tree index. If `maxTreeDepthIndex` is `0`, apply
+  no band. If it is `1`, band only depth `0`. If it is `2`, band depths `0`
+  and `1`.
 - Keep the deepest visible level neutral by default; this makes detail rows
   quieter and prevents every row from being tinted in shallow trees.
 - For configurable colors, validate stored values as `#RRGGBB` and mix them
@@ -620,3 +620,25 @@ When Markdown images are rendered as Figure Cards:
 - Use a normal modal overlay with Escape and backdrop close; the viewer body
   should keep overflow hidden and expose large images through pan/zoom instead
   of nested scrollbars.
+
+---
+
+## §21 Modal Cancel Guards for Unsaved Changes
+
+**Used in:** Snippets editor drafts
+
+Use this pattern when a modal edits user content and closing it can lose work.
+
+- Keep using the shared `showModal` component. Do not hand-roll a separate
+  overlay for ordinary forms.
+- Pass an async `onCancel` guard. Return `false` to keep the original modal
+  open, for example after the user chooses "Continue editing" in a nested
+  confirmation dialog.
+- Throw from `onConfirm` for validation or API failures that should keep the
+  editor open. Do not swallow the error with a toast and let the modal close.
+- Store local drafts in a per-feature localStorage key only when the current
+  snapshot differs from the saved/empty baseline. Clear the draft only after a
+  successful save or an explicit discard.
+- When adding a restore prompt with more than two choices, use `showModal`
+  button labels plus `extraActions` so keyboard Escape handling and modal
+  stacking stay consistent.

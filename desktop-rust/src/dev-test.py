@@ -187,6 +187,13 @@ async def run_tests():
           [...document.querySelectorAll('.modal-overlay')].forEach(x => x.remove());
         })()""")
 
+    async def clear_snippet_drafts():
+        await cdp.eval("""(() => {
+          for (const key of Object.keys(localStorage)) {
+            if (key.startsWith('snippet_editor_draft_')) localStorage.removeItem(key);
+          }
+        })()""")
+
     async def open_shortcuts_tab():
         await close_modals()
         await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"shortcuts\"]').click()")
@@ -2594,8 +2601,103 @@ async def run_tests():
         assert badge == 'empty', f'description badge: {badge!r}'
     await check('T20 Snippets new editor focuses name and collapses description', t20_snippets_new_editor_focus_and_description_collapse)
 
+    # ── T20b: New snippet draft survives accidental close ───
+    async def t20b_snippets_new_editor_draft_restore():
+        await clear_snippet_drafts()
+        await cdp.eval("""
+          document.querySelectorAll('.modal-overlay').forEach(el => el.remove());
+        """)
+        await open_shortcuts_tab()
+        await cdp.eval("document.querySelector('#panel-shortcuts button[title=\"Add shortcut\"]').click()")
+        await wait_until(cdp, "!!document.querySelector('.modal-overlay textarea[placeholder^=\"Value\"]')", timeout=3)
+        await cdp.eval("""
+          var draftNameInput = document.querySelector('.modal-overlay input[placeholder="Name"]');
+          var draftValueInput = document.querySelector('.modal-overlay textarea[placeholder^="Value"]');
+          draftNameInput.value = 'Draft guarded snippet';
+          draftValueInput.value = 'draft body';
+          draftNameInput.dispatchEvent(new Event('input', { bubbles: true }));
+          draftValueInput.dispatchEvent(new Event('input', { bubbles: true }));
+          document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        """)
+        await wait_until(
+            cdp,
+            "[...document.querySelectorAll('.modal h3')].some(x => x.textContent.includes('Discard unsaved changes'))",
+            timeout=3,
+        )
+        overlay_count = await cdp.eval("document.querySelectorAll('.modal-overlay').length")
+        assert overlay_count == 2, f'expected editor + discard confirm, got {overlay_count}'
+        await cdp.eval("""
+          var overlayTop = [...document.querySelectorAll('.modal-overlay')].at(-1);
+          [...overlayTop.querySelectorAll('.modal-actions button')]
+            .find(btn => btn.textContent.trim() === 'Continue editing')
+            .click();
+        """)
+        await wait_until(cdp, "document.querySelectorAll('.modal-overlay').length === 1", timeout=3)
+        value = await cdp.eval("document.querySelector('.modal-overlay textarea[placeholder^=\"Value\"]')?.value")
+        assert value == 'draft body', f'editor should stay open with draft text, got {value!r}'
+
+        await cdp.eval("""
+          document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        """)
+        await wait_until(
+            cdp,
+            "[...document.querySelectorAll('.modal h3')].some(x => x.textContent.includes('Discard unsaved changes'))",
+            timeout=3,
+        )
+        await cdp.eval("""
+          var overlayTop = [...document.querySelectorAll('.modal-overlay')].at(-1);
+          [...overlayTop.querySelectorAll('.modal-actions button')]
+            .find(btn => btn.textContent.trim() === 'Discard')
+            .click();
+        """)
+        await wait_until(cdp, "document.querySelectorAll('.modal-overlay').length === 0", timeout=3)
+        draft_after_discard = await cdp.eval("localStorage.getItem('snippet_editor_draft_new_v1')")
+        assert draft_after_discard is None, f'draft should clear after discard: {draft_after_discard!r}'
+
+        await cdp.eval("document.querySelector('#panel-shortcuts button[title=\"Add shortcut\"]').click()")
+        await wait_until(cdp, "!!document.querySelector('.modal-overlay textarea[placeholder^=\"Value\"]')", timeout=3)
+        await cdp.eval("""
+          var draftNameInput = document.querySelector('.modal-overlay input[placeholder="Name"]');
+          var draftValueInput = document.querySelector('.modal-overlay textarea[placeholder^="Value"]');
+          draftNameInput.value = 'Restored draft snippet';
+          draftValueInput.value = 'restored draft body';
+          draftNameInput.dispatchEvent(new Event('input', { bubbles: true }));
+          draftValueInput.dispatchEvent(new Event('input', { bubbles: true }));
+          document.querySelectorAll('.modal-overlay').forEach(el => el.remove());
+        """)
+        saved_draft = await cdp.eval("!!localStorage.getItem('snippet_editor_draft_new_v1')")
+        assert saved_draft, 'draft should be saved in localStorage'
+        await cdp.eval("document.querySelector('#panel-shortcuts button[title=\"Add shortcut\"]').click()")
+        await wait_until(
+            cdp,
+            "[...document.querySelectorAll('.modal h3')].some(x => x.textContent.includes('Unsaved snippet draft'))",
+            timeout=3,
+        )
+        await cdp.eval("""
+          var overlayTop = [...document.querySelectorAll('.modal-overlay')].at(-1);
+          [...overlayTop.querySelectorAll('.modal-actions button')]
+            .find(btn => btn.textContent.trim() === 'Restore')
+            .click();
+        """)
+        await wait_until(
+            cdp,
+            "document.querySelector('.modal-overlay textarea[placeholder^=\"Value\"]')?.value === 'restored draft body'",
+            timeout=3,
+        )
+        restored_name = await cdp.eval("document.querySelector('.modal-overlay input[placeholder=\"Name\"]')?.value")
+        assert restored_name == 'Restored draft snippet', f'restored name: {restored_name!r}'
+        await cdp.eval("""
+          document.querySelectorAll('.modal-overlay').forEach(el => el.remove());
+        """)
+        await clear_snippet_drafts()
+    await check('T20b Snippets new editor draft restore', t20b_snippets_new_editor_draft_restore)
+
     # ── T21: Toolbar code button inserts fenced block ────────
     async def t21_snippets_toolbar_code_block_insert():
+        await clear_snippet_drafts()
+        await cdp.eval("""
+          document.querySelectorAll('.modal-overlay').forEach(el => el.remove());
+        """)
         await open_shortcuts_tab()
         await cdp.eval("document.querySelector('#panel-shortcuts button[title=\"Add shortcut\"]').click()")
         await wait_until(cdp, "!!document.querySelector('.modal-overlay textarea[placeholder^=\"Value\"]')", timeout=3)
@@ -2609,6 +2711,10 @@ async def run_tests():
         caret = await cdp.eval("document.querySelector('.modal-overlay textarea[placeholder^=\"Value\"]').selectionStart")
         assert value == '```\n\n```', f'value: {value!r}'
         assert caret == 4, f'caret: {caret}'
+        await cdp.eval("""
+          document.querySelectorAll('.modal-overlay').forEach(el => el.remove());
+        """)
+        await clear_snippet_drafts()
     await check('T21 Snippets toolbar inserts fenced code block', t21_snippets_toolbar_code_block_insert)
 
     # ── T21b: Image upload modal inserts Markdown + figure ───
@@ -2781,6 +2887,7 @@ async def run_tests():
 
     # ── T21d: Clipboard screenshot upload path works ─────────
     async def t21d_snippets_image_upload_from_clipboard():
+        await clear_snippet_drafts()
         await close_modals()
         await open_shortcuts_tab()
         await cdp.eval("document.querySelector('#panel-shortcuts button[title=\"Add shortcut\"]').click()")
@@ -2808,10 +2915,13 @@ async def run_tests():
             timeout=3,
         )
         assert '![clipboard-screenshot]' in value
+        await clear_snippet_drafts()
+        await close_modals()
     await check('T21d Snippets clipboard image upload modal', t21d_snippets_image_upload_from_clipboard)
 
     # ── T21e: Image preview failures show copyable diagnostics ─
     async def t21e_snippets_image_preview_error_dialog():
+        await clear_snippet_drafts()
         await close_modals()
         await open_shortcuts_tab()
         await cdp.eval("window.__mockFailMediaPreviews = true; window.__mockClipboardText = '';")
@@ -2847,6 +2957,7 @@ async def run_tests():
 
     # ── T21f: Remote media previews use native data-url fallback ─
     async def t21f_snippets_remote_media_preview_native_fallback():
+        await clear_snippet_drafts()
         await close_modals()
         await open_shortcuts_tab()
         await cdp.eval(
@@ -2999,6 +3110,7 @@ async def run_tests():
 
     # ── T21g: Image preview shows variant title + arrows ─────
     async def t21g_image_preview_variant_navigation():
+        await clear_snippet_drafts()
         await close_modals()
         await open_shortcuts_tab()
         await cdp.eval("window.__mockFailMediaPreviews = false; window.__mockRemoteMediaPreviews = false;")
