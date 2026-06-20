@@ -2196,6 +2196,10 @@ async function expandFileCard(path, sourceFileResult = null) {
   });
   headerActions.appendChild(copyBtn);
 
+  const historyBtn = el('button', { text: 'History', class: 'rs-card-btn', title: 'Show file commit history' });
+  historyBtn.dataset.role = 'rs-file-history';
+  headerActions.appendChild(historyBtn);
+
   const collapse = document.createElement('button');
   collapse.className = 'rs-card-btn';
   collapse.textContent = 'Collapse ◂';
@@ -2225,9 +2229,11 @@ async function expandFileCard(path, sourceFileResult = null) {
     return;
   }
 
+  const lang = guessLang(path);
   const lines = splitFileLines(data.content);
   let currentMatches = [];
   let currentMatchIndex = -1;
+  let currentMode = 'file';
 
   function getCurrentEditorLine() {
     if (currentMatches.length && currentMatchIndex >= 0) {
@@ -2280,7 +2286,7 @@ async function expandFileCard(path, sourceFileResult = null) {
       lineEl.dataset.lineNum = String(lineNum);
       lineEl.appendChild(el('span', { text: String(lineNum).padStart(4, ' '), class: 'rs-fs-linenum' }));
       const textEl = el('span', { class: 'rs-fs-code-text' });
-      appendSearchHighlightedText(textEl, line, query);
+      renderHighlightedLine(textEl, line, lang, query);
       lineEl.appendChild(textEl);
       fileLines.appendChild(lineEl);
     });
@@ -2294,7 +2300,9 @@ async function expandFileCard(path, sourceFileResult = null) {
 
   prevBtn.addEventListener('click', () => setActiveMatch(currentMatchIndex - 1));
   nextBtn.addEventListener('click', () => setActiveMatch(currentMatchIndex + 1));
-  findInput.addEventListener('input', () => renderExpandedLines({ keepCurrentLine: true, scroll: false }));
+  findInput.addEventListener('input', () => {
+    if (currentMode === 'file') renderExpandedLines({ keepCurrentLine: true, scroll: false });
+  });
   findInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -2305,8 +2313,179 @@ async function expandFileCard(path, sourceFileResult = null) {
     }
   });
 
+  async function showHistoryMode() {
+    currentMode = 'history';
+    findBar.style.display = 'none';
+    historyBtn.textContent = 'Back to file';
+    historyBtn.title = 'Return to file content';
+    historyBtn.classList.add('active');
+    codeWrap.innerHTML = '<p class="rs-placeholder">Loading file history...</p>';
+    const repoPath = resolveRepoPathForExpandedFile(fileResult, path);
+    if (!repoPath) {
+      codeWrap.innerHTML = '<p class="rs-placeholder" style="color:var(--danger)">Repository path not found for this file.</p>';
+      return;
+    }
+    try {
+      const commits = await call('repo_search_file_history', { repoPath, filePath: path, limit: 30 });
+      renderFileHistoryView(codeWrap, { repoPath, filePath: path, commits });
+    } catch (err) {
+      codeWrap.innerHTML = '';
+      codeWrap.appendChild(el('p', {
+        text: `History error: ${err}`,
+        class: 'rs-placeholder',
+        style: 'color:var(--danger)',
+      }));
+    }
+  }
+
+  function showFileMode() {
+    currentMode = 'file';
+    findBar.style.display = '';
+    historyBtn.textContent = 'History';
+    historyBtn.title = 'Show file commit history';
+    historyBtn.classList.remove('active');
+    renderExpandedLines({ keepCurrentLine: true, scroll: false });
+  }
+
+  historyBtn.addEventListener('click', () => {
+    if (currentMode === 'history') showFileMode();
+    else showHistoryMode();
+  });
+
   renderExpandedLines();
   setTimeout(() => findInput.select(), 0);
+}
+
+function resolveRepoPathForExpandedFile(fileResult, path) {
+  if (fileResult?.repo_name) {
+    const repo = allRepos.find(r => r.name === fileResult.repo_name);
+    if (repo?.path) return repo.path;
+  }
+  const normalizedPath = normalizePath(path);
+  const candidates = allRepos
+    .filter(r => r.path && normalizedPath.startsWith(normalizePath(r.path).replace(/\/+$/, '') + '/'))
+    .sort((a, b) => normalizePath(b.path).length - normalizePath(a.path).length);
+  return candidates[0]?.path || '';
+}
+
+function renderHighlightedLine(target, line, lang, query) {
+  target.innerHTML = '';
+  const code = String(line ?? '');
+  if (!code) {
+    markSearchHitsInElement(target, query);
+    return;
+  }
+  try {
+    if (lang && window.hljs?.getLanguage(lang)) {
+      target.innerHTML = window.hljs.highlight(code, { language: lang, ignoreIllegals: true }).value;
+    } else if (window.hljs) {
+      target.innerHTML = window.hljs.highlightAuto(code).value;
+    } else {
+      target.textContent = code;
+    }
+  } catch {
+    target.textContent = code;
+  }
+  markSearchHitsInElement(target, query);
+}
+
+function markSearchHitsInElement(rootEl, query) {
+  const q = String(query || '').trim();
+  if (!q) return;
+  const needle = q.toLowerCase();
+  const walker = document.createTreeWalker(rootEl, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      if (!node.nodeValue || !node.nodeValue.toLowerCase().includes(needle)) {
+        return NodeFilter.FILTER_REJECT;
+      }
+      if (node.parentElement?.closest('mark')) {
+        return NodeFilter.FILTER_REJECT;
+      }
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  for (const node of nodes) {
+    const text = node.nodeValue || '';
+    const frag = document.createDocumentFragment();
+    let pos = 0;
+    const lower = text.toLowerCase();
+    while (pos < text.length) {
+      const hit = lower.indexOf(needle, pos);
+      if (hit < 0) break;
+      if (hit > pos) frag.appendChild(document.createTextNode(text.slice(pos, hit)));
+      const mark = el('mark', { text: text.slice(hit, hit + q.length), class: 'rs-inline-hit' });
+      frag.appendChild(mark);
+      pos = hit + q.length;
+    }
+    if (pos < text.length) frag.appendChild(document.createTextNode(text.slice(pos)));
+    node.parentNode?.replaceChild(frag, node);
+  }
+}
+
+function renderFileHistoryView(container, { repoPath, filePath, commits }) {
+  container.innerHTML = '';
+  const wrap = el('div', { class: 'rs-fs-history-view' });
+  const sidebar = el('div', { class: 'rs-fs-history-list' });
+  const diffPane = el('div', { class: 'rs-fs-history-diff' });
+  wrap.appendChild(sidebar);
+  wrap.appendChild(diffPane);
+  container.appendChild(wrap);
+
+  if (!commits?.length) {
+    sidebar.appendChild(el('p', { text: 'No commits found for this file.', class: 'rs-fs-history-empty' }));
+    diffPane.appendChild(el('p', { text: 'No diff to show.', class: 'rs-placeholder' }));
+    return;
+  }
+
+  async function selectCommit(commit, row) {
+    sidebar.querySelector('.rs-fs-history-row.active')?.classList.remove('active');
+    row?.classList.add('active');
+    diffPane.innerHTML = '<p class="rs-placeholder">Loading diff...</p>';
+    try {
+      const diff = await call('repo_search_file_diff', {
+        repoPath,
+        filePath: commit.relative_path || filePath,
+        hash: commit.commit_hash,
+      });
+      diffPane.innerHTML = '';
+      const meta = el('div', { class: 'rs-fs-history-diff-head' });
+      meta.appendChild(el('span', { text: commit.commit_hash.slice(0, 10), class: 'rs-commit-hash' }));
+      meta.appendChild(el('span', { text: commit.message || '(no message)' }));
+      diffPane.appendChild(meta);
+      const pre = el('pre', { class: 'rs-fs-pre rs-fs-diff-pre' });
+      const code = document.createElement('code');
+      code.className = 'hljs language-diff';
+      try {
+        code.innerHTML = window.hljs.highlight(diff || '(empty diff)', { language: 'diff', ignoreIllegals: true }).value;
+      } catch {
+        code.textContent = diff || '(empty diff)';
+      }
+      pre.appendChild(code);
+      diffPane.appendChild(pre);
+    } catch (err) {
+      diffPane.innerHTML = '';
+      diffPane.appendChild(el('p', {
+        text: `Diff error: ${err}`,
+        class: 'rs-placeholder',
+        style: 'color:var(--danger)',
+      }));
+    }
+  }
+
+  for (const commit of commits) {
+    const row = el('button', { class: 'rs-fs-history-row' });
+    row.type = 'button';
+    row.innerHTML = `
+      <span class="rs-fs-history-hash">${escapeHtmlForTemplate(commit.commit_hash.slice(0, 8))}</span>
+      <span class="rs-fs-history-message">${escapeHtmlForTemplate(commit.message || '(no message)')}</span>
+      <span class="rs-fs-history-meta">${escapeHtmlForTemplate(formatDate(commit.commit_date))} · ${escapeHtmlForTemplate(commit.author || '')}</span>
+    `;
+    row.addEventListener('click', () => selectCommit(commit, row));
+    sidebar.appendChild(row);
+  }
+  selectCommit(commits[0], sidebar.querySelector('.rs-fs-history-row'));
 }
 
 function getExpandedInitialQuery(preferLastContentQuery = false) {
@@ -2474,6 +2653,15 @@ function formatSize(bytes) {
   if (bytes < 1024) return bytes + ' B';
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function escapeHtmlForTemplate(s) {
+  return String(s ?? '').replace(/[&<>"]/g, c => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+  })[c]);
 }
 
 // ── CSS ────────────────────────────────────────────────────
@@ -3383,6 +3571,85 @@ function css() {
 .rs-fs-pre code {
   font-family: 'SF Mono','Consolas','Menlo',monospace;
   white-space: pre;
+}
+.rs-fs-history-view {
+  display: flex;
+  min-height: 100%;
+}
+.rs-fs-history-list {
+  width: 320px;
+  min-width: 260px;
+  border-right: 1px solid var(--border);
+  background: var(--bg, #0d1117);
+  overflow-y: auto;
+  padding: 6px;
+}
+.rs-fs-history-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-areas:
+    "hash message"
+    "meta meta";
+  gap: 2px 8px;
+  padding: 7px 8px;
+  margin-bottom: 3px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.rs-fs-history-row:hover {
+  background: rgba(255,255,255,0.04);
+}
+.rs-fs-history-row.active {
+  background: rgba(59,130,246,0.10);
+  border-color: rgba(59,130,246,0.35);
+}
+.rs-fs-history-hash {
+  grid-area: hash;
+  font-family: 'SF Mono','Consolas','Menlo',monospace;
+  font-size: 10px;
+  color: #f0883e;
+}
+.rs-fs-history-message {
+  grid-area: message;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rs-fs-history-meta {
+  grid-area: meta;
+  color: var(--text-muted);
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rs-fs-history-empty {
+  color: var(--text-muted);
+  padding: 16px 10px;
+  font-size: 12px;
+}
+.rs-fs-history-diff {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+}
+.rs-fs-history-diff-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.rs-fs-diff-pre {
+  padding: 12px 14px;
 }
 
 /* Multi-commit expand overlay */

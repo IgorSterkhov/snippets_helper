@@ -258,6 +258,25 @@ For `f-*` releases: 3 assets expected (frontend zip, `frontend-version.json`, `l
 
 **Used in:** Snippets tab rendered Code, Description, and Obsidian Note views.
 
+### Line-Based Code View With Search Marks
+
+**Used in:** Repo Search expanded file view
+
+When a code viewer needs line-level UI state such as matched-line markers,
+active search result, or line numbers, keep one DOM row per source line.
+
+- Do not highlight the whole file and split highlighted HTML by newline:
+  highlight.js spans can cross line boundaries in some languages.
+- Highlight each line independently, then overlay search marks by walking text
+  nodes inside the highlighted line DOM.
+- Keep search marks as `<mark>` elements inside existing syntax spans where
+  possible, so syntax coloring and search highlighting remain visible together.
+- Keep line state on the row (`.is-match`, `.is-current`) and inline match
+  state inside the code text. This lets scrolling/navigation use line rows
+  without destroying syntax markup.
+
+### Markdown Code Block Pattern
+
 **Pattern:**
 1. Before passing user Markdown to `marked(...)`, normalize only fence-marker
    lines so pasted indented fences still render as code blocks:

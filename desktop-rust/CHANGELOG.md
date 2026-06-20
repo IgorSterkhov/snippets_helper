@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v1.14.0 (2026-06-20)
+
+- **Repo Search expanded history:** expanded content results now keep syntax
+  highlighting and search-line markers together, and the expanded file header
+  has a History mode that lists commits for the current file and previews
+  highlighted per-file diffs.
+
 ## f-20260620-1 (2026-06-20)
 
 - **Repo Search expanded file find:** expanded content results now preserve

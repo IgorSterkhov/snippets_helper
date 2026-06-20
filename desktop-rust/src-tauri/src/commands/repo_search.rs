@@ -20,14 +20,19 @@ const SKIP_DIRS: &[&str] = &[
 
 /// Build a `Command` that won't flash a console window on Windows.
 /// Every git/rg/grep spawn must go through this to keep the UI clean.
+#[cfg(not(windows))]
+fn spawn(program: &str) -> std::process::Command {
+    std::process::Command::new(program)
+}
+
+/// Build a `Command` that won't flash a console window on Windows.
+/// Every git/rg/grep spawn must go through this to keep the UI clean.
+#[cfg(windows)]
 fn spawn(program: &str) -> std::process::Command {
     let mut c = std::process::Command::new(program);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        c.creation_flags(CREATE_NO_WINDOW);
-    }
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    c.creation_flags(CREATE_NO_WINDOW);
     c
 }
 
@@ -93,6 +98,15 @@ pub struct GitSearchResult {
     pub author: String,
     pub message: String,
     pub files_changed: Vec<String>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct FileHistoryCommit {
+    pub commit_hash: String,
+    pub commit_date: String,
+    pub author: String,
+    pub message: String,
+    pub relative_path: String,
 }
 
 // ── Repo management ──────────────────────────────────────
@@ -1025,6 +1039,64 @@ fn git_run(repo: &str, args: &[&str]) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stderr).trim().to_string())
 }
 
+fn git_run_strings(repo: &str, args: &[String]) -> Result<String, String> {
+    let mut cmd = spawn("git");
+    cmd.arg("-C").arg(repo);
+    for arg in args {
+        cmd.arg(arg);
+    }
+    let out = cmd.output().map_err(|e| format!("git: {e}"))?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if !stdout.is_empty() {
+        return Ok(stdout);
+    }
+    Ok(String::from_utf8_lossy(&out.stderr).trim().to_string())
+}
+
+fn resolve_repo_relative_path(repo_path: &str, file_path: &str) -> Result<String, String> {
+    let repo_abs = std::fs::canonicalize(repo_path)
+        .map_err(|e| format!("repo path: {e}"))?;
+    let raw_file = Path::new(file_path);
+    if raw_file.is_absolute() {
+        let file_abs = std::fs::canonicalize(raw_file)
+            .map_err(|e| format!("file path: {e}"))?;
+        let rel = file_abs
+            .strip_prefix(&repo_abs)
+            .map_err(|_| "file is outside repository".to_string())?;
+        return validate_repo_relative_path(rel);
+    }
+    validate_repo_relative_path(raw_file)
+}
+
+fn validate_repo_relative_path(path: &Path) -> Result<String, String> {
+    let mut parts = Vec::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::Normal(part) => {
+                let s = part.to_string_lossy();
+                if s.is_empty() {
+                    return Err("invalid file path".to_string());
+                }
+                parts.push(s.to_string());
+            }
+            std::path::Component::CurDir => {}
+            _ => return Err("invalid file path".to_string()),
+        }
+    }
+    let rel = parts.join("/");
+    if rel.is_empty() || rel.starts_with("../") || rel.contains("/../") {
+        return Err("invalid file path".to_string());
+    }
+    Ok(rel)
+}
+
+fn is_valid_git_hash(hash: &str) -> bool {
+    !hash.is_empty() && hash.len() <= 64 && hash.chars().all(|c| c.is_ascii_hexdigit())
+}
+
 fn default_branch(repo: &str) -> Option<String> {
     for b in ["main", "master"] {
         if git_run(
@@ -1243,7 +1315,7 @@ pub async fn repo_search_commit_diff(
     hash: String,
     full_context: Option<bool>,
 ) -> Result<String, String> {
-    if hash.is_empty() || hash.len() > 64 || !hash.chars().all(|c| c.is_ascii_hexdigit()) {
+    if !is_valid_git_hash(&hash) {
         return Err("invalid hash".to_string());
     }
     let full = full_context.unwrap_or(false);
@@ -1254,6 +1326,110 @@ pub async fn repo_search_commit_diff(
         }
         args.push(&hash);
         git_run(&repo_path, &args)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn parse_name_status_path(line: &str) -> Option<String> {
+    let mut cols = line.split('\t');
+    let status = cols.next()?.trim();
+    if status.is_empty() {
+        return None;
+    }
+    if status.starts_with('R') || status.starts_with('C') {
+        let _old = cols.next()?;
+        return cols.next().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    }
+    cols.next().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+}
+
+fn parse_file_history_log(stdout: &str, fallback_path: &str) -> Vec<FileHistoryCommit> {
+    stdout
+        .split('\x1e')
+        .filter_map(|record| {
+            let record = record.trim_matches(|c| c == '\n' || c == '\r');
+            if record.trim().is_empty() {
+                return None;
+            }
+            let mut lines = record.lines();
+            let header = lines.next()?.trim();
+            let mut parts = header.splitn(4, '\x1f');
+            let commit_hash = parts.next()?.trim().to_string();
+            let commit_date = parts.next()?.trim().to_string();
+            let author = parts.next()?.trim().to_string();
+            let message = parts.next().unwrap_or("").trim().to_string();
+            if commit_hash.is_empty() {
+                return None;
+            }
+            let relative_path = lines
+                .filter_map(parse_name_status_path)
+                .next()
+                .unwrap_or_else(|| fallback_path.to_string());
+            Some(FileHistoryCommit {
+                commit_hash,
+                commit_date,
+                author,
+                message,
+                relative_path,
+            })
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub async fn repo_search_file_history(
+    repo_path: String,
+    file_path: String,
+    limit: Option<u32>,
+) -> Result<Vec<FileHistoryCommit>, String> {
+    let capped = limit.unwrap_or(30).clamp(1, 100);
+    tokio::task::spawn_blocking(move || {
+        if git_run(&repo_path, &["rev-parse", "--is-inside-work-tree"]).is_err() {
+            return Err(format!("not a git repository: {repo_path}"));
+        }
+        let rel = resolve_repo_relative_path(&repo_path, &file_path)?;
+        let args = vec![
+            "log".to_string(),
+            "--follow".to_string(),
+            "--name-status".to_string(),
+            "--date=iso-strict".to_string(),
+            "--format=%x1e%H%x1f%aI%x1f%an%x1f%s".to_string(),
+            format!("-{}", capped),
+            "--".to_string(),
+            rel.clone(),
+        ];
+        let stdout = git_run_strings(&repo_path, &args)?;
+        Ok(parse_file_history_log(&stdout, &rel))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn repo_search_file_diff(
+    repo_path: String,
+    file_path: String,
+    hash: String,
+) -> Result<String, String> {
+    if !is_valid_git_hash(&hash) {
+        return Err("invalid hash".to_string());
+    }
+    tokio::task::spawn_blocking(move || {
+        if git_run(&repo_path, &["rev-parse", "--is-inside-work-tree"]).is_err() {
+            return Err(format!("not a git repository: {repo_path}"));
+        }
+        let rel = resolve_repo_relative_path(&repo_path, &file_path)?;
+        let args = vec![
+            "show".to_string(),
+            "--no-color".to_string(),
+            "--format=".to_string(),
+            "--find-renames".to_string(),
+            hash,
+            "--".to_string(),
+            rel,
+        ];
+        git_run_strings(&repo_path, &args)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1536,6 +1712,41 @@ mod tests {
             .find(|commit| commit.message == "adjust value")
             .expect("changed line commit should be found");
         assert_eq!(adjusted.files_changed, vec!["sample.rs"]);
+    }
+
+    #[test]
+    fn repo_relative_path_rejects_outside_repo() {
+        let repo_dir = tempfile::tempdir().unwrap();
+        let outside_dir = tempfile::tempdir().unwrap();
+        std::fs::write(repo_dir.path().join("inside.py"), "print('ok')\n").unwrap();
+        std::fs::write(outside_dir.path().join("outside.py"), "print('no')\n").unwrap();
+
+        let rel = resolve_repo_relative_path(
+            repo_dir.path().to_str().unwrap(),
+            repo_dir.path().join("inside.py").to_str().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(rel, "inside.py");
+
+        let err = resolve_repo_relative_path(
+            repo_dir.path().to_str().unwrap(),
+            outside_dir.path().join("outside.py").to_str().unwrap(),
+        )
+        .unwrap_err();
+        assert!(err.contains("outside repository"), "{err}");
+    }
+
+    #[test]
+    fn parse_file_history_log_uses_control_separators() {
+        let raw = "\x1eabc123\x1f2026-06-20T10:00:00+00:00\x1fAlice\x1fadd file\nM\tsrc/app.py\n\
+                   \x1edef456\x1f2026-06-19T09:00:00+00:00\x1fBob\x1ffix: keep | pipes\nR100\told.py\tnew.py";
+        let commits = parse_file_history_log(raw, "fallback.py");
+        assert_eq!(commits.len(), 2);
+        assert_eq!(commits[0].commit_hash, "abc123");
+        assert_eq!(commits[0].author, "Alice");
+        assert_eq!(commits[0].relative_path, "src/app.py");
+        assert_eq!(commits[1].message, "fix: keep | pipes");
+        assert_eq!(commits[1].relative_path, "new.py");
     }
 
     #[test]

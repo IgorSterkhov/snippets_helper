@@ -259,6 +259,8 @@ pub fn run() {
             commands::repo_search::get_file_context,
             commands::repo_search::open_in_editor,
             commands::repo_search::read_full_file,
+            commands::repo_search::repo_search_file_history,
+            commands::repo_search::repo_search_file_diff,
             commands::repo_search::repo_search_status,
             commands::repo_search::repo_search_pull_main,
             commands::repo_search::repo_search_reset_hard,

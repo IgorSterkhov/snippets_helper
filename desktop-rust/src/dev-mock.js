@@ -1712,10 +1712,33 @@
         md: '# Sample markdown\n\nA mock file — in prod this reads the real disk.',
         txt: 'plain text sample\nline two\nline three',
         js: 'function hello(name) {\n  return `Hello, ${name}!`;\n}',
-        py: 'def hello(name):\n    return f"Hello, {name}!"',
+        py: 'import os\nimport sys\n\n\ndef hello(name):\n    return f"Hello, {name}!"',
       };
       const content = samples[lang] || `# ${path}\n(mock content for dev)`;
       return { content, truncated: false, size: content.length };
+    },
+    async repo_search_file_history({ repoPath, filePath, limit }) {
+      console.log('[mock] repo_search_file_history', { repoPath, filePath, limit });
+      return [
+        {
+          commit_hash: 'abc123def4567890',
+          commit_date: '2026-06-20T10:00:00+00:00',
+          author: 'Mock User',
+          message: 'update file history sample',
+          relative_path: 'sample.py',
+        },
+        {
+          commit_hash: 'def456abc1237890',
+          commit_date: '2026-06-19T09:00:00+00:00',
+          author: 'Mock User',
+          message: 'add python sample',
+          relative_path: 'sample.py',
+        },
+      ];
+    },
+    async repo_search_file_diff({ repoPath, filePath, hash }) {
+      console.log('[mock] repo_search_file_diff', { repoPath, filePath, hash });
+      return `diff --git a/sample.py b/sample.py\nindex 1111111..2222222 100644\n--- a/sample.py\n+++ b/sample.py\n@@ -1,4 +1,5 @@\n import os\n+import sys\n \n def hello(name):\n-    return name\n+    return f\"Hello, {name}!\"\n`;
     },
     async repo_search_status() {
       return storeGet('repo_statuses', [

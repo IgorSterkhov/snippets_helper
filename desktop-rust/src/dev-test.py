@@ -1270,12 +1270,12 @@ async def run_tests():
         )
         await cdp.eval("""(() => {
           const input = document.getElementById('rs-search-input');
-          input.value = 'line';
+          input.value = 'import';
           input.dispatchEvent(new Event('input', { bubbles: true }));
           const area = document.getElementById('rs-results');
           if (!area) return;
           area.innerHTML = `<div class="rs-file-card">
-            <button data-role="rs-expand" data-path="/tmp/sample.txt">Expand ▸</button>
+            <button data-role="rs-expand" data-path="/home/dev/repo-00/sample.py">Expand ▸</button>
           </div>`;
         })()""")
         # Click expand
@@ -1289,12 +1289,15 @@ async def run_tests():
           counter: document.querySelector('#rs-fullscreen-overlay .rs-fs-match-count')?.textContent || '',
           hasOpen: !!document.querySelector('#rs-fullscreen-overlay [data-role="rs-open"]'),
           hasCopy: !!document.querySelector('#rs-fullscreen-overlay [data-role="rs-copy-path"]'),
+          hasHistory: !!document.querySelector('#rs-fullscreen-overlay [data-role="rs-file-history"]'),
+          syntax: document.querySelectorAll('#rs-fullscreen-overlay .rs-fs-code-text .hljs-keyword').length,
         }))()""")
-        assert initial['query'] == 'line', initial
+        assert initial['query'] == 'import', initial
         assert initial['matches'] == 2, initial
-        assert initial['current'] == '2', initial
+        assert initial['current'] == '1', initial
         assert initial['counter'] == '1 / 2', initial
-        assert initial['hasOpen'] and initial['hasCopy'], initial
+        assert initial['hasOpen'] and initial['hasCopy'] and initial['hasHistory'], initial
+        assert initial['syntax'] >= 2, initial
 
         await cdp.eval("document.querySelector('#rs-fullscreen-overlay .rs-fs-nav-btn[title=\"Next match\"]').click()")
         after_next = await cdp.eval("""(() => ({
@@ -1302,12 +1305,12 @@ async def run_tests():
           counter: document.querySelector('#rs-fullscreen-overlay .rs-fs-match-count')?.textContent || '',
           editorLine: document.querySelector('#rs-fullscreen-overlay [data-role="rs-open"]')?.dataset.line || '',
         }))()""")
-        assert after_next['current'] == '3' and after_next['counter'] == '2 / 2', after_next
-        assert after_next['editorLine'] == '3', after_next
+        assert after_next['current'] == '2' and after_next['counter'] == '2 / 2', after_next
+        assert after_next['editorLine'] == '2', after_next
 
         await cdp.eval("""(() => {
           const input = document.querySelector('#rs-fullscreen-overlay .rs-fs-find-input');
-          input.value = 'plain';
+          input.value = 'return';
           input.dispatchEvent(new Event('input', { bubbles: true }));
         })()""")
         await wait_until(cdp, "document.querySelectorAll('#rs-fullscreen-overlay .rs-fs-line.is-match').length === 1", timeout=3)
@@ -1315,16 +1318,40 @@ async def run_tests():
           current: document.querySelector('#rs-fullscreen-overlay .rs-fs-line.is-current')?.dataset.lineNum || '',
           counter: document.querySelector('#rs-fullscreen-overlay .rs-fs-match-count')?.textContent || '',
           inlineHits: document.querySelectorAll('#rs-fullscreen-overlay .rs-inline-hit').length,
+          syntaxAndSearch: !!document.querySelector('#rs-fullscreen-overlay .rs-fs-line.is-match .hljs-keyword .rs-inline-hit'),
         }))()""")
-        assert updated['current'] == '1' and updated['counter'] == '1 / 1', updated
+        assert updated['current'] == '6' and updated['counter'] == '1 / 1', updated
         assert updated['inlineHits'] >= 1, updated
+        assert updated['syntaxAndSearch'], updated
         await cdp.eval("""(() => {
           localStorage.removeItem('mock.repo_search_last_open_editor');
           document.querySelector('#rs-fullscreen-overlay [data-role="rs-open"]').click();
         })()""")
         await wait_until(cdp, "!!localStorage.getItem('mock.repo_search_last_open_editor')", timeout=2)
         opened = await cdp.eval("JSON.parse(localStorage.getItem('mock.repo_search_last_open_editor'))")
-        assert opened['path'] == '/tmp/sample.txt' and opened['line'] == 1, opened
+        assert opened['path'] == '/home/dev/repo-00/sample.py' and opened['line'] == 6, opened
+
+        await cdp.eval("document.querySelector('#rs-fullscreen-overlay [data-role=\"rs-file-history\"]').click()")
+        await wait_until(cdp, "document.querySelectorAll('#rs-fullscreen-overlay .rs-fs-history-row').length === 2", timeout=3)
+        history = await cdp.eval("""(() => ({
+          rows: document.querySelectorAll('#rs-fullscreen-overlay .rs-fs-history-row').length,
+          active: document.querySelector('#rs-fullscreen-overlay .rs-fs-history-row.active .rs-fs-history-message')?.textContent || '',
+          diff: document.querySelector('#rs-fullscreen-overlay .rs-fs-history-diff')?.textContent || '',
+          highlighted: document.querySelectorAll('#rs-fullscreen-overlay .rs-fs-history-diff .hljs-addition').length,
+          backLabel: document.querySelector('#rs-fullscreen-overlay [data-role="rs-file-history"]')?.textContent || '',
+        }))()""")
+        assert history['rows'] == 2, history
+        assert 'update file history sample' in history['active'], history
+        assert '+import sys' in history['diff'] and history['highlighted'] >= 1, history
+        assert history['backLabel'] == 'Back to file', history
+
+        await cdp.eval("document.querySelector('#rs-fullscreen-overlay [data-role=\"rs-file-history\"]').click()")
+        await wait_until(cdp, "!!document.querySelector('#rs-fullscreen-overlay .rs-fs-findbar') && getComputedStyle(document.querySelector('#rs-fullscreen-overlay .rs-fs-findbar')).display !== 'none'", timeout=3)
+        back = await cdp.eval("""(() => ({
+          label: document.querySelector('#rs-fullscreen-overlay [data-role="rs-file-history"]')?.textContent || '',
+          syntax: document.querySelectorAll('#rs-fullscreen-overlay .rs-fs-code-text .hljs-keyword').length,
+        }))()""")
+        assert back['label'] == 'History' and back['syntax'] >= 2, back
 
         await cdp.eval("""(() => {
           const input = document.querySelector('#rs-fullscreen-overlay .rs-fs-find-input');
