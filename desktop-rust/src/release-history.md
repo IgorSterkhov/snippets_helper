@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## f-20260620-1 (2026-06-20)
+
+- **Repo Search expanded file find:** expanded content results now preserve
+  matched-line highlighting, include local in-file search with next/previous
+  navigation, and expose Open in editor plus Copy path directly in the expanded
+  header.
+
 ## f-20260619-2 (2026-06-19)
 
 - **Repo Search header settings/help:** Repo Search now has standard module

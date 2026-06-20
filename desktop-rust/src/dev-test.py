@@ -1268,30 +1268,77 @@ async def run_tests():
         await cdp.eval(
           "[...document.querySelectorAll('.rs-inner-tab')].find(b => b.textContent.includes('Search')).click()"
         )
-        # The search results area is empty by default — we exercise the overlay directly
-        # via the rs-fullscreen toggle elements: the test validates the DOM wiring,
-        # since the actual expand button is only visible after a search.
-        # Simulate a minimal expand/collapse by clicking any button with text 'Expand' if present;
-        # otherwise skip gracefully by running a content search first.
-        has_expand = await cdp.eval(
-          "!!document.querySelector('[data-role=\"rs-expand\"]')"
-        )
-        if not has_expand:
-          # Run a fake search so a result-card with Expand button appears.
-          # Content search returns empty from mock; instead push a fake result via the UI shim:
-          await cdp.eval("""(() => {
-            // Render a fake file card manually in the results area
-            const area = document.getElementById('rs-results');
-            if (!area) return;
-            area.innerHTML = `<div class="rs-file-card">
-              <button data-role="rs-open" data-path="/tmp/sample.md" data-line="1">Open in editor</button>
-              <button>Copy path</button>
-              <button data-role="rs-expand" data-path="/tmp/sample.md">Expand ▸</button>
-            </div>`;
-          })()""")
+        await cdp.eval("""(() => {
+          const input = document.getElementById('rs-search-input');
+          input.value = 'line';
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          const area = document.getElementById('rs-results');
+          if (!area) return;
+          area.innerHTML = `<div class="rs-file-card">
+            <button data-role="rs-expand" data-path="/tmp/sample.txt">Expand ▸</button>
+          </div>`;
+        })()""")
         # Click expand
         await cdp.eval("document.querySelector('[data-role=\"rs-expand\"]').click()")
         await wait_until(cdp, "!!document.getElementById('rs-fullscreen-overlay')", timeout=3)
+        await wait_until(cdp, "document.querySelectorAll('#rs-fullscreen-overlay .rs-fs-line.is-match').length === 2", timeout=3)
+        initial = await cdp.eval("""(() => ({
+          query: document.querySelector('#rs-fullscreen-overlay .rs-fs-find-input')?.value || '',
+          matches: document.querySelectorAll('#rs-fullscreen-overlay .rs-fs-line.is-match').length,
+          current: document.querySelector('#rs-fullscreen-overlay .rs-fs-line.is-current')?.dataset.lineNum || '',
+          counter: document.querySelector('#rs-fullscreen-overlay .rs-fs-match-count')?.textContent || '',
+          hasOpen: !!document.querySelector('#rs-fullscreen-overlay [data-role="rs-open"]'),
+          hasCopy: !!document.querySelector('#rs-fullscreen-overlay [data-role="rs-copy-path"]'),
+        }))()""")
+        assert initial['query'] == 'line', initial
+        assert initial['matches'] == 2, initial
+        assert initial['current'] == '2', initial
+        assert initial['counter'] == '1 / 2', initial
+        assert initial['hasOpen'] and initial['hasCopy'], initial
+
+        await cdp.eval("document.querySelector('#rs-fullscreen-overlay .rs-fs-nav-btn[title=\"Next match\"]').click()")
+        after_next = await cdp.eval("""(() => ({
+          current: document.querySelector('#rs-fullscreen-overlay .rs-fs-line.is-current')?.dataset.lineNum || '',
+          counter: document.querySelector('#rs-fullscreen-overlay .rs-fs-match-count')?.textContent || '',
+          editorLine: document.querySelector('#rs-fullscreen-overlay [data-role="rs-open"]')?.dataset.line || '',
+        }))()""")
+        assert after_next['current'] == '3' and after_next['counter'] == '2 / 2', after_next
+        assert after_next['editorLine'] == '3', after_next
+
+        await cdp.eval("""(() => {
+          const input = document.querySelector('#rs-fullscreen-overlay .rs-fs-find-input');
+          input.value = 'plain';
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        })()""")
+        await wait_until(cdp, "document.querySelectorAll('#rs-fullscreen-overlay .rs-fs-line.is-match').length === 1", timeout=3)
+        updated = await cdp.eval("""(() => ({
+          current: document.querySelector('#rs-fullscreen-overlay .rs-fs-line.is-current')?.dataset.lineNum || '',
+          counter: document.querySelector('#rs-fullscreen-overlay .rs-fs-match-count')?.textContent || '',
+          inlineHits: document.querySelectorAll('#rs-fullscreen-overlay .rs-inline-hit').length,
+        }))()""")
+        assert updated['current'] == '1' and updated['counter'] == '1 / 1', updated
+        assert updated['inlineHits'] >= 1, updated
+        await cdp.eval("""(() => {
+          localStorage.removeItem('mock.repo_search_last_open_editor');
+          document.querySelector('#rs-fullscreen-overlay [data-role="rs-open"]').click();
+        })()""")
+        await wait_until(cdp, "!!localStorage.getItem('mock.repo_search_last_open_editor')", timeout=2)
+        opened = await cdp.eval("JSON.parse(localStorage.getItem('mock.repo_search_last_open_editor'))")
+        assert opened['path'] == '/tmp/sample.txt' and opened['line'] == 1, opened
+
+        await cdp.eval("""(() => {
+          const input = document.querySelector('#rs-fullscreen-overlay .rs-fs-find-input');
+          input.value = 'no-such-pattern';
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        })()""")
+        no_match = await cdp.eval("""(() => ({
+          matches: document.querySelectorAll('#rs-fullscreen-overlay .rs-fs-line.is-match').length,
+          counter: document.querySelector('#rs-fullscreen-overlay .rs-fs-match-count')?.textContent || '',
+          editorLine: document.querySelector('#rs-fullscreen-overlay [data-role="rs-open"]')?.dataset.line || '',
+          disabled: document.querySelector('#rs-fullscreen-overlay .rs-fs-nav-btn[title="Next match"]')?.disabled || false,
+        }))()""")
+        assert no_match['matches'] == 0 and no_match['counter'] == '0 / 0', no_match
+        assert no_match['editorLine'] == '1' and no_match['disabled'], no_match
         # Click collapse
         await cdp.eval(
           "document.getElementById('rs-fullscreen-overlay').querySelector('[data-role=\"rs-collapse\"]').click()"

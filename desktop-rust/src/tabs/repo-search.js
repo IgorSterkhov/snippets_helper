@@ -13,6 +13,7 @@ let sortMode = 'name';      // name | date
 let results = [];
 let contentResults = [];
 let gitResults = [];
+let lastContentQuery = '';
 let settingsModalBody = null;
 let settingsModalOverlay = null;
 let activeRepos = new Set();  // names of selected repos
@@ -1522,6 +1523,7 @@ async function doSearch() {
       renderResults();
     } else if (searchType === 'content') {
       contentResults = await call('search_content', { query, repos });
+      lastContentQuery = query;
       results = []; gitResults = [];
       renderContentResults(contentResults);
     } else if (searchType === 'git') {
@@ -1698,6 +1700,7 @@ async function showDetailModal(fileResult) {
   headerActions.appendChild(openBtn);
 
   const copyBtn = el('button', { text: 'Copy path', class: 'rs-card-btn' });
+  copyBtn.dataset.role = 'rs-copy-path';
   copyBtn.addEventListener('click', () => {
     navigator.clipboard.writeText(fileResult.file_path)
       .then(() => showToast('Path copied', 'success'))
@@ -1708,7 +1711,7 @@ async function showDetailModal(fileResult) {
   const expandBtn = el('button', { text: 'Expand ▸', class: 'rs-card-btn' });
   expandBtn.dataset.role = 'rs-expand';
   expandBtn.dataset.path = fileResult.file_path;
-  expandBtn.addEventListener('click', () => expandFileCard(fileResult.file_path));
+  expandBtn.addEventListener('click', () => expandFileCard(fileResult.file_path, fileResult));
   headerActions.appendChild(expandBtn);
 
   const closeBtn = el('button', { text: '✕', class: 'btn-secondary rs-modal-close' });
@@ -1976,7 +1979,7 @@ async function expandGitResults(allCommits, startHash) {
   const titleEl = el('div', { text: `${allCommits.length} commits`, class: 'rs-fs-path' });
   header.appendChild(titleEl);
 
-  const headerRight = el('div', { style: 'display:flex;align-items:center;gap:10px' });
+  const headerRight = el('div', { style: 'display:flex;align-items:center;gap:10px;margin-left:auto;flex-shrink:0' });
   const fullCtxLabel = document.createElement('label');
   fullCtxLabel.className = 'rs-fs-toggle';
   fullCtxLabel.innerHTML = '<input type="checkbox" id="rs-fs-fullctx"/> Full file context';
@@ -2128,10 +2131,18 @@ async function expandGitResults(allCommits, startHash) {
 
 // ── Expand / fullscreen view ───────────────────────────────
 
-async function expandFileCard(path) {
+async function expandFileCard(path, sourceFileResult = null) {
   if (document.getElementById('rs-fullscreen-overlay')) return;
   if (!root) return;
   await ensureHighlight();
+
+  const contentFileResult = findContentResultForPath(path);
+  const fileResult = sourceFileResult || contentFileResult;
+  const initialQuery = getExpandedInitialQuery(!!contentFileResult);
+  const originalMatchLines = new Set((fileResult?.matches || [])
+    .map(m => Number(m.line_num))
+    .filter(n => Number.isFinite(n) && n > 0));
+  const preferredInitialLine = fileResult?.matches?.[0]?.line_num || 1;
 
   const overlay = document.createElement('div');
   overlay.id = 'rs-fullscreen-overlay';
@@ -2142,15 +2153,56 @@ async function expandFileCard(path) {
   const fsPath = document.createElement('div');
   fsPath.className = 'rs-fs-path';
   fsPath.title = path;
-  fsPath.textContent = path.split(/[\\/]/).pop();
+  fsPath.textContent = fileResult?.relative_path || path.split(/[\\/]/).pop();
   header.appendChild(fsPath);
+
+  const findBar = document.createElement('div');
+  findBar.className = 'rs-fs-findbar';
+
+  const findInput = document.createElement('input');
+  findInput.type = 'text';
+  findInput.className = 'rs-fs-find-input';
+  findInput.placeholder = 'Search in file...';
+  findInput.value = initialQuery;
+  findInput.autocomplete = 'off';
+  findInput.spellcheck = false;
+  findBar.appendChild(findInput);
+
+  const prevBtn = el('button', { text: '↑', class: 'rs-card-btn rs-fs-nav-btn', title: 'Previous match' });
+  const nextBtn = el('button', { text: '↓', class: 'rs-card-btn rs-fs-nav-btn', title: 'Next match' });
+  const matchCounter = el('span', { text: '0 / 0', class: 'rs-fs-match-count' });
+  findBar.appendChild(prevBtn);
+  findBar.appendChild(nextBtn);
+  findBar.appendChild(matchCounter);
+  header.appendChild(findBar);
+
+  const headerActions = el('div', { class: 'rs-fs-actions' });
+
+  const openBtn = el('button', { text: 'Open in editor', class: 'rs-card-btn' });
+  openBtn.dataset.role = 'rs-open';
+  openBtn.dataset.path = path;
+  openBtn.addEventListener('click', () => {
+    call('open_in_editor', { path, line: getCurrentEditorLine() })
+      .catch(err => showToast('Editor error: ' + err, 'error'));
+  });
+  headerActions.appendChild(openBtn);
+
+  const copyBtn = el('button', { text: 'Copy path', class: 'rs-card-btn' });
+  copyBtn.dataset.role = 'rs-copy-path';
+  copyBtn.addEventListener('click', () => {
+    navigator.clipboard.writeText(path)
+      .then(() => showToast('Path copied', 'success'))
+      .catch(() => {});
+  });
+  headerActions.appendChild(copyBtn);
 
   const collapse = document.createElement('button');
   collapse.className = 'rs-card-btn';
   collapse.textContent = 'Collapse ◂';
   collapse.dataset.role = 'rs-collapse';
   collapse.addEventListener('click', closeFullscreen);
-  header.appendChild(collapse);
+  headerActions.appendChild(collapse);
+  header.appendChild(headerActions);
   overlay.appendChild(header);
 
   const codeWrap = document.createElement('div');
@@ -2173,29 +2225,152 @@ async function expandFileCard(path) {
     return;
   }
 
-  const lang = guessLang(path);
-  const pre = document.createElement('pre');
-  pre.className = 'rs-fs-pre';
-  const code = document.createElement('code');
+  const lines = splitFileLines(data.content);
+  let currentMatches = [];
+  let currentMatchIndex = -1;
 
-  if (lang && window.hljs?.getLanguage(lang)) {
-    code.className = `hljs language-${lang}`;
-    try {
-      code.innerHTML = window.hljs.highlight(data.content, { language: lang, ignoreIllegals: true }).value;
-    } catch {
-      code.textContent = data.content;
+  function getCurrentEditorLine() {
+    if (currentMatches.length && currentMatchIndex >= 0) {
+      return currentMatches[currentMatchIndex];
     }
-  } else {
-    code.className = 'hljs';
-    try {
-      code.innerHTML = window.hljs.highlightAuto(data.content).value;
-    } catch {
-      code.textContent = data.content;
-    }
+    return 1;
   }
 
-  pre.appendChild(code);
-  codeWrap.appendChild(pre);
+  function updateCounter() {
+    const total = currentMatches.length;
+    matchCounter.textContent = total ? `${currentMatchIndex + 1} / ${total}` : '0 / 0';
+    prevBtn.disabled = total === 0;
+    nextBtn.disabled = total === 0;
+    openBtn.dataset.line = String(getCurrentEditorLine());
+  }
+
+  function setActiveMatch(index, opts = {}) {
+    const total = currentMatches.length;
+    codeWrap.querySelector('.rs-fs-line.is-current')?.classList.remove('is-current');
+    if (!total) {
+      currentMatchIndex = -1;
+      updateCounter();
+      return;
+    }
+    currentMatchIndex = ((index % total) + total) % total;
+    const lineNum = currentMatches[currentMatchIndex];
+    const lineEl = codeWrap.querySelector(`.rs-fs-line[data-line-num="${lineNum}"]`);
+    lineEl?.classList.add('is-current');
+    if (opts.scroll !== false) {
+      lineEl?.scrollIntoView({ block: 'center' });
+    }
+    updateCounter();
+  }
+
+  function renderExpandedLines(opts = {}) {
+    const query = findInput.value.trim();
+    const previousLine = opts.keepCurrentLine && currentMatches.length && currentMatchIndex >= 0
+      ? currentMatches[currentMatchIndex]
+      : null;
+    currentMatches = findLineMatches(lines, query);
+    if (!currentMatches.length && query && query === initialQuery && originalMatchLines.size) {
+      currentMatches = [...originalMatchLines].filter(n => n <= lines.length).sort((a, b) => a - b);
+    }
+    const matchSet = new Set(currentMatches);
+    const fileLines = el('div', { class: 'rs-fs-lines' });
+    lines.forEach((line, idx) => {
+      const lineNum = idx + 1;
+      const isMatch = matchSet.has(lineNum);
+      const lineEl = el('div', { class: 'rs-fs-line' + (isMatch ? ' is-match' : '') });
+      lineEl.dataset.lineNum = String(lineNum);
+      lineEl.appendChild(el('span', { text: String(lineNum).padStart(4, ' '), class: 'rs-fs-linenum' }));
+      const textEl = el('span', { class: 'rs-fs-code-text' });
+      appendSearchHighlightedText(textEl, line, query);
+      lineEl.appendChild(textEl);
+      fileLines.appendChild(lineEl);
+    });
+    codeWrap.innerHTML = '';
+    codeWrap.appendChild(fileLines);
+
+    const preferred = previousLine || preferredInitialLine;
+    const nextIndex = currentMatches.indexOf(preferred);
+    setActiveMatch(nextIndex >= 0 ? nextIndex : 0, { scroll: opts.scroll !== false });
+  }
+
+  prevBtn.addEventListener('click', () => setActiveMatch(currentMatchIndex - 1));
+  nextBtn.addEventListener('click', () => setActiveMatch(currentMatchIndex + 1));
+  findInput.addEventListener('input', () => renderExpandedLines({ keepCurrentLine: true, scroll: false }));
+  findInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      setActiveMatch(currentMatchIndex + (e.shiftKey ? -1 : 1));
+    } else if (e.key === 'Escape') {
+      e.stopPropagation();
+      closeFullscreen();
+    }
+  });
+
+  renderExpandedLines();
+  setTimeout(() => findInput.select(), 0);
+}
+
+function getExpandedInitialQuery(preferLastContentQuery = false) {
+  if (preferLastContentQuery && lastContentQuery) return lastContentQuery;
+  const input = root?.querySelector('#rs-search-input');
+  return input?.value?.trim() || '';
+}
+
+function findContentResultForPath(path) {
+  const normalized = normalizePath(path);
+  return contentResults.find(f => normalizePath(f.file_path) === normalized
+    || (f.matches || []).some(m => normalizePath(m.file_path || '') === normalized)) || null;
+}
+
+function normalizePath(path) {
+  return String(path || '').replace(/\\/g, '/');
+}
+
+function splitFileLines(content) {
+  const text = String(content ?? '');
+  if (text.length === 0) return [''];
+  return text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+}
+
+function findLineMatches(lines, query) {
+  const q = String(query || '').trim().toLowerCase();
+  if (!q) return [];
+  const matches = [];
+  lines.forEach((line, idx) => {
+    if (String(line).toLowerCase().includes(q)) {
+      matches.push(idx + 1);
+    }
+  });
+  return matches;
+}
+
+function appendSearchHighlightedText(target, text, query) {
+  const raw = String(text ?? '');
+  const q = String(query || '').trim();
+  if (!q) {
+    target.textContent = raw;
+    return;
+  }
+  const lowerRaw = raw.toLowerCase();
+  const lowerQ = q.toLowerCase();
+  let pos = 0;
+  let matched = false;
+  while (pos < raw.length) {
+    const hit = lowerRaw.indexOf(lowerQ, pos);
+    if (hit < 0) break;
+    if (hit > pos) {
+      target.appendChild(document.createTextNode(raw.slice(pos, hit)));
+    }
+    const mark = el('mark', { text: raw.slice(hit, hit + q.length), class: 'rs-inline-hit' });
+    target.appendChild(mark);
+    matched = true;
+    pos = hit + q.length;
+  }
+  if (pos < raw.length) {
+    target.appendChild(document.createTextNode(raw.slice(pos)));
+  }
+  if (!matched) {
+    target.textContent = raw;
+  }
 }
 
 function closeFullscreen() {
@@ -3069,6 +3244,10 @@ function css() {
   margin-right: 0;
 }
 .rs-card-btn:hover { color: var(--text); border-color: #484f58; }
+.rs-card-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
 .rs-card-btn.active {
   color: var(--accent, #3b82f6);
   border-color: rgba(59,130,246,0.5);
@@ -3086,7 +3265,8 @@ function css() {
 .rs-fullscreen-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
+  gap: 10px;
   padding: 10px 14px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
@@ -3098,11 +3278,101 @@ function css() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 160px;
+  flex: 0 1 34%;
+}
+.rs-fs-findbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 220px;
+  max-width: 620px;
+}
+.rs-fs-find-input {
+  flex: 1;
+  min-width: 120px;
+  height: 26px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+}
+.rs-fs-find-input:focus {
+  border-color: var(--accent, #3b82f6);
+  box-shadow: 0 0 0 2px rgba(59,130,246,0.12);
+}
+.rs-fs-nav-btn {
+  width: 28px;
+  min-width: 28px;
+  padding: 4px 0;
+  text-align: center;
+}
+.rs-fs-match-count {
+  width: 54px;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-align: center;
+  white-space: nowrap;
+  font-family: 'SF Mono','Consolas','Menlo',monospace;
+}
+.rs-fs-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  flex-shrink: 0;
 }
 .rs-fullscreen-code {
   flex: 1;
   min-height: 0;
   overflow: auto;
+}
+.rs-fs-lines {
+  display: inline-block;
+  min-width: 100%;
+  padding: 14px 0;
+  font-family: 'SF Mono','Consolas','Menlo',monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.rs-fs-line {
+  display: flex;
+  min-width: 100%;
+  min-height: 18px;
+  border-left: 3px solid transparent;
+  color: var(--text-muted);
+}
+.rs-fs-line.is-match {
+  color: var(--text);
+  border-left-color: var(--accent, #3b82f6);
+  background: rgba(59,130,246,0.08);
+}
+.rs-fs-line.is-current {
+  background: rgba(245,158,11,0.16);
+  border-left-color: #f59e0b;
+}
+.rs-fs-linenum {
+  width: 58px;
+  padding: 0 12px 0 8px;
+  color: var(--text-muted);
+  opacity: 0.62;
+  text-align: right;
+  user-select: none;
+  flex-shrink: 0;
+}
+.rs-fs-code-text {
+  white-space: pre;
+  padding-right: 18px;
+}
+.rs-inline-hit {
+  background: rgba(245,158,11,0.34);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
 }
 .rs-fs-pre {
   margin: 0;

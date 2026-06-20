@@ -1703,6 +1703,7 @@
 
     // v1.2.0 tools
     async open_in_editor({ path, line }) {
+      storeSet('repo_search_last_open_editor', { path, line });
       console.log('[mock] open_in_editor', { path, line });
     },
     async read_full_file({ path }) {
