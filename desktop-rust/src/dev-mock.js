@@ -1834,6 +1834,53 @@
       if (servers[index]) servers[index].environment = targetEnv;
       storeSet('vps_servers', servers);
     },
+    async import_vps_ssh_config_servers() {
+      const settings = storeGet('settings', {});
+      const windowsPaths = String(settings.vps_ssh_config_windows_paths || '').split('\n').map(s => s.trim()).filter(Boolean);
+      const wslPaths = String(settings.vps_ssh_config_wsl_paths || '').split('\n').map(s => s.trim()).filter(Boolean);
+      const candidates = [];
+      if (windowsPaths.length) {
+        candidates.push(
+          { name: 'ssh-api', host: '10.44.0.10', user: 'deploy', port: 2222, key_file: '~/.ssh/ssh_api' },
+          { name: 'api-prod', host: '10.0.0.1', user: 'deploy', port: 22, key_file: '~/.ssh/id_rsa' },
+        );
+      }
+      if (wslPaths.length) {
+        candidates.push({ name: 'ssh-wsl', host: '172.20.1.15', user: 'ubuntu', port: 22, key_file: '~/.ssh/id_ed25519' });
+      }
+      const servers = storeGet('vps_servers', []);
+      const existing = new Set(servers.map(s => String(s.name || '').trim().toLowerCase()));
+      const summary = {
+        imported: 0,
+        skipped_existing: 0,
+        ignored_patterns: windowsPaths.length || wslPaths.length ? 1 : 0,
+        failed_files: [],
+        imported_names: [],
+      };
+      for (const c of candidates) {
+        const key = c.name.trim().toLowerCase();
+        if (existing.has(key)) {
+          summary.skipped_existing += 1;
+          continue;
+        }
+        existing.add(key);
+        servers.push({
+          name: c.name,
+          host: c.host,
+          user: c.user,
+          port: c.port,
+          key_file: c.key_file,
+          color: '#58a6ff',
+          auto_refresh: true,
+          refresh_interval: 30,
+          environment: 'Default',
+        });
+        summary.imported += 1;
+        summary.imported_names.push(c.name);
+      }
+      storeSet('vps_servers', servers);
+      return summary;
+    },
     async vps_get_stats() {
       return {
         cpu_percent: Math.round(Math.random() * 60),

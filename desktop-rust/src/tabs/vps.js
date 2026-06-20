@@ -18,6 +18,8 @@ const ANALYSIS_WIDTH_SETTING = 'vps.analysis_modal_width';
 const statsCache = new Map(); // gIdx → { stats, ts, error: string? }
 // Per-tile UI flag: true while the 🔄 button is mid-fetch.
 const fetchInFlight = new Set();
+const VPS_SSH_CONFIG_WINDOWS_PATHS_KEY = 'vps_ssh_config_windows_paths';
+const VPS_SSH_CONFIG_WSL_PATHS_KEY = 'vps_ssh_config_wsl_paths';
 
 export function init(container) {
   root = container;
@@ -118,6 +120,14 @@ function buildLayout() {
   const refreshAllBtn = el('button', { text: 'Refresh All', class: 'btn-secondary vps-toolbar-btn' });
   refreshAllBtn.addEventListener('click', () => refreshAllEnvironments());
   toolbar.appendChild(refreshAllBtn);
+
+  const importSshBtn = el('button', { text: 'Import SSH configs', class: 'btn-secondary vps-toolbar-btn' });
+  importSshBtn.addEventListener('click', () => importSshConfigServers(importSshBtn));
+  toolbar.appendChild(importSshBtn);
+
+  const settingsBtn = el('button', { text: 'Settings', class: 'btn-secondary vps-toolbar-btn' });
+  settingsBtn.addEventListener('click', () => showVpsSettingsModal());
+  toolbar.appendChild(settingsBtn);
 
   wrap.appendChild(toolbar);
 
@@ -1196,6 +1206,123 @@ function formatRawAnalysis(raw) {
   ].join('\n');
 }
 
+async function importSshConfigServers(button) {
+  const oldText = button ? button.textContent : '';
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Importing...';
+  }
+  try {
+    const summary = await call('import_vps_ssh_config_servers');
+    await loadData();
+    renderEnvironments();
+    const failedCount = Array.isArray(summary.failed_files) ? summary.failed_files.length : 0;
+    const message = [
+      `Imported ${summary.imported || 0}`,
+      `skipped ${summary.skipped_existing || 0}`,
+      `ignored ${summary.ignored_patterns || 0}`,
+      `failed files ${failedCount}`,
+    ].join(', ');
+    showToast(message, failedCount ? 'warning' : 'success');
+  } catch (e) {
+    showToast('SSH config import failed: ' + e, 'error');
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = oldText;
+    }
+  }
+}
+
+async function showVpsSettingsModal() {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay vps-modal-overlay';
+
+  const modal = document.createElement('div');
+  modal.className = 'modal vps-modal vps-settings-modal';
+
+  const header = el('div', { class: 'vps-modal-header' });
+  header.appendChild(el('h3', { text: 'VPS Settings' }));
+  const closeBtn = el('button', { text: '\u2715', class: 'btn-secondary vps-modal-close' });
+  closeBtn.addEventListener('click', () => overlay.remove());
+  header.appendChild(closeBtn);
+  modal.appendChild(header);
+
+  const body = el('div', { class: 'vps-modal-body' });
+  body.appendChild(el('div', { text: 'SSH config import', class: 'vps-settings-section-title' }));
+  body.appendChild(el('div', {
+    text: 'Add one config file path per line. Import creates normal VPS servers and skips aliases that already exist by name.',
+    class: 'vps-form-help',
+  }));
+
+  const windowsRow = el('div', { class: 'vps-form-row vps-form-row-stack' });
+  windowsRow.appendChild(el('label', { text: 'Windows SSH config files', class: 'vps-form-label' }));
+  const windowsInput = document.createElement('textarea');
+  windowsInput.className = 'vps-form-input vps-path-textarea vps-ssh-windows-paths';
+  windowsInput.placeholder = 'C:\\Users\\me\\.ssh\\config';
+  windowsRow.appendChild(windowsInput);
+  body.appendChild(windowsRow);
+
+  const wslRow = el('div', { class: 'vps-form-row vps-form-row-stack' });
+  wslRow.appendChild(el('label', { text: 'WSL SSH config files', class: 'vps-form-label' }));
+  const wslInput = document.createElement('textarea');
+  wslInput.className = 'vps-form-input vps-path-textarea vps-ssh-wsl-paths';
+  wslInput.placeholder = '\\\\wsl.localhost\\Ubuntu\\home\\me\\.ssh\\config';
+  wslRow.appendChild(wslInput);
+  wslRow.appendChild(el('div', {
+    text: 'Use Windows-readable WSL paths such as \\\\wsl$\\Ubuntu\\home\\me\\.ssh\\config. Raw /home/... paths are not translated in this version.',
+    class: 'vps-form-help',
+  }));
+  body.appendChild(wslRow);
+
+  modal.appendChild(body);
+
+  const actions = el('div', { class: 'vps-modal-actions' });
+  actions.appendChild(el('div', { style: 'flex:1' }));
+  const saveBtn = el('button', { text: 'Save', class: 'vps-ssh-settings-save' });
+  saveBtn.addEventListener('click', async () => {
+    saveBtn.disabled = true;
+    try {
+      await call('set_setting', {
+        key: VPS_SSH_CONFIG_WINDOWS_PATHS_KEY,
+        value: windowsInput.value.trim(),
+      });
+      await call('set_setting', {
+        key: VPS_SSH_CONFIG_WSL_PATHS_KEY,
+        value: wslInput.value.trim(),
+      });
+      showToast('VPS settings saved', 'success');
+      overlay.remove();
+    } catch (e) {
+      saveBtn.disabled = false;
+      showToast('Failed to save VPS settings: ' + e, 'error');
+    }
+  });
+  actions.appendChild(saveBtn);
+  const cancelBtn = el('button', { text: 'Cancel', class: 'btn-secondary' });
+  cancelBtn.addEventListener('click', () => overlay.remove());
+  actions.appendChild(cancelBtn);
+  modal.appendChild(actions);
+
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) overlay.remove();
+  });
+  try {
+    const [windowsPaths, wslPaths] = await Promise.all([
+      call('get_setting', { key: VPS_SSH_CONFIG_WINDOWS_PATHS_KEY }),
+      call('get_setting', { key: VPS_SSH_CONFIG_WSL_PATHS_KEY }),
+    ]);
+    windowsInput.value = windowsPaths || '';
+    wslInput.value = wslPaths || '';
+  } catch (e) {
+    showToast('Failed to load VPS settings: ' + e, 'error');
+  }
+  windowsInput.focus();
+}
+
 function showServerModal(editIndex) {
   const isEdit = editIndex !== undefined;
   const existing = isEdit ? allServers[editIndex] : null;
@@ -1622,6 +1749,31 @@ function css() {
 .vps-toolbar-btn {
   font-size: 12px;
   padding: 5px 12px;
+}
+.vps-settings-section-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-bottom: 4px;
+}
+.vps-form-help {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  margin-bottom: 8px;
+}
+.vps-form-row-stack {
+  align-items: stretch;
+  flex-direction: column;
+  gap: 6px;
+}
+.vps-path-textarea {
+  min-height: 78px;
+  resize: vertical;
+  font-family: 'SF Mono', 'Cascadia Code', monospace;
+  line-height: 1.4;
 }
 
 /* Environments */

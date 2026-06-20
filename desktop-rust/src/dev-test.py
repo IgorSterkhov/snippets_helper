@@ -303,6 +303,50 @@ async def run_tests():
         await cdp.eval("document.querySelector('.settings-overlay')?.remove()")
     await check('T2b3 Settings frontend cache reset action', t2b3_settings_frontend_cache_reset_action)
 
+    # ── T2b4: VPS imports SSH config aliases without duplicates ──
+    async def t2b4_vps_ssh_config_import_ui():
+        await close_modals()
+        await cdp.eval("""(() => {
+          localStorage.setItem('mock.vps_servers', JSON.stringify([
+            { name: 'api-prod', host: '10.0.0.1', user: 'deploy', port: 22, key_file: '~/.ssh/id_rsa',
+              color: '#3b82f6', auto_refresh: true, refresh_interval: 30, environment: 'Production' },
+            { name: 'dev-box', host: '192.168.1.50', user: 'dev', port: 22, key_file: '',
+              color: '#10b981', auto_refresh: false, refresh_interval: 60, environment: 'Default' }
+          ]));
+          const settings = JSON.parse(localStorage.getItem('mock.settings') || '{}');
+          delete settings['vps_ssh_config_windows_paths'];
+          delete settings['vps_ssh_config_wsl_paths'];
+          localStorage.setItem('mock.settings', JSON.stringify(settings));
+          document.querySelector('.tab-btn[data-tab-id="vps"]').click();
+        })()""")
+        await wait_until(cdp, "!!document.querySelector('#panel-vps .vps-toolbar')", timeout=5)
+        toolbar_buttons = await cdp.eval("[...document.querySelectorAll('#panel-vps .vps-toolbar button')].map(b => b.textContent.trim())")
+        assert 'Import SSH configs' in toolbar_buttons, toolbar_buttons
+        assert 'Settings' in toolbar_buttons, toolbar_buttons
+
+        await cdp.eval("[...document.querySelectorAll('#panel-vps .vps-toolbar button')].find(b => b.textContent.trim() === 'Settings').click()")
+        await wait_until(cdp, "document.querySelector('.vps-modal')?.textContent.includes('SSH config import')", timeout=3)
+        await cdp.eval("""(() => {
+          document.querySelector('.vps-ssh-windows-paths').value = '/mock/windows/config';
+          document.querySelector('.vps-ssh-wsl-paths').value = '\\\\\\\\wsl.localhost\\\\Ubuntu\\\\home\\\\dev\\\\.ssh\\\\config';
+          document.querySelector('.vps-ssh-settings-save').click();
+        })()""")
+        await wait_until(cdp, "!document.querySelector('.vps-modal-overlay')", timeout=3)
+        saved = await cdp.eval("JSON.parse(localStorage.getItem('mock.settings') || '{}')")
+        assert saved.get('vps_ssh_config_windows_paths') == '/mock/windows/config', saved
+        assert '\\\\wsl.localhost\\Ubuntu' in saved.get('vps_ssh_config_wsl_paths', ''), saved
+
+        await cdp.eval("[...document.querySelectorAll('#panel-vps .vps-toolbar button')].find(b => b.textContent.trim() === 'Import SSH configs').click()")
+        await wait_until(cdp, "JSON.parse(localStorage.getItem('mock.vps_servers') || '[]').some(s => s.name === 'ssh-api')", timeout=3)
+        first_count = await cdp.eval("JSON.parse(localStorage.getItem('mock.vps_servers') || '[]').length")
+        await cdp.eval("[...document.querySelectorAll('#panel-vps .vps-toolbar button')].find(b => b.textContent.trim() === 'Import SSH configs').click()")
+        await asyncio.sleep(0.3)
+        second_count = await cdp.eval("JSON.parse(localStorage.getItem('mock.vps_servers') || '[]').length")
+        assert second_count == first_count, {'first': first_count, 'second': second_count}
+        body = await cdp.eval("document.body.textContent")
+        assert 'skipped' in body.lower(), body[-1000:]
+    await check('T2b4 VPS SSH config import UI', t2b4_vps_ssh_config_import_ui)
+
     # ── T2c: Settings admin tab is gated by server flag ──────
     async def t2c_admin_settings_tab_visibility():
         await cdp.eval("""

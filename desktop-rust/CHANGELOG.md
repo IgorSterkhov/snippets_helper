@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v1.16.0 (2026-06-20)
+
+- **VPS SSH config import:** VPS settings now accept Windows and
+  Windows-readable WSL SSH config file paths. The new toolbar import action
+  adds concrete `Host` aliases as normal VPS servers, skips existing server
+  names on repeat imports, and reports imported/skipped/ignored/failed counts.
+
 ## v1.15.0 (2026-06-20)
 
 - **Frontend OTA cache prevention:** frontend assets served through `khapp://`

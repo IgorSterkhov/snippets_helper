@@ -277,6 +277,7 @@ pub fn run() {
             commands::vps::update_vps_server,
             commands::vps::remove_vps_server,
             commands::vps::move_vps_server,
+            commands::vps::import_vps_ssh_config_servers,
             commands::vps::vps_get_stats,
             commands::vps::vps_get_detailed_analysis,
             commands::vps::vps_test_connection,

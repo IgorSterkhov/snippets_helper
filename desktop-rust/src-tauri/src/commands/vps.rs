@@ -2,7 +2,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::State;
 use crate::db::{DbState, queries};
+use std::collections::HashSet;
 use std::time::Duration;
+
+const VPS_SSH_CONFIG_WINDOWS_PATHS_KEY: &str = "vps_ssh_config_windows_paths";
+const VPS_SSH_CONFIG_WSL_PATHS_KEY: &str = "vps_ssh_config_wsl_paths";
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct VpsServer {
@@ -22,6 +26,36 @@ pub struct VpsServer {
 pub struct VpsEnvironment {
     pub name: String,
     pub sort_order: u32,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct VpsSshConfigSettings {
+    pub windows_paths: Vec<String>,
+    pub wsl_paths: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct VpsSshConfigImportSummary {
+    pub imported: u32,
+    pub skipped_existing: u32,
+    pub ignored_patterns: u32,
+    pub failed_files: Vec<VpsSshConfigFailedFile>,
+    pub imported_names: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct VpsSshConfigFailedFile {
+    pub path: String,
+    pub message: String,
+}
+
+#[derive(Clone, Debug)]
+struct ParsedSshHost {
+    alias: String,
+    host: String,
+    user: String,
+    port: u16,
+    key_file: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -92,6 +126,21 @@ fn load_servers(conn: &rusqlite::Connection, computer_id: &str) -> Vec<VpsServer
     serde_json::from_str::<Vec<VpsServer>>(&raw).unwrap_or_default()
 }
 
+fn parse_servers_json_strict(raw: &str) -> Result<Vec<VpsServer>, String> {
+    serde_json::from_str::<Vec<VpsServer>>(raw)
+        .map_err(|e| format!("Failed to parse vps_servers: {}", e))
+}
+
+fn load_servers_strict(
+    conn: &rusqlite::Connection,
+    computer_id: &str,
+) -> Result<Vec<VpsServer>, String> {
+    let raw = queries::get_setting(conn, computer_id, "vps_servers")
+        .map_err(|e| e.to_string())?
+        .unwrap_or_else(|| "[]".to_string());
+    parse_servers_json_strict(&raw)
+}
+
 fn save_servers(conn: &rusqlite::Connection, computer_id: &str, servers: &[VpsServer]) -> Result<(), String> {
     let json = serde_json::to_string(servers).map_err(|e| e.to_string())?;
     queries::set_setting(conn, computer_id, "vps_servers", &json).map_err(|e| e.to_string())
@@ -108,6 +157,32 @@ fn load_environments(conn: &rusqlite::Connection, computer_id: &str) -> Vec<VpsE
 fn save_environments(conn: &rusqlite::Connection, computer_id: &str, envs: &[VpsEnvironment]) -> Result<(), String> {
     let json = serde_json::to_string(envs).map_err(|e| e.to_string())?;
     queries::set_setting(conn, computer_id, "vps_environments", &json).map_err(|e| e.to_string())
+}
+
+fn parse_path_setting(raw: Option<String>) -> Vec<String> {
+    raw.unwrap_or_default()
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn load_vps_ssh_config_settings(
+    conn: &rusqlite::Connection,
+    computer_id: &str,
+) -> VpsSshConfigSettings {
+    let windows_paths = parse_path_setting(
+        queries::get_setting(conn, computer_id, VPS_SSH_CONFIG_WINDOWS_PATHS_KEY)
+            .ok()
+            .flatten(),
+    );
+    let wsl_paths = parse_path_setting(
+        queries::get_setting(conn, computer_id, VPS_SSH_CONFIG_WSL_PATHS_KEY)
+            .ok()
+            .flatten(),
+    );
+    VpsSshConfigSettings { windows_paths, wsl_paths }
 }
 
 /// Ensure a "Default" environment exists and assign orphan servers to it.
@@ -169,6 +244,32 @@ fn build_ssh_cmd(user: &str, host: &str, port: u16, key_file: &str, remote_cmd: 
     cmd.arg(format!("{}@{}", user, host));
     cmd.arg(remote_cmd);
     cmd
+}
+
+// ── SSH Config Import Commands ──────────────────────────────
+
+#[tauri::command]
+pub fn import_vps_ssh_config_servers(state: State<DbState>) -> Result<Value, String> {
+    let (cid, settings) = {
+        let conn = state.lock_recover();
+        let cid = get_computer_id();
+        let settings = load_vps_ssh_config_settings(&conn, &cid);
+        (cid, settings)
+    };
+    let mut paths = Vec::new();
+    paths.extend(settings.windows_paths);
+    paths.extend(settings.wsl_paths);
+
+    let (hosts, mut summary) = read_ssh_config_paths(&paths);
+
+    let conn = state.lock_recover();
+    ensure_default_environment(&conn, &cid)?;
+    let mut servers = load_servers_strict(&conn, &cid)?;
+    import_parsed_ssh_hosts(&mut servers, hosts, &mut summary);
+    if summary.imported > 0 {
+        save_servers(&conn, &cid, &servers)?;
+    }
+    serde_json::to_value(summary).map_err(|e| e.to_string())
 }
 
 // ── Environment Commands ────────────────────────────────────
@@ -467,6 +568,214 @@ pub async fn vps_get_detailed_analysis(
 
     let parsed = parse_detailed_analysis(&stdout)?;
     serde_json::to_value(parsed).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+fn import_ssh_config_paths_into_servers(
+    paths: &[String],
+    servers: &mut Vec<VpsServer>,
+) -> VpsSshConfigImportSummary {
+    let (hosts, mut summary) = read_ssh_config_paths(paths);
+    import_parsed_ssh_hosts(servers, hosts, &mut summary);
+    summary
+}
+
+fn read_ssh_config_paths(paths: &[String]) -> (Vec<ParsedSshHost>, VpsSshConfigImportSummary) {
+    let mut hosts = Vec::new();
+    let mut summary = VpsSshConfigImportSummary::default();
+    for path in paths {
+        let path = path.trim();
+        if path.is_empty() {
+            continue;
+        }
+        match std::fs::read_to_string(path) {
+            Ok(content) => {
+                let (parsed_hosts, ignored) = parse_ssh_config_hosts(&content);
+                summary.ignored_patterns += ignored as u32;
+                hosts.extend(parsed_hosts);
+            }
+            Err(e) => summary.failed_files.push(VpsSshConfigFailedFile {
+                path: path.to_string(),
+                message: e.to_string(),
+            }),
+        }
+    }
+    (hosts, summary)
+}
+
+fn import_parsed_ssh_hosts(
+    servers: &mut Vec<VpsServer>,
+    hosts: Vec<ParsedSshHost>,
+    summary: &mut VpsSshConfigImportSummary,
+) {
+    let mut existing_names: HashSet<String> = servers
+        .iter()
+        .map(|s| normalize_server_name(&s.name))
+        .collect();
+    for host in hosts {
+        if !existing_names.insert(normalize_server_name(&host.alias)) {
+            summary.skipped_existing += 1;
+            continue;
+        }
+        let color = color_for_ssh_alias(&host.alias);
+        servers.push(VpsServer {
+            name: host.alias.clone(),
+            host: host.host,
+            user: host.user,
+            port: host.port,
+            key_file: host.key_file,
+            color,
+            auto_refresh: true,
+            refresh_interval: 30,
+            environment: "Default".to_string(),
+        });
+        summary.imported += 1;
+        summary.imported_names.push(host.alias);
+    }
+}
+
+fn normalize_server_name(name: &str) -> String {
+    name.trim().to_ascii_lowercase()
+}
+
+fn parse_ssh_config_hosts(config: &str) -> (Vec<ParsedSshHost>, usize) {
+    #[derive(Clone, Debug)]
+    struct HostBlock {
+        aliases: Vec<String>,
+        host: Option<String>,
+        user: Option<String>,
+        port: Option<u16>,
+        key_file: Option<String>,
+    }
+
+    fn flush_block(
+        block: Option<HostBlock>,
+        hosts: &mut Vec<ParsedSshHost>,
+        ignored_patterns: &mut usize,
+    ) {
+        let Some(block) = block else {
+            return;
+        };
+        for alias in block.aliases {
+            if should_ignore_ssh_host_alias(&alias) {
+                *ignored_patterns += 1;
+                continue;
+            }
+            hosts.push(ParsedSshHost {
+                host: block.host.clone().unwrap_or_else(|| alias.clone()),
+                user: block.user.clone().unwrap_or_else(|| "root".to_string()),
+                port: block.port.unwrap_or(22),
+                key_file: block.key_file.clone().unwrap_or_default(),
+                alias,
+            });
+        }
+    }
+
+    let mut hosts = Vec::new();
+    let mut ignored_patterns = 0usize;
+    let mut current: Option<HostBlock> = None;
+
+    for raw_line in config.lines() {
+        let line = strip_ssh_inline_comment(raw_line).trim().to_string();
+        if line.is_empty() {
+            continue;
+        }
+        let Some((keyword, value)) = split_ssh_directive(&line) else {
+            continue;
+        };
+        let keyword_lc = keyword.to_ascii_lowercase();
+        if keyword_lc == "host" {
+            flush_block(current.take(), &mut hosts, &mut ignored_patterns);
+            let aliases = value
+                .split_whitespace()
+                .map(unquote_ssh_value)
+                .filter(|v| !v.is_empty())
+                .collect::<Vec<_>>();
+            current = Some(HostBlock {
+                aliases,
+                host: None,
+                user: None,
+                port: None,
+                key_file: None,
+            });
+            continue;
+        }
+        if keyword_lc == "match" {
+            flush_block(current.take(), &mut hosts, &mut ignored_patterns);
+            continue;
+        }
+
+        let Some(block) = current.as_mut() else {
+            continue;
+        };
+        match keyword_lc.as_str() {
+            "hostname" => block.host = Some(unquote_ssh_value(value.trim())),
+            "user" => block.user = Some(unquote_ssh_value(value.trim())),
+            "port" => block.port = value.trim().parse::<u16>().ok(),
+            "identityfile" => {
+                if block.key_file.is_none() {
+                    block.key_file = Some(unquote_ssh_value(value.trim()));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    flush_block(current, &mut hosts, &mut ignored_patterns);
+    (hosts, ignored_patterns)
+}
+
+fn should_ignore_ssh_host_alias(alias: &str) -> bool {
+    let alias = alias.trim();
+    alias.is_empty()
+        || alias.starts_with('!')
+        || alias.contains('*')
+        || alias.contains('?')
+}
+
+fn split_ssh_directive(line: &str) -> Option<(&str, &str)> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    match trimmed.find(char::is_whitespace) {
+        Some(pos) => Some((&trimmed[..pos], trimmed[pos..].trim_start())),
+        None => Some((trimmed, "")),
+    }
+}
+
+fn strip_ssh_inline_comment(line: &str) -> &str {
+    let bytes = line.as_bytes();
+    for (idx, byte) in bytes.iter().enumerate() {
+        if *byte == b'#' && (idx == 0 || bytes[idx - 1].is_ascii_whitespace()) {
+            return &line[..idx];
+        }
+    }
+    line
+}
+
+fn unquote_ssh_value(value: &str) -> String {
+    let value = value.trim();
+    if value.len() >= 2 {
+        let bytes = value.as_bytes();
+        if (bytes[0] == b'"' && bytes[value.len() - 1] == b'"')
+            || (bytes[0] == b'\'' && bytes[value.len() - 1] == b'\'')
+        {
+            return value[1..value.len() - 1].to_string();
+        }
+    }
+    value.to_string()
+}
+
+fn color_for_ssh_alias(alias: &str) -> String {
+    const COLORS: [&str; 8] = [
+        "#58a6ff", "#3fb950", "#f0883e", "#d2a8ff",
+        "#ff7b72", "#79c0ff", "#a5d6ff", "#ffa657",
+    ];
+    let hash = alias
+        .bytes()
+        .fold(0usize, |acc, b| acc.wrapping_mul(31).wrapping_add(b as usize));
+    COLORS[hash % COLORS.len()].to_string()
 }
 
 fn wait_with_timeout(child: std::process::Child, timeout: Duration) -> Result<std::process::Output, String> {
@@ -1020,5 +1329,157 @@ mod tests {
         assert_eq!(parsed.disk.entries.len(), 1);
         assert_eq!(parsed.processes.len(), 1);
         assert!(parsed.raw.stderr.contains("Permission denied"));
+    }
+
+    #[test]
+    fn vps_ssh_parse_concrete_host_with_options() {
+        let config = r#"
+Host api-prod
+    HostName 10.0.0.15
+    User deploy
+    Port 2222
+    IdentityFile ~/.ssh/api_prod
+"#;
+        let (hosts, ignored) = parse_ssh_config_hosts(config);
+        assert_eq!(ignored, 0);
+        assert_eq!(hosts.len(), 1);
+        assert_eq!(hosts[0].alias, "api-prod");
+        assert_eq!(hosts[0].host, "10.0.0.15");
+        assert_eq!(hosts[0].user, "deploy");
+        assert_eq!(hosts[0].port, 2222);
+        assert_eq!(hosts[0].key_file, "~/.ssh/api_prod");
+    }
+
+    #[test]
+    fn vps_ssh_parser_skips_wildcards_and_negated_hosts() {
+        let config = r#"
+Host * github-* !bastion prod?
+    User git
+
+Host db-prod
+    HostName db.internal
+"#;
+        let (hosts, ignored) = parse_ssh_config_hosts(config);
+        assert_eq!(ignored, 4);
+        assert_eq!(hosts.len(), 1);
+        assert_eq!(hosts[0].alias, "db-prod");
+        assert_eq!(hosts[0].host, "db.internal");
+        assert_eq!(hosts[0].user, "root");
+        assert_eq!(hosts[0].port, 22);
+    }
+
+    #[test]
+    fn vps_ssh_parser_handles_multiple_aliases_comments_quotes_and_case() {
+        let config = r#"
+HOST web-a web-b *.ignored # inline comment
+    hostname "web.internal"
+    USER 'deploy'
+    identityfile "~/.ssh/web key"
+"#;
+        let (hosts, ignored) = parse_ssh_config_hosts(config);
+        assert_eq!(ignored, 1);
+        assert_eq!(hosts.len(), 2);
+        assert_eq!(hosts[0].alias, "web-a");
+        assert_eq!(hosts[1].alias, "web-b");
+        assert_eq!(hosts[0].host, "web.internal");
+        assert_eq!(hosts[0].user, "deploy");
+        assert_eq!(hosts[0].key_file, "~/.ssh/web key");
+    }
+
+    #[test]
+    fn vps_ssh_match_block_does_not_mutate_previous_host() {
+        let config = r#"
+Host api-prod
+    HostName 10.0.0.15
+
+Match user root
+    HostName should-not-apply
+    User bad
+
+Host db-prod
+    HostName 10.0.0.20
+"#;
+        let (hosts, ignored) = parse_ssh_config_hosts(config);
+        assert_eq!(ignored, 0);
+        assert_eq!(hosts.len(), 2);
+        assert_eq!(hosts[0].alias, "api-prod");
+        assert_eq!(hosts[0].host, "10.0.0.15");
+        assert_eq!(hosts[0].user, "root");
+        assert_eq!(hosts[1].alias, "db-prod");
+        assert_eq!(hosts[1].host, "10.0.0.20");
+    }
+
+    #[test]
+    fn vps_ssh_import_skips_existing_server_names() {
+        let mut servers = vec![VpsServer {
+            name: " API-PROD ".to_string(),
+            host: "old.example.com".to_string(),
+            user: "root".to_string(),
+            port: 22,
+            key_file: String::new(),
+            color: "#58a6ff".to_string(),
+            auto_refresh: true,
+            refresh_interval: 30,
+            environment: "Default".to_string(),
+        }];
+        let parsed = vec![
+            ParsedSshHost {
+                alias: "api-prod".to_string(),
+                host: "10.0.0.15".to_string(),
+                user: "deploy".to_string(),
+                port: 2222,
+                key_file: "~/.ssh/api_prod".to_string(),
+            },
+            ParsedSshHost {
+                alias: "db-prod".to_string(),
+                host: "10.0.0.20".to_string(),
+                user: "postgres".to_string(),
+                port: 22,
+                key_file: String::new(),
+            },
+        ];
+
+        let mut summary = VpsSshConfigImportSummary::default();
+        import_parsed_ssh_hosts(&mut servers, parsed, &mut summary);
+
+        assert_eq!(summary.imported, 1);
+        assert_eq!(summary.skipped_existing, 1);
+        assert_eq!(servers.len(), 2);
+        assert_eq!(servers[1].name, "db-prod");
+        assert_eq!(servers[1].host, "10.0.0.20");
+        assert_eq!(servers[1].user, "postgres");
+    }
+
+    #[test]
+    fn vps_ssh_strict_server_json_rejects_malformed_existing_data() {
+        let err = parse_servers_json_strict("{not valid json").unwrap_err();
+        assert!(err.contains("Failed to parse vps_servers"));
+    }
+
+    #[test]
+    fn vps_ssh_import_files_reports_missing_file_without_blocking() {
+        let temp = tempfile::tempdir().unwrap();
+        let good_path = temp.path().join("ssh_config");
+        std::fs::write(
+            &good_path,
+            "Host api-prod\n  HostName 10.0.0.15\n  User deploy\n",
+        )
+        .unwrap();
+        let missing_path = temp.path().join("missing_config");
+        let mut servers = Vec::new();
+
+        let summary = import_ssh_config_paths_into_servers(
+            &[
+                good_path.to_string_lossy().to_string(),
+                missing_path.to_string_lossy().to_string(),
+            ],
+            &mut servers,
+        );
+
+        assert_eq!(summary.imported, 1);
+        assert_eq!(summary.failed_files.len(), 1);
+        assert!(summary.failed_files[0].path.ends_with("missing_config"));
+        assert_eq!(servers.len(), 1);
+        assert_eq!(servers[0].name, "api-prod");
     }
 }
