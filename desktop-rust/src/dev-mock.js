@@ -561,6 +561,95 @@
     }));
   }
 
+  function clickhouseMockPages() {
+    const updated = '2026-06-20T10:00:00.000Z';
+    return [
+      {
+        id: 1,
+        category: 'Functions / Arrays',
+        title: 'Array Functions',
+        source_url: 'mock://clickhouse/array-functions.md',
+        public_url: 'https://clickhouse.com/docs/ru/sql-reference/functions/array-functions',
+        updated_at: updated,
+        markdown: '# Array Functions\n\n## array\n\nCreates an array.\n\n```sql\narray(x1 [, x2])\n```\n\n## arrayCompact\n\nRemoves consecutive duplicate elements.\n\n```sql\narrayCompact(arr)\n```\n\n## arrayConcat\n\nCombines arrays.\n\n```sql\narrayConcat(arr1 [, arr2])\n```',
+        sections: [
+          {
+            id: 1,
+            page_id: 1,
+            category: 'Functions / Arrays',
+            page_title: 'Array Functions',
+            title: 'array',
+            slug: 'array',
+            section_path: 'array',
+            level: 2,
+            body: 'Creates an array.\n\n```sql\narray(x1 [, x2])\n```',
+            normalized_search_text: 'array array functions functions arrays creates an array sql array x1 x2',
+            content_hash: 'mock-array',
+          },
+          {
+            id: 2,
+            page_id: 1,
+            category: 'Functions / Arrays',
+            page_title: 'Array Functions',
+            title: 'arrayCompact',
+            slug: 'arraycompact',
+            section_path: 'arraycompact',
+            level: 2,
+            body: 'Removes consecutive duplicate elements.\n\n```sql\narrayCompact(arr)\n```',
+            normalized_search_text: 'array compact array functions functions arrays removes consecutive duplicate elements sql array compact arr',
+            content_hash: 'mock-arraycompact',
+          },
+          {
+            id: 3,
+            page_id: 1,
+            category: 'Functions / Arrays',
+            page_title: 'Array Functions',
+            title: 'arrayConcat',
+            slug: 'arrayconcat',
+            section_path: 'arrayconcat',
+            level: 2,
+            body: 'Combines arrays.\n\n```sql\narrayConcat(arr1 [, arr2])\n```',
+            normalized_search_text: 'array concat array functions functions arrays combines arrays sql array concat arr1 arr2',
+            content_hash: 'mock-arrayconcat',
+          },
+        ],
+      },
+      {
+        id: 2,
+        category: 'Reference / Statements',
+        title: 'SELECT',
+        source_url: 'mock://clickhouse/select.md',
+        public_url: 'https://clickhouse.com/docs/ru/sql-reference/statements/select',
+        updated_at: updated,
+        markdown: '# SELECT\n\n## SELECT query\n\nSELECT retrieves data from one or more tables.',
+        sections: [
+          {
+            id: 4,
+            page_id: 2,
+            category: 'Reference / Statements',
+            page_title: 'SELECT',
+            title: 'SELECT query',
+            slug: 'select-query',
+            section_path: 'select-query',
+            level: 2,
+            body: 'SELECT retrieves data from one or more tables.',
+            normalized_search_text: 'select query reference statements select retrieves data from one or more tables',
+            content_hash: 'mock-select',
+          },
+        ],
+      },
+    ];
+  }
+
+  function normalizeClickhouseQuery(text) {
+    return String(text || '')
+      .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+      .toLowerCase()
+      .replace(/[^a-zа-яё0-9]+/gi, ' ')
+      .trim()
+      .replace(/\s+/g, ' ');
+  }
+
   const handlers = {
     // ── Settings ────────────────────────────────────────
     async get_setting({ key }) {
@@ -1788,6 +1877,102 @@
         dirty_after: false,
         cleaned,
       };
+    },
+
+    // ── ClickHouse Docs ─────────────────────────────────
+    async list_clickhouse_doc_tree() {
+      const pages = clickhouseMockPages().map(page => ({
+        id: page.id,
+        category: page.category,
+        title: page.title,
+        source_url: page.source_url,
+        public_url: page.public_url,
+        updated_at: page.updated_at,
+        section_count: page.sections.length,
+      }));
+      return {
+        pages,
+        page_count: pages.length,
+        section_count: pages.reduce((sum, page) => sum + page.section_count, 0),
+        last_update_at: pages[0]?.updated_at || null,
+      };
+    },
+    async get_clickhouse_doc_page({ pageId }) {
+      const page = clickhouseMockPages().find(entry => entry.id === pageId);
+      if (!page) throw new Error(`ClickHouse mock page not found: ${pageId}`);
+      return page;
+    },
+    async search_clickhouse_docs({ query, limit }) {
+      const tokens = normalizeClickhouseQuery(query).split(/\s+/).filter(Boolean);
+      if (!tokens.length) return [];
+      const sections = clickhouseMockPages().flatMap(page => page.sections);
+      return sections
+        .map(section => {
+          const haystack = section.normalized_search_text || normalizeClickhouseQuery(
+            `${section.title} ${section.page_title} ${section.category} ${section.body}`,
+          );
+          if (!tokens.every(token => haystack.includes(token))) return null;
+          const titleNorm = normalizeClickhouseQuery(section.title);
+          const queryNorm = normalizeClickhouseQuery(query);
+          const score = titleNorm.replace(/\s+/g, '') === queryNorm.replace(/\s+/g, '') ? 220 : 80;
+          return {
+            section_id: section.id,
+            page_id: section.page_id,
+            category: section.category,
+            page_title: section.page_title,
+            section_title: section.title,
+            slug: section.slug,
+            section_path: section.section_path,
+            excerpt: section.body.replace(/\n+/g, ' ').slice(0, 220),
+            score,
+          };
+        })
+        .filter(Boolean)
+        .sort((a, b) => b.score - a.score || a.section_title.localeCompare(b.section_title))
+        .slice(0, limit || 50);
+    },
+    async update_clickhouse_docs() {
+      const runs = storeGet('clickhouse_doc_update_runs', []);
+      const run = {
+        id: runs.length + 1,
+        started_at: now(),
+        finished_at: now(),
+        status: 'success',
+        pages_checked: 2,
+        pages_updated: 2,
+        sections_added: 4,
+        sections_changed: 0,
+        sections_removed: 0,
+        failed_urls: 0,
+        summary: '2 page(s) checked, 2 updated, 4 added, 0 changed, 0 removed, 0 failed',
+      };
+      storeSet('clickhouse_doc_update_runs', [run, ...runs]);
+      storeSet(`clickhouse_doc_changes.${run.id}`, [
+        { id: 1, run_id: run.id, change_type: 'added', item_type: 'section', title: 'arrayCompact', source_url: 'mock://clickhouse/array-functions.md', details: "Added section 'arrayCompact'" },
+      ]);
+      return run;
+    },
+    async list_clickhouse_doc_update_runs() {
+      const runs = storeGet('clickhouse_doc_update_runs', null);
+      if (runs) return runs;
+      return [{
+        id: 1,
+        started_at: '2026-06-20T10:00:00.000Z',
+        finished_at: '2026-06-20T10:00:01.000Z',
+        status: 'success',
+        pages_checked: 2,
+        pages_updated: 2,
+        sections_added: 4,
+        sections_changed: 0,
+        sections_removed: 0,
+        failed_urls: 0,
+        summary: '2 page(s) checked, 2 updated, 4 added, 0 changed, 0 removed, 0 failed',
+      }];
+    },
+    async list_clickhouse_doc_changes({ runId }) {
+      return storeGet(`clickhouse_doc_changes.${runId}`, [
+        { id: 1, run_id: runId, change_type: 'added', item_type: 'section', title: 'arrayCompact', source_url: 'mock://clickhouse/array-functions.md', details: "Added section 'arrayCompact'" },
+      ]);
     },
 
     // ── VPS ─────────────────────────────────────────────

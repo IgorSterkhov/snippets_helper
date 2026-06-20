@@ -8,6 +8,7 @@ pub mod sql_tools;
 pub mod sync_cmd;
 pub mod superset;
 pub mod commits;
+pub mod clickhouse_docs;
 pub mod exec;
 pub mod finance;
 pub mod help;

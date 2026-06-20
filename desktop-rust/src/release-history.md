@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v1.17.0 (2026-06-20)
+
+- **ClickHouse Docs module:** added a DEV sidebar module with the native
+  ClickHouse icon, local SQLite-backed official documentation cache,
+  section/function-level search, manual `Update docs`, and an update changelog
+  for added, changed, removed, or failed documentation sources.
+
 ## v1.16.0 (2026-06-20)
 
 - **VPS SSH config import:** VPS settings now accept Windows and

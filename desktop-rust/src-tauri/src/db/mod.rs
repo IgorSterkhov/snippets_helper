@@ -279,6 +279,57 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
             user_id         TEXT NOT NULL DEFAULT ''
         );
 
+        CREATE TABLE IF NOT EXISTS clickhouse_doc_pages (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_url      TEXT UNIQUE NOT NULL,
+            public_url      TEXT NOT NULL DEFAULT '',
+            category        TEXT NOT NULL DEFAULT '',
+            title           TEXT NOT NULL DEFAULT '',
+            markdown        TEXT NOT NULL DEFAULT '',
+            content_hash    TEXT NOT NULL DEFAULT '',
+            updated_at      TIMESTAMP NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS clickhouse_doc_sections (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            page_id         INTEGER NOT NULL REFERENCES clickhouse_doc_pages(id) ON DELETE CASCADE,
+            category        TEXT NOT NULL DEFAULT '',
+            page_title      TEXT NOT NULL DEFAULT '',
+            title           TEXT NOT NULL DEFAULT '',
+            slug            TEXT NOT NULL DEFAULT '',
+            section_path    TEXT NOT NULL DEFAULT '',
+            level           INTEGER NOT NULL DEFAULT 2,
+            body            TEXT NOT NULL DEFAULT '',
+            normalized_search_text TEXT NOT NULL DEFAULT '',
+            content_hash    TEXT NOT NULL DEFAULT '',
+            sort_order      INTEGER NOT NULL DEFAULT 0,
+            UNIQUE(page_id, section_path)
+        );
+
+        CREATE TABLE IF NOT EXISTS clickhouse_doc_update_runs (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            started_at      TIMESTAMP NOT NULL,
+            finished_at     TIMESTAMP NOT NULL,
+            status          TEXT NOT NULL DEFAULT '',
+            pages_checked   INTEGER NOT NULL DEFAULT 0,
+            pages_updated   INTEGER NOT NULL DEFAULT 0,
+            sections_added  INTEGER NOT NULL DEFAULT 0,
+            sections_changed INTEGER NOT NULL DEFAULT 0,
+            sections_removed INTEGER NOT NULL DEFAULT 0,
+            failed_urls     INTEGER NOT NULL DEFAULT 0,
+            summary         TEXT NOT NULL DEFAULT ''
+        );
+
+        CREATE TABLE IF NOT EXISTS clickhouse_doc_changes (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id          INTEGER NOT NULL REFERENCES clickhouse_doc_update_runs(id) ON DELETE CASCADE,
+            change_type     TEXT NOT NULL DEFAULT '',
+            item_type       TEXT NOT NULL DEFAULT '',
+            title           TEXT NOT NULL DEFAULT '',
+            source_url      TEXT NOT NULL DEFAULT '',
+            details         TEXT NOT NULL DEFAULT ''
+        );
+
         CREATE INDEX IF NOT EXISTS idx_tasks_sort      ON tasks(is_pinned DESC, sort_order ASC);
         CREATE INDEX IF NOT EXISTS idx_tasks_category  ON tasks(category_id);
         CREATE INDEX IF NOT EXISTS idx_tasks_status    ON tasks(status_id);
@@ -286,6 +337,12 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         CREATE INDEX IF NOT EXISTS idx_links_task      ON task_links(task_id, sort_order);
         CREATE INDEX IF NOT EXISTS idx_finance_plans_sort ON finance_plans(sort_order, name);
         CREATE INDEX IF NOT EXISTS idx_finance_items_plan ON finance_items(plan_id, parent_id, sort_order);
+        CREATE INDEX IF NOT EXISTS idx_clickhouse_doc_pages_category ON clickhouse_doc_pages(category, title);
+        CREATE INDEX IF NOT EXISTS idx_clickhouse_doc_sections_page ON clickhouse_doc_sections(page_id, sort_order);
+        CREATE INDEX IF NOT EXISTS idx_clickhouse_doc_sections_title ON clickhouse_doc_sections(title);
+        CREATE INDEX IF NOT EXISTS idx_clickhouse_doc_sections_slug ON clickhouse_doc_sections(slug);
+        CREATE INDEX IF NOT EXISTS idx_clickhouse_doc_sections_search ON clickhouse_doc_sections(normalized_search_text);
+        CREATE INDEX IF NOT EXISTS idx_clickhouse_doc_changes_run ON clickhouse_doc_changes(run_id);
 
         CREATE TABLE IF NOT EXISTS whisper_models (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -315,6 +372,14 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_whisper_history_created ON whisper_history(created_at DESC);",
     )?;
+
+    // Migration (v1.17.0): local ClickHouse documentation browser metadata.
+    conn.execute_batch("ALTER TABLE clickhouse_doc_pages ADD COLUMN public_url TEXT NOT NULL DEFAULT ''")
+        .ok();
+    conn.execute_batch("ALTER TABLE clickhouse_doc_sections ADD COLUMN section_path TEXT NOT NULL DEFAULT ''")
+        .ok();
+    conn.execute_batch("ALTER TABLE clickhouse_doc_sections ADD COLUMN normalized_search_text TEXT NOT NULL DEFAULT ''")
+        .ok();
 
     // Migration: add links column to shortcuts (may already exist)
     conn.execute_batch("ALTER TABLE shortcuts ADD COLUMN links TEXT NOT NULL DEFAULT '[]'")
@@ -534,6 +599,10 @@ mod tests {
 
         let expected = vec![
             "app_settings",
+            "clickhouse_doc_changes",
+            "clickhouse_doc_pages",
+            "clickhouse_doc_sections",
+            "clickhouse_doc_update_runs",
             "commit_history",
             "commit_tags",
             "exec_categories",

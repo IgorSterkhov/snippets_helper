@@ -15,6 +15,7 @@ const TABS = [
   { id: 'commits',   label: 'Commits',   icon: '\u{1F500}', loader: (el) => import('./tabs/commits.js').then(m => m.init(el)) },
   { id: 'exec',      label: 'Exec',      icon: '\u26A1',    loader: (el) => import('./tabs/exec.js').then(m => m.init(el)) },
   { id: 'repo-search', label: 'Search', icon: '\uD83D\uDD0D', loader: (el) => import('./tabs/repo-search.js').then(m => m.init(el)) },
+  { id: 'clickhouse-docs', label: 'ClickHouse', icon: 'logo:clickhouse', loader: (el) => import('./tabs/clickhouse-docs.js').then(m => m.init(el)) },
   { id: 'vps', label: 'VPS', icon: '\uD83D\uDDA5', loader: (el) => import('./tabs/vps.js').then(m => m.init(el)) },
   { id: 'whisper', label: 'Whisper', icon: '🎤', loader: (el) => import('./tabs/whisper/whisper-main.js').then(m => m.init(el)) },
   { id: 'ai', label: 'AI', icon: 'AI', loader: (el) => import('./tabs/ai/ai-main.js').then(m => m.init(el)) },
@@ -25,7 +26,7 @@ const SIDEBAR_GROUPS = [
     id: 'dev',
     label: 'DEV',
     icon: '&lt;/&gt;',
-    childIds: ['sql', 'superset', 'commits', 'repo-search'],
+    childIds: ['sql', 'superset', 'commits', 'repo-search', 'clickhouse-docs'],
   },
 ];
 

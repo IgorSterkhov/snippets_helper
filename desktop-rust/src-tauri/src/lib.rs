@@ -271,6 +271,13 @@ pub fn run() {
             commands::repo_search::repo_search_pull_main,
             commands::repo_search::repo_search_reset_hard,
             commands::repo_search::repo_search_commit_diff,
+            // ClickHouse Docs
+            commands::clickhouse_docs::list_clickhouse_doc_tree,
+            commands::clickhouse_docs::get_clickhouse_doc_page,
+            commands::clickhouse_docs::search_clickhouse_docs,
+            commands::clickhouse_docs::update_clickhouse_docs,
+            commands::clickhouse_docs::list_clickhouse_doc_update_runs,
+            commands::clickhouse_docs::list_clickhouse_doc_changes,
             // VPS
             commands::vps::list_vps_servers,
             commands::vps::add_vps_server,

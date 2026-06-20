@@ -13,7 +13,7 @@ const i18n = {
     detached_windows_name: 'Detached module windows',
     detached_windows_desc: 'Right-click a main sidebar module to open it in its own focused window without the main left sidebar. Each module has one detached window; opening it again brings that window back to the front.',
     sidebar_groups_name: 'Sidebar module groups',
-    sidebar_groups_desc: 'Developer-oriented modules are grouped under the compact DEV sidebar button. SQL, Superset, Commits, and Search expand below DEV when clicked or when one of them is active, including activation through Ctrl+Tab or app commands. Switching to another module collapses the group again.',
+    sidebar_groups_desc: 'Developer-oriented modules are grouped under the compact DEV sidebar button. SQL, Superset, Commits, Search, and ClickHouse expand below DEV when clicked or when one of them is active, including activation through Ctrl+Tab or app commands. Switching to another module collapses the group again.',
     view_history_name: 'Recent view switching',
     view_history_desc: 'Ctrl+Tab switches back to the previous recent view, such as the exact snippet, task, or note you had open. Press Ctrl+Tab repeatedly in the same sequence to show a compact switcher overlay and cycle through recent views; Ctrl+Shift+Tab cycles backward. The switcher ignores active modal dialogs.',
     html_cards_name: 'Sandbox HTML cards',
@@ -52,6 +52,8 @@ const i18n = {
 
     search_name: 'Repo Search',
     search_desc: 'Search across local git repositories by filename (glob patterns), file content (uses ripgrep if available), or git history. Git search checks both commit messages and changed patch lines, so code-only changes are discoverable. Add named colored repos, group them, toggle which ones to search, and use the scope badge to confirm whether search runs across All, one group, or Ungrouped. The module header has standard Help and Settings buttons; Settings opens a scrollable repository/settings modal instead of an inline Search-panel drawer. Group tabs and repository chips can be reordered by drag-and-drop; repository chips can still be dragged onto group tabs to move repos between groups. Results are grouped by file with context preview on click; expanded content results keep syntax highlighting and line highlights together, provide local in-file search with next/previous navigation plus Open in editor and Copy path actions, and include a History mode with commit date/author metadata and highlighted per-file diffs. Tab auto-unloads after configurable timeout.',
+    clickhouse_name: 'ClickHouse Docs',
+    clickhouse_desc: 'A local ClickHouse documentation browser in the DEV group. It stores a curated set of official ClickHouse raw Markdown docs in the local SQLite database, renders articles as Markdown, and searches at section/function granularity so large function pages return the relevant block instead of the whole article. The Update docs button refreshes the local cache manually from the official ClickHouse docs repository, and Changelog shows added, changed, removed, or failed sources from recent update runs.',
 
     vps_name: 'VPS Management',
     vps_desc: 'Monitor remote servers via SSH. Add named servers with color coding, grouped by environment. Every tile shows inline CPU / RAM / Disk progress bars and a freshness timestamp. Explicit ↻ refresh per tile (click no longer auto-fetches) avoids unwanted SSH connections. Detailed analysis opens a resizable modal with disk tree drill-down, top memory processes, and raw SSH output. Drag ⋮⋮ grip to move a server between environments. Test connection before saving. Supports custom SSH key files and ports, plus one-time import from Windows and Windows-readable WSL SSH config files; repeated imports skip existing server names.',
@@ -84,7 +86,7 @@ const i18n = {
     detached_windows_name: 'Отдельные окна модулей',
     detached_windows_desc: 'Кликните правой кнопкой по модулю в левой панели, чтобы открыть его в отдельном окне без основной левой панели. Для каждого модуля открывается одно окно; повторное открытие выводит его на передний план.',
     sidebar_groups_name: 'Группы модулей в sidebar',
-    sidebar_groups_desc: 'Developer-модули сгруппированы под компактной кнопкой DEV в левой панели. SQL, Superset, Commits и Search раскрываются под DEV по клику или когда один из них активен, включая переход через Ctrl+Tab или команды приложения. При переходе в другой модуль группа снова сворачивается.',
+    sidebar_groups_desc: 'Developer-модули сгруппированы под компактной кнопкой DEV в левой панели. SQL, Superset, Commits, Search и ClickHouse раскрываются под DEV по клику или когда один из них активен, включая переход через Ctrl+Tab или команды приложения. При переходе в другой модуль группа снова сворачивается.',
     view_history_name: 'Переключение недавних представлений',
     view_history_desc: 'Ctrl+Tab возвращает к предыдущему недавнему представлению: конкретному сниппету, задаче или заметке. Повторные Ctrl+Tab в той же последовательности показывают компактный switcher и перебирают недавние представления; Ctrl+Shift+Tab идет назад. При открытых модальных окнах переключатель не срабатывает.',
     html_cards_name: 'Sandbox HTML-карточки',
@@ -123,6 +125,8 @@ const i18n = {
 
     search_name: 'Поиск в репозиториях',
     search_desc: 'Поиск по локальным git-репозиториям: по имени файла (glob), по содержимому (ripgrep если установлен), по истории git. Git-поиск проверяет и сообщения коммитов, и измененные строки патча, поэтому можно найти изменения кода без совпадения в тексте коммита. Добавляйте именованные цветные репозитории, группируйте их, выбирайте где искать и проверяйте scope badge: All, конкретная группа или Ungrouped. В header модуля есть стандартные кнопки справки и настроек; Settings открывает прокручиваемую модалку репозиториев/настроек вместо inline-панели внутри Search. Вкладки групп и чипы репозиториев можно менять местами drag-and-drop; чипы репозиториев по-прежнему можно перетаскивать на вкладку группы для переноса между группами. Результаты группируются по файлу с превью контекста по клику; expanded-режим результатов по содержимому совмещает подсветку синтаксиса и подсветку строк, дает локальный поиск внутри файла со стрелками перехода, Open in editor и Copy path, а также History-режим с датой/автором коммита и подсвеченными diff. Вкладка выгружается из памяти при неиспользовании.',
+    clickhouse_name: 'Документация ClickHouse',
+    clickhouse_desc: 'Локальный справочник ClickHouse в группе DEV. Модуль хранит курируемый набор официальных raw Markdown документов ClickHouse в локальной SQLite базе, рендерит статьи как Markdown и ищет на уровне секций/функций, поэтому большие страницы функций возвращают нужный блок, а не всю статью. Кнопка Update docs вручную обновляет локальный кэш из официального репозитория документации ClickHouse, а Changelog показывает добавленные, измененные, удаленные или неудачно загруженные источники последних обновлений.',
 
     vps_name: 'Управление VPS',
     vps_desc: 'Мониторинг удалённых серверов по SSH. Именованные серверы с цветовым кодированием, группировка по окружениям. На каждой карточке inline-прогрессбары CPU / RAM / Disk + отметка свежести данных. Явный ↻ обновление на карточке (клик больше не фетчит сам — избегаем лишних SSH-коннектов). Детальный анализ открывает растягиваемую модалку с drill-down деревом диска, топом процессов по памяти и сырым SSH-выводом. Drag ⋮⋮ рукоятка — переносит сервер между окружениями. Тест подключения перед сохранением. Поддержка SSH-ключей и кастомных портов, а также разовый импорт из Windows и Windows-readable WSL SSH config файлов; повторный импорт пропускает уже существующие имена серверов.',
@@ -333,6 +337,7 @@ function renderFeatures(container, lang) {
     { name: t(lang, 'settings_name'),  desc: t(lang, 'settings_desc') },
     { name: t(lang, 'exec_name'),      desc: t(lang, 'exec_desc') },
     { name: t(lang, 'search_name'),    desc: t(lang, 'search_desc') },
+    { name: t(lang, 'clickhouse_name'), desc: t(lang, 'clickhouse_desc') },
     { name: t(lang, 'vps_name'),       desc: t(lang, 'vps_desc') },
     { name: t(lang, 'whisper_name'),   desc: t(lang, 'whisper_desc') },
     { name: t(lang, 'speech_provider_setup_name'), desc: t(lang, 'speech_provider_setup_desc') },

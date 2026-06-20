@@ -4351,8 +4351,52 @@ async def run_tests():
 
     await check('T26h Finance row editing preserves scroll and placeholder selection', t26h_finance_row_editing_scroll_and_placeholder)
 
-    # ── T27: Detached module windows ───────────────────────
-    async def t27_detached_module_context_menu_and_standalone_boot():
+    # ── T27: ClickHouse docs module ───────────────────────
+    async def t27_clickhouse_docs_module():
+        await close_modals()
+        placement = await cdp.eval("""(() => {
+          const buttons = [...document.querySelectorAll('.tab-btn[data-tab-id]')];
+          const ids = buttons.map(btn => btn.dataset.tabId);
+          return {
+            ids,
+            searchIndex: ids.indexOf('repo-search'),
+            clickhouseIndex: ids.indexOf('clickhouse-docs'),
+          };
+        })()""")
+        assert placement['clickhouseIndex'] > placement['searchIndex'] >= 0, placement
+
+        await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"clickhouse-docs\"]').click()")
+        await wait_until(cdp, "!!document.querySelector('#panel-clickhouse-docs .ch-docs-shell')", timeout=5)
+        title = await cdp.eval("document.querySelector('#panel-clickhouse-docs .ch-docs-title')?.textContent.trim()")
+        assert title == 'ClickHouse', title
+
+        await cdp.eval("""(() => {
+          const input = document.querySelector('#panel-clickhouse-docs .ch-search-input');
+          input.value = 'arrayCompact';
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        })()""")
+        await wait_until(cdp, "!!document.querySelector('#panel-clickhouse-docs .ch-result-card')", timeout=5)
+        first_result = await cdp.eval("document.querySelector('#panel-clickhouse-docs .ch-result-card')?.textContent")
+        assert first_result and 'arrayCompact' in first_result, first_result
+        await cdp.eval("document.querySelector('#panel-clickhouse-docs .ch-result-card').click()")
+        article_text = await wait_until(
+            cdp,
+            "document.querySelector('#panel-clickhouse-docs .ch-article')?.innerText",
+            timeout=5,
+        )
+        assert 'arrayCompact(arr)' in article_text, article_text[:200]
+        assert 'arrayConcat(arr1' not in article_text, article_text[:400]
+
+        await cdp.eval("document.querySelector('#panel-clickhouse-docs [data-action=\"changelog\"]').click()")
+        await wait_until(cdp, "!!document.querySelector('.modal-overlay .ch-changelog-modal')", timeout=4)
+        changelog_text = await cdp.eval("document.querySelector('.modal-overlay')?.innerText")
+        assert 'ClickHouse Docs Changelog' in changelog_text, changelog_text
+        await close_modals()
+
+    await check('T27 ClickHouse docs module', t27_clickhouse_docs_module)
+
+    # ── T28: Detached module windows ───────────────────────
+    async def t28_detached_module_context_menu_and_standalone_boot():
         await cdp.send('Page.navigate', url=TEST_URL)
         await asyncio.sleep(0.8)
         await wait_until(cdp, "!!document.querySelector('.tab-btn')", timeout=8)
@@ -4431,7 +4475,7 @@ async def run_tests():
             timeout=4,
         )
         assert active_tab == 'notes', f'main window did not keep last_active_tab: {active_tab!r}'
-    await check('T27 Detached module windows', t27_detached_module_context_menu_and_standalone_boot)
+    await check('T28 Detached module windows', t28_detached_module_context_menu_and_standalone_boot)
 
     # Summary
     print()
