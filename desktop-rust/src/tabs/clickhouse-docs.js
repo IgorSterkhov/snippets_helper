@@ -190,7 +190,7 @@ function renderSectionResult(result) {
   main.innerHTML = '';
   main.appendChild(articleHeader(activePage, section.title));
   const article = el('article', { class: 'ch-article' });
-  article.innerHTML = marked(`## ${section.title}\n\n${section.body || ''}`);
+  article.innerHTML = renderMarkdown(`## ${section.title}\n\n${section.body || ''}`);
   main.appendChild(article);
 }
 
@@ -202,9 +202,11 @@ function renderArticle() {
   const article = el('article', { class: 'ch-article' });
   if (activeSectionPath) {
     const section = activePage.sections?.find(s => s.section_path === activeSectionPath);
-    article.innerHTML = section ? marked(`## ${section.title}\n\n${section.body || ''}`) : marked(activePage.markdown || '');
+    article.innerHTML = section
+      ? renderMarkdown(`## ${section.title}\n\n${section.body || ''}`)
+      : renderMarkdown(activePage.markdown || '');
   } else {
-    article.innerHTML = marked(activePage.markdown || '');
+    article.innerHTML = renderMarkdown(activePage.markdown || '');
   }
   main.appendChild(article);
 }
@@ -244,13 +246,25 @@ async function updateDocs(button) {
     const run = await call('update_clickhouse_docs');
     showToast(run.summary || 'ClickHouse docs updated');
     activePage = null;
-    await loadTree({ openFirst: true });
+    await loadTree({ openFirst: false });
+    renderUpdateState(run);
   } catch (err) {
     renderError(`ClickHouse docs update failed: ${err}`);
   } finally {
     button.disabled = false;
     button.textContent = oldText;
   }
+}
+
+function renderUpdateState(run) {
+  const main = root?.querySelector('.ch-main');
+  if (!main) return;
+  main.innerHTML = '';
+  const state = el('div', { class: 'ch-update-state' });
+  state.appendChild(el('div', { class: 'ch-update-title', text: 'ClickHouse docs updated' }));
+  state.appendChild(el('div', { class: 'ch-update-summary', text: run?.summary || 'The local documentation cache is up to date.' }));
+  state.appendChild(el('div', { class: 'ch-update-hint', text: 'Use search or choose a page from the navigation tree.' }));
+  main.appendChild(state);
 }
 
 async function openChangelogModal() {
@@ -316,6 +330,44 @@ function escapeHtml(value) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+function renderMarkdown(markdown) {
+  return marked(normalizeClickHouseMarkdownForRender(markdown || ''));
+}
+
+export function normalizeClickHouseMarkdownForRender(markdown) {
+  const lines = String(markdown || '').split(/\r?\n/);
+  let inFence = false;
+  let fenceMarker = '';
+  let fenceLength = 0;
+  return lines.map((line) => {
+    const trimmed = line.trimStart();
+    const fenceMatch = trimmed.match(/^(`{3,}|~{3,})(.*)$/);
+    if (!fenceMatch) return line;
+
+    const marker = fenceMatch[1];
+    if (!inFence) {
+      inFence = true;
+      fenceMarker = marker[0];
+      fenceLength = marker.length;
+      const info = fenceMatch[2].trim();
+      const lang = sanitizeFenceLanguage(info.split(/\s+/)[0] || '');
+      const indent = line.slice(0, line.length - trimmed.length);
+      return `${indent}${marker}${lang ? lang : ''}`;
+    }
+
+    if (marker[0] === fenceMarker && marker.length >= fenceLength) {
+      inFence = false;
+      fenceMarker = '';
+      fenceLength = 0;
+    }
+    return line;
+  }).join('\n');
+}
+
+function sanitizeFenceLanguage(lang) {
+  return String(lang || '').replace(/[^\w#+.-]/g, '');
 }
 
 function el(tag, opts = {}) {
@@ -527,9 +579,28 @@ function css() {
   }
   .ch-loading,
   .ch-empty,
-  .ch-error {
+  .ch-error,
+  .ch-update-state {
     color: var(--text-muted);
     padding: 12px;
+  }
+  .ch-update-state {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-secondary);
+  }
+  .ch-update-title {
+    color: var(--text-primary);
+    font-size: 16px;
+    font-weight: 700;
+  }
+  .ch-update-summary {
+    margin-top: 6px;
+    color: var(--text-secondary);
+  }
+  .ch-update-hint {
+    margin-top: 8px;
+    font-size: 12px;
   }
   .ch-error {
     color: var(--danger, #f85149);

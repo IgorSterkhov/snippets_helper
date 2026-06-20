@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## f-20260620-3 (2026-06-20)
+
+- **ClickHouse Docs update freeze fix:** ClickHouse markdown rendering now
+  strips Docusaurus code-fence metadata before handing content to the Markdown
+  renderer, preventing the UI from freezing on official docs blocks such as
+  `sql title=Query`. After `Update docs`, the module now shows a lightweight
+  update summary instead of immediately rendering a large article.
+
 ## v1.17.0 (2026-06-20)
 
 - **ClickHouse Docs module:** added a DEV sidebar module with the native

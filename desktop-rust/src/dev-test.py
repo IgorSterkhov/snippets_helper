@@ -4369,6 +4369,17 @@ async def run_tests():
         await wait_until(cdp, "!!document.querySelector('#panel-clickhouse-docs .ch-docs-shell')", timeout=5)
         title = await cdp.eval("document.querySelector('#panel-clickhouse-docs .ch-docs-title')?.textContent.trim()")
         assert title == 'ClickHouse', title
+        normalized_fence = await cdp.eval("""(async () => {
+          const mod = await import('./tabs/clickhouse-docs.js');
+          return [
+            mod.normalizeClickHouseMarkdownForRender("```sql title=Query\\nSELECT 1\\n```"),
+            mod.normalizeClickHouseMarkdownForRender("````sql title=Query\\n```not close\\n````"),
+          ];
+        })()""")
+        assert normalized_fence == [
+            "```sql\nSELECT 1\n```",
+            "````sql\n```not close\n````",
+        ], normalized_fence
 
         await cdp.eval("""(() => {
           const input = document.querySelector('#panel-clickhouse-docs .ch-search-input');
@@ -4392,6 +4403,17 @@ async def run_tests():
         changelog_text = await cdp.eval("document.querySelector('.modal-overlay')?.innerText")
         assert 'ClickHouse Docs Changelog' in changelog_text, changelog_text
         await close_modals()
+
+        await cdp.eval("document.querySelector('#panel-clickhouse-docs [data-action=\"update\"]').click()")
+        update_text = await wait_until(
+            cdp,
+            "document.querySelector('#panel-clickhouse-docs .ch-update-state')?.innerText",
+            timeout=5,
+        )
+        assert 'ClickHouse docs updated' in update_text, update_text
+        assert 'Use search or choose a page' in update_text, update_text
+        article_after_update = await cdp.eval("!!document.querySelector('#panel-clickhouse-docs .ch-article')")
+        assert article_after_update is False, article_after_update
 
     await check('T27 ClickHouse docs module', t27_clickhouse_docs_module)
 
