@@ -1089,9 +1089,12 @@ async function renderUpdates(container) {
   const feApplyBtn = el('button', { text: 'Apply' });
   feApplyBtn.style.display = 'none';
   const feRevertBtn = el('button', { text: 'Revert to previous', class: 'btn-secondary' });
+  const feClearCacheBtn = el('button', { text: 'Clear frontend cache & reload', class: 'btn-secondary' });
+  feClearCacheBtn.title = 'Clear WebView browsing data and reload frontend windows. Use this if a hot update still shows the old UI.';
   feRow.appendChild(feCheckBtn);
   feRow.appendChild(feApplyBtn);
   feRow.appendChild(feRevertBtn);
+  feRow.appendChild(feClearCacheBtn);
   feSection.appendChild(feRow);
   container.appendChild(feSection);
 
@@ -1143,6 +1146,25 @@ async function renderUpdates(container) {
       showToast(String(e), 'error');
     } finally {
       feRevertBtn.disabled = false;
+    }
+  });
+
+  feClearCacheBtn.addEventListener('click', async () => {
+    const ok = window.confirm('Clear WebView browsing data and reload frontend windows? This can reset local UI state such as drafts and collapsed panels.');
+    if (!ok) return;
+    feClearCacheBtn.disabled = true;
+    feClearCacheBtn.textContent = 'Clearing...';
+    try {
+      const errors = await call('clear_frontend_browsing_data');
+      if (Array.isArray(errors) && errors.length) {
+        showToast('Frontend cache cleared with warnings; reloading...', 'info');
+      } else {
+        showToast('Frontend cache cleared; reloading...', 'success');
+      }
+    } catch (e) {
+      showToast('Clear frontend cache failed: ' + e, 'error');
+      feClearCacheBtn.disabled = false;
+      feClearCacheBtn.textContent = 'Clear frontend cache & reload';
     }
   });
 

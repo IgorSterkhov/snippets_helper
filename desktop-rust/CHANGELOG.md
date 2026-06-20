@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v1.15.0 (2026-06-20)
+
+- **Frontend OTA cache prevention:** frontend assets served through `khapp://`
+  now use no-cache headers so macOS WebView reloads pick up the newly applied
+  hot-update bundle. Settings > Updates also has a manual `Clear frontend cache
+  & reload` recovery action for stale WebView cache cases.
+
 ## f-20260620-2 (2026-06-20)
 
 - **Repo Search history metadata:** the expanded file History diff header now

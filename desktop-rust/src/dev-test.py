@@ -279,6 +279,30 @@ async def run_tests():
         await cdp.eval("document.querySelector('.settings-overlay')?.remove()")
     await check('T2b2 Settings modal stable layout', t2b2_settings_modal_layout_stable)
 
+    # ── T2b3: Settings exposes frontend cache reset ──────────
+    async def t2b3_settings_frontend_cache_reset_action():
+        await cdp.eval("""
+          document.querySelector('.settings-overlay')?.remove();
+          document.querySelector('.tab-btn[title="Settings"]').click();
+        """)
+        await wait_until(cdp, "!!document.querySelector('.settings-overlay')", timeout=3)
+        await cdp.eval("[...document.querySelectorAll('.settings-tab-btn')].find(b => b.textContent.trim() === 'Updates').click()")
+        await wait_until(cdp, "document.querySelector('.settings-tab-btn.active')?.textContent.trim() === 'Updates'", timeout=3)
+        button_texts = await cdp.eval("[...document.querySelectorAll('.settings-content button')].map(b => b.textContent.trim())")
+        assert 'Clear frontend cache & reload' in button_texts, button_texts
+        await cdp.eval("""(() => {
+          localStorage.removeItem('mock.clear_frontend_browsing_data_calls');
+          const oldConfirm = window.confirm;
+          window.confirm = () => true;
+          [...document.querySelectorAll('.settings-content button')]
+            .find(b => b.textContent.trim() === 'Clear frontend cache & reload')
+            .click();
+          window.confirm = oldConfirm;
+        })()""")
+        await wait_until(cdp, "localStorage.getItem('mock.clear_frontend_browsing_data_calls') === '1'", timeout=3)
+        await cdp.eval("document.querySelector('.settings-overlay')?.remove()")
+    await check('T2b3 Settings frontend cache reset action', t2b3_settings_frontend_cache_reset_action)
+
     # ── T2c: Settings admin tab is gated by server flag ──────
     async def t2c_admin_settings_tab_visibility():
         await cdp.eval("""
@@ -703,10 +727,13 @@ async def run_tests():
     # ── T2k: Whisper overlay is reloaded after frontend OTA ─
     async def t2k_whisper_overlay_reload_contract():
         ota_rs_path = os.path.join(SRC_DIR, '..', 'src-tauri', 'src', 'commands', 'ota.rs')
+        lib_rs_path = os.path.join(SRC_DIR, '..', 'src-tauri', 'src', 'lib.rs')
         service_rs_path = os.path.join(SRC_DIR, '..', 'src-tauri', 'src', 'whisper', 'service.rs')
         capabilities_path = os.path.join(SRC_DIR, '..', 'src-tauri', 'capabilities', 'default.json')
         with open(ota_rs_path, 'r', encoding='utf-8') as f:
             ota_rs = f.read()
+        with open(lib_rs_path, 'r', encoding='utf-8') as f:
+            lib_rs = f.read()
         with open(service_rs_path, 'r', encoding='utf-8') as f:
             service_rs = f.read()
         with open(capabilities_path, 'r', encoding='utf-8') as f:
@@ -715,6 +742,10 @@ async def run_tests():
         assert 'webview_windows()' in ota_rs, 'frontend OTA should iterate every open WebView window'
         assert 'label == "whisper-overlay"' in ota_rs, 'frontend OTA should explicitly reload the hidden overlay window'
         assert 'label.starts_with("module_")' in ota_rs, 'frontend OTA should reload detached module windows'
+        assert 'clear_all_browsing_data' in ota_rs, 'manual frontend cache reset should use Tauri WebView browsing-data clear'
+        assert 'clear_frontend_browsing_data,' in lib_rs, 'manual frontend cache reset command should be registered'
+        assert 'Cache-Control' in lib_rs and 'no-store, no-cache' in lib_rs, 'khapp frontend assets should disable WebView caching'
+        assert 'Pragma' in lib_rs and 'Expires' in lib_rs, 'khapp frontend assets should include legacy no-cache headers'
         assert 'reload_overlay_document' in service_rs, 'show_overlay should refresh a stale hidden overlay document before showing it'
         assert '.reload()' in service_rs, 'overlay refresh should use the native WebView reload API'
         assert 'module_*' in capabilities.get('windows', []), 'detached module windows must have Tauri IPC permissions'

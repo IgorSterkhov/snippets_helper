@@ -239,21 +239,45 @@ pub async fn apply_frontend_update(app: AppHandle, version: String) -> Result<()
     fs::write(&tentative, &version).map_err(|e| e.to_string())?;
 
     cleanup_old_frontends(&root, &version)?;
-
     reload_frontend_windows(&app);
     Ok(())
 }
 
+fn is_frontend_window_label(label: &str) -> bool {
+    label == "main"
+        || label == "whisper-overlay"
+        || label == crate::commands::micro_picker::picker_label()
+        || label.starts_with("module_")
+}
+
+fn clear_frontend_browsing_data_for_frontend_windows(app: &AppHandle) -> Vec<String> {
+    let mut errors = Vec::new();
+    for (label, window) in app.webview_windows() {
+        if !is_frontend_window_label(&label) {
+            continue;
+        }
+        if let Err(err) = window.clear_all_browsing_data() {
+            let message = format!("{label}: {err}");
+            eprintln!("[ota] clear browsing data failed: {message}");
+            errors.push(message);
+        }
+    }
+    errors
+}
+
 fn reload_frontend_windows(app: &AppHandle) {
     for (label, window) in app.webview_windows() {
-        if label == "main"
-            || label == "whisper-overlay"
-            || label == crate::commands::micro_picker::picker_label()
-            || label.starts_with("module_")
-        {
+        if is_frontend_window_label(&label) {
             let _ = window.reload();
         }
     }
+}
+
+#[tauri::command]
+pub async fn clear_frontend_browsing_data(app: AppHandle) -> Result<Vec<String>, String> {
+    let clear_errors = clear_frontend_browsing_data_for_frontend_windows(&app);
+    reload_frontend_windows(&app);
+    Ok(clear_errors)
 }
 
 /// Called by the frontend once it has successfully booted. Clears the

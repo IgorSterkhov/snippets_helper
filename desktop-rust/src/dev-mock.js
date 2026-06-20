@@ -1052,6 +1052,11 @@
     },
     async download_frontend_update() { return; },
     async apply_frontend_update() { return; },
+    async clear_frontend_browsing_data() {
+      const count = Number(localStorage.getItem('mock.clear_frontend_browsing_data_calls') || '0');
+      localStorage.setItem('mock.clear_frontend_browsing_data_calls', String(count + 1));
+      return [];
+    },
     async revert_frontend() { return '0.9.5-f0'; },
     async drop_frontend_override() { return; },
     async confirm_frontend_boot() { return; },

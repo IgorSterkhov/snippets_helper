@@ -90,6 +90,9 @@ pub fn run() {
                             .status(StatusCode::OK)
                             .header("Content-Type", mime)
                             .header("Access-Control-Allow-Origin", "*")
+                            .header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+                            .header("Pragma", "no-cache")
+                            .header("Expires", "0")
                             .body(bytes)
                             .unwrap();
                     }
@@ -103,6 +106,9 @@ pub fn run() {
                     .status(StatusCode::OK)
                     .header("Content-Type", mime)
                     .header("Access-Control-Allow-Origin", "*")
+                    .header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+                    .header("Pragma", "no-cache")
+                    .header("Expires", "0")
                     .body(asset.bytes)
                     .unwrap();
             }
@@ -287,6 +293,7 @@ pub fn run() {
             commands::ota::check_frontend_update,
             commands::ota::download_frontend_update,
             commands::ota::apply_frontend_update,
+            commands::ota::clear_frontend_browsing_data,
             commands::ota::revert_frontend,
             commands::ota::drop_frontend_override,
             commands::ota::confirm_frontend_boot,
