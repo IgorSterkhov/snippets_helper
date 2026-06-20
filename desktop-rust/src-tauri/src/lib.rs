@@ -64,6 +64,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(db)
+        .manage(commands::clickhouse_docs::ClickHouseDocUpdateProgressState::default())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
@@ -276,6 +277,7 @@ pub fn run() {
             commands::clickhouse_docs::get_clickhouse_doc_page,
             commands::clickhouse_docs::search_clickhouse_docs,
             commands::clickhouse_docs::update_clickhouse_docs,
+            commands::clickhouse_docs::get_clickhouse_doc_update_progress,
             commands::clickhouse_docs::list_clickhouse_doc_update_runs,
             commands::clickhouse_docs::list_clickhouse_doc_changes,
             // VPS

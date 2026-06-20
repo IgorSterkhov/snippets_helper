@@ -20,6 +20,10 @@
     return cur;
   }
   function now() { return new Date().toISOString(); }
+  function nowMs() { return Date.now(); }
+  function emitMockEvent(name, payload) {
+    window.dispatchEvent(new CustomEvent(name, { detail: payload }));
+  }
   function uuid() {
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
       const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
@@ -1933,10 +1937,12 @@
     },
     async update_clickhouse_docs() {
       const runs = storeGet('clickhouse_doc_update_runs', []);
+      const startedMs = nowMs();
+      const finishedMs = startedMs + 1000;
       const run = {
         id: runs.length + 1,
-        started_at: now(),
-        finished_at: now(),
+        started_at: new Date(startedMs).toISOString(),
+        finished_at: new Date(finishedMs).toISOString(),
         status: 'success',
         pages_checked: 2,
         pages_updated: 2,
@@ -1950,7 +1956,55 @@
       storeSet(`clickhouse_doc_changes.${run.id}`, [
         { id: 1, run_id: run.id, change_type: 'added', item_type: 'section', title: 'arrayCompact', source_url: 'mock://clickhouse/array-functions.md', details: "Added section 'arrayCompact'" },
       ]);
+      const progress = {
+        running: false,
+        phase: 'done',
+        message: 'Complete',
+        current: 2,
+        total: 2,
+        remaining: 0,
+        percent: 100,
+        started_at: run.started_at,
+        finished_at: run.finished_at,
+        started_at_ms: startedMs,
+        finished_at_ms: finishedMs,
+        elapsed_ms: 1000,
+        pages_checked: run.pages_checked,
+        pages_updated: run.pages_updated,
+        sections_added: run.sections_added,
+        sections_changed: run.sections_changed,
+        sections_removed: run.sections_removed,
+        failed_urls: run.failed_urls,
+        summary: run.summary,
+        error: null,
+      };
+      storeSet('clickhouse_doc_update_progress', progress);
+      emitMockEvent('clickhouse-doc-update-progress', progress);
       return run;
+    },
+    async get_clickhouse_doc_update_progress() {
+      return storeGet('clickhouse_doc_update_progress', {
+        running: false,
+        phase: 'idle',
+        message: 'ClickHouse docs update has not run in this session.',
+        current: 0,
+        total: 0,
+        remaining: 0,
+        percent: 0,
+        started_at: null,
+        finished_at: null,
+        started_at_ms: null,
+        finished_at_ms: null,
+        elapsed_ms: 0,
+        pages_checked: 0,
+        pages_updated: 0,
+        sections_added: 0,
+        sections_changed: 0,
+        sections_removed: 0,
+        failed_urls: 0,
+        summary: '',
+        error: null,
+      });
     },
     async list_clickhouse_doc_update_runs() {
       const runs = storeGet('clickhouse_doc_update_runs', null);

@@ -7,26 +7,40 @@ let root = null;
 let tree = { pages: [], page_count: 0, section_count: 0, last_update_at: null };
 let activePage = null;
 let activeSectionPath = '';
+let pageCache = new Map();
 let searchTimer = null;
+let updateProgress = null;
+let updateUnlisten = null;
+let updateElapsedTimer = null;
 
 export function init(container) {
   root = container;
+  pageCache = new Map();
   root.innerHTML = '';
   const style = document.createElement('style');
   style.textContent = css();
   root.appendChild(style);
   root.appendChild(buildShell());
+  setupUpdateProgressListener();
+  loadUpdateProgress();
   loadTree();
 }
 
 export function destroy() {
   clearTimeout(searchTimer);
   searchTimer = null;
+  stopUpdateElapsedTimer();
+  if (typeof updateUnlisten === 'function') {
+    updateUnlisten();
+  }
+  updateUnlisten = null;
   if (root) root.innerHTML = '';
   root = null;
   tree = { pages: [], page_count: 0, section_count: 0, last_update_at: null };
   activePage = null;
   activeSectionPath = '';
+  updateProgress = null;
+  pageCache.clear();
 }
 
 function buildShell() {
@@ -61,6 +75,7 @@ function buildShell() {
   actions.appendChild(changelogBtn);
   header.appendChild(actions);
   shell.appendChild(header);
+  shell.appendChild(el('section', { class: 'ch-update-progress', hidden: true }));
 
   const body = el('div', { class: 'ch-body' });
   body.appendChild(el('aside', { class: 'ch-nav' }));
@@ -75,6 +90,7 @@ async function loadTree({ openFirst = true } = {}) {
   try {
     tree = await call('list_clickhouse_doc_tree');
     renderStatus();
+    renderUpdateProgress();
     renderNav();
     if (openFirst && !activePage && tree.pages?.[0]) {
       await openPage(tree.pages[0].id);
@@ -106,13 +122,27 @@ function renderNav() {
     const group = el('div', { class: 'ch-nav-group' });
     group.appendChild(el('div', { class: 'ch-nav-category', text: category }));
     for (const page of pages) {
+      const isActivePage = activePage?.id === page.id;
       const btn = el('button', {
-        class: 'ch-nav-page' + (activePage?.id === page.id ? ' active' : ''),
+        class: 'ch-nav-page' + (isActivePage ? ' active' : ''),
         text: page.title,
       });
       btn.type = 'button';
       btn.addEventListener('click', () => openPage(page.id));
       group.appendChild(btn);
+      if (isActivePage && activePage?.sections?.length) {
+        const sections = el('div', { class: 'ch-nav-sections' });
+        for (const section of activePage.sections) {
+          const sectionBtn = el('button', {
+            class: 'ch-nav-section' + (activeSectionPath === section.section_path ? ' active' : ''),
+            text: section.title,
+          });
+          sectionBtn.type = 'button';
+          sectionBtn.addEventListener('click', () => openPage(page.id, section.section_path));
+          sections.appendChild(sectionBtn);
+        }
+        group.appendChild(sections);
+      }
     }
     nav.appendChild(group);
   }
@@ -120,19 +150,27 @@ function renderNav() {
 
 async function openPage(pageId, sectionPath = '') {
   try {
-    activePage = await call('get_clickhouse_doc_page', { pageId });
+    activePage = await loadPage(pageId);
     activeSectionPath = sectionPath || '';
     renderNav();
-    renderArticle();
+    renderPageContent();
   } catch (err) {
     renderError(`Failed to open ClickHouse page: ${err}`);
   }
 }
 
+async function loadPage(pageId) {
+  const key = String(pageId);
+  if (!pageCache.has(key)) {
+    pageCache.set(key, await call('get_clickhouse_doc_page', { pageId }));
+  }
+  return pageCache.get(key);
+}
+
 async function runSearch(query) {
   const q = (query || '').trim();
   if (!q) {
-    if (activePage) renderArticle();
+    if (activePage) renderPageContent();
     else renderEmptyState();
     return;
   }
@@ -172,17 +210,32 @@ function renderSearchResults(query, results) {
       await openPage(result.page_id, result.section_path);
       const input = root?.querySelector('.ch-search-input');
       if (input) input.value = '';
-      renderSectionResult(result);
     });
     list.appendChild(card);
   }
   main.appendChild(list);
 }
 
-function renderSectionResult(result) {
-  const section = activePage?.sections?.find(s => s.section_path === result.section_path);
+function renderPageContent() {
+  if (!activePage) {
+    renderEmptyState();
+    return;
+  }
+  if (activeSectionPath) {
+    renderSection(activeSectionPath);
+    return;
+  }
+  if (activePage.sections?.length) {
+    renderSectionIndex();
+    return;
+  }
+  renderFullArticle();
+}
+
+function renderSection(sectionPath) {
+  const section = activePage?.sections?.find(s => s.section_path === sectionPath);
   if (!section) {
-    renderArticle();
+    renderSectionIndex();
     return;
   }
   const main = root?.querySelector('.ch-main');
@@ -194,20 +247,39 @@ function renderSectionResult(result) {
   main.appendChild(article);
 }
 
-function renderArticle() {
+function renderSectionIndex() {
+  const main = root?.querySelector('.ch-main');
+  if (!main || !activePage) return;
+  main.innerHTML = '';
+  main.appendChild(articleHeader(activePage));
+  const index = el('div', { class: 'ch-section-index' });
+  index.appendChild(el('div', {
+    class: 'ch-section-index-head',
+    text: `${activePage.sections.length} section${activePage.sections.length === 1 ? '' : 's'}`,
+  }));
+  const list = el('div', { class: 'ch-section-index-list' });
+  for (const section of activePage.sections) {
+    const card = el('button', { class: 'ch-section-card' });
+    card.type = 'button';
+    card.dataset.sectionPath = section.section_path;
+    card.innerHTML = `
+      <div class="ch-section-card-title">${escapeHtml(section.title)}</div>
+      <div class="ch-section-card-excerpt">${escapeHtml(section.body || '').replace(/\s+/g, ' ').slice(0, 180)}</div>
+    `;
+    card.addEventListener('click', () => openPage(activePage.id, section.section_path));
+    list.appendChild(card);
+  }
+  index.appendChild(list);
+  main.appendChild(index);
+}
+
+function renderFullArticle() {
   const main = root?.querySelector('.ch-main');
   if (!main || !activePage) return;
   main.innerHTML = '';
   main.appendChild(articleHeader(activePage));
   const article = el('article', { class: 'ch-article' });
-  if (activeSectionPath) {
-    const section = activePage.sections?.find(s => s.section_path === activeSectionPath);
-    article.innerHTML = section
-      ? renderMarkdown(`## ${section.title}\n\n${section.body || ''}`)
-      : renderMarkdown(activePage.markdown || '');
-  } else {
-    article.innerHTML = renderMarkdown(activePage.markdown || '');
-  }
+  article.innerHTML = renderMarkdown(activePage.markdown || '');
   main.appendChild(article);
 }
 
@@ -244,16 +316,136 @@ async function updateDocs(button) {
   button.textContent = 'Updating...';
   try {
     const run = await call('update_clickhouse_docs');
+    if (!root) return;
     showToast(run.summary || 'ClickHouse docs updated');
     activePage = null;
+    activeSectionPath = '';
+    pageCache.clear();
     await loadTree({ openFirst: false });
     renderUpdateState(run);
   } catch (err) {
-    renderError(`ClickHouse docs update failed: ${err}`);
+    await loadUpdateProgress();
+    if (root) renderError(`ClickHouse docs update failed: ${err}`);
   } finally {
-    button.disabled = false;
-    button.textContent = oldText;
+    if (button?.isConnected) {
+      if (updateProgress?.running) {
+        button.disabled = true;
+        button.textContent = 'Updating...';
+      } else {
+        button.disabled = false;
+        button.textContent = oldText;
+      }
+    }
   }
+}
+
+async function loadUpdateProgress() {
+  try {
+    updateProgress = await call('get_clickhouse_doc_update_progress');
+    renderUpdateProgress();
+    if (updateProgress?.running) startUpdateElapsedTimer();
+  } catch (err) {
+    console.warn('[clickhouse-docs] failed to load update progress', err);
+  }
+}
+
+async function setupUpdateProgressListener() {
+  const listen = await waitForEventListen();
+  if (!listen || !root) return;
+  try {
+    updateUnlisten = await listen('clickhouse-doc-update-progress', async (event) => {
+      updateProgress = event?.payload || null;
+      renderUpdateProgress();
+      if (updateProgress?.running) {
+        startUpdateElapsedTimer();
+        return;
+      }
+      stopUpdateElapsedTimer();
+      if (root && updateProgress?.phase === 'done') {
+        activePage = null;
+        activeSectionPath = '';
+        pageCache.clear();
+        await loadTree({ openFirst: false });
+        renderUpdateState(updateProgress);
+      }
+    });
+  } catch (err) {
+    console.warn('[clickhouse-docs] failed to subscribe to update progress', err);
+  }
+}
+
+async function waitForEventListen(timeoutMs = 2500) {
+  const started = Date.now();
+  while (Date.now() - started <= timeoutMs) {
+    const listen = window.__TAURI__?.event?.listen;
+    if (typeof listen === 'function') return listen;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  return null;
+}
+
+function startUpdateElapsedTimer() {
+  if (updateElapsedTimer) return;
+  updateElapsedTimer = setInterval(() => {
+    if (!updateProgress?.running) {
+      stopUpdateElapsedTimer();
+      return;
+    }
+    if (updateProgress.started_at_ms) {
+      updateProgress.elapsed_ms = Math.max(0, Date.now() - updateProgress.started_at_ms);
+    }
+    renderUpdateProgress();
+  }, 1000);
+}
+
+function stopUpdateElapsedTimer() {
+  if (!updateElapsedTimer) return;
+  clearInterval(updateElapsedTimer);
+  updateElapsedTimer = null;
+}
+
+function renderUpdateProgress() {
+  const panel = root?.querySelector('.ch-update-progress');
+  if (!panel) return;
+  const progress = updateProgress || {};
+  const phase = progress.phase || 'idle';
+  const hasResult = Boolean(progress.summary || progress.error || progress.finished_at);
+  if (phase === 'idle' && !progress.running && !hasResult) {
+    setUpdateButtonRunning(false);
+    panel.hidden = true;
+    panel.innerHTML = '';
+    return;
+  }
+  const percent = clampPercent(progress.percent);
+  const running = Boolean(progress.running);
+  const isError = phase === 'error' || Boolean(progress.error);
+  const title = running ? 'Updating ClickHouse docs' : isError ? 'Update failed' : 'Complete';
+  const summary = progress.summary || progress.error || progress.message || 'The local documentation cache is up to date.';
+  const elapsed = formatDuration(progress.elapsed_ms || 0);
+  const countLine = running
+    ? `${progress.current || 0}/${progress.total || 0} source page(s) · ${progress.remaining || 0} remaining · ${Math.round(percent)}% · ${elapsed}`
+    : `Last update ${formatDate(progress.finished_at || progress.started_at)} · ${Math.round(percent)}% · ${tree.page_count || 0} page(s) · ${tree.section_count || 0} section(s) · ${elapsed}`;
+  panel.hidden = false;
+  panel.className = `ch-update-progress ${running ? 'running' : isError ? 'error' : 'done'}`;
+  setUpdateButtonRunning(running);
+  panel.innerHTML = `
+    <div class="ch-update-progress-main">
+      <div class="ch-update-progress-title">${escapeHtml(title)}</div>
+      <div class="ch-update-progress-message">${escapeHtml(progress.message || summary)}</div>
+      <div class="ch-update-progress-meta">${escapeHtml(countLine)}</div>
+      <div class="ch-update-progress-summary">${escapeHtml(summary)}</div>
+    </div>
+    <div class="ch-update-progress-meter" aria-label="ClickHouse update progress">
+      <div class="ch-update-progress-fill" style="width: ${percent}%"></div>
+    </div>
+  `;
+}
+
+function setUpdateButtonRunning(running) {
+  const button = root?.querySelector('[data-action="update"]');
+  if (!button) return;
+  button.disabled = Boolean(running);
+  button.textContent = running ? 'Updating...' : 'Update docs';
 }
 
 function renderUpdateState(run) {
@@ -323,6 +515,20 @@ function formatDate(value) {
   return date.toLocaleString();
 }
 
+function formatDuration(ms) {
+  const totalSeconds = Math.max(0, Math.round(Number(ms || 0) / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes <= 0) return `${seconds}s`;
+  return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
+}
+
+function clampPercent(value) {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number)) return 0;
+  return Math.max(0, Math.min(100, number));
+}
+
 function escapeHtml(value) {
   return String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -374,6 +580,7 @@ function el(tag, opts = {}) {
   const node = document.createElement(tag);
   if (opts.class) node.className = opts.class;
   if (opts.text !== undefined) node.textContent = opts.text;
+  if (opts.hidden) node.hidden = true;
   return node;
 }
 
@@ -443,6 +650,58 @@ function css() {
     opacity: 0.6;
     cursor: default;
   }
+  .ch-update-progress {
+    border-bottom: 1px solid var(--border);
+    padding: 9px 14px 10px;
+    background: rgba(244, 196, 48, 0.08);
+  }
+  .ch-update-progress[hidden] {
+    display: none;
+  }
+  .ch-update-progress.error {
+    background: rgba(239, 68, 68, 0.11);
+  }
+  .ch-update-progress-main {
+    display: grid;
+    grid-template-columns: minmax(150px, 220px) minmax(180px, 1fr) auto;
+    gap: 10px;
+    align-items: baseline;
+  }
+  .ch-update-progress-title {
+    font-size: 13px;
+    font-weight: 700;
+  }
+  .ch-update-progress-message,
+  .ch-update-progress-summary {
+    min-width: 0;
+    color: var(--text-secondary);
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ch-update-progress-meta {
+    color: var(--text-muted);
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .ch-update-progress-meter {
+    height: 5px;
+    margin-top: 7px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+  }
+  .ch-update-progress-fill {
+    height: 100%;
+    width: 0;
+    border-radius: inherit;
+    background: linear-gradient(90deg, rgba(244, 196, 48, 0.85), rgba(96, 165, 250, 0.85));
+    transition: width 160ms ease;
+  }
+  .ch-update-progress.error .ch-update-progress-fill {
+    background: rgba(239, 68, 68, 0.85);
+  }
   .ch-body {
     min-height: 0;
     flex: 1;
@@ -483,6 +742,35 @@ function css() {
   .ch-nav-page.active {
     border-color: rgba(244, 196, 48, 0.45);
     background: rgba(244, 196, 48, 0.12);
+  }
+  .ch-nav-sections {
+    margin: 4px 0 2px 10px;
+    padding-left: 9px;
+    border-left: 1px solid rgba(244, 196, 48, 0.24);
+    display: grid;
+    gap: 2px;
+  }
+  .ch-nav-section {
+    width: 100%;
+    min-height: 24px;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    padding: 3px 7px;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.25;
+    text-align: left;
+    cursor: pointer;
+  }
+  .ch-nav-section:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.045);
+  }
+  .ch-nav-section.active {
+    border-color: rgba(244, 196, 48, 0.38);
+    color: var(--text-primary);
+    background: rgba(244, 196, 48, 0.1);
   }
   .ch-main {
     min-width: 0;
@@ -538,6 +826,42 @@ function css() {
     margin-top: 6px;
     color: var(--text-secondary);
     line-height: 1.45;
+  }
+  .ch-section-index {
+    max-width: 1040px;
+  }
+  .ch-section-index-head {
+    margin-bottom: 8px;
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+  .ch-section-index-list {
+    display: grid;
+    gap: 7px;
+  }
+  .ch-section-card {
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    text-align: left;
+    cursor: pointer;
+  }
+  .ch-section-card:hover {
+    border-color: rgba(244, 196, 48, 0.45);
+    background: rgba(244, 196, 48, 0.08);
+  }
+  .ch-section-card-title {
+    font-size: 14px;
+    font-weight: 700;
+  }
+  .ch-section-card-excerpt {
+    margin-top: 4px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.35;
   }
   .ch-article-header h2 {
     margin: 2px 0 0;

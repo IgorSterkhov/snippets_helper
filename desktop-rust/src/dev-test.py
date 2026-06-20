@@ -4369,6 +4369,18 @@ async def run_tests():
         await wait_until(cdp, "!!document.querySelector('#panel-clickhouse-docs .ch-docs-shell')", timeout=5)
         title = await cdp.eval("document.querySelector('#panel-clickhouse-docs .ch-docs-title')?.textContent.trim()")
         assert title == 'ClickHouse', title
+        page_index_text = await wait_until(
+            cdp,
+            "document.querySelector('#panel-clickhouse-docs .ch-section-index')?.innerText",
+            timeout=5,
+        )
+        assert 'arrayCompact' in page_index_text, page_index_text
+        expanded_nav_sections = await cdp.eval(
+            "document.querySelectorAll('#panel-clickhouse-docs .ch-nav-section').length"
+        )
+        assert expanded_nav_sections >= 3, expanded_nav_sections
+        article_on_page_index = await cdp.eval("!!document.querySelector('#panel-clickhouse-docs .ch-article')")
+        assert article_on_page_index is False, article_on_page_index
         normalized_fence = await cdp.eval("""(async () => {
           const mod = await import('./tabs/clickhouse-docs.js');
           return [
@@ -4407,13 +4419,24 @@ async def run_tests():
         await cdp.eval("document.querySelector('#panel-clickhouse-docs [data-action=\"update\"]').click()")
         update_text = await wait_until(
             cdp,
-            "document.querySelector('#panel-clickhouse-docs .ch-update-state')?.innerText",
+            "document.querySelector('#panel-clickhouse-docs .ch-update-progress')?.innerText",
             timeout=5,
         )
-        assert 'ClickHouse docs updated' in update_text, update_text
-        assert 'Use search or choose a page' in update_text, update_text
+        assert 'Complete' in update_text, update_text
+        assert '100%' in update_text, update_text
+        assert '2 page(s) checked' in update_text, update_text
+        assert 'Last update' in update_text, update_text
         article_after_update = await cdp.eval("!!document.querySelector('#panel-clickhouse-docs .ch-article')")
         assert article_after_update is False, article_after_update
+        await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"tasks\"]').click()")
+        await wait_until(cdp, "!!document.querySelector('#panel-tasks')", timeout=5)
+        await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"clickhouse-docs\"]').click()")
+        persisted_update_text = await wait_until(
+            cdp,
+            "document.querySelector('#panel-clickhouse-docs .ch-update-progress')?.innerText",
+            timeout=5,
+        )
+        assert '2 page(s) checked' in persisted_update_text, persisted_update_text
 
     await check('T27 ClickHouse docs module', t27_clickhouse_docs_module)
 

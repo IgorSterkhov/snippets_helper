@@ -5,10 +5,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::sync::Mutex;
 use std::time::Duration;
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 
 const DEFAULT_LIMIT: usize = 50;
+const UPDATE_PROGRESS_EVENT: &str = "clickhouse-doc-update-progress";
 
 #[derive(Clone, Debug)]
 struct DocSource {
@@ -199,6 +201,83 @@ pub struct ClickHouseDocUpdateRun {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ClickHouseDocUpdateProgress {
+    pub running: bool,
+    pub phase: String,
+    pub message: String,
+    pub current: i64,
+    pub total: i64,
+    pub remaining: i64,
+    pub percent: f64,
+    pub started_at: Option<String>,
+    pub finished_at: Option<String>,
+    pub started_at_ms: Option<i64>,
+    pub finished_at_ms: Option<i64>,
+    pub elapsed_ms: i64,
+    pub pages_checked: i64,
+    pub pages_updated: i64,
+    pub sections_added: i64,
+    pub sections_changed: i64,
+    pub sections_removed: i64,
+    pub failed_urls: i64,
+    pub summary: String,
+    pub error: Option<String>,
+}
+
+impl Default for ClickHouseDocUpdateProgress {
+    fn default() -> Self {
+        Self {
+            running: false,
+            phase: "idle".to_string(),
+            message: "ClickHouse docs update has not run in this session.".to_string(),
+            current: 0,
+            total: 0,
+            remaining: 0,
+            percent: 0.0,
+            started_at: None,
+            finished_at: None,
+            started_at_ms: None,
+            finished_at_ms: None,
+            elapsed_ms: 0,
+            pages_checked: 0,
+            pages_updated: 0,
+            sections_added: 0,
+            sections_changed: 0,
+            sections_removed: 0,
+            failed_urls: 0,
+            summary: String::new(),
+            error: None,
+        }
+    }
+}
+
+pub struct ClickHouseDocUpdateProgressState(pub Mutex<ClickHouseDocUpdateProgress>);
+
+impl Default for ClickHouseDocUpdateProgressState {
+    fn default() -> Self {
+        Self(Mutex::new(ClickHouseDocUpdateProgress::default()))
+    }
+}
+
+impl ClickHouseDocUpdateProgressState {
+    fn snapshot(&self) -> ClickHouseDocUpdateProgress {
+        let mut progress = self
+            .0
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .clone();
+        refresh_elapsed(&mut progress);
+        progress
+    }
+
+    fn set(&self, progress: ClickHouseDocUpdateProgress) -> ClickHouseDocUpdateProgress {
+        let mut guard = self.0.lock().unwrap_or_else(|poison| poison.into_inner());
+        *guard = progress;
+        guard.clone()
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ClickHouseDocChange {
     pub id: i64,
     pub run_id: i64,
@@ -276,15 +355,119 @@ pub fn list_clickhouse_doc_changes(state: State<DbState>, run_id: i64) -> Result
 }
 
 #[tauri::command]
-pub async fn update_clickhouse_docs(state: State<'_, DbState>) -> Result<Value, String> {
-    let started_at = Utc::now().to_rfc3339();
-    let fetched_pages = fetch_doc_sources().await;
-    let mut conn = state.lock_recover();
-    let run = apply_doc_update(&mut conn, &started_at, fetched_pages)?;
-    serde_json::to_value(run).map_err(|e| e.to_string())
+pub fn get_clickhouse_doc_update_progress(
+    progress_state: State<'_, ClickHouseDocUpdateProgressState>,
+) -> Result<Value, String> {
+    serde_json::to_value(progress_state.snapshot()).map_err(|e| e.to_string())
 }
 
-async fn fetch_doc_sources() -> Vec<Result<ParsedDocPage, FailedDocSource>> {
+#[tauri::command]
+pub async fn update_clickhouse_docs(
+    app: AppHandle,
+    state: State<'_, DbState>,
+    progress_state: State<'_, ClickHouseDocUpdateProgressState>,
+) -> Result<Value, String> {
+    if progress_state.snapshot().running {
+        return Err("ClickHouse docs update is already running".to_string());
+    }
+
+    let started = Utc::now();
+    let started_at = started.to_rfc3339();
+    let started_at_ms = started.timestamp_millis();
+    emit_update_progress(
+        &app,
+        &progress_state,
+        progress_snapshot(
+            true,
+            "fetching",
+            "Starting ClickHouse docs update",
+            0,
+            DOC_SOURCES.len() as i64,
+            Some(started_at.clone()),
+            Some(started_at_ms),
+            None,
+            None,
+            None,
+            None,
+        ),
+    );
+
+    let fetched_pages = fetch_doc_sources(&app, &progress_state, &started_at, started_at_ms).await;
+    emit_update_progress(
+        &app,
+        &progress_state,
+        progress_snapshot(
+            true,
+            "applying",
+            "Applying parsed ClickHouse docs to the local cache",
+            DOC_SOURCES.len() as i64,
+            DOC_SOURCES.len() as i64,
+            Some(started_at.clone()),
+            Some(started_at_ms),
+            None,
+            None,
+            None,
+            None,
+        ),
+    );
+
+    let run_result = {
+        let mut conn = state.lock_recover();
+        apply_doc_update(&mut conn, &started_at, fetched_pages)
+    };
+
+    match run_result {
+        Ok(run) => {
+            let finished = Utc::now();
+            emit_update_progress(
+                &app,
+                &progress_state,
+                progress_snapshot(
+                    false,
+                    "done",
+                    "Complete",
+                    DOC_SOURCES.len() as i64,
+                    DOC_SOURCES.len() as i64,
+                    Some(started_at),
+                    Some(started_at_ms),
+                    Some(finished.to_rfc3339()),
+                    Some(finished.timestamp_millis()),
+                    Some(&run),
+                    None,
+                ),
+            );
+            serde_json::to_value(run).map_err(|e| e.to_string())
+        }
+        Err(error) => {
+            let finished = Utc::now();
+            emit_update_progress(
+                &app,
+                &progress_state,
+                progress_snapshot(
+                    false,
+                    "error",
+                    "ClickHouse docs update failed",
+                    DOC_SOURCES.len() as i64,
+                    DOC_SOURCES.len() as i64,
+                    Some(started_at),
+                    Some(started_at_ms),
+                    Some(finished.to_rfc3339()),
+                    Some(finished.timestamp_millis()),
+                    None,
+                    Some(error.clone()),
+                ),
+            );
+            Err(error)
+        }
+    }
+}
+
+async fn fetch_doc_sources(
+    app: &AppHandle,
+    progress_state: &ClickHouseDocUpdateProgressState,
+    started_at: &str,
+    started_at_ms: i64,
+) -> Vec<Result<ParsedDocPage, FailedDocSource>> {
     let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(25))
         .user_agent("snippets-helper-clickhouse-docs/1.0")
@@ -306,7 +489,24 @@ async fn fetch_doc_sources() -> Vec<Result<ParsedDocPage, FailedDocSource>> {
     };
 
     let mut results = Vec::new();
-    for source in DOC_SOURCES {
+    for (index, source) in DOC_SOURCES.iter().enumerate() {
+        emit_update_progress(
+            app,
+            progress_state,
+            progress_snapshot(
+                true,
+                "fetching",
+                &format!("Fetching {}", source.title),
+                index as i64,
+                DOC_SOURCES.len() as i64,
+                Some(started_at.to_string()),
+                Some(started_at_ms),
+                None,
+                None,
+                None,
+                None,
+            ),
+        );
         let result = async {
             let raw_markdown = client
                 .get(source.source_url)
@@ -336,9 +536,100 @@ async fn fetch_doc_sources() -> Vec<Result<ParsedDocPage, FailedDocSource>> {
             title: source.title.to_string(),
             error,
         });
+        let message = match &result {
+            Ok(page) => format!("Parsed {} ({} sections)", page.title, page.sections.len()),
+            Err(failed) => format!("Failed {}: {}", failed.title, failed.error),
+        };
+        emit_update_progress(
+            app,
+            progress_state,
+            progress_snapshot(
+                true,
+                "fetching",
+                &message,
+                index as i64 + 1,
+                DOC_SOURCES.len() as i64,
+                Some(started_at.to_string()),
+                Some(started_at_ms),
+                None,
+                None,
+                None,
+                None,
+            ),
+        );
         results.push(result);
     }
     results
+}
+
+fn emit_update_progress(
+    app: &AppHandle,
+    progress_state: &ClickHouseDocUpdateProgressState,
+    mut progress: ClickHouseDocUpdateProgress,
+) {
+    refresh_elapsed(&mut progress);
+    let snapshot = progress_state.set(progress);
+    let _ = app.emit(UPDATE_PROGRESS_EVENT, snapshot);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn progress_snapshot(
+    running: bool,
+    phase: &str,
+    message: &str,
+    current: i64,
+    total: i64,
+    started_at: Option<String>,
+    started_at_ms: Option<i64>,
+    finished_at: Option<String>,
+    finished_at_ms: Option<i64>,
+    run: Option<&ClickHouseDocUpdateRun>,
+    error: Option<String>,
+) -> ClickHouseDocUpdateProgress {
+    let current = current.clamp(0, total.max(0));
+    let remaining = (total - current).max(0);
+    let percent = if total > 0 {
+        ((current as f64 / total as f64) * 100.0).clamp(0.0, 100.0)
+    } else if !running {
+        100.0
+    } else {
+        0.0
+    };
+    let mut progress = ClickHouseDocUpdateProgress {
+        running,
+        phase: phase.to_string(),
+        message: message.to_string(),
+        current,
+        total,
+        remaining,
+        percent,
+        started_at,
+        finished_at,
+        started_at_ms,
+        finished_at_ms,
+        elapsed_ms: 0,
+        pages_checked: run.map(|r| r.pages_checked).unwrap_or(0),
+        pages_updated: run.map(|r| r.pages_updated).unwrap_or(0),
+        sections_added: run.map(|r| r.sections_added).unwrap_or(0),
+        sections_changed: run.map(|r| r.sections_changed).unwrap_or(0),
+        sections_removed: run.map(|r| r.sections_removed).unwrap_or(0),
+        failed_urls: run.map(|r| r.failed_urls).unwrap_or(0),
+        summary: run.map(|r| r.summary.clone()).unwrap_or_default(),
+        error,
+    };
+    refresh_elapsed(&mut progress);
+    progress
+}
+
+fn refresh_elapsed(progress: &mut ClickHouseDocUpdateProgress) {
+    let Some(started_at_ms) = progress.started_at_ms else {
+        progress.elapsed_ms = 0;
+        return;
+    };
+    let end_ms = progress
+        .finished_at_ms
+        .unwrap_or_else(|| Utc::now().timestamp_millis());
+    progress.elapsed_ms = (end_ms - started_at_ms).max(0);
 }
 
 fn build_parsed_page(

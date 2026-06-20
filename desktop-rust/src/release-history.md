@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## v1.18.0 (2026-06-20)
+
+- **ClickHouse section-first navigation:** ClickHouse pages now open as a
+  lightweight section index, and the active page expands in the left navigation
+  with its parsed functions/sections. Selecting a section renders only that
+  block, so large function pages no longer need to render in full during normal
+  browsing.
+- **ClickHouse background update progress:** `Update docs` now reports native
+  fetch/apply progress in a dedicated status bar with percentage, remaining
+  source pages, elapsed time, final summary, last update time, and page/section
+  counts. The update continues while switching modules, and returning to
+  ClickHouse restores the current progress snapshot.
+
 ## f-20260620-3 (2026-06-20)
 
 - **ClickHouse Docs update freeze fix:** ClickHouse markdown rendering now
