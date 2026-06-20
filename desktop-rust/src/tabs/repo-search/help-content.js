@@ -13,8 +13,8 @@ export const REPO_SEARCH_HELP_HTML = `
     <li><strong>Content</strong> searches file contents. Open a result and use
     Expand to inspect the full file with syntax highlighting, local in-file
     search, highlighted matching lines, and next/previous match navigation.
-    The expanded header also has History for commit metadata and per-file
-    diff previews.</li>
+    The expanded header also has History for commit date/author metadata and
+    per-file diff previews.</li>
     <li><strong>Git</strong> searches commit messages and changed patch lines.</li>
   </ul>
 

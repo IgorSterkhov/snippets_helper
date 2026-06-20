@@ -2453,6 +2453,10 @@ function renderFileHistoryView(container, { repoPath, filePath, commits }) {
       const meta = el('div', { class: 'rs-fs-history-diff-head' });
       meta.appendChild(el('span', { text: commit.commit_hash.slice(0, 10), class: 'rs-commit-hash' }));
       meta.appendChild(el('span', { text: commit.message || '(no message)' }));
+      const byline = [formatCommitDateTime(commit.commit_date), commit.author].filter(Boolean).join(' · ');
+      if (byline) {
+        meta.appendChild(el('span', { text: byline, class: 'rs-fs-history-diff-meta' }));
+      }
       diffPane.appendChild(meta);
       const pre = el('pre', { class: 'rs-fs-pre rs-fs-diff-pre' });
       const code = document.createElement('code');
@@ -2644,6 +2648,18 @@ function formatDate(iso) {
   try {
     const d = new Date(iso);
     return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  } catch {
+    return iso;
+  }
+}
+
+function formatCommitDateTime(iso) {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
   } catch {
     return iso;
   }
@@ -3643,10 +3659,15 @@ function css() {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
   padding: 8px 14px;
   border-bottom: 1px solid var(--border);
   color: var(--text-muted);
   font-size: 12px;
+}
+.rs-fs-history-diff-meta {
+  color: var(--text-muted);
+  opacity: 0.82;
 }
 .rs-fs-diff-pre {
   padding: 12px 14px;

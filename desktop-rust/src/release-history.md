@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## f-20260620-2 (2026-06-20)
+
+- **Repo Search history metadata:** the expanded file History diff header now
+  shows the selected commit date/time and author next to the hash and message.
+
 ## v1.14.0 (2026-06-20)
 
 - **Repo Search expanded history:** expanded content results now keep syntax

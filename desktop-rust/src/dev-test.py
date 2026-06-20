@@ -1336,12 +1336,14 @@ async def run_tests():
         history = await cdp.eval("""(() => ({
           rows: document.querySelectorAll('#rs-fullscreen-overlay .rs-fs-history-row').length,
           active: document.querySelector('#rs-fullscreen-overlay .rs-fs-history-row.active .rs-fs-history-message')?.textContent || '',
+          diffHead: document.querySelector('#rs-fullscreen-overlay .rs-fs-history-diff-head')?.textContent || '',
           diff: document.querySelector('#rs-fullscreen-overlay .rs-fs-history-diff')?.textContent || '',
           highlighted: document.querySelectorAll('#rs-fullscreen-overlay .rs-fs-history-diff .hljs-addition').length,
           backLabel: document.querySelector('#rs-fullscreen-overlay [data-role="rs-file-history"]')?.textContent || '',
         }))()""")
         assert history['rows'] == 2, history
         assert 'update file history sample' in history['active'], history
+        assert '2026-06-20' in history['diffHead'] and 'Mock User' in history['diffHead'], history
         assert '+import sys' in history['diff'] and history['highlighted'] >= 1, history
         assert history['backLabel'] == 'Back to file', history
 
