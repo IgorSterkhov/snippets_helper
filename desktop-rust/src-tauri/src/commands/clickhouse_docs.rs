@@ -4,13 +4,19 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
 
 const DEFAULT_LIMIT: usize = 50;
 const UPDATE_PROGRESS_EVENT: &str = "clickhouse-doc-update-progress";
+const CLICKHOUSE_DOCS_RU_CURRENT_PREFIX: &str = "i18n/ru/docusaurus-plugin-content-docs/current/";
+const CLICKHOUSE_DOCS_FUNCTIONS_PATH: &str =
+    "i18n/ru/docusaurus-plugin-content-docs/current/sql-reference/functions";
+const CLICKHOUSE_DOCS_CONTENTS_API_ROOT: &str =
+    "https://api.github.com/repos/ClickHouse/clickhouse-docs/contents";
+const CLICKHOUSE_DOCS_REF: &str = "main";
 
 #[derive(Clone, Debug)]
 struct DocSource {
@@ -26,6 +32,18 @@ const DOC_SOURCES: &[DocSource] = &[
         title: "Array Functions",
         source_url: "https://raw.githubusercontent.com/ClickHouse/clickhouse-docs/main/i18n/ru/docusaurus-plugin-content-docs/current/sql-reference/functions/array-functions.md",
         public_url: "https://clickhouse.com/docs/ru/sql-reference/functions/array-functions",
+    },
+    DocSource {
+        category: "Functions / Dictionaries",
+        title: "Dictionary Functions",
+        source_url: "https://raw.githubusercontent.com/ClickHouse/clickhouse-docs/main/i18n/ru/docusaurus-plugin-content-docs/current/sql-reference/functions/ext-dict-functions.md",
+        public_url: "https://clickhouse.com/docs/ru/sql-reference/functions/ext-dict-functions",
+    },
+    DocSource {
+        category: "Functions / Encoding",
+        title: "Encoding Functions",
+        source_url: "https://raw.githubusercontent.com/ClickHouse/clickhouse-docs/main/i18n/ru/docusaurus-plugin-content-docs/current/sql-reference/functions/encoding-functions.md",
+        public_url: "https://clickhouse.com/docs/ru/sql-reference/functions/encoding-functions",
     },
     DocSource {
         category: "Functions / Strings",
@@ -76,6 +94,34 @@ const DOC_SOURCES: &[DocSource] = &[
         public_url: "https://clickhouse.com/docs/ru/engines/table-engines/mergetree-family/mergetree",
     },
 ];
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RuntimeDocSource {
+    category: String,
+    title: String,
+    source_url: String,
+    public_url: String,
+}
+
+impl RuntimeDocSource {
+    fn from_builtin(source: &DocSource) -> Self {
+        Self {
+            category: source.category.to_string(),
+            title: source.title.to_string(),
+            source_url: source.source_url.to_string(),
+            public_url: source.public_url.to_string(),
+        }
+    }
+}
+
+#[derive(Deserialize, Debug)]
+struct GitHubContentEntry {
+    name: String,
+    path: String,
+    #[serde(rename = "type")]
+    entry_type: String,
+    download_url: Option<String>,
+}
 
 const SEED_ARRAY_FUNCTIONS: &str = r#"# Array Functions
 
@@ -401,7 +447,7 @@ pub async fn update_clickhouse_docs(
             "fetching",
             "Starting ClickHouse docs update",
             0,
-            DOC_SOURCES.len() as i64,
+            0,
             Some(started_at.clone()),
             Some(started_at_ms),
             None,
@@ -412,6 +458,7 @@ pub async fn update_clickhouse_docs(
     );
 
     let fetched_pages = fetch_doc_sources(&app, &progress_state, &started_at, started_at_ms).await;
+    let total_pages = fetched_pages.len() as i64;
     emit_update_progress(
         &app,
         &progress_state,
@@ -419,8 +466,8 @@ pub async fn update_clickhouse_docs(
             true,
             "applying",
             "Applying parsed ClickHouse docs to the local cache",
-            DOC_SOURCES.len() as i64,
-            DOC_SOURCES.len() as i64,
+            total_pages,
+            total_pages,
             Some(started_at.clone()),
             Some(started_at_ms),
             None,
@@ -445,8 +492,8 @@ pub async fn update_clickhouse_docs(
                     false,
                     "done",
                     "Complete",
-                    DOC_SOURCES.len() as i64,
-                    DOC_SOURCES.len() as i64,
+                    run.pages_checked,
+                    run.pages_checked,
                     Some(started_at),
                     Some(started_at_ms),
                     Some(finished.to_rfc3339()),
@@ -466,8 +513,8 @@ pub async fn update_clickhouse_docs(
                     false,
                     "error",
                     "ClickHouse docs update failed",
-                    DOC_SOURCES.len() as i64,
-                    DOC_SOURCES.len() as i64,
+                    total_pages,
+                    total_pages,
                     Some(started_at),
                     Some(started_at_ms),
                     Some(finished.to_rfc3339()),
@@ -494,21 +541,62 @@ async fn fetch_doc_sources(
     {
         Ok(client) => client,
         Err(e) => {
-            return DOC_SOURCES
+            return fallback_doc_sources()
                 .iter()
                 .map(|source| {
                     Err(FailedDocSource {
-                        source_url: source.source_url.to_string(),
-                        title: source.title.to_string(),
+                        source_url: source.source_url.clone(),
+                        title: source.title.clone(),
                         error: format!("create HTTP client: {}", e),
                     })
                 })
                 .collect()
         }
     };
+    let (sources, discovery_error) = collect_doc_sources(&client).await;
+    if let Some(error) = discovery_error {
+        emit_update_progress(
+            app,
+            progress_state,
+            progress_snapshot(
+                true,
+                "fetching",
+                &format!(
+                    "ClickHouse docs discovery failed; using fallback list: {}",
+                    error
+                ),
+                0,
+                sources.len() as i64,
+                Some(started_at.to_string()),
+                Some(started_at_ms),
+                None,
+                None,
+                None,
+                None,
+            ),
+        );
+    } else {
+        emit_update_progress(
+            app,
+            progress_state,
+            progress_snapshot(
+                true,
+                "fetching",
+                &format!("Discovered {} ClickHouse doc source(s)", sources.len()),
+                0,
+                sources.len() as i64,
+                Some(started_at.to_string()),
+                Some(started_at_ms),
+                None,
+                None,
+                None,
+                None,
+            ),
+        );
+    }
 
     let mut results = Vec::new();
-    for (index, source) in DOC_SOURCES.iter().enumerate() {
+    for (index, source) in sources.iter().enumerate() {
         emit_update_progress(
             app,
             progress_state,
@@ -517,7 +605,7 @@ async fn fetch_doc_sources(
                 "fetching",
                 &format!("Fetching {}", source.title),
                 index as i64,
-                DOC_SOURCES.len() as i64,
+                sources.len() as i64,
                 Some(started_at.to_string()),
                 Some(started_at_ms),
                 None,
@@ -528,7 +616,7 @@ async fn fetch_doc_sources(
         );
         let result = async {
             let raw_markdown = client
-                .get(source.source_url)
+                .get(&source.source_url)
                 .send()
                 .await
                 .map_err(|e| format!("fetch {}: {}", source.source_url, e))?
@@ -544,18 +632,19 @@ async fn fetch_doc_sources(
                     source.source_url
                 ));
             }
+            let page_title = first_markdown_h1(&markdown).unwrap_or_else(|| source.title.clone());
             Ok::<ParsedDocPage, String>(build_parsed_page(
-                source.category,
-                source.title,
-                source.source_url,
-                source.public_url,
+                &source.category,
+                &page_title,
+                &source.source_url,
+                &source.public_url,
                 &markdown,
             ))
         }
         .await
         .map_err(|error| FailedDocSource {
-            source_url: source.source_url.to_string(),
-            title: source.title.to_string(),
+            source_url: source.source_url.clone(),
+            title: source.title.clone(),
             error,
         });
         let message = match &result {
@@ -570,7 +659,7 @@ async fn fetch_doc_sources(
                 "fetching",
                 &message,
                 index as i64 + 1,
-                DOC_SOURCES.len() as i64,
+                sources.len() as i64,
                 Some(started_at.to_string()),
                 Some(started_at_ms),
                 None,
@@ -582,6 +671,189 @@ async fn fetch_doc_sources(
         results.push(result);
     }
     results
+}
+
+fn fallback_doc_sources() -> Vec<RuntimeDocSource> {
+    DOC_SOURCES
+        .iter()
+        .map(RuntimeDocSource::from_builtin)
+        .collect()
+}
+
+async fn collect_doc_sources(client: &reqwest::Client) -> (Vec<RuntimeDocSource>, Option<String>) {
+    let mut sources = fallback_doc_sources();
+    let mut seen = sources
+        .iter()
+        .map(|source| source.source_url.clone())
+        .collect::<HashSet<_>>();
+    match discover_function_doc_sources(client).await {
+        Ok(discovered) => {
+            for source in discovered {
+                if seen.insert(source.source_url.clone()) {
+                    sources.push(source);
+                }
+            }
+            sources.sort_by(|a, b| {
+                a.category
+                    .cmp(&b.category)
+                    .then_with(|| a.title.cmp(&b.title))
+                    .then_with(|| a.source_url.cmp(&b.source_url))
+            });
+            (sources, None)
+        }
+        Err(error) => (sources, Some(error)),
+    }
+}
+
+async fn discover_function_doc_sources(
+    client: &reqwest::Client,
+) -> Result<Vec<RuntimeDocSource>, String> {
+    let mut queue = VecDeque::from([clickhouse_contents_api_url(CLICKHOUSE_DOCS_FUNCTIONS_PATH)]);
+    let mut visited = HashSet::new();
+    let mut sources = Vec::new();
+    while let Some(url) = queue.pop_front() {
+        if !visited.insert(url.clone()) {
+            continue;
+        }
+        let raw = client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| format!("fetch source directory {}: {}", url, e))?
+            .error_for_status()
+            .map_err(|e| format!("fetch source directory {}: {}", url, e))?
+            .text()
+            .await
+            .map_err(|e| format!("read source directory {}: {}", url, e))?;
+        let entries = parse_github_contents_entries(&raw)?;
+        sources.extend(entries.iter().filter_map(doc_source_from_github_content));
+        for entry in entries {
+            if entry.entry_type == "dir" {
+                queue.push_back(clickhouse_contents_api_url(&entry.path));
+            }
+        }
+    }
+    sources.sort_by(|a, b| {
+        a.category
+            .cmp(&b.category)
+            .then_with(|| a.title.cmp(&b.title))
+            .then_with(|| a.source_url.cmp(&b.source_url))
+    });
+    Ok(sources)
+}
+
+fn clickhouse_contents_api_url(path: &str) -> String {
+    format!(
+        "{}/{}?ref={}",
+        CLICKHOUSE_DOCS_CONTENTS_API_ROOT, path, CLICKHOUSE_DOCS_REF
+    )
+}
+
+#[cfg(test)]
+fn parse_github_contents_sources(raw: &str) -> Result<Vec<RuntimeDocSource>, String> {
+    let mut sources = parse_github_contents_entries(raw)?
+        .iter()
+        .filter_map(doc_source_from_github_content)
+        .collect::<Vec<_>>();
+    sources.sort_by(|a, b| {
+        a.category
+            .cmp(&b.category)
+            .then_with(|| a.title.cmp(&b.title))
+            .then_with(|| a.source_url.cmp(&b.source_url))
+    });
+    Ok(sources)
+}
+
+fn parse_github_contents_entries(raw: &str) -> Result<Vec<GitHubContentEntry>, String> {
+    serde_json::from_str(raw).map_err(|e| format!("parse GitHub contents: {}", e))
+}
+
+fn doc_source_from_github_content(entry: &GitHubContentEntry) -> Option<RuntimeDocSource> {
+    if entry.entry_type != "file" || !entry.name.ends_with(".md") {
+        return None;
+    }
+    let source_url = entry.download_url.clone()?;
+    let relative_path = entry.path.strip_prefix(CLICKHOUSE_DOCS_RU_CURRENT_PREFIX)?;
+    if !relative_path.starts_with("sql-reference/functions/") {
+        return None;
+    }
+    let public_path = relative_path
+        .strip_suffix(".md")
+        .unwrap_or(relative_path)
+        .strip_suffix("/index")
+        .unwrap_or_else(|| relative_path.strip_suffix(".md").unwrap_or(relative_path));
+    let title = humanize_clickhouse_doc_name(&entry.name);
+    let category = clickhouse_function_category(relative_path);
+    Some(RuntimeDocSource {
+        category,
+        title,
+        source_url,
+        public_url: format!("https://clickhouse.com/docs/ru/{}", public_path),
+    })
+}
+
+fn clickhouse_function_category(relative_path: &str) -> String {
+    let rest = relative_path
+        .strip_prefix("sql-reference/functions/")
+        .unwrap_or(relative_path);
+    if let Some((dir, _)) = rest.split_once('/') {
+        return format!(
+            "Functions / {}",
+            humanize_clickhouse_doc_stem(dir)
+                .replace("Functions", "")
+                .trim()
+        )
+        .trim()
+        .to_string();
+    }
+    format!("Functions / {}", humanize_clickhouse_doc_name(rest))
+}
+
+fn humanize_clickhouse_doc_name(name: &str) -> String {
+    let stem = name.strip_suffix(".md").unwrap_or(name);
+    humanize_clickhouse_doc_stem(stem)
+}
+
+fn humanize_clickhouse_doc_stem(stem: &str) -> String {
+    let mut words = Vec::new();
+    for part in stem.replace('_', "-").split('-') {
+        if part.is_empty() || part == "index" {
+            continue;
+        }
+        let word = match part {
+            "ai" => "AI".to_string(),
+            "ip" => "IP".to_string(),
+            "json" => "JSON".to_string(),
+            "nlp" => "NLP".to_string(),
+            "udf" => "UDF".to_string(),
+            "ulid" => "ULID".to_string(),
+            "url" => "URL".to_string(),
+            "uuid" => "UUID".to_string(),
+            "wasm" => "WebAssembly".to_string(),
+            "dict" => "Dictionaries".to_string(),
+            "ext" => "External".to_string(),
+            "geo" => "Geometry".to_string(),
+            other => {
+                let mut chars = other.chars();
+                match chars.next() {
+                    Some(first) => format!(
+                        "{}{}",
+                        first.to_uppercase().collect::<String>(),
+                        chars.collect::<String>()
+                    ),
+                    None => String::new(),
+                }
+            }
+        };
+        if !word.is_empty() {
+            words.push(word);
+        }
+    }
+    if words.is_empty() {
+        "Documentation".to_string()
+    } else {
+        words.join(" ")
+    }
 }
 
 fn emit_update_progress(
@@ -1314,6 +1586,15 @@ fn clean_heading_title(line: &str, level: usize) -> String {
         .to_string()
 }
 
+fn first_markdown_h1(markdown: &str) -> Option<String> {
+    markdown
+        .lines()
+        .map(str::trim_start)
+        .find(|line| markdown_heading_level(line) == Some(1))
+        .map(|line| clean_heading_title(line, 1))
+        .filter(|title| !title.trim().is_empty())
+}
+
 fn search_sections_in_memory(
     sections: &[ClickHouseDocSection],
     query: &str,
@@ -1675,6 +1956,61 @@ Concat arrays.
         let body = "Кириллица и эмодзи 🙂 перед функцией arrayCompact(arr), потом текст.";
         let excerpt = excerpt_for_tokens(body, &["array".to_string(), "compact".to_string()]);
         assert!(excerpt.contains("arrayCompact"));
+    }
+
+    #[test]
+    fn clickhouse_docs_fallback_sources_include_dictionary_and_encoding_functions() {
+        let urls = DOC_SOURCES
+            .iter()
+            .map(|source| source.source_url)
+            .collect::<Vec<_>>();
+
+        assert!(urls
+            .iter()
+            .any(|url| url.ends_with("/ext-dict-functions.md")));
+        assert!(urls
+            .iter()
+            .any(|url| url.ends_with("/encoding-functions.md")));
+    }
+
+    #[test]
+    fn clickhouse_docs_github_contents_discovers_function_sources() {
+        let raw = r#"[
+          {
+            "name": "ext-dict-functions.md",
+            "path": "i18n/ru/docusaurus-plugin-content-docs/current/sql-reference/functions/ext-dict-functions.md",
+            "type": "file",
+            "download_url": "https://raw.githubusercontent.com/ClickHouse/clickhouse-docs/main/i18n/ru/docusaurus-plugin-content-docs/current/sql-reference/functions/ext-dict-functions.md"
+          },
+          {
+            "name": "geo",
+            "path": "i18n/ru/docusaurus-plugin-content-docs/current/sql-reference/functions/geo",
+            "type": "dir",
+            "download_url": null
+          },
+          {
+            "name": "encoding-functions.md",
+            "path": "i18n/ru/docusaurus-plugin-content-docs/current/sql-reference/functions/encoding-functions.md",
+            "type": "file",
+            "download_url": "https://raw.githubusercontent.com/ClickHouse/clickhouse-docs/main/i18n/ru/docusaurus-plugin-content-docs/current/sql-reference/functions/encoding-functions.md"
+          }
+        ]"#;
+
+        let sources = parse_github_contents_sources(raw).expect("parse contents");
+        let urls = sources
+            .iter()
+            .map(|source| source.source_url.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(urls
+            .iter()
+            .any(|url| url.ends_with("/ext-dict-functions.md")));
+        assert!(urls
+            .iter()
+            .any(|url| url.ends_with("/encoding-functions.md")));
+        assert!(sources.iter().any(|source| source
+            .public_url
+            .ends_with("/sql-reference/functions/encoding-functions")));
     }
 
     fn section_with_hash(title: &str, hash: &str) -> ClickHouseDocSection {

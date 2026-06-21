@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## v1.18.4 (2026-06-21)
+
+- **ClickHouse docs source coverage:** `Update docs` now discovers the
+  official ClickHouse `sql-reference/functions` catalog through GitHub contents
+  metadata instead of refreshing only the small built-in source list. Searches
+  such as `dictGet` and `mortonEncode` are indexed after updating docs, and the
+  offline fallback now includes dictionary and encoding function pages.
+
 ## v1.18.3 (2026-06-21)
 
 - **ClickHouse lightweight section loading:** opening a ClickHouse page now
