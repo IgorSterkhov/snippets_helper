@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v1.18.3 (2026-06-21)
+
+- **ClickHouse lightweight section loading:** opening a ClickHouse page now
+  loads only section metadata and short excerpts. The full Markdown body is
+  fetched only for the selected section, preventing large documentation pages
+  from blocking sidebar clicks, the status bar, or module switching.
+
 ## v1.18.2 (2026-06-21)
 
 - **ClickHouse loading hang fix:** ClickHouse documentation index loading now

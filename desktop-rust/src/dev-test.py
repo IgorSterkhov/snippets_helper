@@ -4358,6 +4358,7 @@ async def run_tests():
         for fn_name in (
             'list_clickhouse_doc_tree',
             'get_clickhouse_doc_page',
+            'get_clickhouse_doc_section',
             'search_clickhouse_docs',
             'list_clickhouse_doc_update_runs',
             'list_clickhouse_doc_changes',
@@ -4453,6 +4454,8 @@ async def run_tests():
             timeout=5,
         )
         assert 'arrayCompact' in page_index_text, page_index_text
+        page_payload_chars = await cdp.eval("window.__mockClickHouseLastPageBodyChars")
+        assert page_payload_chars == 0, f'ClickHouse page index payload must not include markdown/section bodies, got {page_payload_chars} chars'
         expanded_nav_sections = await cdp.eval(
             "document.querySelectorAll('#panel-clickhouse-docs .ch-nav-section').length"
         )
@@ -4487,6 +4490,10 @@ async def run_tests():
         )
         assert 'arrayCompact(arr)' in article_text, article_text[:200]
         assert 'arrayConcat(arr1' not in article_text, article_text[:400]
+        section_calls = await cdp.eval(
+            "(window.__mockCommandLog || []).filter(call => call.command === 'get_clickhouse_doc_section').length"
+        )
+        assert section_calls >= 1, section_calls
 
         await cdp.eval("document.querySelector('#panel-clickhouse-docs [data-action=\"changelog\"]').click()")
         await wait_until(cdp, "!!document.querySelector('.modal-overlay .ch-changelog-modal')", timeout=4)

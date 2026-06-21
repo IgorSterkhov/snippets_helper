@@ -167,6 +167,7 @@ pub struct ClickHouseDocSection {
     pub slug: String,
     pub section_path: String,
     pub level: i64,
+    pub excerpt: String,
     pub body: String,
     pub normalized_search_text: String,
     pub content_hash: String,
@@ -328,6 +329,18 @@ pub async fn get_clickhouse_doc_page(
     let conn = state.lock_recover();
     ensure_seed_docs(&conn)?;
     serde_json::to_value(load_page(&conn, page_id)?).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_clickhouse_doc_section(
+    state: State<'_, DbState>,
+    page_id: i64,
+    section_path: String,
+) -> Result<Value, String> {
+    let conn = state.lock_recover();
+    ensure_seed_docs(&conn)?;
+    serde_json::to_value(load_section_by_path(&conn, page_id, &section_path)?)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -526,7 +539,10 @@ async fn fetch_doc_sources(
                 .map_err(|e| format!("read {}: {}", source.source_url, e))?;
             let markdown = normalize_clickhouse_markdown(&raw_markdown);
             if markdown.trim().is_empty() {
-                return Err(format!("empty markdown after normalization: {}", source.source_url));
+                return Err(format!(
+                    "empty markdown after normalization: {}",
+                    source.source_url
+                ));
             }
             Ok::<ParsedDocPage, String>(build_parsed_page(
                 source.category,
@@ -666,7 +682,9 @@ fn build_parsed_page(
 
 fn ensure_seed_docs(conn: &Connection) -> Result<(), String> {
     let count: i64 = conn
-        .query_row("SELECT COUNT(*) FROM clickhouse_doc_pages", [], |row| row.get(0))
+        .query_row("SELECT COUNT(*) FROM clickhouse_doc_pages", [], |row| {
+            row.get(0)
+        })
         .map_err(|e| e.to_string())?;
     if count > 0 {
         return Ok(());
@@ -743,9 +761,18 @@ fn apply_doc_update(
         }
     }
 
-    let sections_added = all_changes.iter().filter(|c| c.change_type == "added").count() as i64;
-    let sections_changed = all_changes.iter().filter(|c| c.change_type == "changed").count() as i64;
-    let sections_removed = all_changes.iter().filter(|c| c.change_type == "removed").count() as i64;
+    let sections_added = all_changes
+        .iter()
+        .filter(|c| c.change_type == "added")
+        .count() as i64;
+    let sections_changed = all_changes
+        .iter()
+        .filter(|c| c.change_type == "changed")
+        .count() as i64;
+    let sections_removed = all_changes
+        .iter()
+        .filter(|c| c.change_type == "removed")
+        .count() as i64;
     let status = if failed_urls == pages_checked {
         "failed"
     } else if failed_urls > 0 {
@@ -755,7 +782,12 @@ fn apply_doc_update(
     };
     let summary = format!(
         "{} page(s) checked, {} updated, {} added, {} changed, {} removed, {} failed",
-        pages_checked, pages_updated, sections_added, sections_changed, sections_removed, failed_urls
+        pages_checked,
+        pages_updated,
+        sections_added,
+        sections_changed,
+        sections_removed,
+        failed_urls
     );
 
     tx.execute(
@@ -783,7 +815,14 @@ fn apply_doc_update(
             "INSERT INTO clickhouse_doc_changes
              (run_id, change_type, item_type, title, source_url, details)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![run_id, change.change_type, change.item_type, change.title, change.source_url, change.details],
+            params![
+                run_id,
+                change.change_type,
+                change.item_type,
+                change.title,
+                change.source_url,
+                change.details
+            ],
         )
         .map_err(|e| e.to_string())?;
     }
@@ -833,8 +872,11 @@ fn upsert_page(conn: &Connection, page: &ParsedDocPage, updated_at: &str) -> Res
             |row| row.get::<_, i64>(0),
         )
         .map_err(|e| e.to_string())?;
-    conn.execute("DELETE FROM clickhouse_doc_sections WHERE page_id = ?1", params![page_id])
-        .map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM clickhouse_doc_sections WHERE page_id = ?1",
+        params![page_id],
+    )
+    .map_err(|e| e.to_string())?;
     for (idx, section) in page.sections.iter().enumerate() {
         conn.execute(
             "INSERT INTO clickhouse_doc_sections
@@ -894,31 +936,49 @@ fn load_tree(conn: &Connection) -> Result<ClickHouseDocTree, String> {
             |row| row.get::<_, Option<String>>(0),
         )
         .map_err(|e| e.to_string())?;
-    Ok(ClickHouseDocTree { pages, page_count, section_count, last_update_at })
+    Ok(ClickHouseDocTree {
+        pages,
+        page_count,
+        section_count,
+        last_update_at,
+    })
 }
 
 fn load_page(conn: &Connection, page_id: i64) -> Result<ClickHouseDocPage, String> {
-    let (id, category, title, source_url, public_url, markdown, updated_at) = conn
+    let (id, category, title, source_url, public_url, updated_at) = conn
         .query_row(
-            "SELECT id, category, title, source_url, public_url, markdown, updated_at
+            "SELECT id, category, title, source_url, public_url, updated_at
              FROM clickhouse_doc_pages WHERE id = ?1",
             params![page_id],
-            |row| Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, String>(5)?,
-                row.get::<_, String>(6)?,
-            )),
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                ))
+            },
         )
         .map_err(|e| e.to_string())?;
-    let sections = load_sections_for_page(conn, page_id)?;
-    Ok(ClickHouseDocPage { id, category, title, source_url, public_url, markdown, updated_at, sections })
+    let sections = load_section_summaries_for_page(conn, page_id)?;
+    Ok(ClickHouseDocPage {
+        id,
+        category,
+        title,
+        source_url,
+        public_url,
+        markdown: String::new(),
+        updated_at,
+        sections,
+    })
 }
 
-fn load_sections_for_page(conn: &Connection, page_id: i64) -> Result<Vec<ClickHouseDocSection>, String> {
+fn load_sections_for_page(
+    conn: &Connection,
+    page_id: i64,
+) -> Result<Vec<ClickHouseDocSection>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT id, page_id, category, page_title, title, slug, section_path, level, body,
@@ -929,7 +989,63 @@ fn load_sections_for_page(conn: &Connection, page_id: i64) -> Result<Vec<ClickHo
     load_sections_from_stmt(&mut stmt, params![page_id])
 }
 
-fn load_sections_for_source(conn: &Connection, source_url: &str) -> Result<Vec<ClickHouseDocSection>, String> {
+fn load_section_summaries_for_page(
+    conn: &Connection,
+    page_id: i64,
+) -> Result<Vec<ClickHouseDocSection>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, page_id, category, page_title, title, slug, section_path, level,
+                    substr(body, 1, 700) AS excerpt_source, content_hash
+             FROM clickhouse_doc_sections WHERE page_id = ?1 ORDER BY sort_order, id",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![page_id], |row| {
+            let excerpt_source = row.get::<_, String>(8)?;
+            Ok(ClickHouseDocSection {
+                id: row.get(0)?,
+                page_id: row.get(1)?,
+                category: row.get(2)?,
+                page_title: row.get(3)?,
+                title: row.get(4)?,
+                slug: row.get(5)?,
+                section_path: row.get(6)?,
+                level: row.get(7)?,
+                excerpt: make_excerpt(&excerpt_source),
+                body: String::new(),
+                normalized_search_text: String::new(),
+                content_hash: row.get(9)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+
+fn load_section_by_path(
+    conn: &Connection,
+    page_id: i64,
+    section_path: &str,
+) -> Result<ClickHouseDocSection, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, page_id, category, page_title, title, slug, section_path, level, body,
+                    normalized_search_text, content_hash
+             FROM clickhouse_doc_sections WHERE page_id = ?1 AND section_path = ?2 LIMIT 1",
+        )
+        .map_err(|e| e.to_string())?;
+    let mut sections = load_sections_from_stmt(&mut stmt, params![page_id, section_path])?;
+    sections
+        .pop()
+        .ok_or_else(|| format!("ClickHouse section not found: {section_path}"))
+}
+
+fn load_sections_for_source(
+    conn: &Connection,
+    source_url: &str,
+) -> Result<Vec<ClickHouseDocSection>, String> {
     let page_id = conn
         .query_row(
             "SELECT id FROM clickhouse_doc_pages WHERE source_url = ?1",
@@ -960,6 +1076,7 @@ fn load_sections_from_stmt<P: rusqlite::Params>(
     params: P,
 ) -> Result<Vec<ClickHouseDocSection>, String> {
     stmt.query_map(params, |row| {
+        let body = row.get::<_, String>(8)?;
         Ok(ClickHouseDocSection {
             id: row.get(0)?,
             page_id: row.get(1)?,
@@ -969,7 +1086,8 @@ fn load_sections_from_stmt<P: rusqlite::Params>(
             slug: row.get(5)?,
             section_path: row.get(6)?,
             level: row.get(7)?,
-            body: row.get(8)?,
+            excerpt: make_excerpt(&body),
+            body,
             normalized_search_text: row.get(9)?,
             content_hash: row.get(10)?,
         })
@@ -977,6 +1095,15 @@ fn load_sections_from_stmt<P: rusqlite::Params>(
     .map_err(|e| e.to_string())?
     .collect::<Result<Vec<_>, _>>()
     .map_err(|e| e.to_string())
+}
+
+fn make_excerpt(text: &str) -> String {
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(220)
+        .collect()
 }
 
 fn load_page_hash(conn: &Connection, source_url: &str) -> Result<Option<String>, String> {
@@ -1097,7 +1224,8 @@ fn split_markdown_sections(
 
     if sections.is_empty() {
         let body = markdown.trim().to_string();
-        let normalized_search_text = normalize_for_search(&format!("{} {} {}", page_title, category, body));
+        let normalized_search_text =
+            normalize_for_search(&format!("{} {} {}", page_title, category, body));
         sections.push(ClickHouseDocSection {
             id: 0,
             page_id,
@@ -1107,6 +1235,7 @@ fn split_markdown_sections(
             slug: slugify(page_title),
             section_path: slugify(page_title),
             level: 1,
+            excerpt: make_excerpt(&body),
             body: body.clone(),
             normalized_search_text,
             content_hash: hash_text(&body),
@@ -1131,7 +1260,11 @@ fn push_current_section(
     }
     let joined = body.join("\n").trim().to_string();
     let slug = slugify(title);
-    let base_path = if slug.is_empty() { "section".to_string() } else { slug.clone() };
+    let base_path = if slug.is_empty() {
+        "section".to_string()
+    } else {
+        slug.clone()
+    };
     let count = path_counts.entry(base_path.clone()).or_insert(0);
     *count += 1;
     let section_path = if *count == 1 {
@@ -1139,7 +1272,8 @@ fn push_current_section(
     } else {
         format!("{}-{}", base_path, count)
     };
-    let normalized_search_text = normalize_for_search(&format!("{} {} {} {}", title, page_title, category, joined));
+    let normalized_search_text =
+        normalize_for_search(&format!("{} {} {} {}", title, page_title, category, joined));
     sections.push(ClickHouseDocSection {
         id: 0,
         page_id,
@@ -1149,6 +1283,7 @@ fn push_current_section(
         slug,
         section_path,
         level: 2,
+        excerpt: make_excerpt(&joined),
         body: joined.clone(),
         normalized_search_text,
         content_hash: hash_text(&format!("{}\n{}", title, joined)),
@@ -1173,7 +1308,10 @@ fn clean_heading_title(line: &str, level: usize) -> String {
     let without_prefix = line.chars().skip(level).collect::<String>();
     let without_hash_suffix = without_prefix.trim().trim_matches('#').trim().to_string();
     let anchor_re = regex::Regex::new(r"\\?\{#[^}]+\}").unwrap();
-    anchor_re.replace_all(&without_hash_suffix, "").trim().to_string()
+    anchor_re
+        .replace_all(&without_hash_suffix, "")
+        .trim()
+        .to_string()
 }
 
 fn search_sections_in_memory(
@@ -1193,7 +1331,13 @@ fn search_sections_in_memory(
         let page_norm = normalize_for_search(&section.page_title);
         let body_norm = normalize_for_search(&section.body);
         let haystack = if section.normalized_search_text.trim().is_empty() {
-            format!("{} {} {} {}", title_norm, page_norm, normalize_for_search(&section.category), body_norm)
+            format!(
+                "{} {} {} {}",
+                title_norm,
+                page_norm,
+                normalize_for_search(&section.category),
+                body_norm
+            )
         } else {
             section.normalized_search_text.clone()
         };
@@ -1206,7 +1350,9 @@ fn search_sections_in_memory(
             score += 220;
         } else if !normalized_query.is_empty() && title_norm == normalized_query {
             score += 200;
-        } else if title_norm.starts_with(&normalized_query) || title_compact.starts_with(&query_compact) {
+        } else if title_norm.starts_with(&normalized_query)
+            || title_compact.starts_with(&query_compact)
+        {
             score += 130;
         }
         for token in &tokens {
@@ -1234,7 +1380,11 @@ fn search_sections_in_memory(
             score,
         });
     }
-    results.sort_by(|a, b| b.score.cmp(&a.score).then_with(|| a.section_title.cmp(&b.section_title)));
+    results.sort_by(|a, b| {
+        b.score
+            .cmp(&a.score)
+            .then_with(|| a.section_title.cmp(&b.section_title))
+    });
     results.truncate(limit);
     results
 }
@@ -1275,8 +1425,14 @@ fn byte_to_char_index(text: &str, byte_idx: usize) -> usize {
 }
 
 fn diff_sections(old: &[ClickHouseDocSection], new: &[ClickHouseDocSection]) -> Vec<SectionChange> {
-    let old_map = old.iter().map(|s| (section_key(s), s)).collect::<HashMap<_, _>>();
-    let new_map = new.iter().map(|s| (section_key(s), s)).collect::<HashMap<_, _>>();
+    let old_map = old
+        .iter()
+        .map(|s| (section_key(s), s))
+        .collect::<HashMap<_, _>>();
+    let new_map = new
+        .iter()
+        .map(|s| (section_key(s), s))
+        .collect::<HashMap<_, _>>();
     let mut changes = Vec::new();
     for (key, section) in &new_map {
         match old_map.get(key) {
@@ -1359,7 +1515,11 @@ fn normalize_clickhouse_markdown(raw: &str) -> String {
     let mut lines = raw.lines().collect::<Vec<_>>();
     if lines.first().map(|line| line.trim()) == Some("---") {
         if let Some(end_idx) = lines.iter().enumerate().skip(1).find_map(|(idx, line)| {
-            if line.trim() == "---" { Some(idx) } else { None }
+            if line.trim() == "---" {
+                Some(idx)
+            } else {
+                None
+            }
         }) {
             lines.drain(0..=end_idx);
         }
@@ -1373,7 +1533,10 @@ fn normalize_clickhouse_markdown(raw: &str) -> String {
         .collect::<Vec<_>>()
         .join("\n");
     let comment_re = regex::Regex::new(r"(?s)\{/\*.*?\*/\}").unwrap();
-    comment_re.replace_all(&without_imports, "").trim().to_string()
+    comment_re
+        .replace_all(&without_imports, "")
+        .trim()
+        .to_string()
 }
 
 fn hash_text(text: &str) -> String {
@@ -1406,7 +1569,8 @@ Syntax
 
     arrayCompact(arr)
 "#;
-        let sections = split_markdown_sections(7, "Functions / Arrays", "Array Functions", markdown);
+        let sections =
+            split_markdown_sections(7, "Functions / Arrays", "Array Functions", markdown);
         assert_eq!(sections.len(), 2);
         assert_eq!(sections[0].title, "array");
         assert_eq!(sections[0].section_path, "array");
@@ -1438,7 +1602,8 @@ The input array.
 
 Concat arrays.
 "#;
-        let sections = split_markdown_sections(1, "Functions / Arrays", "Array Functions", markdown);
+        let sections =
+            split_markdown_sections(1, "Functions / Arrays", "Array Functions", markdown);
         assert_eq!(sections.len(), 2);
         assert_eq!(sections[0].title, "arrayCompact");
         assert!(sections[0].body.contains("### Syntax"));
@@ -1471,6 +1636,14 @@ Concat arrays.
     }
 
     #[test]
+    fn clickhouse_docs_make_excerpt_is_utf8_safe() {
+        let text = "Пример 😀 ".repeat(80);
+        let excerpt = make_excerpt(&text);
+        assert!(excerpt.chars().count() <= 220);
+        assert!(excerpt.starts_with("Пример 😀"));
+    }
+
+    #[test]
     fn clickhouse_docs_diff_sections_detects_added_changed_removed() {
         let old = vec![
             section_with_hash("array", "h1"),
@@ -1483,16 +1656,22 @@ Concat arrays.
         ];
 
         let changes = diff_sections(&old, &new);
-        assert!(changes.iter().any(|c| c.change_type == "changed" && c.title == "arrayCompact"));
-        assert!(changes.iter().any(|c| c.change_type == "added" && c.title == "arrayConcat"));
+        assert!(changes
+            .iter()
+            .any(|c| c.change_type == "changed" && c.title == "arrayCompact"));
+        assert!(changes
+            .iter()
+            .any(|c| c.change_type == "added" && c.title == "arrayConcat"));
         assert!(!changes.iter().any(|c| c.change_type == "removed"));
 
         let removed = diff_sections(&new, &old);
-        assert!(removed.iter().any(|c| c.change_type == "removed" && c.title == "arrayConcat"));
+        assert!(removed
+            .iter()
+            .any(|c| c.change_type == "removed" && c.title == "arrayConcat"));
     }
 
     #[test]
-    fn clickhouse_docs_excerpt_is_utf8_safe() {
+    fn clickhouse_docs_search_excerpt_is_utf8_safe() {
         let body = "Кириллица и эмодзи 🙂 перед функцией arrayCompact(arr), потом текст.";
         let excerpt = excerpt_for_tokens(body, &["array".to_string(), "compact".to_string()]);
         assert!(excerpt.contains("arrayCompact"));
@@ -1516,6 +1695,7 @@ Concat arrays.
             slug: slugify(title),
             section_path: slugify(title),
             level: 2,
+            excerpt: make_excerpt(body),
             body: body.to_string(),
             normalized_search_text,
             content_hash: hash.to_string(),

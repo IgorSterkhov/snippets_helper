@@ -654,6 +654,19 @@
       .replace(/\s+/g, ' ');
   }
 
+  function clickhouseExcerpt(text) {
+    return String(text || '').replace(/\s+/g, ' ').trim().slice(0, 220);
+  }
+
+  function clickhouseSectionSummary(section) {
+    return {
+      ...section,
+      excerpt: clickhouseExcerpt(section.body),
+      body: '',
+      normalized_search_text: '',
+    };
+  }
+
   const handlers = {
     // ── Settings ────────────────────────────────────────
     async get_setting({ key }) {
@@ -1906,7 +1919,22 @@
       recordMockCall('get_clickhouse_doc_page', { pageId });
       const page = clickhouseMockPages().find(entry => entry.id === pageId);
       if (!page) throw new Error(`ClickHouse mock page not found: ${pageId}`);
-      return page;
+      const result = {
+        ...page,
+        markdown: '',
+        sections: (page.sections || []).map(clickhouseSectionSummary),
+      };
+      window.__mockClickHouseLastPageBodyChars = String(result.markdown || '').length
+        + (result.sections || []).reduce((sum, section) => sum + String(section.body || '').length, 0);
+      return result;
+    },
+    async get_clickhouse_doc_section({ pageId, sectionPath }) {
+      recordMockCall('get_clickhouse_doc_section', { pageId, sectionPath });
+      const page = clickhouseMockPages().find(entry => entry.id === pageId);
+      if (!page) throw new Error(`ClickHouse mock page not found: ${pageId}`);
+      const section = (page.sections || []).find(entry => entry.section_path === sectionPath);
+      if (!section) throw new Error(`ClickHouse mock section not found: ${sectionPath}`);
+      return { ...section, excerpt: clickhouseExcerpt(section.body) };
     },
     async search_clickhouse_docs({ query, limit }) {
       recordMockCall('search_clickhouse_docs', { query, limit });

@@ -8,15 +8,18 @@ let tree = { pages: [], page_count: 0, section_count: 0, last_update_at: null };
 let activePage = null;
 let activeSectionPath = '';
 let pageCache = new Map();
+let sectionCache = new Map();
 let searchTimer = null;
 let updateProgress = null;
 let updateUnlisten = null;
 let updateElapsedTimer = null;
 let treeLoadToken = 0;
+let pageLoadToken = 0;
 
 export function init(container) {
   root = container;
   pageCache = new Map();
+  sectionCache = new Map();
   root.innerHTML = '';
   const style = document.createElement('style');
   style.textContent = css();
@@ -30,6 +33,8 @@ export function init(container) {
 export function destroy() {
   clearTimeout(searchTimer);
   searchTimer = null;
+  pageLoadToken += 1;
+  treeLoadToken += 1;
   stopUpdateElapsedTimer();
   if (typeof updateUnlisten === 'function') {
     updateUnlisten();
@@ -42,6 +47,7 @@ export function destroy() {
   activeSectionPath = '';
   updateProgress = null;
   pageCache.clear();
+  sectionCache.clear();
 }
 
 function buildShell() {
@@ -161,12 +167,15 @@ function renderNav() {
 }
 
 async function openPage(pageId, sectionPath = '') {
+  const token = ++pageLoadToken;
   try {
     activePage = await loadPage(pageId);
+    if (token !== pageLoadToken) return;
     activeSectionPath = sectionPath || '';
     renderNav();
-    renderPageContent();
+    await renderPageContent(token);
   } catch (err) {
+    if (token !== pageLoadToken) return;
     renderError(`Failed to open ClickHouse page: ${err}`);
   }
 }
@@ -177,6 +186,14 @@ async function loadPage(pageId) {
     pageCache.set(key, await call('get_clickhouse_doc_page', { pageId }));
   }
   return pageCache.get(key);
+}
+
+async function loadSection(pageId, sectionPath) {
+  const key = `${pageId}:${sectionPath}`;
+  if (!sectionCache.has(key)) {
+    sectionCache.set(key, await call('get_clickhouse_doc_section', { pageId, sectionPath }));
+  }
+  return sectionCache.get(key);
 }
 
 async function runSearch(query) {
@@ -228,13 +245,13 @@ function renderSearchResults(query, results) {
   main.appendChild(list);
 }
 
-function renderPageContent() {
+async function renderPageContent(token = pageLoadToken) {
   if (!activePage) {
     renderEmptyState();
     return;
   }
   if (activeSectionPath) {
-    renderSection(activeSectionPath);
+    await renderSection(activeSectionPath, token);
     return;
   }
   if (activePage.sections?.length) {
@@ -244,18 +261,23 @@ function renderPageContent() {
   renderFullArticle();
 }
 
-function renderSection(sectionPath) {
-  const section = activePage?.sections?.find(s => s.section_path === sectionPath);
-  if (!section) {
+async function renderSection(sectionPath, token = pageLoadToken) {
+  const summary = activePage?.sections?.find(s => s.section_path === sectionPath);
+  if (!summary) {
     renderSectionIndex();
     return;
   }
   const main = root?.querySelector('.ch-main');
   if (!main) return;
   main.innerHTML = '';
-  main.appendChild(articleHeader(activePage, section.title));
+  main.appendChild(articleHeader(activePage, summary.title));
+  main.appendChild(el('div', { class: 'ch-loading', text: 'Loading section...' }));
+  const section = await loadSection(activePage.id, sectionPath);
+  if (token !== pageLoadToken) return;
+  main.innerHTML = '';
+  main.appendChild(articleHeader(activePage, section.title || summary.title));
   const article = el('article', { class: 'ch-article' });
-  article.innerHTML = renderMarkdown(`## ${section.title}\n\n${section.body || ''}`);
+  article.innerHTML = renderMarkdown(`## ${section.title || summary.title}\n\n${section.body || ''}`);
   main.appendChild(article);
 }
 
@@ -350,6 +372,7 @@ async function updateDocs(button) {
     activePage = null;
     activeSectionPath = '';
     pageCache.clear();
+    sectionCache.clear();
     await loadTree({ openFirst: false });
     renderUpdateState(run);
   } catch (err) {
@@ -394,6 +417,7 @@ async function setupUpdateProgressListener() {
         activePage = null;
         activeSectionPath = '';
         pageCache.clear();
+        sectionCache.clear();
         await loadTree({ openFirst: false });
         renderUpdateState(updateProgress);
       }

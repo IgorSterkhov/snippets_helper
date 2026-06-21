@@ -275,6 +275,7 @@ pub fn run() {
             // ClickHouse Docs
             commands::clickhouse_docs::list_clickhouse_doc_tree,
             commands::clickhouse_docs::get_clickhouse_doc_page,
+            commands::clickhouse_docs::get_clickhouse_doc_section,
             commands::clickhouse_docs::search_clickhouse_docs,
             commands::clickhouse_docs::update_clickhouse_docs,
             commands::clickhouse_docs::get_clickhouse_doc_update_progress,
