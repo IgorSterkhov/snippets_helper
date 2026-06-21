@@ -202,6 +202,22 @@ pub struct FinanceItem {
     pub user_id: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FinancePayment {
+    pub id: Option<i64>,
+    pub plan_id: i64,
+    pub item_id: i64,
+    pub month_key: String,
+    pub is_paid: bool,
+    pub paid_amount_cents: i64,
+    pub note: String,
+    pub created_at: NaiveDateTime,
+    pub updated_at: NaiveDateTime,
+    pub uuid: String,
+    pub sync_status: String,
+    pub user_id: String,
+}
+
 // ── Local tables ─────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -262,12 +278,14 @@ pub struct ExecCommand {
     pub sort_order: i32,
     pub hide_after_run: bool,
     #[serde(default = "default_shell")]
-    pub shell: String,              // "host" | "wsl"
+    pub shell: String, // "host" | "wsl"
     #[serde(default)]
     pub wsl_distro: Option<String>, // None => use WSL default distro
 }
 
-fn default_shell() -> String { "host".into() }
+fn default_shell() -> String {
+    "host".into()
+}
 
 // ── Tests ────────────────────────────────────────────────────
 

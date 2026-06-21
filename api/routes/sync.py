@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from api.database import get_db
-from api.models import FinanceItem, FinancePlan, User, TABLE_MODELS
+from api.models import FinanceItem, FinancePayment, FinancePlan, User, TABLE_MODELS
 from api.schemas import (
     PushRequest, PushResponse, ConflictInfo,
     PullRequest, PullResponse,
@@ -42,6 +42,8 @@ def _has_required_uuid_relations(table_name: str, row: dict) -> bool:
         return bool(row.get("task_uuid"))
     if table_name == "finance_items":
         return bool(row.get("plan_uuid"))
+    if table_name == "finance_payments":
+        return bool(row.get("plan_uuid")) and bool(row.get("item_uuid"))
     return True
 
 
@@ -114,6 +116,25 @@ def _valid_finance_item_values(extra: dict) -> bool:
     return True
 
 
+def _valid_finance_payment_values(extra: dict) -> bool:
+    try:
+        amount = int(extra.get("paid_amount_cents") or 0)
+    except (TypeError, ValueError):
+        return False
+    if amount < 0:
+        return False
+
+    month_key = str(extra.get("month_key") or "").strip()
+    if len(month_key) != 7 or month_key[4] != "-":
+        return False
+    try:
+        date.fromisoformat(f"{month_key}-01")
+    except ValueError:
+        return False
+    extra["month_key"] = month_key
+    return True
+
+
 async def _finance_plan_exists(db: AsyncSession, user_id: UUID, plan_uuid: UUID) -> bool:
     result = await db.execute(
         select(FinancePlan.uuid).where(
@@ -125,19 +146,42 @@ async def _finance_plan_exists(db: AsyncSession, user_id: UUID, plan_uuid: UUID)
     return result.scalar_one_or_none() is not None
 
 
-async def _finance_parent_plan_uuid(
+async def _finance_plan_kind(
     db: AsyncSession,
     user_id: UUID,
-    parent_uuid: UUID,
+    plan_uuid: UUID,
+) -> str | None:
+    result = await db.execute(
+        select(FinancePlan.kind).where(
+            FinancePlan.uuid == plan_uuid,
+            FinancePlan.user_id == user_id,
+            FinancePlan.is_deleted == False,  # noqa: E712
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def _finance_item_plan_uuid(
+    db: AsyncSession,
+    user_id: UUID,
+    item_uuid: UUID,
 ) -> UUID | None:
     result = await db.execute(
         select(FinanceItem.plan_uuid).where(
-            FinanceItem.uuid == parent_uuid,
+            FinanceItem.uuid == item_uuid,
             FinanceItem.user_id == user_id,
             FinanceItem.is_deleted == False,  # noqa: E712
         )
     )
     return result.scalar_one_or_none()
+
+
+async def _finance_parent_plan_uuid(
+    db: AsyncSession,
+    user_id: UUID,
+    parent_uuid: UUID,
+) -> UUID | None:
+    return await _finance_item_plan_uuid(db, user_id, parent_uuid)
 
 
 async def _valid_finance_row(
@@ -147,7 +191,7 @@ async def _valid_finance_row(
     row_uuid: UUID,
     is_deleted: bool,
     extra: dict,
-    batch_plan_uuids: set[UUID],
+    batch_plan_kinds: dict[UUID, str],
     batch_item_plans: dict[UUID, UUID],
 ) -> bool:
     if is_deleted:
@@ -161,7 +205,27 @@ async def _valid_finance_row(
         return True
 
     if table_name != "finance_items":
-        return True
+        if table_name != "finance_payments":
+            return True
+
+        if not _valid_finance_payment_values(extra):
+            return False
+
+        plan_uuid = _parse_optional_uuid(extra.get("plan_uuid"))
+        item_uuid = _parse_optional_uuid(extra.get("item_uuid"))
+        if not plan_uuid or not item_uuid:
+            return False
+
+        plan_kind = batch_plan_kinds.get(plan_uuid)
+        if plan_kind is None:
+            plan_kind = await _finance_plan_kind(db, user_id, plan_uuid)
+        if plan_kind != "monthly":
+            return False
+
+        item_plan_uuid = batch_item_plans.get(item_uuid)
+        if item_plan_uuid is None:
+            item_plan_uuid = await _finance_item_plan_uuid(db, user_id, item_uuid)
+        return item_plan_uuid == plan_uuid
 
     if not _valid_finance_item_values(extra):
         return False
@@ -169,7 +233,7 @@ async def _valid_finance_row(
     plan_uuid = _parse_optional_uuid(extra.get("plan_uuid"))
     if not plan_uuid:
         return False
-    if plan_uuid not in batch_plan_uuids and not await _finance_plan_exists(db, user_id, plan_uuid):
+    if plan_uuid not in batch_plan_kinds and not await _finance_plan_exists(db, user_id, plan_uuid):
         return False
 
     parent_uuid = _parse_optional_uuid(extra.get("parent_uuid"))
@@ -197,14 +261,15 @@ async def push(
     accepted_uuids: dict[str, list[str]] = {}
     rejected_uuids: dict[str, list[str]] = {}
 
-    batch_plan_uuids: set[UUID] = set()
+    batch_plan_kinds: dict[UUID, str] = {}
     for row_data in req.changes.get("finance_plans", []):
         try:
             row_uuid = UUID(row_data.uuid)
         except ValueError:
             continue
-        if not row_data.is_deleted and _normalize_finance_kind((row_data.model_extra or {}).get("kind")):
-            batch_plan_uuids.add(row_uuid)
+        kind = _normalize_finance_kind((row_data.model_extra or {}).get("kind"))
+        if not row_data.is_deleted and kind:
+            batch_plan_kinds[row_uuid] = kind
 
     batch_item_plans: dict[UUID, UUID] = {}
     for row_data in req.changes.get("finance_items", []):
@@ -262,11 +327,27 @@ async def push(
                 row_uuid,
                 is_deleted,
                 extra,
-                batch_plan_uuids,
+                batch_plan_kinds,
                 batch_item_plans,
             ):
                 rejected_uuids.setdefault(table_name, []).append(str(row_uuid))
                 continue
+
+            if table_name == "finance_payments" and not existing and not is_deleted:
+                item_uuid = _parse_optional_uuid(extra.get("item_uuid"))
+                month_key = str(extra.get("month_key") or "").strip()
+                if item_uuid and month_key:
+                    natural_result = await db.execute(
+                        select(FinancePayment.uuid).where(
+                            FinancePayment.user_id == user.id,
+                            FinancePayment.item_uuid == item_uuid,
+                            FinancePayment.month_key == month_key,
+                        )
+                    )
+                    natural_uuid = natural_result.scalar_one_or_none()
+                    if natural_uuid and natural_uuid != row_uuid:
+                        rejected_uuids.setdefault(table_name, []).append(str(row_uuid))
+                        continue
 
             if existing:
                 # Conflict check: last-write-wins

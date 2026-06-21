@@ -279,6 +279,25 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
             user_id         TEXT NOT NULL DEFAULT ''
         );
 
+        CREATE TABLE IF NOT EXISTS finance_payments (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            plan_id           INTEGER NOT NULL REFERENCES finance_plans(id) ON DELETE CASCADE,
+            item_id           INTEGER NOT NULL REFERENCES finance_items(id) ON DELETE CASCADE,
+            month_key         TEXT NOT NULL CHECK (
+                month_key GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'
+                AND substr(month_key, 6, 2) BETWEEN '01' AND '12'
+            ),
+            is_paid           INTEGER NOT NULL DEFAULT 0 CHECK (is_paid IN (0, 1)),
+            paid_amount_cents INTEGER NOT NULL DEFAULT 0 CHECK (paid_amount_cents >= 0),
+            note              TEXT NOT NULL DEFAULT '',
+            created_at        TIMESTAMP NOT NULL,
+            updated_at        TIMESTAMP NOT NULL,
+            uuid              TEXT UNIQUE NOT NULL,
+            sync_status       TEXT NOT NULL DEFAULT 'pending',
+            user_id           TEXT NOT NULL DEFAULT '',
+            UNIQUE(plan_id, item_id, month_key)
+        );
+
         CREATE TABLE IF NOT EXISTS clickhouse_doc_pages (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             source_url      TEXT UNIQUE NOT NULL,
@@ -337,6 +356,8 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         CREATE INDEX IF NOT EXISTS idx_links_task      ON task_links(task_id, sort_order);
         CREATE INDEX IF NOT EXISTS idx_finance_plans_sort ON finance_plans(sort_order, name);
         CREATE INDEX IF NOT EXISTS idx_finance_items_plan ON finance_items(plan_id, parent_id, sort_order);
+        CREATE INDEX IF NOT EXISTS idx_finance_payments_plan_month ON finance_payments(plan_id, month_key, item_id);
+        CREATE INDEX IF NOT EXISTS idx_finance_payments_item ON finance_payments(item_id, month_key);
         CREATE INDEX IF NOT EXISTS idx_clickhouse_doc_pages_category ON clickhouse_doc_pages(category, title);
         CREATE INDEX IF NOT EXISTS idx_clickhouse_doc_sections_page ON clickhouse_doc_sections(page_id, sort_order);
         CREATE INDEX IF NOT EXISTS idx_clickhouse_doc_sections_title ON clickhouse_doc_sections(title);
@@ -607,6 +628,7 @@ mod tests {
             "commit_tags",
             "exec_categories",
             "exec_commands",
+            "finance_payments",
             "finance_items",
             "finance_plans",
             "note_folders",

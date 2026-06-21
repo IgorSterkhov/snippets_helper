@@ -239,6 +239,24 @@ impl SyncClient {
                     }
                 }
 
+                if table == "finance_payments" {
+                    let Some(plan_id) = obj.get("plan_id").and_then(|v| v.as_i64()) else {
+                        continue;
+                    };
+                    let Some(item_id) = obj.get("item_id").and_then(|v| v.as_i64()) else {
+                        continue;
+                    };
+                    let plan_uuid = queries::get_finance_plan_uuid_by_id(conn, plan_id)
+                        .map_err(|e| format!("get_finance_plan_uuid_by_id: {e}"))?;
+                    let item_uuid = queries::get_finance_item_uuid_by_id(conn, item_id)
+                        .map_err(|e| format!("get_finance_item_uuid_by_id: {e}"))?;
+                    let (Some(plan_uuid), Some(item_uuid)) = (plan_uuid, item_uuid) else {
+                        continue;
+                    };
+                    obj.insert("plan_uuid".to_string(), Value::String(plan_uuid));
+                    obj.insert("item_uuid".to_string(), Value::String(item_uuid));
+                }
+
                 table_names.push(display_name);
                 rows_to_push.push(row_data);
             }
@@ -291,7 +309,7 @@ impl SyncClient {
                         .collect()
                 });
             let requires_explicit_acceptance =
-                table == "finance_plans" || table == "finance_items";
+                table == "finance_plans" || table == "finance_items" || table == "finance_payments";
             let is_accepted = |uuid: &str| -> bool {
                 if let Some(accepted) = &accepted_for_table {
                     accepted.contains(uuid)
@@ -655,6 +673,51 @@ impl SyncClient {
                     }
                 }
 
+                if table == "finance_payments" {
+                    let before = rows_owned.len();
+                    rows_owned.retain_mut(|row| {
+                        let Some(obj) = row.as_object_mut() else {
+                            return false;
+                        };
+                        let Some(plan_uuid) = obj
+                            .get("plan_uuid")
+                            .and_then(|v| v.as_str())
+                            .map(String::from)
+                        else {
+                            return false;
+                        };
+                        let Some(item_uuid) = obj
+                            .get("item_uuid")
+                            .and_then(|v| v.as_str())
+                            .map(String::from)
+                        else {
+                            return false;
+                        };
+                        let plan_id = queries::get_finance_plan_id_by_uuid(conn, &plan_uuid)
+                            .ok()
+                            .flatten();
+                        let item_id = queries::get_finance_item_id_by_uuid(conn, &item_uuid)
+                            .ok()
+                            .flatten();
+                        let (Some(plan_id), Some(item_id)) = (plan_id, item_id) else {
+                            return false;
+                        };
+                        let item_plan_id = queries::get_finance_item_plan_id_by_id(conn, item_id)
+                            .ok()
+                            .flatten();
+                        if item_plan_id != Some(plan_id) {
+                            return false;
+                        }
+                        obj.insert("plan_id".to_string(), Value::Number(plan_id.into()));
+                        obj.insert("item_id".to_string(), Value::Number(item_id.into()));
+                        true
+                    });
+                    let skipped = before.saturating_sub(rows_owned.len());
+                    if skipped > 0 {
+                        skipped_counts.insert(table.to_string(), skipped);
+                    }
+                }
+
                 queries::upsert_from_server(conn, table, &rows_owned)
                     .map_err(|e| format!("upsert_from_server({table}): {e}"))?;
 
@@ -726,6 +789,7 @@ impl SyncClient {
             | "task_statuses"
             | "finance_plans"
             | "finance_items" => "name",
+            "finance_payments" => "month_key",
             "notes" | "tasks" => "title",
             "task_checkboxes" => "text",
             "sql_macrosing_templates" => "template_name",
@@ -1005,6 +1069,20 @@ mod tests {
                         "updated_at": "2026-06-11T00:00:01",
                         "is_deleted": false
                     }
+                ],
+                "finance_payments": [
+                    {
+                        "uuid": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+                        "plan_uuid": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+                        "item_uuid": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                        "month_key": "2026-06",
+                        "is_paid": true,
+                        "paid_amount_cents": 45000,
+                        "note": "paid",
+                        "created_at": "2026-06-11T00:00:04",
+                        "updated_at": "2026-06-11T00:00:04",
+                        "is_deleted": false
+                    }
                 ]
             },
             "server_time": "2026-06-11T00:00:10"
@@ -1034,5 +1112,30 @@ mod tests {
             .unwrap();
         assert_eq!(child.0, plan_id);
         assert_eq!(child.1, Some(parent_id));
+
+        let child_id =
+            queries::get_finance_item_id_by_uuid(&conn, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+                .unwrap()
+                .unwrap();
+        let payment: (i64, i64, String, i64, i64) = conn
+            .query_row(
+                "SELECT plan_id, item_id, month_key, is_paid, paid_amount_cents
+                 FROM finance_payments WHERE uuid = ?1",
+                ["dddddddd-dddd-4ddd-8ddd-dddddddddddd"],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            payment,
+            (plan_id, child_id, "2026-06".to_string(), 1, 45000)
+        );
     }
 }

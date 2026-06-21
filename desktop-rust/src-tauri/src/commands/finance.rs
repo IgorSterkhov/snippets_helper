@@ -1,5 +1,5 @@
 use crate::db::{
-    models::{FinanceItem, FinancePlan},
+    models::{FinanceItem, FinancePayment, FinancePlan},
     queries, DbState,
 };
 use tauri::State;
@@ -127,4 +127,36 @@ pub fn move_finance_item(
 pub fn delete_finance_item(state: State<DbState>, id: i64) -> Result<(), String> {
     let conn = state.lock_recover();
     queries::delete_finance_item(&conn, id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn list_finance_payments(
+    state: State<DbState>,
+    plan_id: i64,
+) -> Result<Vec<FinancePayment>, String> {
+    let conn = state.lock_recover();
+    queries::list_finance_payments(&conn, plan_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn upsert_finance_payment(
+    state: State<DbState>,
+    plan_id: i64,
+    item_id: i64,
+    month_key: String,
+    is_paid: bool,
+    paid_amount_cents: i64,
+    note: String,
+) -> Result<FinancePayment, String> {
+    let conn = state.lock_recover();
+    queries::upsert_finance_payment(
+        &conn,
+        plan_id,
+        item_id,
+        &month_key,
+        is_paid,
+        paid_amount_cents,
+        &note,
+    )
+    .map_err(|e| e.to_string())
 }

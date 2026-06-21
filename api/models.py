@@ -323,6 +323,32 @@ class FinanceItem(Base):
     )
 
 
+class FinancePayment(Base):
+    __tablename__ = "finance_payments"
+
+    uuid: Mapped[uuid_mod.UUID] = mapped_column(Uuid, primary_key=True, default=uuid_mod.uuid4)
+    user_id: Mapped[uuid_mod.UUID] = mapped_column(Uuid, ForeignKey("users.id"), nullable=False)
+    id: Mapped[int | None] = mapped_column(Integer)
+    plan_id: Mapped[int | None] = mapped_column(Integer)
+    plan_uuid: Mapped[uuid_mod.UUID | None] = mapped_column(Uuid)
+    item_id: Mapped[int | None] = mapped_column(Integer)
+    item_uuid: Mapped[uuid_mod.UUID | None] = mapped_column(Uuid)
+    month_key: Mapped[str] = mapped_column(String(7), nullable=False)
+    is_paid: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    paid_amount_cents: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    note: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    __table_args__ = (
+        CheckConstraint("paid_amount_cents >= 0", name="ck_finance_payments_amount_non_negative"),
+        UniqueConstraint("user_id", "item_uuid", "month_key", name="uq_finance_payments_user_item_month"),
+        Index("idx_finance_payments_user_updated", "user_id", "updated_at"),
+        Index("idx_finance_payments_plan_month", "user_id", "plan_uuid", "month_key", "item_uuid"),
+    )
+
+
 class ShareLink(Base):
     __tablename__ = "share_links"
 
@@ -469,4 +495,5 @@ TABLE_MODELS = {
     "task_links": TaskLink,
     "finance_plans": FinancePlan,
     "finance_items": FinanceItem,
+    "finance_payments": FinancePayment,
 }

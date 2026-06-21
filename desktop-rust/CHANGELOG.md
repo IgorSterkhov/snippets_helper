@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## v1.19.0 (2026-06-21)
+
+- **Finance payment calendar:** monthly Finance lists now have a `Calendar`
+  view next to `Structure`. The calendar reuses the expense hierarchy, lets
+  terminal rows track paid state and actual amount per month, aggregates paid
+  descendant totals on group rows, supports adding month columns and hiding old
+  months, and syncs payment facts through the API using deterministic
+  item/month identities.
+
 ## v1.18.4 (2026-06-21)
 
 - **ClickHouse docs source coverage:** `Update docs` now discovers the

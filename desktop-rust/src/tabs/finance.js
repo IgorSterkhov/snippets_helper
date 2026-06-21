@@ -19,6 +19,8 @@ const DEFAULT_FINANCE_DISPLAY = {
 const FINANCE_FILL_ORDERS = new Set(['strong_first', 'soft_first']);
 const FINANCE_HEADER_AUTOSAVE_DELAY_MS = 650;
 const FINANCE_PLACEHOLDER_ITEM_NAME = 'Untitled item';
+const CALENDAR_MONTHS_KEY_PREFIX = 'finance.calendar.months.';
+const CALENDAR_SHOW_OLD_KEY = 'finance.calendar.show_old_months';
 const PLAN_KINDS = [
   { value: 'monthly', label: 'Monthly' },
   { value: 'project', label: 'Project' },
@@ -31,7 +33,10 @@ let rootEl = null;
 let state = {
   plans: [],
   items: [],
+  payments: [],
   activePlanId: null,
+  activeView: 'structure',
+  calendarShowOldMonths: false,
   collapsed: new Set(),
   itemDrag: null,
   planDrag: null,
@@ -292,6 +297,51 @@ function injectStyles() {
   font-size: 16px;
   font-weight: 700;
 }
+.finance-view-bar {
+  min-height: 38px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: color-mix(in srgb, var(--bg-primary) 78%, var(--bg-secondary));
+}
+.finance-segment {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg-secondary);
+}
+.finance-segment-btn {
+  height: 26px;
+  min-width: 78px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 650;
+}
+.finance-segment-btn.active {
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-primary));
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 38%, transparent);
+}
+.finance-calendar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.finance-calendar-status {
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
 .finance-table-wrap {
   flex: 1;
   min-height: 0;
@@ -528,6 +578,111 @@ function injectStyles() {
   font-variant-numeric: tabular-nums;
   font-weight: 700;
 }
+.finance-calendar-tree {
+  min-width: 820px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-primary);
+}
+.finance-calendar-head,
+.finance-calendar-row {
+  display: grid;
+  align-items: stretch;
+}
+.finance-calendar-head {
+  min-height: 32px;
+  color: var(--text-muted);
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+.finance-calendar-row {
+  min-height: 32px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+}
+.finance-calendar-row:last-child {
+  border-bottom: 0;
+}
+.finance-calendar-row.finance-band-slot-0 {
+  background: linear-gradient(90deg, var(--finance-band-strong-bg), var(--finance-band-strong-bg-soft));
+  border-bottom-color: var(--finance-band-strong-border);
+}
+.finance-calendar-row.finance-band-slot-1 {
+  background: linear-gradient(90deg, var(--finance-band-medium-bg), var(--finance-band-medium-bg-soft));
+  border-bottom-color: var(--finance-band-medium-border);
+}
+.finance-calendar-row.finance-band-slot-2 {
+  background: linear-gradient(90deg, var(--finance-band-soft-bg), var(--finance-band-soft-bg-soft));
+  border-bottom-color: var(--finance-band-soft-border);
+}
+.finance-calendar-head > div,
+.finance-calendar-row > div {
+  min-width: 0;
+  padding: 4px 6px;
+  border-right: 1px solid color-mix(in srgb, var(--border) 68%, transparent);
+}
+.finance-calendar-head > div:last-child,
+.finance-calendar-row > div:last-child {
+  border-right: 0;
+}
+.finance-calendar-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.finance-calendar-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 650;
+}
+.finance-calendar-terminal .finance-calendar-label {
+  font-weight: 500;
+}
+.finance-payment-cell {
+  display: grid;
+  grid-template-columns: 18px minmax(58px, 1fr);
+  align-items: center;
+  gap: 5px;
+}
+.finance-payment-cell input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+}
+.finance-payment-amount {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  height: 23px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: rgba(13, 17, 23, 0.16);
+  color: var(--text);
+  padding: 1px 5px;
+  font-size: 12px;
+  text-align: right;
+}
+.finance-payment-amount:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: rgba(13, 17, 23, 0.36);
+}
+.finance-calendar-total {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  font-size: 12px;
+  font-weight: 760;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
 `;
   document.head.appendChild(style);
 }
@@ -546,6 +701,10 @@ function itemId(item) {
 
 function currencyOfActivePlan() {
   return state.plans.find((plan) => planId(plan) === state.activePlanId)?.currency || 'RUB';
+}
+
+function activePlan() {
+  return state.plans.find((plan) => planId(plan) === state.activePlanId) || null;
 }
 
 function activePlanKind() {
@@ -699,6 +858,62 @@ function amountInputValue(amountCents) {
   return amount ? String(amount).replace('.', ',') : '';
 }
 
+function monthKeyFromDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  return `${year}-${month}`;
+}
+
+function currentMonthKey() {
+  return monthKeyFromDate(new Date());
+}
+
+function addMonths(monthKey, delta) {
+  const [year, month] = String(monthKey || currentMonthKey()).split('-').map(Number);
+  const date = new Date(Number.isFinite(year) ? year : new Date().getFullYear(), (Number.isFinite(month) ? month : 1) - 1 + delta, 1);
+  return monthKeyFromDate(date);
+}
+
+function monthLabel(monthKey) {
+  const [year, month] = String(monthKey || currentMonthKey()).split('-').map(Number);
+  const date = new Date(year || new Date().getFullYear(), (month || 1) - 1, 1);
+  try {
+    const label = new Intl.DateTimeFormat('ru-RU', { month: 'long', year: 'numeric' }).format(date);
+    return label.charAt(0).toUpperCase() + label.slice(1);
+  } catch {
+    return monthKey;
+  }
+}
+
+function calendarMonthsStorageKey(plan = activePlan()) {
+  const stableId = plan?.uuid || state.activePlanId || 'default';
+  return `${CALENDAR_MONTHS_KEY_PREFIX}${stableId}`;
+}
+
+function loadStoredCalendarMonths(plan = activePlan()) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(calendarMonthsStorageKey(plan)) || '[]');
+    return Array.isArray(parsed)
+      ? parsed.filter((value) => /^\d{4}-\d{2}$/.test(String(value)))
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveStoredCalendarMonths(months, plan = activePlan()) {
+  const unique = [...new Set(months)].sort();
+  localStorage.setItem(calendarMonthsStorageKey(plan), JSON.stringify(unique));
+}
+
+function loadCalendarUiState() {
+  state.calendarShowOldMonths = localStorage.getItem(CALENDAR_SHOW_OLD_KEY) === '1';
+}
+
+function saveCalendarShowOldMonths() {
+  localStorage.setItem(CALENDAR_SHOW_OLD_KEY, state.calendarShowOldMonths ? '1' : '0');
+}
+
 function dateInputValue(value) {
   const text = String(value || '').trim();
   return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : '';
@@ -823,6 +1038,8 @@ async function loadAll(selectPlanId = state.activePlanId) {
     ? wanted
     : planId(state.plans[0]);
   state.items = await call('list_finance_items', { planId: state.activePlanId });
+  state.payments = await call('list_finance_payments', { planId: state.activePlanId });
+  if (activePlanKind() !== 'monthly') state.activeView = 'structure';
   render();
 }
 
@@ -929,7 +1146,16 @@ function renderMain() {
   const { roots, children } = buildTree(state.items);
   const { totals, grandTotal } = computeTotals(roots, children);
   main.appendChild(renderSummary(grandTotal, activePlan.currency || 'RUB'));
-  main.appendChild(renderTree(roots, children, totals));
+  if (activePlanKind() === 'monthly') {
+    main.appendChild(renderFinanceViewBar());
+  } else {
+    state.activeView = 'structure';
+  }
+  main.appendChild(
+    state.activeView === 'calendar'
+      ? renderPaymentCalendar(roots, children, activePlan)
+      : renderTree(roots, children, totals)
+  );
   return main;
 }
 
@@ -1277,6 +1503,271 @@ function renderSummary(total, currency) {
     summary.appendChild(card);
   }
   return summary;
+}
+
+function renderFinanceViewBar() {
+  const bar = document.createElement('div');
+  bar.className = 'finance-view-bar';
+
+  const segment = document.createElement('div');
+  segment.className = 'finance-segment';
+  [
+    ['structure', 'Structure'],
+    ['calendar', 'Calendar'],
+  ].forEach(([view, label]) => {
+    const btn = document.createElement('button');
+    btn.className = 'finance-segment-btn' + (state.activeView === view ? ' active' : '');
+    btn.type = 'button';
+    btn.textContent = label;
+    btn.addEventListener('click', () => {
+      state.activeView = view;
+      render();
+    });
+    segment.appendChild(btn);
+  });
+
+  const actions = document.createElement('div');
+  actions.className = 'finance-calendar-actions';
+  if (state.activeView === 'calendar') {
+    const status = document.createElement('span');
+    status.className = 'finance-calendar-status';
+    status.textContent = 'Payment facts';
+    const oldBtn = document.createElement('button');
+    oldBtn.className = 'finance-small-btn';
+    oldBtn.type = 'button';
+    oldBtn.title = 'Show or hide months before the current month';
+    oldBtn.textContent = state.calendarShowOldMonths ? 'Hide old' : 'Show old';
+    oldBtn.addEventListener('click', () => {
+      state.calendarShowOldMonths = !state.calendarShowOldMonths;
+      saveCalendarShowOldMonths();
+      render();
+    });
+    const addMonthBtn = document.createElement('button');
+    addMonthBtn.className = 'finance-small-btn finance-primary-btn';
+    addMonthBtn.type = 'button';
+    addMonthBtn.title = 'Add next month column';
+    addMonthBtn.textContent = '+ Month';
+    addMonthBtn.addEventListener('click', () => addCalendarMonthColumn());
+    actions.append(status, oldBtn, addMonthBtn);
+  }
+
+  bar.append(segment, actions);
+  return bar;
+}
+
+function paymentMap() {
+  const map = new Map();
+  for (const payment of state.payments || []) {
+    const item = normalizeId(payment.item_id);
+    const month = String(payment.month_key || '');
+    if (item != null && month) map.set(`${item}|${month}`, payment);
+  }
+  return map;
+}
+
+function knownCalendarMonths(plan = activePlan()) {
+  const months = new Set([currentMonthKey(), addMonths(currentMonthKey(), 1), addMonths(currentMonthKey(), 2)]);
+  for (const payment of state.payments || []) {
+    if (/^\d{4}-\d{2}$/.test(String(payment.month_key || ''))) months.add(payment.month_key);
+  }
+  for (const month of loadStoredCalendarMonths(plan)) months.add(month);
+  return [...months].sort();
+}
+
+function visibleCalendarMonths(plan = activePlan()) {
+  const current = currentMonthKey();
+  const months = knownCalendarMonths(plan);
+  const visible = state.calendarShowOldMonths ? months : months.filter((month) => month >= current);
+  return visible.length ? visible : [current];
+}
+
+function addCalendarMonthColumn() {
+  const plan = activePlan();
+  const months = knownCalendarMonths(plan);
+  const next = addMonths(months[months.length - 1] || currentMonthKey(), 1);
+  saveStoredCalendarMonths([...loadStoredCalendarMonths(plan), next], plan);
+  render();
+}
+
+function terminalDescendantIds(item, children, cache = new Map()) {
+  const id = itemId(item);
+  if (cache.has(id)) return cache.get(id);
+  const kids = children.get(id) || [];
+  if (!kids.length) {
+    cache.set(id, [id]);
+    return [id];
+  }
+  const ids = kids.flatMap((child) => terminalDescendantIds(child, children, cache));
+  cache.set(id, ids);
+  return ids;
+}
+
+function paidTotalForMonth(item, monthKey, children, payments, cache) {
+  const ids = terminalDescendantIds(item, children, cache);
+  return ids.reduce((sum, id) => {
+    const payment = payments.get(`${id}|${monthKey}`);
+    return payment?.is_paid ? sum + (Number(payment.paid_amount_cents) || 0) : sum;
+  }, 0);
+}
+
+function renderPaymentCalendar(roots, children, plan) {
+  const wrap = document.createElement('div');
+  wrap.className = 'finance-table-wrap';
+  if (!state.items.length) {
+    const empty = document.createElement('div');
+    empty.className = 'finance-empty';
+    empty.textContent = 'No expense rows yet. Add rows in Structure.';
+    wrap.appendChild(empty);
+    return wrap;
+  }
+
+  const months = visibleCalendarMonths(plan);
+  const template = `minmax(260px, 1.6fr) repeat(${months.length}, minmax(132px, 146px))`;
+  const tree = document.createElement('div');
+  tree.className = 'finance-calendar-tree';
+  tree.style.minWidth = `${Math.max(820, 280 + months.length * 142)}px`;
+
+  const head = document.createElement('div');
+  head.className = 'finance-calendar-head';
+  head.style.gridTemplateColumns = template;
+  const first = document.createElement('div');
+  first.textContent = 'Expense';
+  head.appendChild(first);
+  for (const month of months) {
+    const cell = document.createElement('div');
+    cell.textContent = monthLabel(month);
+    head.appendChild(cell);
+  }
+  tree.appendChild(head);
+
+  const rows = flattenVisible(roots, children);
+  const maxDepth = maxTreeDepth(roots, children);
+  const payments = paymentMap();
+  const terminalCache = new Map();
+  for (const row of rows) {
+    tree.appendChild(renderCalendarRow(row, children, maxDepth, months, payments, terminalCache, template, plan));
+  }
+  wrap.appendChild(tree);
+  return wrap;
+}
+
+function renderCalendarRow(row, children, maxDepth, months, payments, terminalCache, template, plan) {
+  const { item, depth } = row;
+  const id = itemId(item);
+  const childCount = (children.get(id) || []).length;
+  const rowEl = document.createElement('div');
+  const classes = ['finance-calendar-row'];
+  if (childCount === 0) classes.push('finance-calendar-terminal');
+  else classes.push('finance-group-row');
+  const bandSlot = bandSlotForDepth(depth, maxDepth);
+  if (bandSlot != null) classes.push(`finance-band-slot-${bandSlot}`);
+  rowEl.className = classes.join(' ');
+  rowEl.style.gridTemplateColumns = template;
+  rowEl.dataset.id = String(id);
+
+  const nameCell = document.createElement('div');
+  nameCell.className = 'finance-calendar-name';
+  const toggle = document.createElement('button');
+  toggle.className = 'finance-toggle';
+  toggle.type = 'button';
+  toggle.disabled = childCount === 0;
+  toggle.textContent = childCount ? (state.collapsed.has(id) ? '>' : 'v') : '';
+  toggle.addEventListener('click', () => {
+    if (state.collapsed.has(id)) state.collapsed.delete(id);
+    else state.collapsed.add(id);
+    saveCollapsed();
+    render();
+  });
+  const pad = document.createElement('span');
+  pad.className = 'finance-depth-pad';
+  pad.style.width = `${Math.min(depth, 8) * 18}px`;
+  const label = document.createElement('span');
+  label.className = 'finance-calendar-label';
+  label.textContent = item.name || FINANCE_PLACEHOLDER_ITEM_NAME;
+  nameCell.append(toggle, pad, label);
+  rowEl.appendChild(nameCell);
+
+  for (const month of months) {
+    if (childCount > 0) {
+      const totalCell = document.createElement('div');
+      const total = document.createElement('div');
+      total.className = 'finance-calendar-total';
+      total.textContent = formatMoney(paidTotalForMonth(item, month, children, payments, terminalCache), plan.currency || 'RUB');
+      totalCell.appendChild(total);
+      rowEl.appendChild(totalCell);
+    } else {
+      rowEl.appendChild(renderPaymentCell(item, month, payments.get(`${id}|${month}`), plan));
+    }
+  }
+  return rowEl;
+}
+
+function renderPaymentCell(item, monthKey, payment, plan) {
+  const cell = document.createElement('div');
+  const wrap = document.createElement('div');
+  wrap.className = 'finance-payment-cell';
+  const checkbox = document.createElement('input');
+  checkbox.type = 'checkbox';
+  checkbox.checked = Boolean(payment?.is_paid);
+  checkbox.title = 'Paid';
+  const amount = document.createElement('input');
+  amount.className = 'finance-payment-amount';
+  amount.inputMode = 'decimal';
+  amount.value = amountInputValue(payment ? payment.paid_amount_cents : item.amount_cents);
+  amount.placeholder = amountInputValue(item.amount_cents) || '0';
+  amount.title = `Fact amount, ${plan.currency || 'RUB'}`;
+
+  const save = () => savePaymentCell(item, monthKey, checkbox.checked, amount.value);
+  checkbox.addEventListener('change', save);
+  amount.addEventListener('change', save);
+  amount.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      save();
+    }
+  });
+
+  wrap.append(checkbox, amount);
+  cell.appendChild(wrap);
+  return cell;
+}
+
+async function savePaymentCell(item, monthKey, isPaid, amountValue) {
+  const amountCents = parseMoneyToCents(amountValue);
+  if (amountCents == null) {
+    showToast('Payment amount must be non-negative', 'error');
+    return;
+  }
+  const tableWrap = rootEl?.querySelector('.finance-table-wrap');
+  const scrollTop = tableWrap?.scrollTop || 0;
+  const scrollLeft = tableWrap?.scrollLeft || 0;
+  try {
+    const saved = await call('upsert_finance_payment', {
+      planId: state.activePlanId,
+      itemId: itemId(item),
+      monthKey,
+      isPaid,
+      paidAmountCents: amountCents,
+      note: '',
+    });
+    state.payments = [
+      ...state.payments.filter((payment) => !(
+        normalizeId(payment.item_id) === itemId(item)
+        && String(payment.month_key) === monthKey
+      )),
+      saved,
+    ];
+    render();
+    setTimeout(() => {
+      const nextWrap = rootEl?.querySelector('.finance-table-wrap');
+      if (nextWrap) {
+        nextWrap.scrollTop = scrollTop;
+        nextWrap.scrollLeft = scrollLeft;
+      }
+    }, 0);
+  } catch (err) {
+    showToast(`Failed to save payment: ${err}`, 'error');
+  }
 }
 
 function renderTree(roots, children, totals) {
@@ -1921,6 +2412,7 @@ async function onPlanDragEnd() {
 export async function init(container) {
   injectStyles();
   loadCollapsed();
+  loadCalendarUiState();
   rootEl = container;
   rootEl.classList.add('finance-tab');
   rootEl.innerHTML = '<div class="loading">Loading finance...</div>';

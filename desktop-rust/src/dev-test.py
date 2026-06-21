@@ -4351,7 +4351,168 @@ async def run_tests():
 
     await check('T26h Finance row editing preserves scroll and placeholder selection', t26h_finance_row_editing_scroll_and_placeholder)
 
-    async def t26i_clickhouse_docs_slow_tree_fallback():
+    # ── T26i: Finance payment calendar ───────────────────────
+    async def t26i_finance_payment_calendar():
+        async def seed_finance_calendar():
+            plans = [
+                {
+                    'id': 1,
+                    'uuid': 'fp-calendar-1',
+                    'name': 'Regular monthly',
+                    'currency': 'RUB',
+                    'kind': 'monthly',
+                    'sort_order': 0,
+                    'created_at': '2026-01-01T00:00:00Z',
+                    'updated_at': '2026-01-01T00:00:00Z',
+                    'sync_status': 'pending',
+                    'user_id': 'mock-user',
+                },
+                {
+                    'id': 2,
+                    'uuid': 'fp-calendar-2',
+                    'name': 'Project once',
+                    'currency': 'RUB',
+                    'kind': 'project',
+                    'sort_order': 1,
+                    'created_at': '2026-01-01T00:00:00Z',
+                    'updated_at': '2026-01-01T00:00:00Z',
+                    'sync_status': 'pending',
+                    'user_id': 'mock-user',
+                },
+            ]
+            items = [
+                {
+                    'id': 1,
+                    'uuid': 'fi-calendar-1',
+                    'plan_id': 1,
+                    'parent_id': None,
+                    'name': 'Housing',
+                    'amount_cents': 0,
+                    'due_day': None,
+                    'due_date': None,
+                    'note': '',
+                    'sort_order': 0,
+                    'created_at': '2026-01-01T00:00:00Z',
+                    'updated_at': '2026-01-01T00:00:00Z',
+                    'sync_status': 'pending',
+                    'user_id': 'mock-user',
+                },
+                {
+                    'id': 2,
+                    'uuid': 'fi-calendar-2',
+                    'plan_id': 1,
+                    'parent_id': 1,
+                    'name': 'Rent',
+                    'amount_cents': 12000000,
+                    'due_day': 21,
+                    'due_date': None,
+                    'note': '',
+                    'sort_order': 0,
+                    'created_at': '2026-01-01T00:00:00Z',
+                    'updated_at': '2026-01-01T00:00:00Z',
+                    'sync_status': 'pending',
+                    'user_id': 'mock-user',
+                },
+                {
+                    'id': 3,
+                    'uuid': 'fi-calendar-3',
+                    'plan_id': 2,
+                    'parent_id': None,
+                    'name': 'Project row',
+                    'amount_cents': 500000,
+                    'due_day': None,
+                    'due_date': '2026-07-01',
+                    'note': '',
+                    'sort_order': 0,
+                    'created_at': '2026-01-01T00:00:00Z',
+                    'updated_at': '2026-01-01T00:00:00Z',
+                    'sync_status': 'pending',
+                    'user_id': 'mock-user',
+                },
+            ]
+            await cdp.eval(f"""(() => {{
+              localStorage.setItem('mock.finance_plans', JSON.stringify({json.dumps(plans)}));
+              localStorage.setItem('mock.__seq.finance_plans', '2');
+              localStorage.setItem('mock.finance_items', JSON.stringify({json.dumps(items)}));
+              localStorage.setItem('mock.__seq.finance_items', '3');
+              localStorage.setItem('mock.finance_payments', JSON.stringify([]));
+              localStorage.setItem('mock.__seq.finance_payments', '0');
+              Object.keys(localStorage)
+                .filter(key => key.startsWith('finance.calendar.months.'))
+                .forEach(key => localStorage.removeItem(key));
+              localStorage.removeItem('finance.calendar.show_old_months');
+            }})()""")
+
+        async def reload_finance():
+            await cdp.send('Page.navigate', url=TEST_URL)
+            await asyncio.sleep(0.8)
+            await wait_until(cdp, "!!document.querySelector('.tab-btn')", timeout=8)
+            await wait_until(cdp, "!!window.__TAURI__ && !!window.__TAURI__.core", timeout=5)
+            await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"finance\"]').click()")
+            await wait_until(cdp, "!!document.querySelector('#panel-finance .finance-row')", timeout=5)
+
+        await seed_finance_calendar()
+        await reload_finance()
+
+        view_buttons = await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-segment-btn')]
+          .map(btn => btn.textContent.trim()).join('|'))()""")
+        assert view_buttons == 'Structure|Calendar', view_buttons
+
+        await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-segment-btn')]
+          .find(btn => btn.textContent.trim() === 'Calendar').click())()""")
+        await wait_until(cdp, "!!document.querySelector('#panel-finance .finance-calendar-row[data-id=\"2\"]')", timeout=4)
+
+        initial_month_count = await cdp.eval(
+            "document.querySelector('#panel-finance .finance-calendar-head')?.children.length || 0"
+        )
+        assert initial_month_count >= 2, initial_month_count
+        await cdp.eval("""(() => {
+          const row = document.querySelector('#panel-finance .finance-calendar-row[data-id="2"]');
+          const amount = row.querySelector('.finance-payment-amount');
+          const checkbox = row.querySelector('input[type="checkbox"]');
+          amount.value = '1000';
+          checkbox.click();
+        })()""")
+        await wait_until(
+            cdp,
+            """(() => {
+              const payments = JSON.parse(localStorage.getItem('mock.finance_payments') || '[]');
+              return payments.some(payment => payment.item_id === 2 && payment.is_paid === true && payment.paid_amount_cents === 100000);
+            })()""",
+            timeout=4,
+        )
+        group_total = await wait_until(
+            cdp,
+            """(() => {
+              const text = document.querySelector('#panel-finance .finance-calendar-row[data-id="1"] .finance-calendar-total')?.textContent || '';
+              return text.replace(/\\s/g, '').includes('1000') && text;
+            })()""",
+            timeout=4,
+        )
+        assert '1000' in group_total.replace('\xa0', '').replace(' ', ''), group_total
+
+        await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-calendar-actions button')]
+          .find(btn => btn.textContent.trim() === '+ Month').click())()""")
+        await wait_until(
+            cdp,
+            f"(document.querySelector('#panel-finance .finance-calendar-head')?.children.length || 0) > {initial_month_count}",
+            timeout=4,
+        )
+
+        await cdp.eval("document.querySelector('#panel-finance .finance-plan-card[data-id=\"2\"]').click()")
+        await wait_until(
+            cdp,
+            "document.querySelector('#panel-finance .finance-plan-card[data-id=\"2\"]')?.classList.contains('active')",
+            timeout=4,
+        )
+        project_buttons = await cdp.eval(
+            "document.querySelectorAll('#panel-finance .finance-segment-btn').length"
+        )
+        assert project_buttons == 0, project_buttons
+
+    await check('T26i Finance payment calendar', t26i_finance_payment_calendar)
+
+    async def t26j_clickhouse_docs_slow_tree_fallback():
         clickhouse_rs_path = os.path.join(SRC_DIR, '..', 'src-tauri', 'src', 'commands', 'clickhouse_docs.rs')
         with open(clickhouse_rs_path, 'r', encoding='utf-8') as fh:
             clickhouse_rs = fh.read()
@@ -4406,7 +4567,7 @@ async def run_tests():
               delete window.__CLICKHOUSE_DOCS_LOAD_TIMEOUT_MS;
             })()""")
 
-    await check('T26i ClickHouse docs slow tree fallback', t26i_clickhouse_docs_slow_tree_fallback)
+    await check('T26j ClickHouse docs slow tree fallback', t26j_clickhouse_docs_slow_tree_fallback)
 
     # ── T27: ClickHouse docs module ───────────────────────
     async def t27_clickhouse_docs_module():

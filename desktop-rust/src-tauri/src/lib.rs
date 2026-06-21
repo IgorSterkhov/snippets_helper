@@ -247,6 +247,8 @@ pub fn run() {
             commands::finance::update_finance_item,
             commands::finance::move_finance_item,
             commands::finance::delete_finance_item,
+            commands::finance::list_finance_payments,
+            commands::finance::upsert_finance_payment,
             // Help
             commands::help::get_changelog,
             // Repo Search

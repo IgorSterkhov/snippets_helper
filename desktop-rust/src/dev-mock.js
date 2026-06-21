@@ -408,6 +408,8 @@
       },
     ]);
     storeSet('__seq.finance_items', 4);
+    storeSet('finance_payments', []);
+    storeSet('__seq.finance_payments', 0);
 
     storeSet('__init', true);
   }
@@ -1360,6 +1362,11 @@
           ? { ...item, sync_status: 'deleted', updated_at: now() }
           : item
       )));
+      storeSet('finance_payments', storeGet('finance_payments', []).map(payment => (
+        Number(payment.plan_id) === planId
+          ? { ...payment, sync_status: 'deleted', updated_at: now() }
+          : payment
+      )));
     },
     async list_finance_items({ planId, plan_id }) {
       const targetPlanId = Number(planId ?? plan_id);
@@ -1547,6 +1554,74 @@
           ? { ...item, sync_status: 'deleted', updated_at: now() }
           : item
       )));
+      storeSet('finance_payments', storeGet('finance_payments', []).map(payment => (
+        toDelete.has(Number(payment.item_id))
+          ? { ...payment, sync_status: 'deleted', updated_at: now() }
+          : payment
+      )));
+    },
+    async list_finance_payments({ planId, plan_id }) {
+      const targetPlanId = Number(planId ?? plan_id);
+      return [...storeGet('finance_payments', [])]
+        .filter(payment => Number(payment.plan_id) === targetPlanId && payment.sync_status !== 'deleted')
+        .sort((a, b) =>
+          String(a.month_key || '').localeCompare(String(b.month_key || ''))
+          || Number(a.item_id) - Number(b.item_id)
+          || Number(a.id) - Number(b.id)
+        );
+    },
+    async upsert_finance_payment({
+      planId,
+      plan_id,
+      itemId,
+      item_id,
+      monthKey,
+      month_key,
+      isPaid,
+      is_paid,
+      paidAmountCents,
+      paid_amount_cents,
+      note,
+    }) {
+      const targetPlanId = Number(planId ?? plan_id);
+      const targetItemId = Number(itemId ?? item_id);
+      const targetMonth = String(monthKey ?? month_key ?? '').trim();
+      if (!/^\d{4}-\d{2}$/.test(targetMonth)) throw new Error('month_key must be a valid YYYY-MM month');
+      const [, month] = targetMonth.split('-').map(Number);
+      if (month < 1 || month > 12) throw new Error('month_key must be a valid YYYY-MM month');
+      const amount = Number(paidAmountCents ?? paid_amount_cents ?? 0);
+      if (!Number.isFinite(amount) || amount < 0) throw new Error('paid_amount_cents must be non-negative');
+      const plan = storeGet('finance_plans', []).find(p => Number(p.id) === targetPlanId && p.sync_status !== 'deleted');
+      if (!plan) throw new Error('finance plan not found');
+      if ((plan.kind || 'monthly') !== 'monthly') throw new Error('finance payments are available only for monthly plans');
+      const item = storeGet('finance_items', []).find(i => Number(i.id) === targetItemId && i.sync_status !== 'deleted');
+      if (!item) throw new Error('finance item not found');
+      if (Number(item.plan_id) !== targetPlanId) throw new Error('finance item must belong to the same plan');
+      const payments = storeGet('finance_payments', []);
+      const existing = payments.find(payment =>
+        Number(payment.plan_id) === targetPlanId
+        && Number(payment.item_id) === targetItemId
+        && String(payment.month_key) === targetMonth
+      );
+      if (existing) {
+        return updateItem('finance_payments', Number(existing.id), {
+          is_paid: Boolean(isPaid ?? is_paid),
+          paid_amount_cents: amount,
+          note: note || '',
+          sync_status: 'pending',
+        });
+      }
+      return createItem('finance_payments', {
+        uuid: uuid(),
+        plan_id: targetPlanId,
+        item_id: targetItemId,
+        month_key: targetMonth,
+        is_paid: Boolean(isPaid ?? is_paid),
+        paid_amount_cents: amount,
+        note: note || '',
+        sync_status: 'pending',
+        user_id: 'mock-user',
+      });
     },
 
     // ── Tasks ───────────────────────────────────────────

@@ -2,6 +2,7 @@ use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use regex::Regex;
 use rusqlite::{params, Connection, OptionalExtension, Result, Transaction};
 use serde_json::{Map, Value};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use super::models::*;
@@ -514,7 +515,11 @@ pub fn move_note_folder(
 
     let mut new_siblings = note_folder_sibling_ids_tx(&tx, parent_id, id)?;
     let insert_at = before_id
-        .and_then(|target_id| new_siblings.iter().position(|sibling_id| *sibling_id == target_id))
+        .and_then(|target_id| {
+            new_siblings
+                .iter()
+                .position(|sibling_id| *sibling_id == target_id)
+        })
         .unwrap_or(new_siblings.len());
     new_siblings.insert(insert_at, id);
     apply_note_folder_sibling_order_tx(&tx, parent_id, &new_siblings, &now)?;
@@ -1301,6 +1306,26 @@ fn read_finance_item(row: &rusqlite::Row) -> rusqlite::Result<FinanceItem> {
     })
 }
 
+fn read_finance_payment(row: &rusqlite::Row) -> rusqlite::Result<FinancePayment> {
+    let is_paid: i64 = row.get(4)?;
+    let created: String = row.get(7)?;
+    let updated: String = row.get(8)?;
+    Ok(FinancePayment {
+        id: row.get(0)?,
+        plan_id: row.get(1)?,
+        item_id: row.get(2)?,
+        month_key: row.get(3)?,
+        is_paid: is_paid != 0,
+        paid_amount_cents: row.get(5)?,
+        note: row.get(6)?,
+        created_at: parse_dt(&created),
+        updated_at: parse_dt(&updated),
+        uuid: row.get(9)?,
+        sync_status: row.get(10)?,
+        user_id: row.get(11)?,
+    })
+}
+
 fn normalize_finance_kind(kind: &str) -> Result<String> {
     let normalized = kind.trim().to_lowercase().replace('-', "_");
     match normalized.as_str() {
@@ -1345,6 +1370,25 @@ fn normalize_due_date(due_date: Option<&str>) -> Result<Option<String>> {
         )
     })?;
     Ok(Some(date.format("%Y-%m-%d").to_string()))
+}
+
+fn normalize_month_key(month_key: &str) -> Result<String> {
+    let trimmed = month_key.trim();
+    let parsed = NaiveDate::parse_from_str(&format!("{trimmed}-01"), "%Y-%m-%d").map_err(|_| {
+        rusqlite::Error::InvalidParameterName("month_key must be a valid YYYY-MM month".to_string())
+    })?;
+    Ok(parsed.format("%Y-%m").to_string())
+}
+
+fn deterministic_finance_payment_uuid(item_uuid: &str, month_key: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(format!("ister-app:finance_payment:{item_uuid}:{month_key}").as_bytes());
+    let digest = hasher.finalize();
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    bytes[6] = (bytes[6] & 0x0f) | 0x80; // UUID v8-style custom deterministic value.
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    Uuid::from_bytes(bytes).to_string()
 }
 
 pub fn list_finance_plans(conn: &Connection) -> Result<Vec<FinancePlan>> {
@@ -1442,6 +1486,12 @@ pub fn delete_finance_plan(conn: &Connection, id: i64) -> Result<()> {
          WHERE plan_id = ?2",
         params![now, id],
     )?;
+    tx.execute(
+        "UPDATE finance_payments
+         SET sync_status = 'deleted', updated_at = ?1
+         WHERE plan_id = ?2",
+        params![now, id],
+    )?;
     tx.commit()?;
     Ok(())
 }
@@ -1467,10 +1517,7 @@ fn finance_plan_kind(conn: &Connection, id: i64) -> Result<Option<String>> {
     .optional()
 }
 
-fn finance_item_plan_and_parent_tx(
-    tx: &Transaction<'_>,
-    id: i64,
-) -> Result<(i64, Option<i64>)> {
+fn finance_item_plan_and_parent_tx(tx: &Transaction<'_>, id: i64) -> Result<(i64, Option<i64>)> {
     tx.query_row(
         "SELECT plan_id, parent_id FROM finance_items WHERE id = ?1 AND sync_status != 'deleted'",
         params![id],
@@ -1483,6 +1530,15 @@ fn finance_item_plan(conn: &Connection, id: i64) -> Result<Option<i64>> {
         "SELECT plan_id FROM finance_items WHERE id = ?1 AND sync_status != 'deleted'",
         params![id],
         |r| r.get(0),
+    )
+    .optional()
+}
+
+fn finance_item_plan_and_uuid(conn: &Connection, id: i64) -> Result<Option<(i64, String)>> {
+    conn.query_row(
+        "SELECT plan_id, uuid FROM finance_items WHERE id = ?1 AND sync_status != 'deleted'",
+        params![id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
     )
     .optional()
 }
@@ -1705,7 +1761,11 @@ pub fn move_finance_item(
 
     let mut new_siblings = finance_item_sibling_ids_tx(&tx, plan_id, parent_id, id)?;
     let insert_at = before_id
-        .and_then(|target_id| new_siblings.iter().position(|sibling_id| *sibling_id == target_id))
+        .and_then(|target_id| {
+            new_siblings
+                .iter()
+                .position(|sibling_id| *sibling_id == target_id)
+        })
         .unwrap_or(new_siblings.len());
     new_siblings.insert(insert_at, id);
     apply_finance_item_sibling_order_tx(&tx, parent_id, &new_siblings, &now)?;
@@ -1743,9 +1803,93 @@ pub fn delete_finance_item(conn: &Connection, id: i64) -> Result<()> {
              WHERE id = ?2",
             params![now, item_id],
         )?;
+        tx.execute(
+            "UPDATE finance_payments
+             SET sync_status = 'deleted', updated_at = ?1
+             WHERE item_id = ?2",
+            params![now, item_id],
+        )?;
     }
     tx.commit()?;
     Ok(())
+}
+
+pub fn list_finance_payments(conn: &Connection, plan_id: i64) -> Result<Vec<FinancePayment>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, plan_id, item_id, month_key, is_paid, paid_amount_cents,
+                note, created_at, updated_at, uuid, sync_status, user_id
+         FROM finance_payments
+         WHERE plan_id = ?1 AND sync_status != 'deleted'
+         ORDER BY month_key ASC, item_id ASC, id ASC",
+    )?;
+    let rows = stmt.query_map(params![plan_id], read_finance_payment)?;
+    rows.collect()
+}
+
+pub fn upsert_finance_payment(
+    conn: &Connection,
+    plan_id: i64,
+    item_id: i64,
+    month_key: &str,
+    is_paid: bool,
+    paid_amount_cents: i64,
+    note: &str,
+) -> Result<FinancePayment> {
+    validate_non_negative_amount(paid_amount_cents)?;
+    let month_key = normalize_month_key(month_key)?;
+    let plan_kind = finance_plan_kind(conn, plan_id)?.ok_or_else(|| {
+        rusqlite::Error::InvalidParameterName("finance plan not found".to_string())
+    })?;
+    if plan_kind != "monthly" {
+        return Err(rusqlite::Error::InvalidParameterName(
+            "finance payments are available only for monthly plans".to_string(),
+        ));
+    }
+    let Some((item_plan_id, item_uuid)) = finance_item_plan_and_uuid(conn, item_id)? else {
+        return Err(rusqlite::Error::InvalidParameterName(
+            "finance item not found".to_string(),
+        ));
+    };
+    if item_plan_id != plan_id {
+        return Err(rusqlite::Error::InvalidParameterName(
+            "finance item must belong to the same plan".to_string(),
+        ));
+    }
+
+    let now = now_str();
+    let uuid = deterministic_finance_payment_uuid(&item_uuid, &month_key);
+    let is_paid_int = if is_paid { 1 } else { 0 };
+    conn.execute(
+        "INSERT INTO finance_payments
+            (plan_id, item_id, month_key, is_paid, paid_amount_cents, note,
+             created_at, updated_at, uuid, sync_status, user_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?8, 'pending', '')
+         ON CONFLICT(plan_id, item_id, month_key) DO UPDATE SET
+             is_paid = excluded.is_paid,
+             paid_amount_cents = excluded.paid_amount_cents,
+             note = excluded.note,
+             updated_at = excluded.updated_at,
+             uuid = excluded.uuid,
+             sync_status = 'pending'",
+        params![
+            plan_id,
+            item_id,
+            month_key,
+            is_paid_int,
+            paid_amount_cents,
+            note,
+            now,
+            uuid
+        ],
+    )?;
+    conn.query_row(
+        "SELECT id, plan_id, item_id, month_key, is_paid, paid_amount_cents,
+                note, created_at, updated_at, uuid, sync_status, user_id
+         FROM finance_payments
+         WHERE plan_id = ?1 AND item_id = ?2 AND month_key = ?3",
+        params![plan_id, item_id, month_key],
+        read_finance_payment,
+    )
 }
 
 // ── Sync Helpers ────────────────────────────────────────────
@@ -3514,8 +3658,8 @@ mod tests {
         let conn = init_test_db();
         let plan = list_finance_plans(&conn).unwrap()[0].clone();
         let plan_id = plan.id.unwrap();
-        let housing = create_finance_item(&conn, plan_id, None, "Housing", 0, None, None, "")
-            .unwrap();
+        let housing =
+            create_finance_item(&conn, plan_id, None, "Housing", 0, None, None, "").unwrap();
         let internet =
             create_finance_item(&conn, plan_id, None, "Internet", 50000, Some(3), None, "")
                 .unwrap();
@@ -3596,9 +3740,8 @@ mod tests {
         let conn = init_test_db();
         let plan_id = list_finance_plans(&conn).unwrap()[0].id.unwrap();
 
-        let err =
-            create_finance_item(&conn, plan_id, None, "Bad day", 0, Some(32), None, "")
-                .unwrap_err();
+        let err = create_finance_item(&conn, plan_id, None, "Bad day", 0, Some(32), None, "")
+            .unwrap_err();
         assert!(err.to_string().contains("due_day"));
 
         let err = create_finance_item(
@@ -3613,6 +3756,117 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.to_string().contains("due_date"));
+    }
+
+    #[test]
+    fn test_finance_payments_upsert_validation_and_deterministic_uuid() {
+        let conn = init_test_db();
+        let plan_id = list_finance_plans(&conn).unwrap()[0].id.unwrap();
+        let item = create_finance_item(&conn, plan_id, None, "Internet", 50000, Some(3), None, "")
+            .unwrap();
+        let item_id = item.id.unwrap();
+
+        let payment =
+            upsert_finance_payment(&conn, plan_id, item_id, "2026-06", true, 45000, "paid")
+                .unwrap();
+        assert_eq!(payment.plan_id, plan_id);
+        assert_eq!(payment.item_id, item_id);
+        assert_eq!(payment.month_key, "2026-06");
+        assert!(payment.is_paid);
+        assert_eq!(payment.paid_amount_cents, 45000);
+        assert_eq!(payment.note, "paid");
+
+        let updated =
+            upsert_finance_payment(&conn, plan_id, item_id, "2026-06", false, 50000, "").unwrap();
+        assert_eq!(updated.uuid, payment.uuid);
+        assert!(!updated.is_paid);
+        assert_eq!(updated.paid_amount_cents, 50000);
+
+        let payments = list_finance_payments(&conn, plan_id).unwrap();
+        assert_eq!(payments.len(), 1);
+        assert_eq!(payments[0].uuid, payment.uuid);
+
+        let err =
+            upsert_finance_payment(&conn, plan_id, item_id, "2026-13", true, 100, "").unwrap_err();
+        assert!(err.to_string().contains("month_key"));
+
+        let err =
+            upsert_finance_payment(&conn, plan_id, item_id, "2026-06", true, -1, "").unwrap_err();
+        assert!(err.to_string().contains("non-negative"));
+
+        let project = create_finance_plan(&conn, "Project", "RUB", "project").unwrap();
+        let project_item = create_finance_item(
+            &conn,
+            project.id.unwrap(),
+            None,
+            "Hardware",
+            10000,
+            None,
+            Some("2026-06-10"),
+            "",
+        )
+        .unwrap();
+        let err = upsert_finance_payment(
+            &conn,
+            project.id.unwrap(),
+            project_item.id.unwrap(),
+            "2026-06",
+            true,
+            10000,
+            "",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("monthly"));
+
+        let other_monthly = create_finance_plan(&conn, "Other Monthly", "RUB", "monthly").unwrap();
+        let err = upsert_finance_payment(
+            &conn,
+            other_monthly.id.unwrap(),
+            item_id,
+            "2026-06",
+            true,
+            10000,
+            "",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("same plan"));
+    }
+
+    #[test]
+    fn test_finance_payment_soft_delete_with_item_and_plan() {
+        let conn = init_test_db();
+        let plan_id = list_finance_plans(&conn).unwrap()[0].id.unwrap();
+        let item =
+            create_finance_item(&conn, plan_id, None, "Rent", 12000000, None, None, "").unwrap();
+        let item_id = item.id.unwrap();
+        let payment =
+            upsert_finance_payment(&conn, plan_id, item_id, "2026-06", true, 12000000, "").unwrap();
+
+        delete_finance_item(&conn, item_id).unwrap();
+        assert!(list_finance_payments(&conn, plan_id).unwrap().is_empty());
+        let status: String = conn
+            .query_row(
+                "SELECT sync_status FROM finance_payments WHERE uuid = ?1",
+                params![payment.uuid],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "deleted");
+
+        let item =
+            create_finance_item(&conn, plan_id, None, "Internet", 50000, None, None, "").unwrap();
+        let payment =
+            upsert_finance_payment(&conn, plan_id, item.id.unwrap(), "2026-07", true, 50000, "")
+                .unwrap();
+        delete_finance_plan(&conn, plan_id).unwrap();
+        let status: String = conn
+            .query_row(
+                "SELECT sync_status FROM finance_payments WHERE uuid = ?1",
+                params![payment.uuid],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "deleted");
     }
 
     // ── Task Categories / Statuses ───────────────────────────
