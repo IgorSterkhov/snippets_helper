@@ -4354,6 +4354,27 @@ async def run_tests():
     # ── T27: ClickHouse docs module ───────────────────────
     async def t27_clickhouse_docs_module():
         await close_modals()
+        await cdp.eval("""(() => {
+          const settings = JSON.parse(localStorage.getItem('mock.settings') || '{}');
+          settings.last_active_tab = 'clickhouse-docs';
+          localStorage.setItem('mock.settings', JSON.stringify(settings));
+        })()""")
+        await cdp.send('Page.reload', ignoreCache=True)
+        await wait_until(cdp, "!!window.__TAURI__ && !!window.__TAURI__.core", timeout=8)
+        await wait_until(cdp, "!!document.querySelector('#panel-clickhouse-docs .ch-docs-shell')", timeout=8)
+        startup_calls = await wait_until(
+            cdp,
+            """(() => {
+              const calls = (window.__mockCommandLog || []).map(call => call.command);
+              return calls.includes('list_clickhouse_doc_tree') && !!document.querySelector('#panel-clickhouse-docs .ch-nav-page')
+                ? calls
+                : null;
+            })()""",
+            timeout=8,
+        )
+        assert 'list_clickhouse_doc_tree' in startup_calls, startup_calls
+        assert 'get_clickhouse_doc_page' not in startup_calls, startup_calls
+
         placement = await cdp.eval("""(() => {
           const buttons = [...document.querySelectorAll('.tab-btn[data-tab-id]')];
           const ids = buttons.map(btn => btn.dataset.tabId);
@@ -4369,6 +4390,7 @@ async def run_tests():
         await wait_until(cdp, "!!document.querySelector('#panel-clickhouse-docs .ch-docs-shell')", timeout=5)
         title = await cdp.eval("document.querySelector('#panel-clickhouse-docs .ch-docs-title')?.textContent.trim()")
         assert title == 'ClickHouse', title
+        await cdp.eval("document.querySelector('#panel-clickhouse-docs .ch-nav-page')?.click()")
         page_index_text = await wait_until(
             cdp,
             "document.querySelector('#panel-clickhouse-docs .ch-section-index')?.innerText",

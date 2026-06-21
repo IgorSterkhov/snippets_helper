@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v1.18.1 (2026-06-21)
+
+- **ClickHouse startup freeze fix:** opening the app with ClickHouse as the
+  last active module no longer auto-loads the first large documentation page.
+  The module now loads only the navigation tree on startup and fetches a page
+  after the user selects it, keeping the window responsive after update.
+
 ## v1.18.0 (2026-06-20)
 
 - **ClickHouse section-first navigation:** ClickHouse pages now open as a

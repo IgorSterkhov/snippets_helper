@@ -1885,6 +1885,7 @@
 
     // ── ClickHouse Docs ─────────────────────────────────
     async list_clickhouse_doc_tree() {
+      recordMockCall('list_clickhouse_doc_tree');
       const pages = clickhouseMockPages().map(page => ({
         id: page.id,
         category: page.category,
@@ -1902,11 +1903,13 @@
       };
     },
     async get_clickhouse_doc_page({ pageId }) {
+      recordMockCall('get_clickhouse_doc_page', { pageId });
       const page = clickhouseMockPages().find(entry => entry.id === pageId);
       if (!page) throw new Error(`ClickHouse mock page not found: ${pageId}`);
       return page;
     },
     async search_clickhouse_docs({ query, limit }) {
+      recordMockCall('search_clickhouse_docs', { query, limit });
       const tokens = normalizeClickhouseQuery(query).split(/\s+/).filter(Boolean);
       if (!tokens.length) return [];
       const sections = clickhouseMockPages().flatMap(page => page.sections);

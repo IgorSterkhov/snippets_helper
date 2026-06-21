@@ -23,7 +23,7 @@ export function init(container) {
   root.appendChild(buildShell());
   setupUpdateProgressListener();
   loadUpdateProgress();
-  loadTree();
+  loadTree({ openFirst: false });
 }
 
 export function destroy() {
@@ -94,6 +94,8 @@ async function loadTree({ openFirst = true } = {}) {
     renderNav();
     if (openFirst && !activePage && tree.pages?.[0]) {
       await openPage(tree.pages[0].id);
+    } else if (tree.pages?.length && !activePage) {
+      renderWelcomeState();
     } else if (!tree.pages?.length) {
       renderEmptyState();
     }
@@ -264,7 +266,7 @@ function renderSectionIndex() {
     card.dataset.sectionPath = section.section_path;
     card.innerHTML = `
       <div class="ch-section-card-title">${escapeHtml(section.title)}</div>
-      <div class="ch-section-card-excerpt">${escapeHtml(section.body || '').replace(/\s+/g, ' ').slice(0, 180)}</div>
+      <div class="ch-section-card-excerpt">${escapeHtml(sectionExcerpt(section))}</div>
     `;
     card.addEventListener('click', () => openPage(activePage.id, section.section_path));
     list.appendChild(card);
@@ -303,6 +305,12 @@ function renderEmptyState() {
   const main = root?.querySelector('.ch-main');
   if (!main) return;
   main.innerHTML = '<div class="ch-empty">Local ClickHouse docs are empty. Click Update docs to fetch the curated reference set.</div>';
+}
+
+function renderWelcomeState() {
+  const main = root?.querySelector('.ch-main');
+  if (!main) return;
+  main.innerHTML = '<div class="ch-empty">Choose a ClickHouse page from the navigation tree. Large pages open as section indexes first.</div>';
 }
 
 function renderError(message) {
@@ -527,6 +535,11 @@ function clampPercent(value) {
   const number = Number(value || 0);
   if (!Number.isFinite(number)) return 0;
   return Math.max(0, Math.min(100, number));
+}
+
+function sectionExcerpt(section) {
+  const raw = String(section?.excerpt || section?.body || '');
+  return raw.slice(0, 600).replace(/\s+/g, ' ').trim().slice(0, 180);
 }
 
 function escapeHtml(value) {
