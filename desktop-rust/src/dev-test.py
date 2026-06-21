@@ -4351,6 +4351,62 @@ async def run_tests():
 
     await check('T26h Finance row editing preserves scroll and placeholder selection', t26h_finance_row_editing_scroll_and_placeholder)
 
+    async def t26i_clickhouse_docs_slow_tree_fallback():
+        clickhouse_rs_path = os.path.join(SRC_DIR, '..', 'src-tauri', 'src', 'commands', 'clickhouse_docs.rs')
+        with open(clickhouse_rs_path, 'r', encoding='utf-8') as fh:
+            clickhouse_rs = fh.read()
+        for fn_name in (
+            'list_clickhouse_doc_tree',
+            'get_clickhouse_doc_page',
+            'search_clickhouse_docs',
+            'list_clickhouse_doc_update_runs',
+            'list_clickhouse_doc_changes',
+        ):
+            assert f'pub async fn {fn_name}' in clickhouse_rs, f'{fn_name} must stay async to avoid UI-blocking IPC'
+
+        await close_modals()
+        await cdp.eval("""(() => {
+          const settings = JSON.parse(localStorage.getItem('mock.settings') || '{}');
+          settings.last_active_tab = 'shortcuts';
+          localStorage.setItem('mock.settings', JSON.stringify(settings));
+        })()""")
+        await cdp.send('Page.reload', ignoreCache=True)
+        await wait_until(cdp, "!!window.__TAURI__ && !!window.__TAURI__.core && !!document.querySelector('.tab-btn[data-tab-id=\"clickhouse-docs\"]')", timeout=8)
+        await cdp.eval("""(() => {
+          window.__CLICKHOUSE_DOCS_LOAD_TIMEOUT_MS = 80;
+          const originalInvoke = window.__TAURI__.core.invoke;
+          window.__clickhouseOriginalInvoke = originalInvoke;
+          window.__TAURI__.core.invoke = async (command, args = {}) => {
+            if (command === 'list_clickhouse_doc_tree') {
+              await new Promise(resolve => setTimeout(resolve, 400));
+            }
+            return originalInvoke(command, args);
+          };
+        })()""")
+        try:
+            await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"clickhouse-docs\"]').click()")
+            slow_text = await wait_until(
+                cdp,
+                """(() => {
+                  const panel = document.querySelector('#panel-clickhouse-docs');
+                  if (!panel) return null;
+                  const text = panel.innerText || '';
+                  return text.includes('ClickHouse docs are still loading') ? text : null;
+                })()""",
+                timeout=3,
+            )
+            assert 'ClickHouse docs are still loading' in slow_text, slow_text
+        finally:
+            await cdp.eval("""(() => {
+              if (window.__clickhouseOriginalInvoke) {
+                window.__TAURI__.core.invoke = window.__clickhouseOriginalInvoke;
+                delete window.__clickhouseOriginalInvoke;
+              }
+              delete window.__CLICKHOUSE_DOCS_LOAD_TIMEOUT_MS;
+            })()""")
+
+    await check('T26i ClickHouse docs slow tree fallback', t26i_clickhouse_docs_slow_tree_fallback)
+
     # ── T27: ClickHouse docs module ───────────────────────
     async def t27_clickhouse_docs_module():
         await close_modals()

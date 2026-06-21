@@ -12,6 +12,7 @@ let searchTimer = null;
 let updateProgress = null;
 let updateUnlisten = null;
 let updateElapsedTimer = null;
+let treeLoadToken = 0;
 
 export function init(container) {
   root = container;
@@ -87,8 +88,14 @@ function buildShell() {
 }
 
 async function loadTree({ openFirst = true } = {}) {
+  const token = ++treeLoadToken;
+  const slowTimer = setTimeout(() => {
+    if (token !== treeLoadToken || activePage) return;
+    renderSlowTreeState();
+  }, getTreeLoadTimeoutMs());
   try {
     tree = await call('list_clickhouse_doc_tree');
+    if (token !== treeLoadToken) return;
     renderStatus();
     renderUpdateProgress();
     renderNav();
@@ -100,7 +107,10 @@ async function loadTree({ openFirst = true } = {}) {
       renderEmptyState();
     }
   } catch (err) {
+    if (token !== treeLoadToken) return;
     renderError(`Failed to load ClickHouse docs: ${err}`);
+  } finally {
+    clearTimeout(slowTimer);
   }
 }
 
@@ -311,6 +321,17 @@ function renderWelcomeState() {
   const main = root?.querySelector('.ch-main');
   if (!main) return;
   main.innerHTML = '<div class="ch-empty">Choose a ClickHouse page from the navigation tree. Large pages open as section indexes first.</div>';
+}
+
+function renderSlowTreeState() {
+  const main = root?.querySelector('.ch-main');
+  if (!main || activePage) return;
+  main.innerHTML = `
+    <div class="ch-empty">
+      <div class="ch-empty-title">ClickHouse docs are still loading</div>
+      <div class="ch-empty-subtitle">The local documentation index is being read in the background. You can switch to another module and come back here.</div>
+    </div>
+  `;
 }
 
 function renderError(message) {
@@ -540,6 +561,12 @@ function clampPercent(value) {
 function sectionExcerpt(section) {
   const raw = String(section?.excerpt || section?.body || '');
   return raw.slice(0, 600).replace(/\s+/g, ' ').trim().slice(0, 180);
+}
+
+function getTreeLoadTimeoutMs() {
+  const override = Number(window.__CLICKHOUSE_DOCS_LOAD_TIMEOUT_MS);
+  if (Number.isFinite(override) && override >= 0) return override;
+  return 1200;
 }
 
 function escapeHtml(value) {

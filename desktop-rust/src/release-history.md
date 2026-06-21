@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v1.18.2 (2026-06-21)
+
+- **ClickHouse loading hang fix:** ClickHouse documentation index loading now
+  uses async IPC commands and shows a slow-load fallback instead of leaving the
+  module on an unresponsive `Loading...` screen when the local SQLite cache is
+  slow or temporarily locked.
+
 ## v1.18.1 (2026-06-21)
 
 - **ClickHouse startup freeze fix:** opening the app with ClickHouse as the

@@ -314,22 +314,25 @@ struct SectionChange {
 }
 
 #[tauri::command]
-pub fn list_clickhouse_doc_tree(state: State<DbState>) -> Result<Value, String> {
+pub async fn list_clickhouse_doc_tree(state: State<'_, DbState>) -> Result<Value, String> {
     let conn = state.lock_recover();
     ensure_seed_docs(&conn)?;
     serde_json::to_value(load_tree(&conn)?).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn get_clickhouse_doc_page(state: State<DbState>, page_id: i64) -> Result<Value, String> {
+pub async fn get_clickhouse_doc_page(
+    state: State<'_, DbState>,
+    page_id: i64,
+) -> Result<Value, String> {
     let conn = state.lock_recover();
     ensure_seed_docs(&conn)?;
     serde_json::to_value(load_page(&conn, page_id)?).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn search_clickhouse_docs(
-    state: State<DbState>,
+pub async fn search_clickhouse_docs(
+    state: State<'_, DbState>,
     query: String,
     limit: Option<usize>,
 ) -> Result<Value, String> {
@@ -341,14 +344,17 @@ pub fn search_clickhouse_docs(
 }
 
 #[tauri::command]
-pub fn list_clickhouse_doc_update_runs(state: State<DbState>) -> Result<Value, String> {
+pub async fn list_clickhouse_doc_update_runs(state: State<'_, DbState>) -> Result<Value, String> {
     let conn = state.lock_recover();
     let runs = load_update_runs(&conn)?;
     serde_json::to_value(runs).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn list_clickhouse_doc_changes(state: State<DbState>, run_id: i64) -> Result<Value, String> {
+pub async fn list_clickhouse_doc_changes(
+    state: State<'_, DbState>,
+    run_id: i64,
+) -> Result<Value, String> {
     let conn = state.lock_recover();
     let changes = load_changes(&conn, run_id)?;
     serde_json::to_value(changes).map_err(|e| e.to_string())
