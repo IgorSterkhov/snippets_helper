@@ -4465,7 +4465,16 @@ async def run_tests():
         initial_month_count = await cdp.eval(
             "document.querySelector('#panel-finance .finance-calendar-head')?.children.length || 0"
         )
-        assert initial_month_count >= 2, initial_month_count
+        assert initial_month_count >= 3, initial_month_count
+        first_headers = await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-calendar-head > div')]
+          .slice(0, 2)
+          .map(cell => cell.textContent.trim())
+          .join('|'))()""")
+        assert first_headers == 'Expense|Date', first_headers
+        rent_due_day = await cdp.eval(
+            "document.querySelector('#panel-finance .finance-calendar-row[data-id=\"2\"] .finance-calendar-date')?.textContent.trim() || ''"
+        )
+        assert rent_due_day == '21', rent_due_day
         await cdp.eval("""(() => {
           const row = document.querySelector('#panel-finance .finance-calendar-row[data-id="2"]');
           const amount = row.querySelector('.finance-payment-amount');

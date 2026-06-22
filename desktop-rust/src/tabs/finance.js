@@ -644,6 +644,19 @@ function injectStyles() {
 .finance-calendar-terminal .finance-calendar-label {
   font-weight: 500;
 }
+.finance-calendar-date {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.finance-calendar-terminal .finance-calendar-date {
+  color: var(--text);
+}
 .finance-payment-cell {
   display: grid;
   grid-template-columns: 18px minmax(58px, 1fr);
@@ -1622,17 +1635,20 @@ function renderPaymentCalendar(roots, children, plan) {
   }
 
   const months = visibleCalendarMonths(plan);
-  const template = `minmax(260px, 1.6fr) repeat(${months.length}, minmax(132px, 146px))`;
+  const template = `minmax(260px, 1.6fr) 56px repeat(${months.length}, minmax(132px, 146px))`;
   const tree = document.createElement('div');
   tree.className = 'finance-calendar-tree';
-  tree.style.minWidth = `${Math.max(820, 280 + months.length * 142)}px`;
+  tree.style.minWidth = `${Math.max(820, 336 + months.length * 142)}px`;
 
   const head = document.createElement('div');
   head.className = 'finance-calendar-head';
   head.style.gridTemplateColumns = template;
   const first = document.createElement('div');
   first.textContent = 'Expense';
-  head.appendChild(first);
+  const dateHead = document.createElement('div');
+  dateHead.textContent = 'Date';
+  dateHead.title = 'Planned day of month';
+  head.append(first, dateHead);
   for (const month of months) {
     const cell = document.createElement('div');
     cell.textContent = monthLabel(month);
@@ -1687,6 +1703,14 @@ function renderCalendarRow(row, children, maxDepth, months, payments, terminalCa
   nameCell.append(toggle, pad, label);
   rowEl.appendChild(nameCell);
 
+  const dateCell = document.createElement('div');
+  const date = document.createElement('div');
+  date.className = 'finance-calendar-date';
+  date.textContent = calendarDateLabel(item);
+  date.title = item.due_day == null ? 'No planned day' : `Planned day: ${item.due_day}`;
+  dateCell.appendChild(date);
+  rowEl.appendChild(dateCell);
+
   for (const month of months) {
     if (childCount > 0) {
       const totalCell = document.createElement('div');
@@ -1700,6 +1724,12 @@ function renderCalendarRow(row, children, maxDepth, months, payments, terminalCa
     }
   }
   return rowEl;
+}
+
+function calendarDateLabel(item) {
+  const day = Number(item?.due_day);
+  if (!Number.isInteger(day) || day < 1 || day > 31) return '';
+  return String(day);
 }
 
 function renderPaymentCell(item, monthKey, payment, plan) {

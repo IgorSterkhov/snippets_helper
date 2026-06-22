@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## f-20260622-1 (2026-06-22)
+
+- **Finance calendar date column:** monthly Finance calendar rows now show a
+  narrow `Date` column after the expense name, so the planned day of month is
+  visible while marking payment facts.
+
 ## v1.19.0 (2026-06-21)
 
 - **Finance payment calendar:** monthly Finance lists now have a `Calendar`
