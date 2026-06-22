@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## f-20260622-2 (2026-06-22)
+
+- **ClickHouse Reference Console:** the ClickHouse docs module now uses a
+  denser dark Reference Console layout with a ClickHouse mark, clearer source
+  navigation, section-first reading, and a right-side local index rail showing
+  cache state, section/page counts, last update time, and update summary.
+
 ## f-20260622-1 (2026-06-22)
 
 - **Finance calendar date column:** monthly Finance calendar rows now show a

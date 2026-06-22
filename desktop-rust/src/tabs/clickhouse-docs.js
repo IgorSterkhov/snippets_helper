@@ -51,11 +51,15 @@ export function destroy() {
 }
 
 function buildShell() {
-  const shell = el('div', { class: 'ch-docs-shell' });
+  const shell = el('div', { class: 'ch-docs-shell ch-reference-console' });
   const header = el('div', { class: 'ch-header' });
   const titleBlock = el('div', { class: 'ch-title-block' });
-  titleBlock.appendChild(el('div', { class: 'ch-docs-title', text: 'ClickHouse' }));
-  titleBlock.appendChild(el('div', { class: 'ch-status', text: 'Loading local docs...' }));
+  const logo = el('div', { class: 'ch-logo-mark' });
+  for (let i = 0; i < 5; i += 1) logo.appendChild(el('span'));
+  const titleText = el('div', { class: 'ch-title-text' });
+  titleText.appendChild(el('div', { class: 'ch-docs-title', text: 'ClickHouse' }));
+  titleText.appendChild(el('div', { class: 'ch-status', text: 'Loading local docs...' }));
+  titleBlock.append(logo, titleText);
   header.appendChild(titleBlock);
 
   const search = el('input', { class: 'ch-search-input' });
@@ -89,6 +93,7 @@ function buildShell() {
   const main = el('main', { class: 'ch-main' });
   main.appendChild(el('div', { class: 'ch-loading', text: 'Loading...' }));
   body.appendChild(main);
+  body.appendChild(el('aside', { class: 'ch-inspector-rail' }));
   shell.appendChild(body);
   return shell;
 }
@@ -125,6 +130,23 @@ function renderStatus() {
   if (!status) return;
   const last = tree.last_update_at ? ` · updated ${formatDate(tree.last_update_at)}` : '';
   status.textContent = `${tree.page_count || 0} pages · ${tree.section_count || 0} sections${last}`;
+  renderInspectorRail();
+}
+
+function renderInspectorRail() {
+  const rail = root?.querySelector('.ch-inspector-rail');
+  if (!rail) return;
+  const last = tree.last_update_at ? formatDate(tree.last_update_at) : 'Never';
+  const summary = updateProgress?.summary || updateProgress?.message || 'Local cache ready';
+  const phase = updateProgress?.running ? 'Updating' : updateProgress?.error ? 'Error' : 'Ready';
+  rail.innerHTML = `
+    <div class="ch-inspector-title">Local index</div>
+    <div class="ch-inspector-card"><b>${tree.section_count || 0}</b><span>sections</span></div>
+    <div class="ch-inspector-card"><b>${tree.page_count || 0}</b><span>pages</span></div>
+    <div class="ch-inspector-card"><b>${escapeHtml(phase)}</b><span>cache state</span></div>
+    <div class="ch-inspector-card"><b>${escapeHtml(last)}</b><span>last update</span></div>
+    <div class="ch-inspector-note">${escapeHtml(summary)}</div>
+  `;
 }
 
 function renderNav() {
@@ -460,6 +482,7 @@ function stopUpdateElapsedTimer() {
 function renderUpdateProgress() {
   const panel = root?.querySelector('.ch-update-progress');
   if (!panel) return;
+  renderInspectorRail();
   const progress = updateProgress || {};
   const phase = progress.phase || 'idle';
   const hasResult = Boolean(progress.summary || progress.error || progress.finished_at);
@@ -1044,6 +1067,267 @@ function css() {
       max-height: 170px;
       border-right: 0;
       border-bottom: 1px solid var(--border);
+    }
+  }
+
+  /* Reference Console redesign overrides */
+  .ch-reference-console {
+    background: #07090d;
+    --ch-ink: #07090d;
+    --ch-panel: #0d1117;
+    --ch-panel-raised: #101722;
+    --ch-line: #26313e;
+    --ch-yellow: #ffcc02;
+    --ch-yellow-soft: rgba(255, 204, 2, 0.1);
+    --ch-yellow-line: rgba(255, 204, 2, 0.48);
+    --ch-text: #e8edf2;
+    --ch-muted: #96a3b1;
+    --ch-soft: #b9c4cf;
+  }
+  .ch-reference-console .ch-header {
+    grid-template-columns: minmax(220px, 310px) minmax(260px, 1fr) auto;
+    padding: 10px 12px;
+    border-bottom-color: var(--ch-line);
+    background: linear-gradient(180deg, #101722, #0d131b);
+  }
+  .ch-reference-console .ch-title-block {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .ch-reference-console .ch-title-text {
+    min-width: 0;
+  }
+  .ch-reference-console .ch-logo-mark {
+    width: 43px;
+    height: 34px;
+    display: grid;
+    grid-template-columns: repeat(5, 6px);
+    align-items: end;
+    gap: 3px;
+    padding: 5px;
+    border: 1px solid var(--ch-line);
+    background: var(--ch-ink);
+    flex: 0 0 auto;
+  }
+  .ch-reference-console .ch-logo-mark span {
+    display: block;
+    width: 6px;
+    background: var(--ch-yellow);
+  }
+  .ch-reference-console .ch-logo-mark span:nth-child(1),
+  .ch-reference-console .ch-logo-mark span:nth-child(3),
+  .ch-reference-console .ch-logo-mark span:nth-child(5) {
+    height: 22px;
+  }
+  .ch-reference-console .ch-logo-mark span:nth-child(2) {
+    height: 14px;
+  }
+  .ch-reference-console .ch-logo-mark span:nth-child(4) {
+    height: 8px;
+  }
+  .ch-reference-console .ch-docs-title {
+    color: var(--ch-text);
+    font-size: 17px;
+    font-weight: 800;
+  }
+  .ch-reference-console .ch-status {
+    color: var(--ch-muted);
+    font-size: 11px;
+  }
+  .ch-reference-console .ch-search-input {
+    min-height: 34px;
+    border-color: #394657;
+    border-radius: 0;
+    padding: 0 12px;
+    background: #070b11;
+    color: var(--ch-text);
+    font-size: 13px;
+  }
+  .ch-reference-console .ch-search-input:focus {
+    border-color: var(--ch-yellow);
+    box-shadow: 0 0 0 3px rgba(255, 204, 2, 0.09);
+  }
+  .ch-reference-console .ch-btn {
+    min-height: 32px;
+    border-color: var(--ch-yellow-line);
+    border-radius: 0;
+    background: var(--ch-yellow-soft);
+    color: #ffdf5f;
+    font-size: 12px;
+  }
+  .ch-reference-console .ch-btn-secondary {
+    border-color: #394657;
+    background: var(--ch-panel-raised);
+    color: var(--ch-text);
+  }
+  .ch-reference-console .ch-update-progress {
+    border-bottom-color: var(--ch-line);
+    padding: 8px 12px 9px;
+    background: rgba(255, 204, 2, 0.055);
+  }
+  .ch-reference-console .ch-update-progress-title {
+    color: var(--ch-text);
+    font-weight: 800;
+  }
+  .ch-reference-console .ch-update-progress-message,
+  .ch-reference-console .ch-update-progress-summary {
+    color: var(--ch-soft);
+  }
+  .ch-reference-console .ch-update-progress-meta {
+    color: var(--ch-muted);
+  }
+  .ch-reference-console .ch-update-progress-meter {
+    background: #1b2531;
+  }
+  .ch-reference-console .ch-update-progress-fill {
+    background: linear-gradient(90deg, #ffcc02, #f59e0b);
+  }
+  .ch-reference-console .ch-body {
+    grid-template-columns: 260px minmax(0, 1fr) 220px;
+  }
+  .ch-reference-console .ch-nav {
+    padding: 10px;
+    border-right-color: var(--ch-line);
+    background: var(--ch-panel);
+  }
+  .ch-reference-console .ch-nav-category {
+    color: #748291;
+    font-weight: 800;
+  }
+  .ch-reference-console .ch-nav-page {
+    border-radius: 0;
+    color: var(--ch-text);
+    font-size: 12px;
+  }
+  .ch-reference-console .ch-nav-page.active {
+    border-color: var(--ch-yellow-line);
+    background: var(--ch-yellow-soft);
+    box-shadow: inset 3px 0 0 var(--ch-yellow);
+    color: #fff6c7;
+  }
+  .ch-reference-console .ch-nav-sections {
+    border-left-color: rgba(255, 204, 2, 0.26);
+  }
+  .ch-reference-console .ch-nav-section {
+    border-radius: 0;
+    color: var(--ch-soft);
+  }
+  .ch-reference-console .ch-nav-section.active {
+    border-color: var(--ch-yellow-line);
+    color: #ffdf5f;
+    background: var(--ch-yellow-soft);
+  }
+  .ch-reference-console .ch-main {
+    padding: 16px 20px 28px;
+    background: #0b1017;
+  }
+  .ch-reference-console .ch-results-title,
+  .ch-reference-console .ch-article-header h2,
+  .ch-reference-console .ch-section-card-title,
+  .ch-reference-console .ch-result-title,
+  .ch-reference-console .ch-update-title {
+    color: var(--ch-text);
+    font-weight: 800;
+  }
+  .ch-reference-console .ch-results-count,
+  .ch-reference-console .ch-article-kicker,
+  .ch-reference-console .ch-section-index-head,
+  .ch-reference-console .ch-result-meta,
+  .ch-reference-console .ch-loading,
+  .ch-reference-console .ch-empty,
+  .ch-reference-console .ch-update-hint,
+  .ch-reference-console .ch-run-head {
+    color: var(--ch-muted);
+  }
+  .ch-reference-console .ch-result-card,
+  .ch-reference-console .ch-section-card,
+  .ch-reference-console .ch-update-state,
+  .ch-reference-console .ch-run {
+    border-color: #2b3644;
+    border-radius: 0;
+    background: var(--ch-panel-raised);
+    color: var(--ch-text);
+  }
+  .ch-reference-console .ch-result-card:hover,
+  .ch-reference-console .ch-section-card:hover {
+    border-color: var(--ch-yellow-line);
+    background: var(--ch-yellow-soft);
+  }
+  .ch-reference-console .ch-result-excerpt,
+  .ch-reference-console .ch-section-card-excerpt,
+  .ch-reference-console .ch-article,
+  .ch-reference-console .ch-update-summary,
+  .ch-reference-console .ch-change-list,
+  .ch-reference-console .ch-run-summary {
+    color: var(--ch-soft);
+  }
+  .ch-reference-console .ch-source-link {
+    color: var(--ch-yellow);
+  }
+  .ch-reference-console .ch-article pre {
+    border-color: #2c3745;
+    border-radius: 0;
+    background: #05080d;
+  }
+  .ch-reference-console .ch-article th,
+  .ch-reference-console .ch-article td {
+    border-color: var(--ch-line);
+  }
+  .ch-reference-console .ch-inspector-rail {
+    min-height: 0;
+    overflow: auto;
+    border-left: 1px solid var(--ch-line);
+    padding: 12px;
+    background: var(--ch-panel);
+  }
+  .ch-reference-console .ch-inspector-title {
+    margin-bottom: 8px;
+    color: #748291;
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+  .ch-reference-console .ch-inspector-card {
+    border: 1px solid #2b3644;
+    background: var(--ch-panel-raised);
+    padding: 9px 10px;
+    margin-bottom: 8px;
+  }
+  .ch-reference-console .ch-inspector-card b {
+    display: block;
+    color: #ffdf5f;
+    font-size: 17px;
+    font-weight: 850;
+    line-height: 1.2;
+    word-break: break-word;
+  }
+  .ch-reference-console .ch-inspector-card span {
+    display: block;
+    margin-top: 2px;
+    color: var(--ch-muted);
+    font-size: 11px;
+  }
+  .ch-reference-console .ch-inspector-note {
+    border: 1px solid rgba(255, 204, 2, 0.24);
+    background: rgba(255, 204, 2, 0.055);
+    padding: 9px 10px;
+    color: var(--ch-soft);
+    font-size: 12px;
+    line-height: 1.35;
+  }
+  @media (max-width: 900px) {
+    .ch-reference-console .ch-header,
+    .ch-reference-console .ch-body {
+      grid-template-columns: 1fr;
+    }
+    .ch-reference-console .ch-nav {
+      border-right: 0;
+      border-bottom: 1px solid var(--ch-line);
+    }
+    .ch-reference-console .ch-inspector-rail {
+      display: none;
     }
   }
   `;

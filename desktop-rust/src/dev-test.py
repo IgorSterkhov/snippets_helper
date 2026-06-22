@@ -4617,6 +4617,20 @@ async def run_tests():
         await wait_until(cdp, "!!document.querySelector('#panel-clickhouse-docs .ch-docs-shell')", timeout=5)
         title = await cdp.eval("document.querySelector('#panel-clickhouse-docs .ch-docs-title')?.textContent.trim()")
         assert title == 'ClickHouse', title
+        console_frame = await cdp.eval("""(() => {
+          const panel = document.querySelector('#panel-clickhouse-docs');
+          return {
+            hasShell: !!panel?.querySelector('.ch-reference-console'),
+            hasLogo: !!panel?.querySelector('.ch-logo-mark'),
+            hasStatusRail: !!panel?.querySelector('.ch-inspector-rail'),
+            statusText: panel?.querySelector('.ch-inspector-rail')?.innerText || '',
+          };
+        })()""")
+        assert console_frame['hasShell'] is True, console_frame
+        assert console_frame['hasLogo'] is True, console_frame
+        assert console_frame['hasStatusRail'] is True, console_frame
+        assert '4' in console_frame['statusText'] and 'sections' in console_frame['statusText'], console_frame
+        assert '2' in console_frame['statusText'] and 'pages' in console_frame['statusText'], console_frame
         await cdp.eval("document.querySelector('#panel-clickhouse-docs .ch-nav-page')?.click()")
         page_index_text = await wait_until(
             cdp,
