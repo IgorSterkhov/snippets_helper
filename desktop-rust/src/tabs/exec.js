@@ -575,36 +575,59 @@ function buildCommandForm(cmd) {
   const groupOptions = categories.map(g =>
     `<option value="${g.id}" ${g.id === currentGroupId ? 'selected' : ''}>${escapeHtml(g.name)}</option>`
   ).join('');
+  body.className = 'exec-command-form';
+  queueMicrotask(() => body.closest('.modal')?.classList.add('exec-command-modal'));
   body.innerHTML = `
-    <label style="display:block;margin-bottom:4px;color:var(--text)">Name</label>
-    <input id="cmd-name" style="width:100%" placeholder="Command name" />
-    <label style="display:block;margin-top:8px;margin-bottom:4px;color:var(--text)">Group</label>
-    <select id="cmd-group" style="width:100%">${groupOptions}</select>
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;margin-bottom:4px">
-      <label style="color:var(--text)">Command</label>
-      <button type="button" id="cmd-tpl-btn" class="btn-secondary" style="padding:2px 8px;font-size:12px">Use template</button>
+    <div class="exec-command-top-grid">
+      <label class="exec-command-field">
+        <span>Name</span>
+        <input id="cmd-name" placeholder="Command name" />
+      </label>
+      <label class="exec-command-field">
+        <span>Group</span>
+        <select id="cmd-group">${groupOptions}</select>
+      </label>
     </div>
-    <textarea id="cmd-command" style="width:100%;min-height:60px;font-family:monospace" placeholder="echo hello"></textarea>
-    <div style="display:flex;gap:8px;margin-top:8px;align-items:flex-start">
-      <div style="flex:1">
-        <label style="display:block;margin-bottom:4px;color:var(--text)">Shell</label>
-        <select id="cmd-shell" style="width:100%">
+
+    <section class="exec-command-panel">
+      <div class="exec-command-panel-head">
+        <div>
+          <div class="exec-command-panel-label">Command</div>
+          <div class="exec-command-panel-subtitle">Shell, SSH, SCP, rsync</div>
+        </div>
+        <button type="button" id="cmd-tpl-btn" class="btn-secondary exec-template-btn">Use template</button>
+      </div>
+      <textarea id="cmd-command" placeholder="echo hello"></textarea>
+    </section>
+
+    <div class="exec-command-runtime-grid">
+      <label class="exec-command-field">
+        <span>Shell</span>
+        <select id="cmd-shell">
           <option value="host">Host (cmd / sh)</option>
           <option value="wsl">WSL (Windows only)</option>
         </select>
-      </div>
-      <div id="cmd-distro-wrap" style="flex:1;display:none">
-        <label style="display:block;margin-bottom:4px;color:var(--text)">WSL distro</label>
-        <select id="cmd-distro" style="width:100%">
+      </label>
+      <label id="cmd-distro-wrap" class="exec-command-field">
+        <span>WSL distro</span>
+        <select id="cmd-distro">
           <option value="">(default)</option>
         </select>
-      </div>
+      </label>
+      <label class="exec-command-field exec-command-sort-field">
+        <span>Sort</span>
+        <input id="cmd-sort" type="number" />
+      </label>
     </div>
-    <label style="display:block;margin-top:8px;margin-bottom:4px;color:var(--text)">Description</label>
-    <input id="cmd-desc" style="width:100%" placeholder="Optional description" />
-    <label style="display:block;margin-top:8px;margin-bottom:4px;color:var(--text)">Sort order</label>
-    <input id="cmd-sort" type="number" style="width:100%" />
-    <label style="display:flex;align-items:center;gap:6px;margin-top:8px;color:var(--text)">
+
+    <div class="exec-command-meta-grid">
+      <label class="exec-command-field">
+        <span>Description</span>
+        <input id="cmd-desc" placeholder="Optional description" />
+      </label>
+    </div>
+
+    <label class="exec-command-check-row">
       <input type="checkbox" id="cmd-hide" /> Hide window after run
     </label>
   `;
@@ -1182,6 +1205,177 @@ function css() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.modal.exec-command-modal,
+.modal:has(.exec-command-form) {
+  max-width: 760px;
+}
+.modal.exec-template-modal,
+.modal:has(.exec-template-form) {
+  max-width: 680px;
+}
+.exec-command-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: min(700px, calc(90vw - 64px));
+}
+.exec-command-top-grid,
+.exec-command-runtime-grid,
+.exec-command-meta-grid {
+  display: grid;
+  gap: 10px;
+}
+.exec-command-top-grid {
+  grid-template-columns: minmax(0, 1.4fr) minmax(180px, 0.8fr);
+}
+.exec-command-runtime-grid {
+  grid-template-columns: minmax(160px, 1fr) minmax(160px, 1fr) 96px;
+}
+.exec-command-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+.exec-command-field > span,
+.exec-command-panel-label {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+}
+.exec-command-field input,
+.exec-command-field select,
+.exec-command-panel textarea,
+.exec-template-form input,
+.exec-template-form select {
+  width: 100%;
+  box-sizing: border-box;
+}
+.exec-command-field input,
+.exec-command-field select,
+.exec-template-input {
+  min-height: 32px;
+}
+.exec-command-panel {
+  border: 1px solid rgba(125, 170, 255, 0.18);
+  background: linear-gradient(180deg, rgba(56, 139, 253, 0.055), rgba(255,255,255,0.018));
+  border-radius: 8px;
+  overflow: hidden;
+}
+.exec-command-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(125, 170, 255, 0.16);
+}
+.exec-command-panel-subtitle {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-family: 'Consolas', 'Monaco', monospace;
+}
+.exec-template-btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.exec-command-panel textarea {
+  display: block;
+  min-height: 128px;
+  resize: vertical;
+  border: 0;
+  border-radius: 0;
+  background: #0f1724;
+  color: #d7e1f5;
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 12px;
+}
+.exec-command-panel textarea:focus {
+  outline: 1px solid rgba(88, 166, 255, 0.6);
+  outline-offset: -1px;
+}
+.exec-command-sort-field {
+  max-width: 110px;
+}
+.exec-command-check-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text);
+  font-size: 12px;
+}
+.exec-template-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: min(620px, calc(90vw - 64px));
+}
+.exec-template-label {
+  font-weight: 650;
+}
+.exec-template-source-list-wrap {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.02);
+  padding: 8px;
+}
+.exec-template-source-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.exec-template-source-pick,
+.exec-template-source-add,
+.exec-template-source-remove {
+  padding: 4px 9px;
+  font-size: 12px;
+}
+.exec-template-source-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.exec-template-source-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+.exec-template-hint {
+  margin-top: 7px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.exec-template-source-message {
+  margin-top: 7px;
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+.exec-template-source-message[data-kind="error"] {
+  color: var(--danger, #e06c75);
+}
+@media (max-width: 760px) {
+  .exec-command-form,
+  .exec-template-form {
+    min-width: 0;
+  }
+  .exec-command-top-grid,
+  .exec-command-runtime-grid {
+    grid-template-columns: 1fr;
+  }
+  .exec-command-sort-field {
+    max-width: none;
+  }
 }
 .exec-bottom {
   height: 200px;

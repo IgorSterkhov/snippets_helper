@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## f-20260624-4 (2026-06-24)
+
+- **Commands composer and multi-file copy templates:** the `New Command` and
+  edit modals now use a structured Command Composer layout with a dedicated
+  monospace command panel. `Use template` for `SCP` and `rsync` now supports a
+  source list, native multi-file local selection, manual remote paths, and
+  shell-quoted paths with spaces.
+
 ## f-20260624-3 (2026-06-24)
 
 - **External link opening fix:** task links, tracker links, and external

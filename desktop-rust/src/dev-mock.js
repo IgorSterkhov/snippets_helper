@@ -2574,6 +2574,14 @@
       },
       emit: async () => {},
     },
+    dialog: {
+      open: async (options = {}) => {
+        const value = window.__mockDialogOpenResult;
+        if (typeof value === 'function') return await value(options);
+        if (value !== undefined) return value;
+        return options.multiple ? [] : null;
+      },
+    },
   };
 
   console.log('[dev-mock] window.__TAURI__ stubbed with', Object.keys(handlers).length, 'handlers');

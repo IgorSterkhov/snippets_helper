@@ -1147,32 +1147,45 @@ async def run_tests():
         )
         # Pick SCP
         await cdp.eval(
+            "(() => {"
             "const r=document.querySelector('input[name=\"tpl-type\"][value=\"scp\"]');"
             "r.checked=true; r.dispatchEvent(new Event('change'));"
+            "})()"
         )
         # Confirm picker (topmost)
         await cdp.eval(
             "[...document.querySelectorAll('.modal-overlay')].pop()"
             ".querySelector('.modal-actions button:last-child').click()"
         )
-        # SCP form should appear
+        # SCP form should appear with the multi-source controls.
         await wait_until(
             cdp,
-            "!!document.getElementById('scp-src-path')",
+            "!!document.getElementById('scp-source-list') && !!document.getElementById('scp-pick-files')",
             timeout=3,
         )
     await check('T6 template picker opens & SCP form loads', t6)
 
-    # ── T7: SCP generation fills cmd textarea ─────────────────
+    # ── T7: SCP multi-file template fills cmd textarea ────────
     async def t7():
         await cdp.eval(
-            "document.getElementById('scp-src-path').value='/tmp/src.txt';"
-            "document.getElementById('scp-dst-path').value='/tmp/dst.txt';"
+            "window.__mockDialogOpenResult=['/tmp/src one.txt','/tmp/src-two.txt'];"
+            "document.getElementById('scp-pick-files').click();"
+        )
+        await wait_until(
+            cdp,
+            "document.querySelectorAll('#scp-source-list input').length >= 2 && "
+            "[...document.querySelectorAll('#scp-source-list input')].some(x => x.value.includes('src one.txt'))",
+            timeout=3,
+        )
+        await cdp.eval(
+            "document.getElementById('scp-dst-path').value='/srv/upload/';"
             "document.getElementById('scp-src-host').value='__local__';"
             # pick a non-local dst (first vps)
+            "(() => {"
             "const sel=document.getElementById('scp-dst-host');"
             "const nonlocal=[...sel.options].find(o=>o.value!=='__local__');"
             "if(nonlocal) sel.value=nonlocal.value;"
+            "})()"
         )
         await cdp.eval(
             "[...document.querySelectorAll('.modal-overlay')].pop()"
@@ -1185,8 +1198,66 @@ async def run_tests():
         )
         cmd = await cdp.eval("document.getElementById('cmd-command').value")
         assert cmd.startswith('scp '), f'unexpected cmd: {cmd!r}'
-        assert 'src.txt' in cmd and 'dst.txt' in cmd, cmd
-    await check('T7 SCP template fills command textarea', t7)
+        assert 'src one.txt' in cmd and 'src-two.txt' in cmd and '/srv/upload/' in cmd, cmd
+        assert "'/tmp/src one.txt'" in cmd, cmd
+    await check('T7 SCP multi-file template fills command textarea', t7)
+
+    # ── T7b: rsync multi-file template fills cmd textarea ─────
+    async def t7b():
+        await cdp.eval("document.getElementById('cmd-tpl-btn').click()")
+        await wait_until(
+            cdp,
+            "document.querySelectorAll('.modal-overlay').length >= 2 && "
+            "!!document.querySelector('input[name=\"tpl-type\"][value=\"rsync\"]')",
+            timeout=4,
+        )
+        await cdp.eval(
+            "(() => {"
+            "const r=document.querySelector('input[name=\"tpl-type\"][value=\"rsync\"]');"
+            "r.checked=true; r.dispatchEvent(new Event('change'));"
+            "})()"
+        )
+        await cdp.eval(
+            "[...document.querySelectorAll('.modal-overlay')].pop()"
+            ".querySelector('.modal-actions button:last-child').click()"
+        )
+        await wait_until(
+            cdp,
+            "!!document.getElementById('rs-source-list') && !!document.getElementById('rs-pick-files')",
+            timeout=3,
+        )
+        await cdp.eval(
+            "window.__mockDialogOpenResult=['/tmp/app.conf','/tmp/env file'];"
+            "document.getElementById('rs-pick-files').click();"
+        )
+        await wait_until(
+            cdp,
+            "document.querySelectorAll('#rs-source-list input').length >= 2 && "
+            "[...document.querySelectorAll('#rs-source-list input')].some(x => x.value.includes('env file'))",
+            timeout=3,
+        )
+        await cdp.eval(
+            "document.getElementById('rs-dst-path').value='/srv/config/';"
+            "document.getElementById('rs-src-host').value='__local__';"
+            "(() => {"
+            "const sel=document.getElementById('rs-dst-host');"
+            "const nonlocal=[...sel.options].find(o=>o.value!=='__local__');"
+            "if(nonlocal) sel.value=nonlocal.value;"
+            "})()"
+        )
+        await cdp.eval(
+            "[...document.querySelectorAll('.modal-overlay')].pop()"
+            ".querySelector('.modal-actions button:last-child').click()"
+        )
+        await wait_until(
+            cdp, "document.querySelectorAll('.modal-overlay').length === 1",
+            timeout=3,
+        )
+        cmd = await cdp.eval("document.getElementById('cmd-command').value")
+        assert cmd.startswith('rsync '), f'unexpected cmd: {cmd!r}'
+        assert 'app.conf' in cmd and 'env file' in cmd and '/srv/config/' in cmd, cmd
+        assert "'/tmp/env file'" in cmd, cmd
+    await check('T7b rsync multi-file template fills command textarea', t7b)
 
     # ── T8: create group via mock ─────────────────────────────
     async def t8_create_group():

@@ -31,6 +31,7 @@ function hostOptions(vps, includeLocal = true) {
 function selectEl(id, options) {
   const sel = document.createElement('select');
   sel.id = id;
+  sel.className = 'exec-template-input';
   sel.style.width = '100%';
   for (const o of options) {
     const opt = document.createElement('option');
@@ -43,9 +44,17 @@ function selectEl(id, options) {
 
 function fieldLabel(text) {
   const l = document.createElement('label');
+  l.className = 'exec-template-label';
   l.style.cssText = 'display:block;margin-top:8px;margin-bottom:4px;color:var(--text);font-size:12px';
   l.textContent = text;
   return l;
+}
+
+function templateHint(text) {
+  const el = document.createElement('div');
+  el.className = 'exec-template-hint';
+  el.textContent = text;
+  return el;
 }
 
 function shellQuote(s) {
@@ -59,6 +68,137 @@ function parseHostValue(v) {
   const m = v.match(/^([^@]+)@([^:]+):(\d+)$/);
   if (!m) return { isLocal: false, userHost: v, port: 22 };
   return { isLocal: false, user: m[1], host: m[2], port: parseInt(m[3]) || 22, userHost: `${m[1]}@${m[2]}` };
+}
+
+async function pickLocalFiles() {
+  const open = window.__TAURI__?.dialog?.open;
+  if (!open) throw new Error('Native file picker is not available in this build');
+  const result = await open({
+    title: 'Choose source files',
+    multiple: true,
+    directory: false,
+  });
+  if (!result) return [];
+  return (Array.isArray(result) ? result : [result]).map(String).filter(Boolean);
+}
+
+function createSourceList({ prefix, sourceHostId, placeholder }) {
+  const wrap = document.createElement('div');
+  wrap.className = 'exec-template-source-list-wrap';
+
+  const toolbar = document.createElement('div');
+  toolbar.className = 'exec-template-source-toolbar';
+
+  const pickBtn = document.createElement('button');
+  pickBtn.type = 'button';
+  pickBtn.id = `${prefix}-pick-files`;
+  pickBtn.className = 'btn-secondary exec-template-source-pick';
+  pickBtn.textContent = 'Choose files...';
+  toolbar.appendChild(pickBtn);
+
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.id = `${prefix}-add-source`;
+  addBtn.className = 'btn-secondary exec-template-source-add';
+  addBtn.textContent = '+ Add path';
+  toolbar.appendChild(addBtn);
+
+  wrap.appendChild(toolbar);
+
+  const list = document.createElement('div');
+  list.id = `${prefix}-source-list`;
+  list.className = 'exec-template-source-list';
+  wrap.appendChild(list);
+
+  const hint = templateHint('For multiple files, use a destination directory.');
+  wrap.appendChild(hint);
+
+  const message = document.createElement('div');
+  message.className = 'exec-template-source-message';
+  message.style.display = 'none';
+  wrap.appendChild(message);
+
+  function setMessage(text, kind = 'info') {
+    if (!text) {
+      message.textContent = '';
+      message.style.display = 'none';
+      message.dataset.kind = '';
+      return;
+    }
+    message.textContent = text;
+    message.dataset.kind = kind;
+    message.style.display = '';
+  }
+
+  function sourceHost() {
+    return parseHostValue(document.getElementById(sourceHostId)?.value);
+  }
+
+  function addPath(value = '', focus = false) {
+    const row = document.createElement('div');
+    row.className = 'exec-template-source-row';
+
+    const input = document.createElement('input');
+    input.className = 'exec-template-input exec-template-source-input';
+    input.placeholder = placeholder;
+    input.value = value;
+    row.appendChild(input);
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'btn-secondary exec-template-source-remove';
+    removeBtn.textContent = 'Remove';
+    removeBtn.addEventListener('click', () => {
+      row.remove();
+      if (!list.querySelector('input')) addPath('', true);
+    });
+    row.appendChild(removeBtn);
+
+    list.appendChild(row);
+    if (focus) input.focus();
+    return input;
+  }
+
+  function clearIfOnlyEmptyRow() {
+    const inputs = [...list.querySelectorAll('input')];
+    if (inputs.length === 1 && !inputs[0].value.trim()) {
+      list.innerHTML = '';
+    }
+  }
+
+  function getPaths() {
+    return [...list.querySelectorAll('input')]
+      .map(input => input.value.trim())
+      .filter(Boolean);
+  }
+
+  pickBtn.addEventListener('click', async () => {
+    setMessage('');
+    if (!sourceHost().isLocal) {
+      setMessage('Native file picker can only choose local source files. Switch Source host to Local or type remote paths manually.', 'error');
+      return;
+    }
+    try {
+      const files = await pickLocalFiles();
+      if (!files.length) return;
+      clearIfOnlyEmptyRow();
+      for (const file of files) addPath(file);
+    } catch (err) {
+      setMessage(String(err?.message || err), 'error');
+    }
+  });
+
+  addBtn.addEventListener('click', () => {
+    setMessage('');
+    addPath('', true);
+  });
+
+  queueMicrotask(() => {
+    document.getElementById(sourceHostId)?.addEventListener('change', () => setMessage(''));
+  });
+  addPath('');
+
+  return { root: wrap, getPaths };
 }
 
 // ── Template picker ──────────────────────────────────────
@@ -111,22 +251,26 @@ async function pickTemplateType() {
 
 function buildScpTemplate(vps) {
   const body = document.createElement('div');
+  body.className = 'exec-template-form';
+  queueMicrotask(() => body.closest('.modal')?.classList.add('exec-template-modal'));
   const opts = hostOptions(vps, true);
 
   body.appendChild(fieldLabel('Source host'));
   body.appendChild(selectEl('scp-src-host', opts));
-  body.appendChild(fieldLabel('Source path'));
-  const srcPath = document.createElement('input');
-  srcPath.id = 'scp-src-path';
-  srcPath.style.width = '100%';
-  srcPath.placeholder = '/path/to/source';
-  body.appendChild(srcPath);
+  body.appendChild(fieldLabel('Source paths'));
+  const sourceList = createSourceList({
+    prefix: 'scp',
+    sourceHostId: 'scp-src-host',
+    placeholder: '/path/to/source',
+  });
+  body.appendChild(sourceList.root);
 
   body.appendChild(fieldLabel('Destination host'));
   body.appendChild(selectEl('scp-dst-host', opts));
   body.appendChild(fieldLabel('Destination path'));
   const dstPath = document.createElement('input');
   dstPath.id = 'scp-dst-path';
+  dstPath.className = 'exec-template-input';
   dstPath.style.width = '100%';
   dstPath.placeholder = '/path/to/dest';
   body.appendChild(dstPath);
@@ -148,13 +292,13 @@ function buildScpTemplate(vps) {
     onConfirm: async () => {
       const srcHost = parseHostValue(document.getElementById('scp-src-host').value);
       const dstHost = parseHostValue(document.getElementById('scp-dst-host').value);
-      const src = document.getElementById('scp-src-path').value.trim();
+      const sources = sourceList.getPaths();
       const dst = document.getElementById('scp-dst-path').value.trim();
       const recursive = document.getElementById('scp-r').checked;
       const port = parseInt(document.getElementById('scp-port').value) || 22;
       const key = document.getElementById('scp-key').value.trim();
 
-      if (!src) throw new Error('Source path is required');
+      if (!sources.length) throw new Error('At least one source path is required');
       if (!dst) throw new Error('Destination path is required');
       if (srcHost.isLocal && dstHost.isLocal) throw new Error('Both ends are local — no transfer needed');
 
@@ -162,12 +306,13 @@ function buildScpTemplate(vps) {
       if (recursive) parts.push('-r');
       if (port && port !== 22) parts.push('-P', String(port));
       if (key) parts.push('-i', shellQuote(key));
-      parts.push(formatScpEndpoint(srcHost, src));
+      for (const src of sources) parts.push(formatScpEndpoint(srcHost, src));
       parts.push(formatScpEndpoint(dstHost, dst));
 
+      const sourceLabel = sources.length > 1 ? `${shortPath(sources[0])} +${sources.length - 1}` : shortPath(sources[0]);
       generated = {
         command: parts.join(' '),
-        name: `scp ${shortPath(src)} → ${shortPath(dst)}`,
+        name: `scp ${sourceLabel} → ${shortPath(dst)}`,
       };
     },
   }).then(() => generated).catch(() => null);
@@ -249,22 +394,26 @@ function buildSshTemplate(vps) {
 
 function buildRsyncTemplate(vps) {
   const body = document.createElement('div');
+  body.className = 'exec-template-form';
+  queueMicrotask(() => body.closest('.modal')?.classList.add('exec-template-modal'));
   const opts = hostOptions(vps, true);
 
   body.appendChild(fieldLabel('Source host'));
   body.appendChild(selectEl('rs-src-host', opts));
-  body.appendChild(fieldLabel('Source path'));
-  const srcPath = document.createElement('input');
-  srcPath.id = 'rs-src-path';
-  srcPath.style.width = '100%';
-  srcPath.placeholder = '/path/to/source/';
-  body.appendChild(srcPath);
+  body.appendChild(fieldLabel('Source paths'));
+  const sourceList = createSourceList({
+    prefix: 'rs',
+    sourceHostId: 'rs-src-host',
+    placeholder: '/path/to/source/',
+  });
+  body.appendChild(sourceList.root);
 
   body.appendChild(fieldLabel('Destination host'));
   body.appendChild(selectEl('rs-dst-host', opts));
   body.appendChild(fieldLabel('Destination path'));
   const dstPath = document.createElement('input');
   dstPath.id = 'rs-dst-path';
+  dstPath.className = 'exec-template-input';
   dstPath.style.width = '100%';
   dstPath.placeholder = '/path/to/dest/';
   body.appendChild(dstPath);
@@ -290,7 +439,7 @@ function buildRsyncTemplate(vps) {
     onConfirm: async () => {
       const srcHost = parseHostValue(document.getElementById('rs-src-host').value);
       const dstHost = parseHostValue(document.getElementById('rs-dst-host').value);
-      const src = document.getElementById('rs-src-path').value.trim();
+      const sources = sourceList.getPaths();
       const dst = document.getElementById('rs-dst-path').value.trim();
       const port = parseInt(document.getElementById('rs-port').value) || 22;
       const key = document.getElementById('rs-key').value.trim();
@@ -300,7 +449,7 @@ function buildRsyncTemplate(vps) {
       const del = document.getElementById('rs-del').checked;
       const dry = document.getElementById('rs-dry').checked;
 
-      if (!src) throw new Error('Source path is required');
+      if (!sources.length) throw new Error('At least one source path is required');
       if (!dst) throw new Error('Destination path is required');
       if (!srcHost.isLocal && !dstHost.isLocal) throw new Error('rsync over SSH requires at least one local endpoint');
 
@@ -319,12 +468,13 @@ function buildRsyncTemplate(vps) {
         if (key) sshParts.push('-i', key);
         parts.push('-e', shellQuote(sshParts.join(' ')));
       }
-      parts.push(formatScpEndpoint(srcHost, src));
+      for (const src of sources) parts.push(formatScpEndpoint(srcHost, src));
       parts.push(formatScpEndpoint(dstHost, dst));
 
+      const sourceLabel = sources.length > 1 ? `${shortPath(sources[0])} +${sources.length - 1}` : shortPath(sources[0]);
       generated = {
         command: parts.join(' '),
-        name: `rsync ${shortPath(src)} → ${shortPath(dst)}`,
+        name: `rsync ${sourceLabel} → ${shortPath(dst)}`,
       };
     },
   }).then(() => generated).catch(() => null);
