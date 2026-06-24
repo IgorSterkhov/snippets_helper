@@ -4631,6 +4631,17 @@ async def run_tests():
         assert console_frame['hasStatusRail'] is True, console_frame
         assert '4' in console_frame['statusText'] and 'sections' in console_frame['statusText'], console_frame
         assert '2' in console_frame['statusText'] and 'pages' in console_frame['statusText'], console_frame
+        update_control = await cdp.eval("""(() => {
+          const panel = document.querySelector('#panel-clickhouse-docs');
+          return {
+            hasControl: !!panel?.querySelector('.ch-update-control'),
+            hasProgressStrip: !!panel?.querySelector('.ch-update-progress:not([hidden])'),
+            updateLogText: panel?.querySelector('[data-action="changelog"]')?.textContent.trim() || '',
+          };
+        })()""")
+        assert update_control['hasControl'] is True, update_control
+        assert update_control['hasProgressStrip'] is False, update_control
+        assert update_control['updateLogText'] == 'Update log', update_control
         await cdp.eval("document.querySelector('#panel-clickhouse-docs .ch-nav-page')?.click()")
         page_index_text = await wait_until(
             cdp,
@@ -4644,6 +4655,34 @@ async def run_tests():
             "document.querySelectorAll('#panel-clickhouse-docs .ch-nav-section').length"
         )
         assert expanded_nav_sections >= 3, expanded_nav_sections
+        nav_tree = await cdp.eval("""(() => {
+          const panel = document.querySelector('#panel-clickhouse-docs');
+          return {
+            hasTree: !!panel?.querySelector('.ch-nav-tree'),
+            branchTexts: [...panel?.querySelectorAll('.ch-nav-branch') || []].map(row => row.textContent.trim()),
+            pageDepth: panel?.querySelector('.ch-nav-page.active')?.dataset.navDepth || '',
+            sectionDepth: panel?.querySelector('.ch-nav-section')?.dataset.navDepth || '',
+          };
+        })()""")
+        assert nav_tree['hasTree'] is True, nav_tree
+        assert any('Functions' in text for text in nav_tree['branchTexts']), nav_tree
+        assert any('Arrays' in text for text in nav_tree['branchTexts']), nav_tree
+        assert nav_tree['pageDepth'] == '2', nav_tree
+        assert nav_tree['sectionDepth'] == '3', nav_tree
+        collapsed_children = await cdp.eval("""(() => {
+          const branch = [...document.querySelectorAll('#panel-clickhouse-docs .ch-nav-branch')]
+            .find(row => row.textContent.includes('Arrays'));
+          branch?.click();
+          return document.querySelectorAll('#panel-clickhouse-docs .ch-nav-section').length;
+        })()""")
+        assert collapsed_children == 0, collapsed_children
+        expanded_children = await cdp.eval("""(() => {
+          const branch = [...document.querySelectorAll('#panel-clickhouse-docs .ch-nav-branch')]
+            .find(row => row.textContent.includes('Arrays'));
+          branch?.click();
+          return document.querySelectorAll('#panel-clickhouse-docs .ch-nav-section').length;
+        })()""")
+        assert expanded_children >= 3, expanded_children
         article_on_page_index = await cdp.eval("!!document.querySelector('#panel-clickhouse-docs .ch-article')")
         assert article_on_page_index is False, article_on_page_index
         normalized_fence = await cdp.eval("""(async () => {
@@ -4674,6 +4713,14 @@ async def run_tests():
         )
         assert 'arrayCompact(arr)' in article_text, article_text[:200]
         assert 'arrayConcat(arr1' not in article_text, article_text[:400]
+        result_expanded_nav = await cdp.eval("""(() => ({
+          functionsOpen: [...document.querySelectorAll('#panel-clickhouse-docs .ch-nav-branch.expanded')]
+            .some(row => row.textContent.includes('Functions')),
+          arraysOpen: [...document.querySelectorAll('#panel-clickhouse-docs .ch-nav-branch.expanded')]
+            .some(row => row.textContent.includes('Arrays')),
+        }))()""")
+        assert result_expanded_nav['functionsOpen'] is True, result_expanded_nav
+        assert result_expanded_nav['arraysOpen'] is True, result_expanded_nav
         section_calls = await cdp.eval(
             "(window.__mockCommandLog || []).filter(call => call.command === 'get_clickhouse_doc_section').length"
         )
@@ -4682,19 +4729,82 @@ async def run_tests():
         await cdp.eval("document.querySelector('#panel-clickhouse-docs [data-action=\"changelog\"]').click()")
         await wait_until(cdp, "!!document.querySelector('.modal-overlay .ch-changelog-modal')", timeout=4)
         changelog_text = await cdp.eval("document.querySelector('.modal-overlay')?.innerText")
-        assert 'ClickHouse Docs Changelog' in changelog_text, changelog_text
+        assert 'ClickHouse Docs Update Log' in changelog_text, changelog_text
         await close_modals()
 
         await cdp.eval("document.querySelector('#panel-clickhouse-docs [data-action=\"update\"]').click()")
         update_text = await wait_until(
             cdp,
-            "document.querySelector('#panel-clickhouse-docs .ch-update-progress')?.innerText",
+            """(() => {
+              const control = document.querySelector('#panel-clickhouse-docs .ch-update-control');
+              return control && control.innerText.includes('updated') ? control.innerText : null;
+            })()""",
             timeout=5,
         )
-        assert 'Complete' in update_text, update_text
-        assert '100%' in update_text, update_text
-        assert '2 page(s) checked' in update_text, update_text
-        assert 'Last update' in update_text, update_text
+        assert 'Update docs' in update_text, update_text
+        assert 'updated' in update_text, update_text
+        visible_progress_strip = await cdp.eval(
+            "!!document.querySelector('#panel-clickhouse-docs .ch-update-progress:not([hidden])')"
+        )
+        assert visible_progress_strip is False, visible_progress_strip
+        await cdp.eval("document.querySelector('#panel-clickhouse-docs [data-action=\"update-details\"]').click()")
+        details_text = await wait_until(
+            cdp,
+            "document.querySelector('#panel-clickhouse-docs .ch-update-popover:not([hidden])')?.innerText",
+            timeout=5,
+        )
+        assert 'Complete' in details_text, details_text
+        assert '100%' in details_text, details_text
+        assert '2 page(s) checked' in details_text, details_text
+        assert 'Last update' in details_text, details_text
+        await cdp.eval("document.querySelector('#panel-clickhouse-docs [data-action=\"update-details\"]').click()")
+        await cdp.eval("""(() => {
+          const progress = {
+            running: true,
+            phase: 'fetching',
+            message: 'Fetching docs',
+            current: 1,
+            total: 2,
+            remaining: 1,
+            percent: 50,
+            elapsed_ms: 1000,
+            summary: '',
+            error: null,
+          };
+          window.dispatchEvent(new CustomEvent('clickhouse-doc-update-progress', { detail: progress }));
+        })()""")
+        running_update_text = await wait_until(
+            cdp,
+            """(() => {
+              const control = document.querySelector('#panel-clickhouse-docs .ch-update-control');
+              return control && control.innerText.includes('50%') ? control.innerText : null;
+            })()""",
+            timeout=5,
+        )
+        assert '50%' in running_update_text, running_update_text
+        assert '1/2' in running_update_text, running_update_text
+        running_progress_strip = await cdp.eval(
+            "!!document.querySelector('#panel-clickhouse-docs .ch-update-progress:not([hidden])')"
+        )
+        assert running_progress_strip is False, running_progress_strip
+        await cdp.eval("""(() => {
+          const now = new Date().toISOString();
+          const progress = {
+            running: false,
+            phase: 'done',
+            message: 'Complete',
+            current: 2,
+            total: 2,
+            remaining: 0,
+            percent: 100,
+            started_at: now,
+            finished_at: now,
+            elapsed_ms: 1000,
+            summary: '2 page(s) checked, 2 updated, 4 added, 0 changed, 0 removed, 0 failed',
+            error: null,
+          };
+          window.dispatchEvent(new CustomEvent('clickhouse-doc-update-progress', { detail: progress }));
+        })()""")
         article_after_update = await cdp.eval("!!document.querySelector('#panel-clickhouse-docs .ch-article')")
         assert article_after_update is False, article_after_update
         await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"tasks\"]').click()")
@@ -4702,10 +4812,11 @@ async def run_tests():
         await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"clickhouse-docs\"]').click()")
         persisted_update_text = await wait_until(
             cdp,
-            "document.querySelector('#panel-clickhouse-docs .ch-update-progress')?.innerText",
+            "document.querySelector('#panel-clickhouse-docs .ch-update-control')?.innerText",
             timeout=5,
         )
-        assert '2 page(s) checked' in persisted_update_text, persisted_update_text
+        assert 'Update docs' in persisted_update_text, persisted_update_text
+        assert 'updated' in persisted_update_text, persisted_update_text
 
     await check('T27 ClickHouse docs module', t27_clickhouse_docs_module)
 

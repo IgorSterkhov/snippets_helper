@@ -15,6 +15,7 @@ let updateUnlisten = null;
 let updateElapsedTimer = null;
 let treeLoadToken = 0;
 let pageLoadToken = 0;
+let navCollapsedBranches = new Set();
 
 export function init(container) {
   root = container;
@@ -46,6 +47,7 @@ export function destroy() {
   activePage = null;
   activeSectionPath = '';
   updateProgress = null;
+  navCollapsedBranches = new Set();
   pageCache.clear();
   sectionCache.clear();
 }
@@ -73,17 +75,28 @@ function buildShell() {
   header.appendChild(search);
 
   const actions = el('div', { class: 'ch-actions' });
-  const updateBtn = el('button', { class: 'ch-btn', text: 'Update docs' });
+  const updateControl = el('div', { class: 'ch-update-control idle' });
+  const updateBtn = el('button', { class: 'ch-update-run', text: 'Update docs' });
   updateBtn.type = 'button';
   updateBtn.dataset.action = 'update';
   updateBtn.addEventListener('click', () => updateDocs(updateBtn));
-  actions.appendChild(updateBtn);
+  const updateDetailsBtn = el('button', { class: 'ch-update-details', text: 'not updated' });
+  updateDetailsBtn.type = 'button';
+  updateDetailsBtn.dataset.action = 'update-details';
+  updateDetailsBtn.setAttribute('aria-expanded', 'false');
+  updateDetailsBtn.addEventListener('click', () => toggleUpdatePopover());
+  const updateMeter = el('span', { class: 'ch-update-control-meter' });
+  updateMeter.appendChild(el('span', { class: 'ch-update-control-fill' }));
+  updateControl.append(updateBtn, updateDetailsBtn, updateMeter);
+  actions.appendChild(updateControl);
 
-  const changelogBtn = el('button', { class: 'ch-btn ch-btn-secondary', text: 'Changelog' });
+  const changelogBtn = el('button', { class: 'ch-btn ch-btn-secondary', text: 'Update log' });
   changelogBtn.type = 'button';
   changelogBtn.dataset.action = 'changelog';
+  changelogBtn.title = 'Docs update history';
   changelogBtn.addEventListener('click', openChangelogModal);
   actions.appendChild(changelogBtn);
+  actions.appendChild(el('div', { class: 'ch-update-popover', hidden: true }));
   header.appendChild(actions);
   shell.appendChild(header);
   shell.appendChild(el('section', { class: 'ch-update-progress', hidden: true }));
@@ -131,6 +144,8 @@ function renderStatus() {
   const last = tree.last_update_at ? ` · updated ${formatDate(tree.last_update_at)}` : '';
   status.textContent = `${tree.page_count || 0} pages · ${tree.section_count || 0} sections${last}`;
   renderInspectorRail();
+  renderUpdateControl();
+  renderUpdatePopover();
 }
 
 function renderInspectorRail() {
@@ -153,39 +168,123 @@ function renderNav() {
   const nav = root?.querySelector('.ch-nav');
   if (!nav) return;
   nav.innerHTML = '';
-  const groups = new Map();
-  for (const page of tree.pages || []) {
-    if (!groups.has(page.category)) groups.set(page.category, []);
-    groups.get(page.category).push(page);
-  }
-  for (const [category, pages] of groups) {
-    const group = el('div', { class: 'ch-nav-group' });
-    group.appendChild(el('div', { class: 'ch-nav-category', text: category }));
-    for (const page of pages) {
-      const isActivePage = activePage?.id === page.id;
-      const btn = el('button', {
-        class: 'ch-nav-page' + (isActivePage ? ' active' : ''),
-        text: page.title,
-      });
-      btn.type = 'button';
-      btn.addEventListener('click', () => openPage(page.id));
-      group.appendChild(btn);
-      if (isActivePage && activePage?.sections?.length) {
-        const sections = el('div', { class: 'ch-nav-sections' });
-        for (const section of activePage.sections) {
-          const sectionBtn = el('button', {
-            class: 'ch-nav-section' + (activeSectionPath === section.section_path ? ' active' : ''),
-            text: section.title,
-          });
-          sectionBtn.type = 'button';
-          sectionBtn.addEventListener('click', () => openPage(page.id, section.section_path));
-          sections.appendChild(sectionBtn);
-        }
-        group.appendChild(sections);
+  const treeRoot = buildNavTree(tree.pages || []);
+  const wrapper = el('div', { class: 'ch-nav-tree' });
+  renderNavNode(wrapper, treeRoot, 0);
+  nav.appendChild(wrapper);
+}
+
+function buildNavTree(pages) {
+  const rootNode = { key: '', label: '', children: new Map(), pages: [] };
+  for (const page of pages) {
+    const parts = splitCategoryPath(page.category);
+    let node = rootNode;
+    let key = '';
+    for (const part of parts) {
+      key = key ? `${key}/${part}` : part;
+      if (!node.children.has(part)) {
+        node.children.set(part, { key, label: part, children: new Map(), pages: [] });
       }
+      node = node.children.get(part);
     }
-    nav.appendChild(group);
+    node.pages.push(page);
   }
+  return rootNode;
+}
+
+function renderNavNode(parent, node, depth) {
+  for (const child of node.children.values()) {
+    const expanded = !navCollapsedBranches.has(child.key);
+    const branch = el('button', {
+      class: `ch-nav-branch ${expanded ? 'expanded' : 'collapsed'}${branchContainsActivePage(child) ? ' has-active' : ''}`,
+    });
+    branch.type = 'button';
+    branch.dataset.branchKey = child.key;
+    branch.dataset.navDepth = String(depth);
+    branch.style.setProperty('--nav-depth', String(depth));
+    branch.innerHTML = `
+      <span class="ch-nav-disclosure">${expanded ? '▾' : '▸'}</span>
+      <span class="ch-nav-label">${escapeHtml(child.label)}</span>
+      <span class="ch-nav-count">${countBranchPages(child)}</span>
+    `;
+    branch.addEventListener('click', () => {
+      if (navCollapsedBranches.has(child.key)) navCollapsedBranches.delete(child.key);
+      else navCollapsedBranches.add(child.key);
+      renderNav();
+    });
+    parent.appendChild(branch);
+    if (expanded) renderNavNode(parent, child, depth + 1);
+  }
+
+  for (const page of node.pages) {
+    const isActivePage = activePage?.id === page.id;
+    const pageDepth = depth;
+    const btn = el('button', {
+      class: 'ch-nav-page' + (isActivePage ? ' active' : ''),
+      text: page.title,
+    });
+    btn.type = 'button';
+    btn.dataset.navDepth = String(pageDepth);
+    btn.style.setProperty('--nav-depth', String(pageDepth));
+    btn.addEventListener('click', () => openPage(page.id));
+    parent.appendChild(btn);
+    if (isActivePage && activePage?.sections?.length) {
+      const sections = el('div', { class: 'ch-nav-sections' });
+      sections.style.setProperty('--nav-depth', String(pageDepth + 1));
+      for (const section of activePage.sections) {
+        const sectionBtn = el('button', {
+          class: 'ch-nav-section' + (activeSectionPath === section.section_path ? ' active' : ''),
+          text: section.title,
+        });
+        sectionBtn.type = 'button';
+        sectionBtn.dataset.navDepth = String(pageDepth + 1);
+        sectionBtn.style.setProperty('--nav-depth', String(pageDepth + 1));
+        sectionBtn.addEventListener('click', () => openPage(page.id, section.section_path));
+        sections.appendChild(sectionBtn);
+      }
+      parent.appendChild(sections);
+    }
+  }
+}
+
+function splitCategoryPath(category) {
+  const parts = String(category || 'General')
+    .split(/\s*\/\s*/g)
+    .map(part => part.trim())
+    .filter(Boolean);
+  return parts.length ? parts : ['General'];
+}
+
+function countBranchPages(node) {
+  let count = node.pages.length;
+  for (const child of node.children.values()) count += countBranchPages(child);
+  return count;
+}
+
+function branchContainsActivePage(node) {
+  if (!activePage) return false;
+  if (node.pages.some(page => page.id === activePage.id)) return true;
+  for (const child of node.children.values()) {
+    if (branchContainsActivePage(child)) return true;
+  }
+  return false;
+}
+
+function ensurePageAncestorsExpanded(page) {
+  for (const key of categoryBranchKeys(page?.category)) {
+    navCollapsedBranches.delete(key);
+  }
+}
+
+function categoryBranchKeys(category) {
+  const parts = splitCategoryPath(category);
+  const keys = [];
+  let key = '';
+  for (const part of parts) {
+    key = key ? `${key}/${part}` : part;
+    keys.push(key);
+  }
+  return keys;
 }
 
 async function openPage(pageId, sectionPath = '') {
@@ -193,6 +292,7 @@ async function openPage(pageId, sectionPath = '') {
   try {
     activePage = await loadPage(pageId);
     if (token !== pageLoadToken) return;
+    ensurePageAncestorsExpanded(activePage);
     activeSectionPath = sectionPath || '';
     renderNav();
     await renderPageContent(token);
@@ -384,9 +484,9 @@ function renderError(message) {
 }
 
 async function updateDocs(button) {
-  const oldText = button.textContent;
+  if (updateProgress?.running) return;
   button.disabled = true;
-  button.textContent = 'Updating...';
+  renderUpdateControl();
   try {
     const run = await call('update_clickhouse_docs');
     if (!root) return;
@@ -404,11 +504,10 @@ async function updateDocs(button) {
     if (button?.isConnected) {
       if (updateProgress?.running) {
         button.disabled = true;
-        button.textContent = 'Updating...';
       } else {
         button.disabled = false;
-        button.textContent = oldText;
       }
+      renderUpdateControl();
     }
   }
 }
@@ -481,47 +580,91 @@ function stopUpdateElapsedTimer() {
 
 function renderUpdateProgress() {
   const panel = root?.querySelector('.ch-update-progress');
-  if (!panel) return;
   renderInspectorRail();
+  renderUpdateControl();
+  renderUpdatePopover();
+  if (!panel) return;
   const progress = updateProgress || {};
   const phase = progress.phase || 'idle';
   const hasResult = Boolean(progress.summary || progress.error || progress.finished_at);
-  if (phase === 'idle' && !progress.running && !hasResult) {
-    setUpdateButtonRunning(false);
-    panel.hidden = true;
-    panel.innerHTML = '';
-    return;
-  }
+  setUpdateButtonRunning(Boolean(progress.running));
+  panel.hidden = true;
+  panel.innerHTML = '';
+  if (phase === 'idle' && !progress.running && !hasResult) return;
+}
+
+function renderUpdateControl() {
+  const control = root?.querySelector('.ch-update-control');
+  const runButton = root?.querySelector('[data-action="update"]');
+  const detailsButton = root?.querySelector('[data-action="update-details"]');
+  const fill = root?.querySelector('.ch-update-control-fill');
+  if (!control || !runButton || !detailsButton) return;
+  const progress = updateProgress || {};
+  const phase = progress.phase || 'idle';
   const percent = clampPercent(progress.percent);
   const running = Boolean(progress.running);
   const isError = phase === 'error' || Boolean(progress.error);
-  const title = running ? 'Updating ClickHouse docs' : isError ? 'Update failed' : 'Complete';
-  const summary = progress.summary || progress.error || progress.message || 'The local documentation cache is up to date.';
-  const elapsed = formatDuration(progress.elapsed_ms || 0);
-  const countLine = running
-    ? `${progress.current || 0}/${progress.total || 0} source page(s) · ${progress.remaining || 0} remaining · ${Math.round(percent)}% · ${elapsed}`
-    : `Last update ${formatDate(progress.finished_at || progress.started_at)} · ${Math.round(percent)}% · ${tree.page_count || 0} page(s) · ${tree.section_count || 0} section(s) · ${elapsed}`;
-  panel.hidden = false;
-  panel.className = `ch-update-progress ${running ? 'running' : isError ? 'error' : 'done'}`;
-  setUpdateButtonRunning(running);
-  panel.innerHTML = `
-    <div class="ch-update-progress-main">
-      <div class="ch-update-progress-title">${escapeHtml(title)}</div>
-      <div class="ch-update-progress-message">${escapeHtml(progress.message || summary)}</div>
-      <div class="ch-update-progress-meta">${escapeHtml(countLine)}</div>
-      <div class="ch-update-progress-summary">${escapeHtml(summary)}</div>
-    </div>
-    <div class="ch-update-progress-meter" aria-label="ClickHouse update progress">
-      <div class="ch-update-progress-fill" style="width: ${percent}%"></div>
-    </div>
-  `;
+  const state = running ? 'running' : isError ? 'error' : (progress.finished_at || progress.summary || tree.last_update_at) ? 'done' : 'idle';
+  control.className = `ch-update-control ${state}`;
+  runButton.disabled = running;
+  runButton.textContent = 'Update docs';
+  if (running) {
+    detailsButton.textContent = `${Math.round(percent)}% · ${progress.current || 0}/${progress.total || 0}`;
+  } else if (isError) {
+    detailsButton.textContent = 'failed';
+  } else {
+    const last = progress.finished_at || tree.last_update_at;
+    detailsButton.textContent = last ? `updated ${formatShortDateTime(last)}` : 'not updated';
+  }
+  if (fill) fill.style.width = `${running || percent > 0 ? percent : 0}%`;
+  const popover = root?.querySelector('.ch-update-popover');
+  detailsButton.setAttribute('aria-expanded', popover && !popover.hidden ? 'true' : 'false');
 }
 
 function setUpdateButtonRunning(running) {
   const button = root?.querySelector('[data-action="update"]');
   if (!button) return;
   button.disabled = Boolean(running);
-  button.textContent = running ? 'Updating...' : 'Update docs';
+  button.textContent = 'Update docs';
+}
+
+function toggleUpdatePopover(forceOpen = null) {
+  const popover = root?.querySelector('.ch-update-popover');
+  if (!popover) return;
+  const shouldOpen = forceOpen === null ? popover.hidden : Boolean(forceOpen);
+  popover.hidden = !shouldOpen;
+  renderUpdatePopover();
+  renderUpdateControl();
+}
+
+function renderUpdatePopover() {
+  const popover = root?.querySelector('.ch-update-popover');
+  if (!popover) return;
+  const progress = updateProgress || {};
+  const phase = progress.phase || 'idle';
+  const running = Boolean(progress.running);
+  const isError = phase === 'error' || Boolean(progress.error);
+  const percent = clampPercent(progress.percent);
+  const hasResult = Boolean(progress.summary || progress.error || progress.finished_at || progress.started_at);
+  const title = running ? 'Updating ClickHouse docs' : isError ? 'Update failed' : hasResult ? 'Complete' : 'Docs update details';
+  const elapsed = formatDuration(progress.elapsed_ms || 0);
+  const summary = progress.summary || progress.error || progress.message || 'The local documentation cache is ready.';
+  const countLine = running
+    ? `${progress.current || 0}/${progress.total || 0} source page(s) · ${progress.remaining || 0} remaining · ${Math.round(percent)}% · ${elapsed}`
+    : hasResult
+      ? `Last update ${formatDate(progress.finished_at || progress.started_at)} · ${Math.round(percent)}% · ${tree.page_count || 0} page(s) · ${tree.section_count || 0} section(s) · ${elapsed}`
+      : 'No update run has been recorded in this session.';
+  popover.innerHTML = `
+    <div class="ch-update-popover-head">
+      <strong>${escapeHtml(title)}</strong>
+      <span class="${isError ? 'error' : running ? 'running' : 'done'}">${escapeHtml(running ? 'Running' : isError ? 'Error' : hasResult ? 'Complete' : 'Idle')}</span>
+    </div>
+    <div class="ch-update-popover-meta">${escapeHtml(countLine)}</div>
+    <div class="ch-update-popover-summary">${escapeHtml(summary)}</div>
+    <div class="ch-update-popover-meter" aria-label="ClickHouse update progress">
+      <div class="ch-update-popover-fill" style="width: ${percent}%"></div>
+    </div>
+  `;
 }
 
 function renderUpdateState(run) {
@@ -537,9 +680,9 @@ function renderUpdateState(run) {
 
 async function openChangelogModal() {
   const body = el('div', { class: 'ch-changelog-modal' });
-  body.appendChild(el('div', { class: 'ch-loading', text: 'Loading changelog...' }));
+  body.appendChild(el('div', { class: 'ch-loading', text: 'Loading update log...' }));
   showModal({
-    title: 'ClickHouse Docs Changelog',
+    title: 'ClickHouse Docs Update Log',
     body,
     confirmText: 'OK',
     cancelText: 'Close',
@@ -556,7 +699,7 @@ async function openChangelogModal() {
 async function renderChangelog(body, runs) {
   body.innerHTML = '';
   if (!runs.length) {
-    body.appendChild(el('div', { class: 'ch-empty', text: 'No update runs yet. Run Update docs first.' }));
+    body.appendChild(el('div', { class: 'ch-empty', text: 'No docs update runs yet. Run Update docs first.' }));
     return;
   }
   for (const run of runs.slice(0, 10)) {
@@ -589,6 +732,13 @@ function formatDate(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString();
+}
+
+function formatShortDateTime(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
 function formatDuration(ms) {
@@ -1162,10 +1312,152 @@ function css() {
     background: var(--ch-panel-raised);
     color: var(--ch-text);
   }
-  .ch-reference-console .ch-update-progress {
-    border-bottom-color: var(--ch-line);
-    padding: 8px 12px 9px;
+  .ch-reference-console .ch-actions {
+    align-items: center;
+    position: relative;
+  }
+  .ch-reference-console .ch-update-control {
+    position: relative;
+    min-width: 214px;
+    min-height: 32px;
+    display: grid;
+    grid-template-columns: minmax(92px, auto) minmax(92px, 1fr);
+    align-items: stretch;
+    overflow: hidden;
+    border: 1px solid var(--ch-yellow-line);
+    background: var(--ch-yellow-soft);
+  }
+  .ch-reference-console .ch-update-control.error {
+    border-color: rgba(255, 107, 117, 0.55);
+    background: rgba(255, 107, 117, 0.1);
+  }
+  .ch-reference-console .ch-update-run,
+  .ch-reference-console .ch-update-details {
+    min-height: 32px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: #ffdf5f;
+    font-size: 12px;
+    font-weight: 760;
+    cursor: pointer;
+  }
+  .ch-reference-console .ch-update-run {
+    padding: 0 10px;
+    text-align: left;
+  }
+  .ch-reference-console .ch-update-details {
+    min-width: 0;
+    border-left: 1px solid rgba(255, 204, 2, 0.22);
+    padding: 0 9px;
+    color: #fff6c7;
+    text-align: right;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+  }
+  .ch-reference-console .ch-update-run:hover,
+  .ch-reference-console .ch-update-details:hover {
+    background: rgba(255, 204, 2, 0.08);
+  }
+  .ch-reference-console .ch-update-run:disabled {
+    cursor: default;
+    opacity: 0.65;
+  }
+  .ch-reference-console .ch-update-control-meter {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 3px;
+    background: rgba(255, 204, 2, 0.11);
+  }
+  .ch-reference-console .ch-update-control-fill {
+    display: block;
+    width: 0;
+    height: 100%;
+    background: linear-gradient(90deg, #ffcc02, #f59e0b);
+    transition: width 160ms ease;
+  }
+  .ch-reference-console .ch-update-control.error .ch-update-control-fill {
+    background: rgba(255, 107, 117, 0.9);
+  }
+  .ch-reference-console .ch-update-popover {
+    position: absolute;
+    top: 42px;
+    right: 82px;
+    z-index: 10;
+    width: 340px;
+    border: 1px solid #374557;
+    background: #0b1017;
+    box-shadow: 0 22px 60px rgba(0, 0, 0, 0.48);
+    padding: 12px;
+    color: var(--ch-text);
+  }
+  .ch-reference-console .ch-update-popover[hidden] {
+    display: none;
+  }
+  .ch-reference-console .ch-update-popover::before {
+    content: "";
+    position: absolute;
+    top: -7px;
+    right: 74px;
+    width: 12px;
+    height: 12px;
+    transform: rotate(45deg);
+    border-left: 1px solid #374557;
+    border-top: 1px solid #374557;
+    background: #0b1017;
+  }
+  .ch-reference-console .ch-update-popover-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 9px;
+  }
+  .ch-reference-console .ch-update-popover-head strong {
+    font-size: 13px;
+    font-weight: 820;
+  }
+  .ch-reference-console .ch-update-popover-head span {
+    color: #31d085;
+    font-size: 11px;
+    font-weight: 820;
+    text-transform: uppercase;
+  }
+  .ch-reference-console .ch-update-popover-head span.error {
+    color: #ff6b75;
+  }
+  .ch-reference-console .ch-update-popover-head span.running {
+    color: #ffdf5f;
+  }
+  .ch-reference-console .ch-update-popover-meta,
+  .ch-reference-console .ch-update-popover-summary {
+    color: var(--ch-soft);
+    font-size: 12px;
+    line-height: 1.4;
+  }
+  .ch-reference-console .ch-update-popover-summary {
+    margin-top: 7px;
+    border: 1px solid rgba(255, 204, 2, 0.22);
     background: rgba(255, 204, 2, 0.055);
+    padding: 8px;
+  }
+  .ch-reference-console .ch-update-popover-meter {
+    height: 4px;
+    margin-top: 8px;
+    background: #1b2531;
+  }
+  .ch-reference-console .ch-update-popover-fill {
+    display: block;
+    height: 100%;
+    background: linear-gradient(90deg, #ffcc02, #f59e0b);
+  }
+  .ch-reference-console .ch-update-progress {
+    display: none !important;
   }
   .ch-reference-console .ch-update-progress-title {
     color: var(--ch-text);
@@ -1192,14 +1484,61 @@ function css() {
     border-right-color: var(--ch-line);
     background: var(--ch-panel);
   }
+  .ch-reference-console .ch-nav-tree {
+    display: grid;
+    gap: 2px;
+  }
   .ch-reference-console .ch-nav-category {
     color: #748291;
     font-weight: 800;
   }
+  .ch-reference-console .ch-nav-branch {
+    width: 100%;
+    min-height: 28px;
+    display: grid;
+    grid-template-columns: 18px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 5px;
+    border: 1px solid transparent;
+    border-radius: 0;
+    padding: 0 7px 0 calc(7px + (var(--nav-depth, 0) * 14px));
+    background: transparent;
+    color: var(--ch-soft);
+    text-align: left;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 740;
+  }
+  .ch-reference-console .ch-nav-branch:hover {
+    background: rgba(255, 255, 255, 0.045);
+    color: var(--ch-text);
+  }
+  .ch-reference-console .ch-nav-branch.has-active {
+    color: #fff6c7;
+  }
+  .ch-reference-console .ch-nav-disclosure {
+    color: #7d8b9b;
+    font-size: 10px;
+  }
+  .ch-reference-console .ch-nav-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ch-reference-console .ch-nav-count {
+    color: #6e7d8f;
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+  }
   .ch-reference-console .ch-nav-page {
+    min-height: 28px;
     border-radius: 0;
     color: var(--ch-text);
     font-size: 12px;
+    padding: 0 8px 0 calc(25px + (var(--nav-depth, 0) * 14px));
+    line-height: 28px;
+    text-align: left;
   }
   .ch-reference-console .ch-nav-page.active {
     border-color: var(--ch-yellow-line);
@@ -1208,11 +1547,15 @@ function css() {
     color: #fff6c7;
   }
   .ch-reference-console .ch-nav-sections {
+    margin: 2px 0 2px calc(25px + (var(--nav-depth, 0) * 14px));
+    padding-left: 8px;
     border-left-color: rgba(255, 204, 2, 0.26);
   }
   .ch-reference-console .ch-nav-section {
     border-radius: 0;
     color: var(--ch-soft);
+    padding: 3px 7px;
+    text-align: left;
   }
   .ch-reference-console .ch-nav-section.active {
     border-color: var(--ch-yellow-line);

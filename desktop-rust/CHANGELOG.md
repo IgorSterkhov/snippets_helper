@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## f-20260624-1 (2026-06-24)
+
+- **ClickHouse update control polish:** ClickHouse docs now use one merged
+  `Update docs` control that shows live progress while refreshing and the last
+  update time afterwards, with the full update summary hidden in an on-demand
+  popover. The left docs navigation is now a collapsible hierarchy built from
+  category paths, and `Changelog` was renamed to `Update log`.
+
 ## f-20260622-2 (2026-06-22)
 
 - **ClickHouse Reference Console:** the ClickHouse docs module now uses a
