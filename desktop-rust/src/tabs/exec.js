@@ -1335,7 +1335,8 @@ function css() {
 }
 .exec-template-source-pick,
 .exec-template-source-add,
-.exec-template-source-remove {
+.exec-template-source-remove,
+.exec-template-destination-pick {
   padding: 4px 9px;
   font-size: 12px;
 }
@@ -1345,6 +1346,17 @@ function css() {
   gap: 6px;
 }
 .exec-template-source-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+.exec-template-destination-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.exec-template-destination-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## f-20260624-5 (2026-06-24)
+
+- **Commands local copy templates:** `SCP` and `rsync` templates now have a
+  native destination folder picker for local targets, while remote destinations
+  remain manual paths. `Use template` also has a new `Local copy` option that
+  generates multi-file local copy commands for Windows PowerShell `Copy-Item`
+  or POSIX `cp`, with separate PowerShell-safe quoting.
+
 ## f-20260624-4 (2026-06-24)
 
 - **Commands composer and multi-file copy templates:** the `New Command` and

@@ -63,6 +63,14 @@ function shellQuote(s) {
   return "'" + s.replace(/'/g, `'\\''`) + "'";
 }
 
+function psSingleQuote(s) {
+  return "'" + String(s || '').replace(/'/g, "''") + "'";
+}
+
+function cmdDoubleQuote(s) {
+  return '"' + String(s || '').replace(/"/g, '\\"') + '"';
+}
+
 function parseHostValue(v) {
   if (!v || v === '__local__') return { isLocal: true };
   const m = v.match(/^([^@]+)@([^:]+):(\d+)$/);
@@ -80,6 +88,18 @@ async function pickLocalFiles() {
   });
   if (!result) return [];
   return (Array.isArray(result) ? result : [result]).map(String).filter(Boolean);
+}
+
+async function pickLocalFolder() {
+  const open = window.__TAURI__?.dialog?.open;
+  if (!open) throw new Error('Native folder picker is not available in this build');
+  const result = await open({
+    title: 'Choose destination folder',
+    multiple: false,
+    directory: true,
+  });
+  if (!result) return '';
+  return Array.isArray(result) ? String(result[0] || '') : String(result);
 }
 
 function createSourceList({ prefix, sourceHostId, placeholder }) {
@@ -201,6 +221,77 @@ function createSourceList({ prefix, sourceHostId, placeholder }) {
   return { root: wrap, getPaths };
 }
 
+function createDestinationPath({ prefix, destinationHostId, placeholder }) {
+  const wrap = document.createElement('div');
+  wrap.className = 'exec-template-destination-wrap';
+
+  const row = document.createElement('div');
+  row.className = 'exec-template-destination-row';
+
+  const input = document.createElement('input');
+  input.id = `${prefix}-dst-path`;
+  input.className = 'exec-template-input';
+  input.placeholder = placeholder;
+  row.appendChild(input);
+
+  const pickBtn = document.createElement('button');
+  pickBtn.type = 'button';
+  pickBtn.id = `${prefix}-pick-dst-folder`;
+  pickBtn.className = 'btn-secondary exec-template-destination-pick';
+  pickBtn.textContent = 'Choose folder...';
+  row.appendChild(pickBtn);
+
+  wrap.appendChild(row);
+
+  const message = document.createElement('div');
+  message.className = 'exec-template-source-message';
+  message.style.display = 'none';
+  wrap.appendChild(message);
+
+  function setMessage(text, kind = 'info') {
+    if (!text) {
+      message.textContent = '';
+      message.style.display = 'none';
+      message.dataset.kind = '';
+      return;
+    }
+    message.textContent = text;
+    message.dataset.kind = kind;
+    message.style.display = '';
+  }
+
+  function destinationHost() {
+    if (!destinationHostId) return { isLocal: true };
+    return parseHostValue(document.getElementById(destinationHostId)?.value);
+  }
+
+  pickBtn.addEventListener('click', async () => {
+    setMessage('');
+    if (!destinationHost().isLocal) {
+      setMessage('Native folder picker can only choose local destination folders. Type the remote destination path manually.', 'error');
+      return;
+    }
+    try {
+      const folder = await pickLocalFolder();
+      if (folder) input.value = folder;
+    } catch (err) {
+      setMessage(String(err?.message || err), 'error');
+    }
+  });
+
+  queueMicrotask(() => {
+    if (destinationHostId) {
+      document.getElementById(destinationHostId)?.addEventListener('change', () => setMessage(''));
+    }
+  });
+
+  return {
+    root: wrap,
+    input,
+    getPath: () => input.value.trim(),
+  };
+}
+
 // ── Template picker ──────────────────────────────────────
 
 export async function openTemplatePicker() {
@@ -210,6 +301,7 @@ export async function openTemplatePicker() {
   if (choice === 'scp') return buildScpTemplate(vps);
   if (choice === 'ssh') return buildSshTemplate(vps);
   if (choice === 'rsync') return buildRsyncTemplate(vps);
+  if (choice === 'local_copy') return buildLocalCopyTemplate();
   return null;
 }
 
@@ -220,6 +312,7 @@ async function pickTemplateType() {
     { id: 'scp', label: 'SCP', desc: 'Copy files between local and remote hosts' },
     { id: 'ssh', label: 'SSH', desc: 'Run a command on a remote host' },
     { id: 'rsync', label: 'rsync', desc: 'Synchronize directories (fast, incremental)' },
+    { id: 'local_copy', label: 'Local copy', desc: 'Copy multiple local files into a local folder' },
   ];
   let chosen = null;
   for (const t of types) {
@@ -268,12 +361,12 @@ function buildScpTemplate(vps) {
   body.appendChild(fieldLabel('Destination host'));
   body.appendChild(selectEl('scp-dst-host', opts));
   body.appendChild(fieldLabel('Destination path'));
-  const dstPath = document.createElement('input');
-  dstPath.id = 'scp-dst-path';
-  dstPath.className = 'exec-template-input';
-  dstPath.style.width = '100%';
-  dstPath.placeholder = '/path/to/dest';
-  body.appendChild(dstPath);
+  const destinationPath = createDestinationPath({
+    prefix: 'scp',
+    destinationHostId: 'scp-dst-host',
+    placeholder: '/path/to/dest',
+  });
+  body.appendChild(destinationPath.root);
 
   body.appendChild(fieldLabel('Options'));
   const optsRow = document.createElement('div');
@@ -293,7 +386,7 @@ function buildScpTemplate(vps) {
       const srcHost = parseHostValue(document.getElementById('scp-src-host').value);
       const dstHost = parseHostValue(document.getElementById('scp-dst-host').value);
       const sources = sourceList.getPaths();
-      const dst = document.getElementById('scp-dst-path').value.trim();
+      const dst = destinationPath.getPath();
       const recursive = document.getElementById('scp-r').checked;
       const port = parseInt(document.getElementById('scp-port').value) || 22;
       const key = document.getElementById('scp-key').value.trim();
@@ -411,12 +504,12 @@ function buildRsyncTemplate(vps) {
   body.appendChild(fieldLabel('Destination host'));
   body.appendChild(selectEl('rs-dst-host', opts));
   body.appendChild(fieldLabel('Destination path'));
-  const dstPath = document.createElement('input');
-  dstPath.id = 'rs-dst-path';
-  dstPath.className = 'exec-template-input';
-  dstPath.style.width = '100%';
-  dstPath.placeholder = '/path/to/dest/';
-  body.appendChild(dstPath);
+  const destinationPath = createDestinationPath({
+    prefix: 'rs',
+    destinationHostId: 'rs-dst-host',
+    placeholder: '/path/to/dest/',
+  });
+  body.appendChild(destinationPath.root);
 
   body.appendChild(fieldLabel('Flags'));
   const optsRow = document.createElement('div');
@@ -440,7 +533,7 @@ function buildRsyncTemplate(vps) {
       const srcHost = parseHostValue(document.getElementById('rs-src-host').value);
       const dstHost = parseHostValue(document.getElementById('rs-dst-host').value);
       const sources = sourceList.getPaths();
-      const dst = document.getElementById('rs-dst-path').value.trim();
+      const dst = destinationPath.getPath();
       const port = parseInt(document.getElementById('rs-port').value) || 22;
       const key = document.getElementById('rs-key').value.trim();
       const a = document.getElementById('rs-a').checked;
@@ -475,6 +568,68 @@ function buildRsyncTemplate(vps) {
       generated = {
         command: parts.join(' '),
         name: `rsync ${sourceLabel} → ${shortPath(dst)}`,
+      };
+    },
+  }).then(() => generated).catch(() => null);
+}
+
+// ── Local copy ─────────────────────────────────────────────
+
+function buildLocalCopyTemplate() {
+  const body = document.createElement('div');
+  body.className = 'exec-template-form';
+  queueMicrotask(() => body.closest('.modal')?.classList.add('exec-template-modal'));
+
+  body.appendChild(fieldLabel('Source files'));
+  const sourceList = createSourceList({
+    prefix: 'lc',
+    sourceHostId: '',
+    placeholder: 'C:\\path\\to\\file.txt',
+  });
+  body.appendChild(sourceList.root);
+
+  body.appendChild(fieldLabel('Destination folder'));
+  const destinationPath = createDestinationPath({
+    prefix: 'lc',
+    destinationHostId: '',
+    placeholder: 'C:\\path\\to\\folder',
+  });
+  body.appendChild(destinationPath.root);
+
+  body.appendChild(fieldLabel('Target shell'));
+  const shellSelect = selectEl('lc-shell', [
+    { value: 'powershell', label: 'Windows PowerShell' },
+    { value: 'posix', label: 'POSIX cp' },
+  ]);
+  body.appendChild(shellSelect);
+  body.appendChild(templateHint('Use Windows PowerShell for Host shell on Windows; use POSIX cp for macOS, Linux, or WSL-style shells.'));
+
+  let generated = null;
+  return showModal({
+    title: 'Local copy Template',
+    body,
+    onConfirm: async () => {
+      const sources = sourceList.getPaths();
+      const dst = destinationPath.getPath();
+      const shell = document.getElementById('lc-shell').value || 'powershell';
+
+      if (!sources.length) throw new Error('At least one source file is required');
+      if (!dst) throw new Error('Destination folder is required');
+
+      const sourceLabel = sources.length > 1 ? `${shortPath(sources[0])} +${sources.length - 1}` : shortPath(sources[0]);
+      if (shell === 'posix') {
+        generated = {
+          command: ['cp', '--', ...sources.map(shellQuote), shellQuote(dst)].join(' '),
+          name: `cp ${sourceLabel} → ${shortPath(dst)}`,
+        };
+        return;
+      }
+
+      const psSources = sources.map(psSingleQuote).join(', ');
+      const psCommand = `Copy-Item -LiteralPath @(${psSources}) -Destination ${psSingleQuote(dst)} -Force`;
+      generated = {
+        command: `powershell -NoProfile -ExecutionPolicy Bypass -Command ${cmdDoubleQuote(psCommand)}`,
+        name: `copy ${sourceLabel} → ${shortPath(dst)}`,
       };
     },
   }).then(() => generated).catch(() => null);

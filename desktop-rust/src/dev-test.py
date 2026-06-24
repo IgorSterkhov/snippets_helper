@@ -1259,6 +1259,154 @@ async def run_tests():
         assert "'/tmp/env file'" in cmd, cmd
     await check('T7b rsync multi-file template fills command textarea', t7b)
 
+    # ── T7c: SCP destination folder picker fills local dst ─────
+    async def t7c():
+        await cdp.eval("document.getElementById('cmd-tpl-btn').click()")
+        await wait_until(
+            cdp,
+            "document.querySelectorAll('.modal-overlay').length >= 2 && "
+            "!!document.querySelector('input[name=\"tpl-type\"][value=\"scp\"]')",
+            timeout=4,
+        )
+        await cdp.eval(
+            "(() => {"
+            "const r=document.querySelector('input[name=\"tpl-type\"][value=\"scp\"]');"
+            "r.checked=true; r.dispatchEvent(new Event('change'));"
+            "})()"
+        )
+        await cdp.eval(
+            "[...document.querySelectorAll('.modal-overlay')].pop()"
+            ".querySelector('.modal-actions button:last-child').click()"
+        )
+        await wait_until(
+            cdp,
+            "!!document.getElementById('scp-dst-path') && !!document.getElementById('scp-pick-dst-folder')",
+            timeout=3,
+        )
+        await cdp.eval(
+            "window.__mockDialogOpenResult=(opts)=>opts.directory ? '/tmp/local dest' : ['/tmp/source.txt'];"
+            "document.getElementById('scp-dst-host').value='__local__';"
+            "document.getElementById('scp-pick-dst-folder').click();"
+        )
+        await wait_until(
+            cdp,
+            "document.getElementById('scp-dst-path').value === '/tmp/local dest'",
+            timeout=3,
+        )
+        await cdp.eval(
+            "[...document.querySelectorAll('.modal-overlay')].pop()"
+            ".querySelector('.modal-actions button:first-child').click()"
+        )
+        await wait_until(
+            cdp, "document.querySelectorAll('.modal-overlay').length === 1",
+            timeout=3,
+        )
+    await check('T7c SCP destination folder picker fills local dst', t7c)
+
+    # ── T7d: rsync destination folder picker fills local dst ───
+    async def t7d():
+        await cdp.eval("document.getElementById('cmd-tpl-btn').click()")
+        await wait_until(
+            cdp,
+            "document.querySelectorAll('.modal-overlay').length >= 2 && "
+            "!!document.querySelector('input[name=\"tpl-type\"][value=\"rsync\"]')",
+            timeout=4,
+        )
+        await cdp.eval(
+            "(() => {"
+            "const r=document.querySelector('input[name=\"tpl-type\"][value=\"rsync\"]');"
+            "r.checked=true; r.dispatchEvent(new Event('change'));"
+            "})()"
+        )
+        await cdp.eval(
+            "[...document.querySelectorAll('.modal-overlay')].pop()"
+            ".querySelector('.modal-actions button:last-child').click()"
+        )
+        await wait_until(
+            cdp,
+            "!!document.getElementById('rs-dst-path') && !!document.getElementById('rs-pick-dst-folder')",
+            timeout=3,
+        )
+        await cdp.eval(
+            "window.__mockDialogOpenResult=(opts)=>opts.directory ? '/tmp/rsync target' : ['/tmp/source.txt'];"
+            "document.getElementById('rs-dst-host').value='__local__';"
+            "document.getElementById('rs-pick-dst-folder').click();"
+        )
+        await wait_until(
+            cdp,
+            "document.getElementById('rs-dst-path').value === '/tmp/rsync target'",
+            timeout=3,
+        )
+        await cdp.eval(
+            "[...document.querySelectorAll('.modal-overlay')].pop()"
+            ".querySelector('.modal-actions button:first-child').click()"
+        )
+        await wait_until(
+            cdp, "document.querySelectorAll('.modal-overlay').length === 1",
+            timeout=3,
+        )
+    await check('T7d rsync destination folder picker fills local dst', t7d)
+
+    # ── T7e: Local copy template generates PowerShell command ──
+    async def t7e():
+        await cdp.eval("document.getElementById('cmd-tpl-btn').click()")
+        await wait_until(
+            cdp,
+            "document.querySelectorAll('.modal-overlay').length >= 2 && "
+            "!!document.querySelector('input[name=\"tpl-type\"][value=\"local_copy\"]')",
+            timeout=4,
+        )
+        await cdp.eval(
+            "(() => {"
+            "const r=document.querySelector('input[name=\"tpl-type\"][value=\"local_copy\"]');"
+            "r.checked=true; r.dispatchEvent(new Event('change'));"
+            "})()"
+        )
+        await cdp.eval(
+            "[...document.querySelectorAll('.modal-overlay')].pop()"
+            ".querySelector('.modal-actions button:last-child').click()"
+        )
+        await wait_until(
+            cdp,
+            "!!document.getElementById('lc-source-list') && !!document.getElementById('lc-pick-files') && "
+            "!!document.getElementById('lc-pick-dst-folder')",
+            timeout=3,
+        )
+        await cdp.eval(
+            "window.__mockDialogOpenResult=(opts)=>opts.directory "
+            "? 'C:\\\\Deploy Target' "
+            ": ['C:\\\\Temp\\\\One File.txt','C:\\\\Temp\\\\two.txt'];"
+            "document.getElementById('lc-pick-files').click();"
+        )
+        await wait_until(
+            cdp,
+            "document.querySelectorAll('#lc-source-list input').length >= 2 && "
+            "[...document.querySelectorAll('#lc-source-list input')].some(x => x.value.includes('One File.txt'))",
+            timeout=3,
+        )
+        await cdp.eval(
+            "document.getElementById('lc-pick-dst-folder').click();"
+            "document.getElementById('lc-shell').value='powershell';"
+        )
+        await wait_until(
+            cdp,
+            "document.getElementById('lc-dst-path').value === 'C:\\\\Deploy Target'",
+            timeout=3,
+        )
+        await cdp.eval(
+            "[...document.querySelectorAll('.modal-overlay')].pop()"
+            ".querySelector('.modal-actions button:last-child').click()"
+        )
+        await wait_until(
+            cdp, "document.querySelectorAll('.modal-overlay').length === 1",
+            timeout=3,
+        )
+        cmd = await cdp.eval("document.getElementById('cmd-command').value")
+        assert cmd.startswith('powershell '), f'unexpected cmd: {cmd!r}'
+        assert 'Copy-Item' in cmd and 'One File.txt' in cmd and 'two.txt' in cmd and 'Deploy Target' in cmd, cmd
+        assert r"'C:\Temp\One File.txt'" in cmd, cmd
+    await check('T7e Local copy template generates PowerShell command', t7e)
+
     # ── T8: create group via mock ─────────────────────────────
     async def t8_create_group():
         result = await cdp.eval("""(async () => {
