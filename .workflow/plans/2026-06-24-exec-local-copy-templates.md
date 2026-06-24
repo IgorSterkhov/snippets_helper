@@ -87,6 +87,11 @@ smoke tests in `desktop-rust/src/dev-test.py`.
 - [ ] Generate Windows PowerShell and POSIX `cp` commands with safe quoting.
 - [ ] Use a dedicated PowerShell single-quoted literal helper that doubles
   embedded `'` characters; do not reuse POSIX `shellQuote` inside PowerShell.
+- [ ] Encode the PowerShell script as UTF-16LE Base64 and pass it through
+  `-EncodedCommand` to avoid nested quote parsing differences under `cmd /c`.
+- [ ] Set `$ErrorActionPreference = 'Stop'` and `-ErrorAction Stop` for
+  `Copy-Item` so failed copy operations surface as errors instead of
+  successful exit code 0.
 
 ### Task 5: Help, Release Notes, Verification
 

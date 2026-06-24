@@ -23,14 +23,17 @@ and local host copy:
   - a source file list with native multi-file selection and manual path rows;
   - a destination folder field with native folder selection;
   - a target shell selector with `Windows PowerShell` and `POSIX cp`.
-- `Windows PowerShell` generates:
-  `powershell -NoProfile -ExecutionPolicy Bypass -Command "Copy-Item ..."`
+- `Windows PowerShell` generates a `powershell -EncodedCommand ...` command
+  so the script does not depend on nested `cmd /c` quoting.
 - `POSIX cp` generates:
   `cp -- src1 src2 destination`
 - Paths with spaces or quotes must remain correctly quoted.
 - POSIX commands use the existing POSIX shell quoting. PowerShell commands use a
   separate PowerShell single-quoted literal escape; POSIX quoting must not be
   reused inside `powershell -Command`.
+- PowerShell copy uses `$ErrorActionPreference = 'Stop'` and
+  `Copy-Item -ErrorAction Stop`, so failed copies do not report a misleading
+  `exit code: 0`.
 
 ## Release Scope
 

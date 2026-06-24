@@ -7,8 +7,10 @@ PASS/FAIL. Intended to run from repo root or this folder.
 """
 
 import asyncio
+import base64
 import json
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -1403,8 +1405,13 @@ async def run_tests():
         )
         cmd = await cdp.eval("document.getElementById('cmd-command').value")
         assert cmd.startswith('powershell '), f'unexpected cmd: {cmd!r}'
-        assert 'Copy-Item' in cmd and 'One File.txt' in cmd and 'two.txt' in cmd and 'Deploy Target' in cmd, cmd
-        assert r"'C:\Temp\One File.txt'" in cmd, cmd
+        assert '-EncodedCommand ' in cmd, cmd
+        encoded = re.search(r'-EncodedCommand\s+([A-Za-z0-9+/=]+)', cmd)
+        assert encoded, cmd
+        script = base64.b64decode(encoded.group(1)).decode('utf-16le')
+        assert 'Copy-Item' in script and 'One File.txt' in script and 'two.txt' in script and 'Deploy Target' in script, script
+        assert '$ErrorActionPreference = ' in script and '-ErrorAction Stop' in script, script
+        assert r"'C:\Temp\One File.txt'" in script, script
     await check('T7e Local copy template generates PowerShell command', t7e)
 
     # ── T8: create group via mock ─────────────────────────────

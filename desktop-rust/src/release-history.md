@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## f-20260624-6 (2026-06-24)
+
+- **Commands PowerShell copy fix:** the `Local copy` PowerShell template now
+  uses `-EncodedCommand` so the copy script is not broken by nested `cmd /c`
+  quote parsing. Copy failures are now terminating errors with non-zero command
+  results instead of a misleading `exit code: 0`, and successful copies print a
+  short copied-item count.
+
 ## f-20260624-5 (2026-06-24)
 
 - **Commands local copy templates:** `SCP` and `rsync` templates now have a

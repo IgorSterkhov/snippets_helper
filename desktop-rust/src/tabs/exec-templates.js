@@ -67,10 +67,6 @@ function psSingleQuote(s) {
   return "'" + String(s || '').replace(/'/g, "''") + "'";
 }
 
-function cmdDoubleQuote(s) {
-  return '"' + String(s || '').replace(/"/g, '\\"') + '"';
-}
-
 function parseHostValue(v) {
   if (!v || v === '__local__') return { isLocal: true };
   const m = v.match(/^([^@]+)@([^:]+):(\d+)$/);
@@ -100,6 +96,24 @@ async function pickLocalFolder() {
   });
   if (!result) return '';
   return Array.isArray(result) ? String(result[0] || '') : String(result);
+}
+
+function utf16LeBase64(s) {
+  const bytes = [];
+  for (let i = 0; i < s.length; i++) {
+    const code = s.charCodeAt(i);
+    bytes.push(code & 0xff, (code >> 8) & 0xff);
+  }
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.slice(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
+function powershellEncodedCommand(script) {
+  return `powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ${utf16LeBase64(script)}`;
 }
 
 function createSourceList({ prefix, sourceHostId, placeholder }) {
@@ -626,9 +640,16 @@ function buildLocalCopyTemplate() {
       }
 
       const psSources = sources.map(psSingleQuote).join(', ');
-      const psCommand = `Copy-Item -LiteralPath @(${psSources}) -Destination ${psSingleQuote(dst)} -Force`;
+      const psCommand = [
+        "$ErrorActionPreference = 'Stop'",
+        `$sources = @(${psSources})`,
+        `$destination = ${psSingleQuote(dst)}`,
+        '$copied = @(Copy-Item -LiteralPath $sources -Destination $destination -Force -PassThru -ErrorAction Stop)',
+        "if ($copied.Count -eq 0) { throw 'Copy-Item completed without reporting copied items.' }",
+        'Write-Output ("Copied {0} item(s) to {1}" -f $copied.Count, $destination)',
+      ].join('; ');
       generated = {
-        command: `powershell -NoProfile -ExecutionPolicy Bypass -Command ${cmdDoubleQuote(psCommand)}`,
+        command: powershellEncodedCommand(psCommand),
         name: `copy ${sourceLabel} → ${shortPath(dst)}`,
       };
     },
