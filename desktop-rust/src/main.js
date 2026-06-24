@@ -45,6 +45,42 @@ function getMicroPickerRequest() {
   return params.get('micro_picker') === '1';
 }
 
+function shouldOpenExternally(url) {
+  if (url.protocol === 'mailto:' || url.protocol === 'tel:') return true;
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+  return url.origin !== window.location.origin;
+}
+
+function installExternalLinkGuard() {
+  if (window.__keyboardHelperExternalLinkGuardInstalled) return;
+  window.__keyboardHelperExternalLinkGuardInstalled = true;
+
+  document.addEventListener('click', (event) => {
+    if (event.defaultPrevented) return;
+    const target = event.target;
+    const element = target instanceof Element ? target : target?.parentElement;
+    const link = element?.closest ? element.closest('a[href]') : null;
+    if (!link || link.hasAttribute('download')) return;
+
+    const rawHref = String(link.getAttribute('href') || '').trim();
+    if (!rawHref || rawHref.startsWith('#')) return;
+
+    let url;
+    try {
+      url = new URL(link.href, window.location.href);
+    } catch {
+      return;
+    }
+    if (!shouldOpenExternally(url)) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    call('open_url', { url: url.href }).catch((err) => {
+      showToast('Failed to open link: ' + err, 'error');
+    });
+  }, true);
+}
+
 function closeModuleContextMenu() {
   document.querySelector('.module-context-menu')?.remove();
 }
@@ -250,6 +286,7 @@ document.addEventListener('visibilitychange', () => {
 
 document.addEventListener('DOMContentLoaded', () => {
   console.log('[keyboard-helper] frontend loaded @', new Date().toISOString());
+  installExternalLinkGuard();
   const standalone = getStandaloneRequest().standalone;
   main();
   if (standalone) return;

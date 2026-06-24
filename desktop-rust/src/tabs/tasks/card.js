@@ -344,10 +344,15 @@ function appendCollapsedLinkShelf(body, task, ctx, links) {
       <span class="task-link-chip-marker">${escapeHtml(settings.marker || '◈')}</span>
       <span class="task-link-chip-label">${escapeHtml(linkLabel(link))}</span>
     `;
-    chip.addEventListener('click', (e) => {
+    chip.addEventListener('click', async (e) => {
       e.stopPropagation();
+      e.preventDefault();
       if (chip.dataset.dragSuppressClick === '1') return;
-      window.open(link.url, '_blank', 'noopener');
+      try {
+        await call('open_url', { url: link.url });
+      } catch (err) {
+        showToast('Open link failed: ' + err, 'error');
+      }
     });
     shelf.appendChild(chip);
   }

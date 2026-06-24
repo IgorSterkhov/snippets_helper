@@ -64,8 +64,14 @@ export function renderExpandedEditor(card, task, ctx) {
   const openTrkBtn = document.createElement('button');
   openTrkBtn.className = 'task-editor-btn';
   openTrkBtn.textContent = '🎫 Open';
-  openTrkBtn.addEventListener('click', () => {
-    if (trackerIn.value) window.open(trackerIn.value, '_blank', 'noopener');
+  openTrkBtn.addEventListener('click', async () => {
+    const url = trackerIn.value.trim();
+    if (!url) return;
+    try {
+      await call('open_url', { url });
+    } catch (e) {
+      showToast('Open failed: ' + e, 'error');
+    }
   });
   trackerRow.appendChild(openTrkBtn);
   body.appendChild(trackerRow);
@@ -332,9 +338,15 @@ function buildLinkRow(link, task, onReload) {
   openBtn.className = 'task-icon-btn';
   openBtn.title = 'Open';
   openBtn.textContent = '↗';
-  openBtn.addEventListener('click', (e) => {
+  openBtn.addEventListener('click', async (e) => {
     e.preventDefault();
-    if (urlIn.value) window.open(urlIn.value, '_blank', 'noopener');
+    const url = urlIn.value.trim();
+    if (!url) return;
+    try {
+      await call('open_url', { url });
+    } catch (err) {
+      showToast('Open failed: ' + err, 'error');
+    }
   });
   row.appendChild(openBtn);
 

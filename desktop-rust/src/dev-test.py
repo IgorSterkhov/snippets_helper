@@ -227,6 +227,46 @@ async def run_tests():
         assert 'v0.9.5-f1' in txt, f'got: {txt!r}'
     await check('T2 status bar shows v0.9.5-f1', t2)
 
+    # ── T2a: external links open outside the app webview ─────
+    async def t2a_external_links_use_native_open_url():
+        before = await cdp.eval("location.href")
+        await cdp.eval("""(() => {
+          window.__mockOpenedUrls = [];
+          window.__directExternalGuardOpenUrls = [];
+          window.__originalOpenForExternalGuard = window.open;
+          window.open = (url) => {
+            window.__directExternalGuardOpenUrls.push(String(url));
+            return null;
+          };
+          document.querySelector('#external-link-guard-test')?.remove();
+          const a = document.createElement('a');
+          a.id = 'external-link-guard-test';
+          a.href = 'https://example.com/global-guard';
+          a.textContent = 'external guard';
+          document.body.appendChild(a);
+          a.click();
+        })()""")
+        opened = await wait_until(
+            cdp,
+            """(() => {
+              const urls = window.__mockOpenedUrls || [];
+              return urls.includes('https://example.com/global-guard') ? urls : null;
+            })()""",
+            timeout=3,
+        )
+        after = await cdp.eval("location.href")
+        assert opened == ['https://example.com/global-guard'], opened
+        assert after == before, f'app webview navigated from {before!r} to {after!r}'
+        await cdp.eval("""(() => {
+          document.querySelector('#external-link-guard-test')?.remove();
+          if (window.__originalOpenForExternalGuard) {
+            window.open = window.__originalOpenForExternalGuard;
+            delete window.__originalOpenForExternalGuard;
+          }
+          delete window.__directExternalGuardOpenUrls;
+        })()""")
+    await check('T2a external links use native open_url', t2a_external_links_use_native_open_url)
+
     # ── T2b: Help changelog shows frontend OTA notes ─────────
     async def t2b_help_changelog_shows_frontend_ota_notes():
         await cdp.eval("document.querySelector('.tab-btn[title=\"Help\"]').click()")
@@ -1844,10 +1884,11 @@ async def run_tests():
             .filter(x => x.task_id !== 2);
           localStorage.setItem('mock.task_links', JSON.stringify([...others, ...links]));
           localStorage.setItem('mock.__seq.task_links', '211');
-          window.__openedTaskLinkUrls = [];
+          window.__mockOpenedUrls = [];
+          window.__directTaskWindowOpenUrls = [];
           window.__originalOpenForTaskLinks = window.open;
           window.open = (url) => {
-            window.__openedTaskLinkUrls.push(String(url));
+            window.__directTaskWindowOpenUrls.push(String(url));
             return null;
           };
         })()""")
@@ -1898,7 +1939,14 @@ async def run_tests():
                 .find(x => x.textContent.includes('Alpha docs'));
               chip?.click();
             })()""")
-            opened = await cdp.eval("window.__openedTaskLinkUrls || []")
+            opened = await wait_until(
+                cdp,
+                """(() => {
+                  const urls = window.__mockOpenedUrls || [];
+                  return urls.includes('https://example.com/alpha') ? urls : null;
+                })()""",
+                timeout=3,
+            )
             assert opened == ['https://example.com/alpha'], opened
 
             await cdp.eval("""(async () => {
@@ -1945,13 +1993,56 @@ async def run_tests():
                 })()""",
                 timeout=3,
             )
+
+            await cdp.eval(
+                "[...document.querySelectorAll('.task-title')]"
+                ".find(x => x.textContent.includes('Regular mock task')).click()"
+            )
+            await wait_until(
+                cdp,
+                "document.querySelector('.task-editor-title')?.value === 'Regular mock task'",
+                timeout=3,
+            )
+            await cdp.eval("""(() => {
+              const trackerRow = [...document.querySelectorAll('#panel-tasks .task-editor-row')]
+                .find(x => x.querySelector('.task-editor-label')?.textContent.trim() === 'Tracker');
+              const trackerInput = trackerRow?.querySelector('input');
+              if (trackerInput) trackerInput.value = 'https://tracker.example.com/TASK-2';
+              const trackerButton = [...trackerRow?.querySelectorAll('button') || []]
+                .find(x => x.textContent.includes('Open'));
+              trackerButton?.click();
+            })()""")
+            opened = await wait_until(
+                cdp,
+                """(() => {
+                  const urls = window.__mockOpenedUrls || [];
+                  return urls[urls.length - 1] === 'https://tracker.example.com/TASK-2' ? urls : null;
+                })()""",
+                timeout=3,
+            )
+            assert opened[-1] == 'https://tracker.example.com/TASK-2', opened
+
+            await cdp.eval("""(() => {
+              const row = [...document.querySelectorAll('.task-editor-link-row')]
+                .find(x => x.querySelector('.url-in')?.value === 'https://example.com/alpha');
+              row?.querySelector('.task-icon-btn[title="Open"]')?.click();
+            })()""")
+            opened = await wait_until(
+                cdp,
+                """(() => {
+                  const urls = window.__mockOpenedUrls || [];
+                  return urls[urls.length - 1] === 'https://example.com/alpha' && urls.length >= 3 ? urls : null;
+                })()""",
+                timeout=3,
+            )
+            assert opened[-1] == 'https://example.com/alpha', opened
         finally:
             await cdp.eval("""(() => {
               if (window.__originalOpenForTaskLinks) {
                 window.open = window.__originalOpenForTaskLinks;
                 delete window.__originalOpenForTaskLinks;
               }
-              delete window.__openedTaskLinkUrls;
+              delete window.__directTaskWindowOpenUrls;
             })()""")
     await check('T15b2 Tasks collapsed link shelf settings + DnD', t15b2_tasks_collapsed_link_shelf_settings_and_dnd)
 

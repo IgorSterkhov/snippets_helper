@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## f-20260624-3 (2026-06-24)
+
+- **External link opening fix:** task links, tracker links, and external
+  in-app anchors now open through the native `open_url` command instead of
+  navigating the app WebView. This prevents external sites from replacing the
+  desktop app screen and leaving no way back without restarting.
+
 ## f-20260624-2 (2026-06-24)
 
 - **Tasks collapsed link shelf:** Tasks Settings now has a `Collapsed links`
