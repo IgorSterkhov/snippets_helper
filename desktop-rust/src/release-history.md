@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## v1.19.1 (2026-06-24)
+
+- **ClickHouse full docs discovery:** `Update docs` now discovers the full
+  Russian ClickHouse Markdown documentation tree through the GitHub Trees API,
+  so pages outside functions, including `AggregatingMergeTree`, become visible
+  and searchable after refresh. Terminal rows in the left docs tree are now
+  explicitly left-aligned.
+
 ## f-20260624-1 (2026-06-24)
 
 - **ClickHouse update control polish:** ClickHouse docs now use one merged

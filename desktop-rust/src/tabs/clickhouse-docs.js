@@ -1533,11 +1533,14 @@ function css() {
   }
   .ch-reference-console .ch-nav-page {
     min-height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
     border-radius: 0;
     color: var(--ch-text);
     font-size: 12px;
     padding: 0 8px 0 calc(25px + (var(--nav-depth, 0) * 14px));
-    line-height: 28px;
+    line-height: 1.2;
     text-align: left;
   }
   .ch-reference-console .ch-nav-page.active {
@@ -1552,6 +1555,9 @@ function css() {
     border-left-color: rgba(255, 204, 2, 0.26);
   }
   .ch-reference-console .ch-nav-section {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
     border-radius: 0;
     color: var(--ch-soft);
     padding: 3px 7px;

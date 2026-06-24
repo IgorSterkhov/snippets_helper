@@ -4669,6 +4669,26 @@ async def run_tests():
         assert any('Arrays' in text for text in nav_tree['branchTexts']), nav_tree
         assert nav_tree['pageDepth'] == '2', nav_tree
         assert nav_tree['sectionDepth'] == '3', nav_tree
+        nav_alignment = await cdp.eval("""(() => {
+          const page = document.querySelector('#panel-clickhouse-docs .ch-nav-page.active');
+          const section = document.querySelector('#panel-clickhouse-docs .ch-nav-section');
+          const pageStyle = page ? getComputedStyle(page) : null;
+          const sectionStyle = section ? getComputedStyle(section) : null;
+          return {
+            pageTextAlign: pageStyle?.textAlign || '',
+            pageDisplay: pageStyle?.display || '',
+            pageJustify: pageStyle?.justifyContent || '',
+            sectionTextAlign: sectionStyle?.textAlign || '',
+            sectionDisplay: sectionStyle?.display || '',
+            sectionJustify: sectionStyle?.justifyContent || '',
+          };
+        })()""")
+        assert nav_alignment['pageTextAlign'] == 'left', nav_alignment
+        assert nav_alignment['pageDisplay'] == 'flex', nav_alignment
+        assert nav_alignment['pageJustify'] == 'flex-start', nav_alignment
+        assert nav_alignment['sectionTextAlign'] == 'left', nav_alignment
+        assert nav_alignment['sectionDisplay'] == 'flex', nav_alignment
+        assert nav_alignment['sectionJustify'] == 'flex-start', nav_alignment
         collapsed_children = await cdp.eval("""(() => {
           const branch = [...document.querySelectorAll('#panel-clickhouse-docs .ch-nav-branch')]
             .find(row => row.textContent.includes('Arrays'));
