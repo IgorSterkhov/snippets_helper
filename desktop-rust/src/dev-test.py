@@ -1826,6 +1826,135 @@ async def run_tests():
         )
     await check('T15b Tasks pinned chips drag reorder', t15b_tasks_pinned_chip_drag_reorder)
 
+    # ── T15b2: Tasks collapsed link shelf settings + DnD ────
+    async def t15b2_tasks_collapsed_link_shelf_settings_and_dnd():
+        await cdp.eval("""(() => {
+          const settings = JSON.parse(localStorage.getItem('mock.settings') || '{}');
+          settings.last_active_tab = 'tasks';
+          settings.tasks_collapsed_links_enabled = 'false';
+          delete settings.tasks_collapsed_link_marker;
+          delete settings.tasks_collapsed_link_color;
+          localStorage.setItem('mock.settings', JSON.stringify(settings));
+          const stamp = new Date().toISOString();
+          const links = [
+            { id: 210, uuid: 'mock-link-210', task_id: 2, url: 'https://example.com/alpha', label: 'Alpha docs', sort_order: 0, created_at: stamp, updated_at: stamp, sync_status: 'synced', user_id: 'mock-user' },
+            { id: 211, uuid: 'mock-link-211', task_id: 2, url: 'https://example.com/beta', label: 'Beta console', sort_order: 1, created_at: stamp, updated_at: stamp, sync_status: 'synced', user_id: 'mock-user' },
+          ];
+          const others = JSON.parse(localStorage.getItem('mock.task_links') || '[]')
+            .filter(x => x.task_id !== 2);
+          localStorage.setItem('mock.task_links', JSON.stringify([...others, ...links]));
+          localStorage.setItem('mock.__seq.task_links', '211');
+          window.__openedTaskLinkUrls = [];
+          window.__originalOpenForTaskLinks = window.open;
+          window.open = (url) => {
+            window.__openedTaskLinkUrls.push(String(url));
+            return null;
+          };
+        })()""")
+        try:
+            await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"tasks\"]').click()")
+            await wait_until(cdp, "!!document.querySelector('#panel-tasks .tasks-wrap')", timeout=5)
+            await cdp.eval("document.querySelector('#panel-tasks .tasks-header .task-icon-btn[title=\"Display settings\"]')?.click()")
+            settings_text = await wait_until(cdp, "document.querySelector('.modal-overlay')?.innerText", timeout=3)
+            assert 'Collapsed links' in settings_text, settings_text
+            assert 'Show links in collapsed cards' in settings_text, settings_text
+            assert 'Diamond resource' in settings_text, settings_text
+            await cdp.eval("""(() => {
+              const modal = document.querySelector('.modal-overlay');
+              modal.querySelector('#tasks-set-links-enabled').checked = true;
+              modal.querySelector('#tasks-set-link-marker').value = '◈';
+              modal.querySelector('#tasks-set-link-color').value = '#d29922';
+              modal.querySelector('.modal-actions button:last-child')?.click();
+            })()""")
+            await wait_until(cdp, "!document.querySelector('.modal-overlay')", timeout=3)
+            shelf = await wait_until(
+                cdp,
+                """(() => {
+                  const card = [...document.querySelectorAll('#panel-tasks .task-card')]
+                    .find(x => x.querySelector('.task-title')?.textContent.includes('Regular mock task'));
+                  const shelf = card?.querySelector('.task-link-shelf');
+                  if (!shelf) return null;
+                  return {
+                    text: shelf.textContent,
+                    marker: shelf.querySelector('.task-link-chip-marker')?.textContent || '',
+                    color: getComputedStyle(shelf.querySelector('.task-link-chip')).borderColor,
+                    beforeCheckboxes: (() => {
+                      const body = shelf.parentElement;
+                      const firstCheckboxAreaRow = [...body.children]
+                        .find(x => x.classList.contains('tcb-item') || x.classList.contains('tcb-add'));
+                      return !!firstCheckboxAreaRow
+                        && !!(shelf.compareDocumentPosition(firstCheckboxAreaRow) & Node.DOCUMENT_POSITION_FOLLOWING);
+                    })(),
+                  };
+                })()""",
+                timeout=4,
+            )
+            assert 'Alpha docs' in shelf['text'] and 'Beta console' in shelf['text'], shelf
+            assert shelf['marker'] == '◈', shelf
+            assert shelf['beforeCheckboxes'] is True, shelf
+
+            await cdp.eval("""(() => {
+              const chip = [...document.querySelectorAll('#panel-tasks .task-link-chip')]
+                .find(x => x.textContent.includes('Alpha docs'));
+              chip?.click();
+            })()""")
+            opened = await cdp.eval("window.__openedTaskLinkUrls || []")
+            assert opened == ['https://example.com/alpha'], opened
+
+            await cdp.eval("""(async () => {
+              const shelf = [...document.querySelectorAll('#panel-tasks .task-card')]
+                .find(x => x.querySelector('.task-title')?.textContent.includes('Regular mock task'))
+                ?.querySelector('.task-link-shelf');
+              const chips = [...shelf.querySelectorAll('.task-link-chip')];
+              const from = chips[1];
+              const to = chips[0];
+              const fr = from.getBoundingClientRect();
+              const tr = to.getBoundingClientRect();
+              const sx = fr.left + fr.width / 2;
+              const sy = fr.top + fr.height / 2;
+              const tx = tr.left + 2;
+              const ty = tr.top + tr.height / 2;
+              const emit = (target, type, x, y, buttons = 1) => {
+                target.dispatchEvent(new PointerEvent(type, {
+                  bubbles: true,
+                  cancelable: true,
+                  pointerId: 16,
+                  pointerType: 'mouse',
+                  button: 0,
+                  buttons,
+                  clientX: x,
+                  clientY: y,
+                }));
+              };
+              emit(from, 'pointerdown', sx, sy);
+              await new Promise(resolve => setTimeout(resolve, 30));
+              emit(document, 'pointermove', sx - 16, sy);
+              await new Promise(resolve => setTimeout(resolve, 30));
+              emit(document, 'pointermove', tx, ty);
+              await new Promise(resolve => setTimeout(resolve, 30));
+              emit(document, 'pointerup', tx, ty, 0);
+            })()""")
+            await wait_until(
+                cdp,
+                """(() => {
+                  const links = JSON.parse(localStorage.getItem('mock.task_links') || '[]')
+                    .filter(x => x.task_id === 2 && x.sync_status !== 'deleted')
+                    .sort((a, b) => a.sort_order - b.sort_order || a.id - b.id)
+                    .map(x => x.label);
+                  return links[0] === 'Beta console' ? links : null;
+                })()""",
+                timeout=3,
+            )
+        finally:
+            await cdp.eval("""(() => {
+              if (window.__originalOpenForTaskLinks) {
+                window.open = window.__originalOpenForTaskLinks;
+                delete window.__originalOpenForTaskLinks;
+              }
+              delete window.__openedTaskLinkUrls;
+            })()""")
+    await check('T15b2 Tasks collapsed link shelf settings + DnD', t15b2_tasks_collapsed_link_shelf_settings_and_dnd)
+
     # ── T15c: Checkbox DnD ignores hidden completed rows ────
     async def t15c_tasks_checkbox_drag_hidden_completed_context():
         await cdp.eval("""(() => {
@@ -2539,6 +2668,141 @@ async def run_tests():
         finally:
             await restore_task2_checkboxes()
     await check('T15f Tasks checkbox arrow navigation uses visible rows', t15f_tasks_checkbox_arrow_navigation_uses_visible_rows)
+
+    # ── T15g: Tab indent expands collapsed new parent ────────
+    async def t15g_tasks_tab_indent_expands_collapsed_parent():
+        async def restore_task2_checkboxes_and_settings():
+            await cdp.eval("""(() => {
+              const stamp = new Date().toISOString();
+              const restored = [
+                {
+                  id: 1, task_id: 2, parent_id: null,
+                  text: 'Regular todo visible', is_checked: false,
+                  sort_order: 0, created_at: stamp, updated_at: stamp,
+                  sync_status: 'synced', user_id: 'mock-user',
+                },
+                {
+                  id: 2, task_id: 2, parent_id: null,
+                  text: 'Regular done hidden', is_checked: true,
+                  sort_order: 1, created_at: stamp, updated_at: stamp,
+                  sync_status: 'synced', user_id: 'mock-user',
+                },
+              ];
+              const others = JSON.parse(localStorage.getItem('mock.task_checkboxes') || '[]')
+                .filter(x => x.task_id !== 2);
+              localStorage.setItem('mock.task_checkboxes', JSON.stringify([...others, ...restored]));
+              localStorage.setItem('mock.__seq.task_checkboxes', '2');
+              const settings = JSON.parse(localStorage.getItem('mock.settings') || '{}');
+              delete settings.tasks_collapsed_checkbox_ids;
+              localStorage.setItem('mock.settings', JSON.stringify(settings));
+              window.dispatchEvent(new CustomEvent('snippets:sync-complete', {
+                detail: {
+                  result: {
+                    timestamp: '12:00:00',
+                    push: { total: 0, pushed: {} },
+                    pull: { total: 1, pulled: { task_checkboxes: ['restore'] } },
+                  },
+                },
+              }));
+            })()""")
+
+        try:
+            await cdp.eval("""(() => {
+              const stamp = new Date().toISOString();
+              const settings = JSON.parse(localStorage.getItem('mock.settings') || '{}');
+              settings.last_active_tab = 'tasks';
+              delete settings.tasks_collapsed_checkbox_ids;
+              localStorage.setItem('mock.settings', JSON.stringify(settings));
+              const rows = [
+                { id: 90, task_id: 2, parent_id: null, text: 'Tab collapsed parent', is_checked: false, sort_order: 0, created_at: stamp, updated_at: stamp, sync_status: 'synced', user_id: 'mock-user' },
+                { id: 91, task_id: 2, parent_id: 90, text: 'Tab existing hidden child', is_checked: false, sort_order: 0, created_at: stamp, updated_at: stamp, sync_status: 'synced', user_id: 'mock-user' },
+                { id: 92, task_id: 2, parent_id: null, text: 'Tab current sibling', is_checked: false, sort_order: 1, created_at: stamp, updated_at: stamp, sync_status: 'synced', user_id: 'mock-user' },
+              ];
+              const others = JSON.parse(localStorage.getItem('mock.task_checkboxes') || '[]')
+                .filter(x => x.task_id !== 2);
+              localStorage.setItem('mock.task_checkboxes', JSON.stringify([...others, ...rows]));
+              localStorage.setItem('mock.__seq.task_checkboxes', '92');
+              window.dispatchEvent(new CustomEvent('snippets:sync-complete', {
+                detail: {
+                  result: {
+                    timestamp: '12:00:00',
+                    push: { total: 0, pushed: {} },
+                    pull: { total: 1, pulled: { task_checkboxes: ['tab fixture'] } },
+                  },
+                },
+              }));
+            })()""")
+            await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"tasks\"]').click()")
+            await wait_until(
+                cdp,
+                "[...document.querySelectorAll('.task-title')]"
+                ".some(x => x.textContent.includes('Regular mock task'))",
+                timeout=4,
+            )
+            await cdp.eval(
+                "[...document.querySelectorAll('.task-title')]"
+                ".find(x => x.textContent.includes('Regular mock task')).click()"
+            )
+            await wait_until(
+                cdp,
+                "[...document.querySelectorAll('.tcb-text')]"
+                ".some(x => x.textContent.includes('Tab current sibling'))",
+                timeout=4,
+            )
+            await wait_until(
+                cdp,
+                "[...document.querySelectorAll('.tcb-text')]"
+                ".some(x => x.textContent.includes('Tab existing hidden child'))",
+                timeout=4,
+            )
+            await cdp.eval("""(() => {
+              const parentRow = [...document.querySelectorAll('.tcb-item')]
+                .find(x => x.querySelector('.tcb-text')?.textContent.includes('Tab collapsed parent'));
+              parentRow?.querySelector('.tcb-arrow')?.click();
+            })()""")
+            await wait_until(
+                cdp,
+                "![...document.querySelectorAll('.tcb-text')].some(x => x.textContent.includes('Tab existing hidden child'))",
+                timeout=3,
+            )
+            hidden_child_visible = await cdp.eval(
+                "[...document.querySelectorAll('.tcb-text')]"
+                ".some(x => x.textContent.includes('Tab existing hidden child'))"
+            )
+            assert hidden_child_visible is False, 'fixture parent must start collapsed'
+
+            await cdp.eval("""(() => {
+              const row = [...document.querySelectorAll('.tcb-item')]
+                .find(x => x.querySelector('.tcb-text')?.textContent.includes('Tab current sibling'));
+              const text = row?.querySelector('.tcb-text');
+              text?.dispatchEvent(new KeyboardEvent('keydown', {
+                key: 'Tab',
+                bubbles: true,
+                cancelable: true,
+              }));
+            })()""")
+            await wait_until(
+                cdp,
+                "JSON.parse(localStorage.getItem('mock.task_checkboxes') || '[]').find(x => x.id === 92)?.parent_id === 90",
+                timeout=3,
+            )
+            visible_after_indent = await wait_until(
+                cdp,
+                """(() => {
+                  const rows = [...document.querySelectorAll('.tcb-text')].map(x => x.textContent);
+                  return rows.includes('Tab existing hidden child') && rows.includes('Tab current sibling') ? rows : null;
+                })()""",
+                timeout=3,
+            )
+            assert 'Tab current sibling' in visible_after_indent, visible_after_indent
+            collapsed_ids = await cdp.eval("""(() => {
+              const settings = JSON.parse(localStorage.getItem('mock.settings') || '{}');
+              return JSON.parse(settings.tasks_collapsed_checkbox_ids || '[]');
+            })()""")
+            assert 90 not in collapsed_ids, collapsed_ids
+        finally:
+            await restore_task2_checkboxes_and_settings()
+    await check('T15g Tasks checkbox Tab expands collapsed parent', t15g_tasks_tab_indent_expands_collapsed_parent)
 
     # ── T16: Tasks Focus view layout/search/outside pinned ──
     async def t16_tasks_focus_view_layout_search_and_outside_pin():

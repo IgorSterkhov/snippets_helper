@@ -313,6 +313,24 @@
       },
     ]);
     storeSet('__seq.task_checkboxes', 2);
+    storeSet('task_links', [
+      {
+        id: 1, uuid: uuid(), task_id: 2, url: 'https://example.com/regular-a',
+        label: 'Regular link A', sort_order: 0,
+        created_at: now(), updated_at: now(), sync_status: 'synced', user_id: 'mock-user',
+      },
+      {
+        id: 2, uuid: uuid(), task_id: 2, url: 'https://example.com/regular-b',
+        label: 'Regular link B', sort_order: 1,
+        created_at: now(), updated_at: now(), sync_status: 'synced', user_id: 'mock-user',
+      },
+      {
+        id: 3, uuid: uuid(), task_id: 1, url: 'https://example.com/pinned',
+        label: 'Pinned link', sort_order: 0,
+        created_at: now(), updated_at: now(), sync_status: 'synced', user_id: 'mock-user',
+      },
+    ]);
+    storeSet('__seq.task_links', 3);
 
     storeSet('finance_plans', [
       {
@@ -1726,6 +1744,47 @@
         };
       });
       storeSet('task_checkboxes', items);
+    },
+    async list_task_links({ taskId }) {
+      return storeGet('task_links', [])
+        .filter(x => Number(x.task_id) === Number(taskId) && x.sync_status !== 'deleted')
+        .sort((a, b) => Number(a.sort_order) - Number(b.sort_order) || Number(a.id) - Number(b.id));
+    },
+    async create_task_link({ taskId, url, label }) {
+      const siblings = storeGet('task_links', [])
+        .filter(x => Number(x.task_id) === Number(taskId) && x.sync_status !== 'deleted');
+      const sortOrder = siblings.reduce((max, x) => Math.max(max, Number(x.sort_order) || 0), -1) + 1;
+      return createItem('task_links', {
+        uuid: uuid(),
+        task_id: Number(taskId),
+        url: url || '',
+        label: label || null,
+        sort_order: sortOrder,
+        sync_status: 'pending',
+        user_id: 'mock-user',
+      });
+    },
+    async update_task_link({ id, url, label }) {
+      return updateItem('task_links', id, {
+        url: url || '',
+        label: label || null,
+      });
+    },
+    async reorder_task_links({ taskId, ids }) {
+      const order = new Map((ids || []).map((id, index) => [Number(id), index]));
+      const items = storeGet('task_links', []).map(x => {
+        if (Number(x.task_id) !== Number(taskId) || !order.has(Number(x.id))) return x;
+        return {
+          ...x,
+          sort_order: order.get(Number(x.id)),
+          updated_at: now(),
+          sync_status: 'pending',
+        };
+      });
+      storeSet('task_links', items);
+    },
+    async delete_task_link({ id }) {
+      return updateItem('task_links', id, { sync_status: 'deleted' });
     },
 
     // ── SQL tools ───────────────────────────────────────

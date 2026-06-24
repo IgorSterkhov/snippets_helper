@@ -40,6 +40,68 @@ export function tasksCSS() {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
+/* Collapsed task link shelf */
+.task-link-shelf {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 0 8px 7px;
+  padding: 6px;
+  border: 1px solid color-mix(in srgb, var(--task-link-chip-color, #3fb950) 34%, var(--border));
+  border-radius: 6px;
+  background:
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--task-link-chip-color, #3fb950) 10%, var(--bg-secondary)),
+      color-mix(in srgb, var(--task-link-chip-color, #3fb950) 4%, var(--bg-secondary)));
+}
+.task-link-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  max-width: 190px;
+  padding: 0 9px 0 6px;
+  border: 1px solid color-mix(in srgb, var(--task-link-chip-color, #3fb950) 48%, var(--border));
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--task-link-chip-color, #3fb950) 12%, transparent);
+  color: color-mix(in srgb, var(--task-link-chip-color, #3fb950) 42%, var(--text));
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+  user-select: none;
+}
+.task-link-chip:hover {
+  border-color: color-mix(in srgb, var(--task-link-chip-color, #3fb950) 72%, var(--text-muted));
+  background: color-mix(in srgb, var(--task-link-chip-color, #3fb950) 18%, transparent);
+}
+.task-link-chip-marker {
+  display: inline-grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  font-size: 13px;
+  line-height: 1;
+}
+.task-link-chip-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.task-link-chip-placeholder {
+  display: inline-flex;
+  border: 2px dashed color-mix(in srgb, var(--task-link-chip-color, #3fb950) 64%, var(--accent));
+  border-radius: 4px;
+  opacity: 0.55;
+  background: color-mix(in srgb, var(--task-link-chip-color, #3fb950) 8%, transparent);
+  pointer-events: none;
+}
+.task-link-chip-source {
+  opacity: 0.35;
+}
+
 /* Filter row */
 .tasks-filter-row {
   display: flex;

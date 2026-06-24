@@ -2,7 +2,7 @@ import { call } from '../../tauri-api.js';
 import { showToast } from '../../components/toast.js';
 import { showModal } from '../../components/modal.js';
 import { tasksCSS } from './tasks-css.js';
-import { renderCard, resetCollapseState, invalidateCheckboxCache, invalidateAllCheckboxCache, loadCheckboxes, focusAfterReload } from './card.js';
+import { renderCard, resetCollapseState, invalidateCheckboxCache, invalidateAllCheckboxCache, loadCheckboxes, loadTaskLinks, focusAfterReload } from './card.js';
 import { renderPinnedChips, renderFilterDropdown } from './dropdown.js';
 import { helpButton } from '../sql/sql-help.js';
 import { TASKS_HELP_HTML } from './help-content.js';
@@ -25,6 +25,11 @@ const state = {
   selectedTask: null,    // task snapshot for Focus view, including outside-filter tasks
   focusCardExpanded: false,
   focusSearch: '',
+  collapsedLinks: {
+    enabled: false,
+    marker: '◈',
+    color: '#3fb950',
+  },
   // Count of tasks with category_id=NULL / status_id=NULL. Derived from
   // `tasks` (unfiltered). Used to show the "None" item in dropdowns only
   // when there is something to show.
@@ -76,6 +81,7 @@ export async function init(container) {
     }
   } catch { /* default via CSS fallback */ }
 
+  await loadCollapsedLinkSettings();
   await Promise.all([loadCategories(), loadStatuses()]);
   await loadTasks();
   await loadPinned();
@@ -424,6 +430,9 @@ async function renderTaskList() {
   for (const task of state.tasks) {
     if (state.expandedTaskId !== task.id) {
       try { await loadCheckboxes(task.id); } catch { /* renderCard will retry */ }
+      if (state.collapsedLinks.enabled) {
+        try { await loadTaskLinks(task.id); } catch { /* renderCard will retry */ }
+      }
     }
   }
 
@@ -593,6 +602,9 @@ async function renderFocusRightPane(right) {
     banner.appendChild(showBtn);
     right.appendChild(banner);
   }
+  if (!state.focusCardExpanded && state.collapsedLinks.enabled) {
+    try { await loadTaskLinks(selected.id); } catch { /* renderCard will retry */ }
+  }
 
   const card = renderCard(selected, {
     expanded: state.focusCardExpanded,
@@ -736,6 +748,8 @@ async function openTasksSettings() {
     const s = await call('get_setting', { key: 'tasks_card_max_checkboxes' });
     if (s) currentMaxItems = Math.max(3, parseInt(s, 10) || 10);
   } catch { /* default */ }
+  await loadCollapsedLinkSettings();
+  const currentCollapsedLinks = { ...state.collapsedLinks };
 
   const body = document.createElement('div');
   body.innerHTML = `
@@ -754,6 +768,27 @@ async function openTasksSettings() {
         </label>
         <input id="tasks-set-max" type="range" min="3" max="20" value="${currentMaxItems}" style="width:100%;margin-top:4px" />
       </div>
+      <div style="border:1px solid var(--border);border-radius:6px;padding:10px;background:var(--bg-secondary)">
+        <div style="font-weight:700;color:var(--text);margin-bottom:8px">Collapsed links</div>
+        <label style="display:flex;align-items:center;gap:8px;color:var(--text);font-size:12px;margin-bottom:10px">
+          <input id="tasks-set-links-enabled" type="checkbox" ${currentCollapsedLinks.enabled ? 'checked' : ''} />
+          <span>Show links in collapsed cards</span>
+        </label>
+        <label style="display:flex;flex-direction:column;gap:4px;color:var(--text);font-size:12px;margin-bottom:10px">
+          <span>Link chip marker</span>
+          <select id="tasks-set-link-marker" class="task-editor-input" style="max-width:260px">
+            ${TASK_LINK_MARKER_OPTIONS.map(option => `
+              <option value="${escapeAttr(option.value)}" ${option.value === currentCollapsedLinks.marker ? 'selected' : ''}>
+                ${escapeHtml(option.value)} ${escapeHtml(option.label)}
+              </option>
+            `).join('')}
+          </select>
+        </label>
+        <label style="display:flex;align-items:center;justify-content:space-between;gap:10px;color:var(--text);font-size:12px">
+          <span>Link chip color</span>
+          <input id="tasks-set-link-color" type="color" value="${escapeAttr(currentCollapsedLinks.color)}" />
+        </label>
+      </div>
       <div style="font-size:11px;color:var(--text-muted);font-style:italic">
         Changes apply immediately and persist across sessions.
       </div>
@@ -764,6 +799,9 @@ async function openTasksSettings() {
   const cbVal = body.querySelector('#tasks-set-cb-val');
   const maxSlider = body.querySelector('#tasks-set-max');
   const maxVal = body.querySelector('#tasks-set-max-val');
+  const linksEnabled = body.querySelector('#tasks-set-links-enabled');
+  const linkMarker = body.querySelector('#tasks-set-link-marker');
+  const linkColor = body.querySelector('#tasks-set-link-color');
   const initialCb = currentCbFont;
   const initialMax = currentMaxItems;
 
@@ -788,7 +826,26 @@ async function openTasksSettings() {
       try {
         await call('set_setting', { key: 'tasks_checkbox_font_size', value: String(cb) });
         await call('set_setting', { key: 'tasks_card_max_checkboxes', value: String(mx) });
+        const nextCollapsedLinks = {
+          enabled: !!linksEnabled.checked,
+          marker: normalizeTaskLinkMarker(linkMarker.value),
+          color: normalizeTaskLinkColor(linkColor.value),
+        };
+        await call('set_setting', {
+          key: 'tasks_collapsed_links_enabled',
+          value: nextCollapsedLinks.enabled ? 'true' : 'false',
+        });
+        await call('set_setting', {
+          key: 'tasks_collapsed_link_marker',
+          value: nextCollapsedLinks.marker,
+        });
+        await call('set_setting', {
+          key: 'tasks_collapsed_link_color',
+          value: nextCollapsedLinks.color,
+        });
+        state.collapsedLinks = nextCollapsedLinks;
         root.style.setProperty('--task-cb-font-size', cb + 'px');
+        await renderTaskList();
         showToast('Saved', 'success');
       } catch (e) {
         showToast('Failed to save: ' + e, 'error');
@@ -801,6 +858,54 @@ async function openTasksSettings() {
       }
     },
   });
+}
+
+const TASK_LINK_MARKER_OPTIONS = [
+  { value: '⛓', label: 'Chain' },
+  { value: '⇱', label: 'Open corner' },
+  { value: '⌘', label: 'Command link' },
+  { value: '◈', label: 'Diamond resource' },
+  { value: '⌁', label: 'Link path' },
+];
+
+async function loadCollapsedLinkSettings() {
+  let enabled = false;
+  let marker = '◈';
+  let color = '#3fb950';
+  try {
+    const rawEnabled = await call('get_setting', { key: 'tasks_collapsed_links_enabled' });
+    enabled = rawEnabled === 'true' || rawEnabled === '1';
+  } catch { /* default */ }
+  try {
+    marker = normalizeTaskLinkMarker(await call('get_setting', { key: 'tasks_collapsed_link_marker' }));
+  } catch { /* default */ }
+  try {
+    color = normalizeTaskLinkColor(await call('get_setting', { key: 'tasks_collapsed_link_color' }));
+  } catch { /* default */ }
+  state.collapsedLinks = { enabled, marker, color };
+}
+
+function normalizeTaskLinkMarker(value) {
+  const raw = String(value || '').trim();
+  return TASK_LINK_MARKER_OPTIONS.some(option => option.value === raw) ? raw : '◈';
+}
+
+function normalizeTaskLinkColor(value) {
+  const raw = String(value || '').trim();
+  return /^#[0-9a-fA-F]{6}$/.test(raw) ? raw : '#3fb950';
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function escapeAttr(value) {
+  return escapeHtml(value);
 }
 
 // ── DOM helper ──────────────────────────────────────────────

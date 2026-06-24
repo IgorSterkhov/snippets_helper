@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## f-20260624-2 (2026-06-24)
+
+- **Tasks collapsed link shelf:** Tasks Settings now has a `Collapsed links`
+  section that can show auxiliary task links as a soft chip shelf above
+  checkboxes in compact cards. The link chip marker defaults to `◈`, all
+  reviewed marker variants are selectable, the chip color is configurable, and
+  link chips can be reordered by drag-and-drop. Pressing `Tab` to nest a
+  checkbox now auto-expands the new parent if it was collapsed, keeping the
+  moved checkbox visible.
+
 ## v1.19.1 (2026-06-24)
 
 - **ClickHouse full docs discovery:** `Update docs` now discovers the full

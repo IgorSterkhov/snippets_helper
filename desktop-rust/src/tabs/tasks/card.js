@@ -1,5 +1,6 @@
 import { call } from '../../tauri-api.js';
 import { showToast } from '../../components/toast.js';
+import { installWrappedChipDnd } from '../../components/wrapped-chip-dnd.js';
 import { el } from './index.js';
 import { renderExpandedEditor } from './editor.js';
 import { CARD_BG_PALETTE } from './tasks-css.js';
@@ -7,6 +8,7 @@ import { CARD_BG_PALETTE } from './tasks-css.js';
 // In-memory cache of checkbox lists per task, to avoid round-trip on every
 // render. Populated lazily as cards render.
 const checkboxCache = new Map();
+const taskLinkCache = new Map();
 
 // Collapse state for checkbox rows. Persisted locally so frontend OTA reloads
 // and normal app restarts do not expand every previously-collapsed branch.
@@ -61,8 +63,13 @@ export function invalidateCheckboxCache(taskId) {
   checkboxCache.delete(taskId);
 }
 
+export function invalidateTaskLinkCache(taskId) {
+  taskLinkCache.delete(taskId);
+}
+
 export function invalidateAllCheckboxCache() {
   checkboxCache.clear();
+  taskLinkCache.clear();
 }
 
 /**
@@ -283,12 +290,14 @@ function buildCollapsedBody(task, ctx) {
   // card content changes after first paint.
   if (checkboxCache.has(task.id)) {
     renderCheckboxes(body, task, checkboxCache.get(task.id), ctx, { editable: true });
+    renderCollapsedLinkShelf(body, task, ctx);
   } else {
     const ph = el('div', { text: '…', style: 'padding:8px 12px;color:var(--text-muted);font-style:italic' });
     body.appendChild(ph);
     loadCheckboxes(task.id).then((items) => {
       body.innerHTML = '';
       renderCheckboxes(body, task, items, ctx, { editable: true });
+      renderCollapsedLinkShelf(body, task, ctx);
     }).catch((e) => {
       body.innerHTML = '';
       body.appendChild(el('div', { text: 'Load error: ' + e, style: 'padding:8px 12px;color:var(--danger)' }));
@@ -296,6 +305,72 @@ function buildCollapsedBody(task, ctx) {
   }
 
   return body;
+}
+
+function renderCollapsedLinkShelf(body, task, ctx) {
+  const settings = ctx.state?.collapsedLinks || {};
+  if (!settings.enabled) return;
+
+  const cached = taskLinkCache.get(task.id);
+  if (cached) {
+    appendCollapsedLinkShelf(body, task, ctx, cached);
+    return;
+  }
+
+  loadTaskLinks(task.id).then((links) => {
+    if (!body.isConnected || body.querySelector('.task-link-shelf')) return;
+    appendCollapsedLinkShelf(body, task, ctx, links);
+  }).catch((e) => {
+    console.warn('[tasks] failed to load collapsed links', e);
+  });
+}
+
+function appendCollapsedLinkShelf(body, task, ctx, links) {
+  if (body.querySelector('.task-link-shelf')) return;
+  const visibleLinks = (links || []).filter(link => String(link.url || '').trim());
+  if (!visibleLinks.length) return;
+
+  const settings = ctx.state?.collapsedLinks || {};
+  const shelf = el('div', { class: 'task-link-shelf' });
+  shelf.style.setProperty('--task-link-chip-color', normalizeChipColor(settings.color));
+
+  for (const link of visibleLinks) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'task-link-chip';
+    chip.dataset.linkId = String(link.id);
+    chip.title = link.url;
+    chip.innerHTML = `
+      <span class="task-link-chip-marker">${escapeHtml(settings.marker || '◈')}</span>
+      <span class="task-link-chip-label">${escapeHtml(linkLabel(link))}</span>
+    `;
+    chip.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (chip.dataset.dragSuppressClick === '1') return;
+      window.open(link.url, '_blank', 'noopener');
+    });
+    shelf.appendChild(chip);
+  }
+
+  installWrappedChipDnd(shelf, {
+    chipSelector: '.task-link-chip',
+    datasetKey: 'linkId',
+    placeholderClass: 'task-link-chip-placeholder',
+    sourceClass: 'task-link-chip-source',
+    onReorder: async (ids) => {
+      try {
+        await call('reorder_task_links', { taskId: task.id, ids });
+        taskLinkCache.delete(task.id);
+      } catch (e) {
+        showToast('Link reorder failed: ' + e, 'error');
+      }
+    },
+  });
+
+  const anchor = Array.from(body.children)
+    .find(child => child.classList.contains('tcb-item') || child.classList.contains('tcb-add'))
+    || body.firstChild;
+  body.insertBefore(shelf, anchor);
 }
 
 async function applyMaxHeight(body) {
@@ -673,6 +748,10 @@ async function nestUnderPrev(task, node, ctx) {
       taskId: task.id,
       entries: [{ id: node.id, parent_id: prev.id, sort_order: 9999 }],
     });
+    if (isCollapsed(prev.id)) {
+      collapsedNodes.delete(prev.id);
+      await persistCollapseState();
+    }
     invalidateCheckboxCache(task.id);
     ctx.onTaskReload && ctx.onTaskReload();
   } catch (err) {
@@ -738,6 +817,15 @@ async function loadCheckboxes(taskId, force = false) {
   const items = await call('list_task_checkboxes', { taskId });
   checkboxCache.set(taskId, items);
   return items;
+}
+
+export async function loadTaskLinks(taskId, force = false) {
+  if (!force && taskLinkCache.has(taskId)) {
+    return taskLinkCache.get(taskId);
+  }
+  const links = await call('list_task_links', { taskId });
+  taskLinkCache.set(taskId, links);
+  return links;
 }
 
 function isCollapsed(id) {
@@ -808,6 +896,33 @@ function countDescendants(id, items) {
     }
   }
   return { checked, total };
+}
+
+function linkLabel(link) {
+  const explicit = String(link.label || '').trim();
+  if (explicit) return explicit;
+  const url = String(link.url || '').trim();
+  if (!url) return '(link)';
+  try {
+    const parsed = new URL(url);
+    return parsed.hostname || url;
+  } catch {
+    return url;
+  }
+}
+
+function normalizeChipColor(value) {
+  const raw = String(value || '').trim();
+  return /^#[0-9a-fA-F]{6}$/.test(raw) ? raw : '#3fb950';
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 }
 
 export { loadCheckboxes, isCollapsed, resetCollapseState };

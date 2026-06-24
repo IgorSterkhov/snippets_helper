@@ -4,7 +4,7 @@ import { showModal } from '../../components/modal.js';
 import { attachToolbar } from '../../components/md-toolbar.js';
 import { el } from './index.js';
 import { CARD_BG_PALETTE } from './tasks-css.js';
-import { renderCheckboxes, loadCheckboxes, invalidateCheckboxCache } from './card.js';
+import { renderCheckboxes, loadCheckboxes, invalidateCheckboxCache, invalidateTaskLinkCache } from './card.js';
 
 // Per-session last-used copy mode: 'all' | 'unchecked' | 'checked'
 let copyMode = 'all';
@@ -280,6 +280,7 @@ async function loadAndRenderLinks(area, task) {
   addBtn.addEventListener('click', async () => {
     try {
       await call('create_task_link', { taskId: task.id, url: '', label: null });
+      invalidateTaskLinkCache(task.id);
       loadAndRenderLinks(area, task);
     } catch (e) {
       showToast('Add failed: ' + e, 'error');
@@ -303,6 +304,7 @@ function buildLinkRow(link, task, onReload) {
       await call('update_task_link', {
         id: link.id, url: urlIn.value, label: labelIn.value || null,
       });
+      invalidateTaskLinkCache(task.id);
     } catch (e) {
       showToast('Save failed: ' + e, 'error');
     }
@@ -319,6 +321,7 @@ function buildLinkRow(link, task, onReload) {
       await call('update_task_link', {
         id: link.id, url: urlIn.value, label: labelIn.value || null,
       });
+      invalidateTaskLinkCache(task.id);
     } catch (e) {
       showToast('Save failed: ' + e, 'error');
     }
@@ -342,6 +345,7 @@ function buildLinkRow(link, task, onReload) {
   delBtn.addEventListener('click', async () => {
     try {
       await call('delete_task_link', { id: link.id });
+      invalidateTaskLinkCache(task.id);
       onReload();
     } catch (e) {
       showToast('Delete failed: ' + e, 'error');
