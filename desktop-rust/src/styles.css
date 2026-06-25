@@ -1971,8 +1971,25 @@ body.micro-launchpad-window {
 }
 
 .launchpad-add-picker {
-  max-height: 180px;
+  max-height: 230px;
   overflow: auto;
+}
+
+.launchpad-add-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.launchpad-add-back {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.055);
+  color: #dce7ed;
+  min-height: 28px;
+  padding: 4px 8px;
+  cursor: pointer;
 }
 
 .launchpad-add-title {
@@ -1982,10 +1999,93 @@ body.micro-launchpad-window {
   margin: 2px 2px 8px;
 }
 
+.launchpad-add-header .launchpad-add-title {
+  margin: 0;
+}
+
+.launchpad-add-search {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 9px;
+  background: rgba(3, 8, 13, 0.52);
+  color: #edf4f7;
+  min-height: 30px;
+  padding: 6px 9px;
+  outline: none;
+}
+
 .launchpad-add-results {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
+}
+
+.launchpad-add-module-list {
+  display: grid;
+  gap: 6px;
+}
+
+.launchpad-add-module-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.035);
+  padding: 6px;
+}
+
+.launchpad-add-module-label {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #dce7ed;
+  font-size: 12px;
+}
+
+.launchpad-add-module-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.07);
+  color: #edf4f7;
+  font-size: 11px;
+  flex: 0 0 auto;
+}
+
+.launchpad-add-module-actions {
+  display: flex;
+  gap: 5px;
+}
+
+.launchpad-add-module-actions button {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #dce7ed;
+  min-height: 28px;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.launchpad-module-browse {
+  border-color: rgba(88, 184, 234, 0.38) !important;
+  color: #c9ecff !important;
+}
+
+.launchpad-add-empty {
+  grid-column: 1 / -1;
+  color: #7f929d;
+  border: 1px dashed rgba(255, 255, 255, 0.14);
+  border-radius: 9px;
+  padding: 10px;
 }
 
 .launchpad-recent-list {

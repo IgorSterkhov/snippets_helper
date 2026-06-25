@@ -13,6 +13,8 @@ const MODULES = [
   { type: 'module', moduleId: 'vps', label: 'VPS', icon: '▣' },
 ];
 
+const BROWSABLE_MODULES = new Set(['shortcuts', 'notes', 'tasks', 'exec', 'finance']);
+
 let root = null;
 let reorderDrag = null;
 let suppressTileClickUntil = 0;
@@ -26,6 +28,8 @@ let state = {
   editMode: false,
   menuOpen: false,
   addOpen: false,
+  addModuleId: null,
+  addQuery: '',
   status: null,
 };
 
@@ -141,6 +145,8 @@ function renderMenu() {
   }));
   menu.appendChild(menuButton('Add item', () => {
     state.addOpen = true;
+    state.addModuleId = null;
+    state.addQuery = '';
     state.menuOpen = false;
     render();
   }));
@@ -317,6 +323,8 @@ function renderAddTile() {
   add.innerHTML = '<span class="launchpad-tile-icon">+</span><span class="launchpad-tile-label">Add</span><span class="launchpad-tile-kind">Item</span>';
   add.addEventListener('click', () => {
     state.addOpen = true;
+    state.addModuleId = null;
+    state.addQuery = '';
     render();
   });
   return add;
@@ -325,17 +333,111 @@ function renderAddTile() {
 function renderAddPicker() {
   const picker = document.createElement('div');
   picker.className = 'launchpad-add-picker';
+  if (state.addModuleId) return renderObjectAddPicker(picker);
+
   const title = document.createElement('div');
   title.className = 'launchpad-add-title';
   title.textContent = 'Add item';
   picker.appendChild(title);
+
+  const list = document.createElement('div');
+  list.className = 'launchpad-add-module-list';
+  MODULES.forEach(item => list.appendChild(addModuleRow(item)));
+  picker.appendChild(list);
+  return picker;
+}
+
+function addModuleRow(item) {
+  const row = document.createElement('div');
+  row.className = 'launchpad-add-module-row';
+
+  const label = document.createElement('div');
+  label.className = 'launchpad-add-module-label';
+  label.innerHTML = `
+    <span class="launchpad-add-module-icon">${escapeHtml(item.icon || iconFor(item))}</span>
+    <span>${escapeHtml(titleFor(item))}</span>
+  `;
+  row.appendChild(label);
+
+  const actions = document.createElement('div');
+  actions.className = 'launchpad-add-module-actions';
+  if (BROWSABLE_MODULES.has(item.moduleId)) {
+    const browse = document.createElement('button');
+    browse.type = 'button';
+    browse.className = 'launchpad-module-browse';
+    browse.textContent = 'Browse';
+    browse.addEventListener('click', () => {
+      state.addModuleId = item.moduleId;
+      state.addQuery = '';
+      render();
+    });
+    actions.appendChild(browse);
+  }
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.className = 'launchpad-module-add';
+  add.textContent = 'Add module';
+  add.addEventListener('click', () => addItem(item));
+  actions.appendChild(add);
+  row.appendChild(actions);
+  return row;
+}
+
+function renderObjectAddPicker(picker) {
+  const module = MODULES.find(item => item.moduleId === state.addModuleId) || {};
+  const header = document.createElement('div');
+  header.className = 'launchpad-add-header';
+  const back = document.createElement('button');
+  back.type = 'button';
+  back.className = 'launchpad-add-back';
+  back.textContent = 'Back';
+  back.addEventListener('click', () => {
+    state.addModuleId = null;
+    state.addQuery = '';
+    render();
+  });
+  header.appendChild(back);
+  const title = document.createElement('div');
+  title.className = 'launchpad-add-title';
+  title.textContent = module.label || 'Items';
+  header.appendChild(title);
+  picker.appendChild(header);
+
+  const search = document.createElement('input');
+  search.className = 'launchpad-add-search';
+  search.type = 'text';
+  search.placeholder = `Search ${module.label || 'items'}...`;
+  search.value = state.addQuery;
+  search.spellcheck = false;
+  search.addEventListener('input', () => {
+    state.addQuery = search.value;
+    render();
+  });
+  picker.appendChild(search);
+
   const list = document.createElement('div');
   list.className = 'launchpad-add-results';
-  MODULES.forEach(item => list.appendChild(addResult(item)));
+  list.textContent = 'Loading...';
   picker.appendChild(list);
-  collectCandidates().then(candidates => {
-    candidates.filter(x => x.type !== 'module').slice(0, 30).forEach(item => list.appendChild(addResult(item)));
-  }).catch(() => {});
+
+  const moduleId = state.addModuleId;
+  const query = state.addQuery;
+  collectAddObjects(moduleId).then(items => {
+    if (!root || state.addModuleId !== moduleId || state.addQuery !== query) return;
+    const filtered = items.filter(item => matches(item, query.trim().toLowerCase())).slice(0, 60);
+    list.innerHTML = '';
+    if (!filtered.length) {
+      const empty = document.createElement('div');
+      empty.className = 'launchpad-add-empty';
+      empty.textContent = 'No matching items';
+      list.appendChild(empty);
+      return;
+    }
+    filtered.forEach(item => list.appendChild(addResult(item)));
+  }).catch(err => {
+    list.textContent = `Failed to load items: ${String(err)}`;
+  });
+  setTimeout(() => root?.querySelector('.launchpad-add-search')?.focus(), 0);
   return picker;
 }
 
@@ -351,6 +453,8 @@ function addResult(item) {
 async function addItem(item) {
   state.items.push({ ...item });
   state.addOpen = false;
+  state.addModuleId = null;
+  state.addQuery = '';
   await persistItems();
   render();
 }
@@ -408,11 +512,12 @@ function matches(item, query) {
 }
 
 async function collectCandidates() {
-  const [tasks, snippets, notes, commands] = await Promise.all([
+  const [tasks, snippets, notes, commands, financePlans] = await Promise.all([
     call('list_tasks', { category: null, status: null }).catch(() => []),
     call('list_shortcuts').catch(() => []),
     collectNotes(),
     collectExecCommands(),
+    collectFinancePlans(),
   ]);
   return [
     ...MODULES,
@@ -435,7 +540,47 @@ async function collectCandidates() {
       icon: '⚡', command: c.command, shell: c.shell || 'host',
       wslDistro: c.wsl_distro || null, description: c.description,
     })),
+    ...financePlans.map(p => financePlanItem(p)),
   ];
+}
+
+async function collectAddObjects(moduleId) {
+  if (moduleId === 'tasks') {
+    const tasks = await call('list_tasks', { category: null, status: null }).catch(() => []);
+    return tasks.map(t => ({
+      type: 'task', moduleId: 'tasks', objectType: 'task', objectId: t.id,
+      objectUuid: t.uuid, label: t.title || '(untitled task)', icon: '✓', title: t.title,
+    }));
+  }
+  if (moduleId === 'shortcuts') {
+    const snippets = await call('list_shortcuts').catch(() => []);
+    return snippets.map(s => ({
+      type: 'snippet', moduleId: 'shortcuts', objectType: 'shortcut', objectId: s.id,
+      objectUuid: s.uuid, label: s.name || '(untitled snippet)', icon: '🏷',
+      title: s.name, value: s.value, description: s.description,
+    }));
+  }
+  if (moduleId === 'notes') {
+    const notes = await collectNotes();
+    return notes.map(n => ({
+      type: 'note', moduleId: 'notes', objectType: 'note', objectId: n.id,
+      objectUuid: n.uuid, label: n.title || '(untitled note)', icon: '🗒',
+      title: n.title, content: n.content,
+    }));
+  }
+  if (moduleId === 'exec') {
+    const commands = await collectExecCommands();
+    return commands.map(c => ({
+      type: 'exec_command', commandId: c.id, label: c.name || '(untitled command)',
+      icon: '⚡', command: c.command, shell: c.shell || 'host',
+      wslDistro: c.wsl_distro || null, description: c.description,
+    }));
+  }
+  if (moduleId === 'finance') {
+    const plans = await collectFinancePlans();
+    return plans.map(financePlanItem);
+  }
+  return [];
 }
 
 async function collectNotes() {
@@ -450,12 +595,30 @@ async function collectExecCommands() {
   return batches.flat();
 }
 
+async function collectFinancePlans() {
+  return call('list_finance_plans').catch(() => []);
+}
+
+function financePlanItem(plan) {
+  return {
+    type: 'finance_plan',
+    moduleId: 'finance',
+    objectType: 'finance_plan',
+    objectId: plan.id,
+    objectUuid: plan.uuid,
+    label: plan.name || '(untitled finance list)',
+    title: plan.name,
+    icon: '$',
+    description: [plan.kind, plan.currency].filter(Boolean).join(' '),
+  };
+}
+
 async function activateItem(item) {
   if (!item) return;
   if (item.type === 'module') {
     await call('open_module_window', { moduleId: item.moduleId });
     await recordRecent(item);
-  } else if (item.type === 'task' || item.type === 'note' || item.type === 'snippet') {
+  } else if (item.type === 'task' || item.type === 'note' || item.type === 'snippet' || item.type === 'finance_plan') {
     await call('open_module_object_window', {
       moduleId: item.moduleId,
       objectType: item.objectType,
@@ -523,6 +686,12 @@ async function onKeydown(event) {
       return;
     }
     if (state.addOpen || state.menuOpen) {
+      if (state.addOpen && state.addModuleId) {
+        state.addModuleId = null;
+        state.addQuery = '';
+        render();
+        return;
+      }
       state.addOpen = false;
       state.menuOpen = false;
       render();
@@ -553,6 +722,7 @@ function iconFor(item) {
   if (item.type === 'note') return '🗒';
   if (item.type === 'snippet') return '🏷';
   if (item.type === 'exec_command') return '⚡';
+  if (item.type === 'finance_plan') return '$';
   return item.icon || '•';
 }
 
@@ -562,6 +732,7 @@ function titleFor(item) {
 
 function kindFor(item) {
   if (item.type === 'exec_command') return 'Command';
+  if (item.type === 'finance_plan') return 'Finance list';
   if (item.type === 'module') return 'Module';
   return item.objectType || item.type || '';
 }

@@ -5562,6 +5562,19 @@ async def run_tests():
         invalid_text = await cdp.eval("document.body.innerText")
         assert 'Unsupported module window' in invalid_text, invalid_text
 
+        await cdp.eval("""(() => {
+          const plans = JSON.parse(localStorage.getItem('mock.finance_plans') || '[]');
+          localStorage.setItem('mock.finance_plans', JSON.stringify(plans.map(p => (
+            Number(p.id) === 2 ? { ...p, name: 'Project expenses', uuid: 'finance-project-expenses-uuid' } : p
+          ))));
+        })()""")
+        await cdp.send('Page.navigate', url=f'{TEST_URL}?standalone=1&module=finance&objectType=finance_plan&objectId=2&title=Project%20expenses')
+        await asyncio.sleep(0.8)
+        await wait_until(cdp, "document.body.classList.contains('standalone-module-window')", timeout=8)
+        await wait_until(cdp, "!!document.querySelector('.finance-plan-card.active')", timeout=6)
+        active_finance = await cdp.eval("document.querySelector('.finance-plan-card.active .finance-plan-name')?.textContent.trim()")
+        assert active_finance == 'Project expenses', active_finance
+
         await cdp.send('Page.navigate', url=TEST_URL)
         await asyncio.sleep(0.8)
         await wait_until(cdp, "!!document.querySelector('.tab-btn')", timeout=8)
@@ -5616,9 +5629,56 @@ async def run_tests():
         await wait_until(cdp, "!!document.querySelector('.launchpad-menu')", timeout=3)
         await cdp.eval("[...document.querySelectorAll('.launchpad-menu button')].find(x => x.textContent.includes('Add item')).click()")
         await wait_until(cdp, "!!document.querySelector('.launchpad-add-picker')", timeout=3)
-        await cdp.eval("[...document.querySelectorAll('.launchpad-add-result')].find(x => x.textContent.includes('Tasks')).click()")
+        await cdp.eval("[...document.querySelectorAll('.launchpad-module-add')].find(x => x.closest('.launchpad-add-module-row')?.textContent.includes('Tasks')).click()")
         items = await cdp.eval("JSON.parse(JSON.parse(localStorage.getItem('mock.settings') || '{}')['launchpad.items'] || '[]')")
         assert items and items[0]['type'] == 'module' and items[0]['moduleId'] == 'tasks', items
+
+        await cdp.eval("""(() => {
+          const snippets = JSON.parse(localStorage.getItem('mock.shortcuts') || '[]');
+          if (!snippets.some(s => s.name === 'wb_doc_kylin')) {
+            snippets.push({
+              id: 9001,
+              uuid: 'snippet-kylin-uuid',
+              name: 'wb_doc_kylin',
+              value: 'kylin connection notes',
+              description: 'deterministic launchpad add fixture',
+              links: [],
+              obsidian_note: null,
+              is_pinned: false,
+              pinned_sort_order: 0,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            });
+            localStorage.setItem('mock.shortcuts', JSON.stringify(snippets));
+          }
+        })()""")
+        await cdp.eval("document.querySelector('.launchpad-add-tile').click()")
+        await wait_until(cdp, "!!document.querySelector('.launchpad-add-picker')", timeout=3)
+        await cdp.eval("[...document.querySelectorAll('.launchpad-module-browse')].find(x => x.closest('.launchpad-add-module-row')?.textContent.includes('Snippets')).click()")
+        await wait_until(cdp, "document.querySelector('.launchpad-add-title')?.textContent.includes('Snippets')", timeout=3)
+        await cdp.eval("""(() => {
+          const input = document.querySelector('.launchpad-add-search');
+          input.value = 'kylin';
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        })()""")
+        await wait_until(cdp, "[...document.querySelectorAll('.launchpad-add-result')].some(x => x.textContent.includes('wb_doc_kylin'))", timeout=5)
+        await cdp.eval("[...document.querySelectorAll('.launchpad-add-result')].find(x => x.textContent.includes('wb_doc_kylin')).click()")
+        items = await cdp.eval("JSON.parse(JSON.parse(localStorage.getItem('mock.settings') || '{}')['launchpad.items'] || '[]')")
+        assert any(item.get('type') == 'snippet' and item.get('objectUuid') == 'snippet-kylin-uuid' for item in items), items
+
+        await cdp.eval("document.querySelector('.launchpad-add-tile').click()")
+        await wait_until(cdp, "!!document.querySelector('.launchpad-add-picker')", timeout=3)
+        await cdp.eval("[...document.querySelectorAll('.launchpad-module-browse')].find(x => x.closest('.launchpad-add-module-row')?.textContent.includes('Finance')).click()")
+        await wait_until(cdp, "document.querySelector('.launchpad-add-title')?.textContent.includes('Finance')", timeout=3)
+        await cdp.eval("""(() => {
+          const input = document.querySelector('.launchpad-add-search');
+          input.value = 'Project';
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        })()""")
+        await wait_until(cdp, "[...document.querySelectorAll('.launchpad-add-result')].some(x => x.textContent.includes('Project expenses'))", timeout=5)
+        await cdp.eval("[...document.querySelectorAll('.launchpad-add-result')].find(x => x.textContent.includes('Project expenses')).click()")
+        items = await cdp.eval("JSON.parse(JSON.parse(localStorage.getItem('mock.settings') || '{}')['launchpad.items'] || '[]')")
+        assert any(item.get('type') == 'finance_plan' and item.get('moduleId') == 'finance' for item in items), items
 
         await cdp.eval("""(() => {
           const settings = JSON.parse(localStorage.getItem('mock.settings') || '{}');
@@ -5630,6 +5690,10 @@ async def run_tests():
             { type: 'exec_command', commandId: 1, label: 'ls project', icon: '⚡', command: 'ls', shell: 'host' }
           ]);
           localStorage.setItem('mock.settings', JSON.stringify(settings));
+          const plans = JSON.parse(localStorage.getItem('mock.finance_plans') || '[]');
+          localStorage.setItem('mock.finance_plans', JSON.stringify(plans.map(p => (
+            Number(p.id) === 2 ? { ...p, name: 'Project expenses', uuid: 'finance-project-expenses-uuid' } : p
+          ))));
           const snippets = JSON.parse(localStorage.getItem('mock.shortcuts') || '[]');
           if (!snippets.some(s => s.name === 'wb_doc_kylin')) {
             snippets.push({

@@ -30,6 +30,7 @@ const PLAN_KINDS = [
 const PLAN_KIND_LABELS = Object.fromEntries(PLAN_KINDS.map((kind) => [kind.value, kind.label]));
 
 let rootEl = null;
+let financeViewHistoryListenerInstalled = false;
 let state = {
   plans: [],
   items: [],
@@ -1054,6 +1055,31 @@ async function loadAll(selectPlanId = state.activePlanId) {
   state.payments = await call('list_finance_payments', { planId: state.activePlanId });
   if (activePlanKind() !== 'monthly') state.activeView = 'structure';
   render();
+}
+
+function installFinanceViewHistoryListener() {
+  if (financeViewHistoryListenerInstalled) return;
+  financeViewHistoryListenerInstalled = true;
+  window.addEventListener('view-history:open', (event) => {
+    openFinanceViewTarget(event.detail || {}).catch((err) => {
+      showToast(`Failed to open finance list: ${err}`, 'error');
+    });
+  });
+}
+
+async function openFinanceViewTarget(detail) {
+  const moduleId = detail.moduleId || '';
+  const objectType = detail.objectType || detail.type || '';
+  if (moduleId && moduleId !== 'finance') return;
+  if (objectType && objectType !== 'finance_plan' && objectType !== 'finance') return;
+
+  let targetId = normalizeId(detail.objectId ?? detail.id);
+  if (targetId == null && detail.objectUuid) {
+    const plans = state.plans.length ? state.plans : await call('list_finance_plans');
+    const matched = plans.find((plan) => plan.uuid === detail.objectUuid);
+    targetId = planId(matched);
+  }
+  if (targetId != null) await loadAll(targetId);
 }
 
 function render() {
@@ -2443,6 +2469,7 @@ export async function init(container) {
   injectStyles();
   loadCollapsed();
   loadCalendarUiState();
+  installFinanceViewHistoryListener();
   rootEl = container;
   rootEl.classList.add('finance-tab');
   rootEl.innerHTML = '<div class="loading">Loading finance...</div>';

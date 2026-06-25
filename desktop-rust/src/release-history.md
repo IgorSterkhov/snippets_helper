@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## f-20260625-1 (2026-06-25)
+
+- **Micro Launchpad Add drill-down:** `Add item` now lets you add either a
+  whole module or browse into Snippets, Notes, Tasks, Exec, and Finance to add a
+  specific snippet, note, task, command, or finance list tile.
+
 ## v1.20.1 (2026-06-25)
 
 - **Micro Launchpad hotkey fix:** changed the default Launchpad hotkey to
