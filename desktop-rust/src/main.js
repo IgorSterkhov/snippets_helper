@@ -33,16 +33,47 @@ const SIDEBAR_GROUPS = [
 function getStandaloneRequest() {
   const params = new URLSearchParams(window.location.search);
   if (params.get('standalone') !== '1') {
-    return { standalone: false, moduleId: '', tab: null };
+    return { standalone: false, moduleId: '', tab: null, target: null };
   }
   const moduleId = params.get('module') || '';
   const tab = TABS.find(t => t.id === moduleId) || null;
-  return { standalone: true, moduleId, tab };
+  const target = parseStandaloneTarget(params, moduleId);
+  return { standalone: true, moduleId, tab, target };
+}
+
+function parseStandaloneTarget(params, moduleId) {
+  const objectType = params.get('objectType') || '';
+  const objectUuid = params.get('objectUuid') || null;
+  const objectIdRaw = params.get('objectId');
+  const title = params.get('title') || '';
+  const detailTab = params.get('detailTab') || '';
+  if (!objectType && !objectUuid && !objectIdRaw && !title) return null;
+  const objectId = objectIdRaw == null || objectIdRaw === '' ? null : Number(objectIdRaw);
+  const detail = {};
+  if (detailTab) {
+    detail.detailTab = detailTab;
+    detail.tab = detailTab;
+  }
+  return {
+    key: `${objectType || moduleId}:${objectUuid || objectId || title || moduleId}`,
+    moduleId,
+    objectType: objectType || moduleId,
+    objectId: Number.isFinite(objectId) ? objectId : null,
+    objectUuid,
+    title: title || objectType || moduleId,
+    label: title || objectType || moduleId,
+    detail,
+  };
 }
 
 function getMicroPickerRequest() {
   const params = new URLSearchParams(window.location.search);
   return params.get('micro_picker') === '1';
+}
+
+function getLaunchpadRequest() {
+  const params = new URLSearchParams(window.location.search);
+  return params.get('launchpad') === '1';
 }
 
 function shouldOpenExternally(url) {
@@ -140,6 +171,10 @@ async function mountStandaloneModule(app, request) {
 
   try {
     await request.tab.loader(panel);
+    installStandaloneObjectListener();
+    if (request.target) {
+      dispatchStandaloneTarget(request.target);
+    }
   } catch (err) {
     console.error(`Failed to load standalone module "${request.moduleId}":`, err);
     panel.innerHTML = '<div class="loading">Failed to load module</div>';
@@ -148,8 +183,40 @@ async function mountStandaloneModule(app, request) {
   setTimeout(() => call('confirm_frontend_boot').catch(() => {}), 5000);
 }
 
+function dispatchStandaloneTarget(target) {
+  for (const delay of [0, 120, 350]) {
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('view-history:open', { detail: target }));
+    }, delay);
+  }
+}
+
+let standaloneObjectListenerInstalled = false;
+
+function installStandaloneObjectListener() {
+  if (standaloneObjectListenerInstalled) return;
+  standaloneObjectListenerInstalled = true;
+  window.addEventListener('standalone:open-object', (event) => {
+    const detail = event.detail || {};
+    window.dispatchEvent(new CustomEvent('view-history:open', { detail }));
+  });
+  const listen = window.__TAURI__?.event?.listen;
+  if (typeof listen === 'function') {
+    listen('standalone:open-object', (event) => {
+      window.dispatchEvent(new CustomEvent('view-history:open', { detail: event.payload || {} }));
+    }).catch(() => {});
+  }
+}
+
 async function main() {
   const app = document.getElementById('app');
+  if (getLaunchpadRequest()) {
+    const { init } = await import('./components/micro-launchpad.js');
+    await init(app);
+    setTimeout(() => call('confirm_frontend_boot').catch(() => {}), 5000);
+    return;
+  }
+
   if (getMicroPickerRequest()) {
     const { init } = await import('./components/snippet-micro-picker.js');
     await init(app);
@@ -267,6 +334,7 @@ async function main() {
 
 document.addEventListener('keydown', async (e) => {
   if (e.key === 'Escape') {
+    if (getLaunchpadRequest()) return;
     if (getMicroPickerRequest()) return;
     if (document.body.classList.contains('standalone-module-window')) return;
     // Don't hide if a modal is open -- modal handles its own Escape
@@ -278,6 +346,7 @@ document.addEventListener('keydown', async (e) => {
 
 // Sync when window becomes visible
 document.addEventListener('visibilitychange', () => {
+  if (getLaunchpadRequest()) return;
   if (getStandaloneRequest().standalone) return;
   if (document.visibilityState === 'visible') {
     doSync().catch(() => {});
@@ -288,8 +357,9 @@ document.addEventListener('DOMContentLoaded', () => {
   console.log('[keyboard-helper] frontend loaded @', new Date().toISOString());
   installExternalLinkGuard();
   const standalone = getStandaloneRequest().standalone;
+  const launchpad = getLaunchpadRequest();
   main();
-  if (standalone) return;
+  if (standalone || launchpad) return;
   // Initial sync on launch
   setTimeout(() => doSync().catch(() => {}), 1000);
   // Confirm the frontend booted successfully so the Rust watchdog

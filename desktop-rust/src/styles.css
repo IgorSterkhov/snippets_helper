@@ -1776,6 +1776,265 @@ body.snippet-micro-picker-window {
   color: var(--danger);
 }
 
+/* ── Micro Launchpad ─────────────────────────────────────── */
+
+body.micro-launchpad-window {
+  margin: 0;
+  background: transparent;
+  overflow: hidden;
+}
+
+.micro-launchpad-root {
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 14% 0%, rgba(88, 184, 234, 0.18), transparent 34%),
+    linear-gradient(180deg, #0c1218 0%, #080d12 100%);
+  color: #edf4f7;
+}
+
+.micro-launchpad {
+  box-sizing: border-box;
+  min-height: 100vh;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.launchpad-topline {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.launchpad-search-input,
+.launchpad-title {
+  flex: 1;
+  height: 34px;
+  box-sizing: border-box;
+  border: 1px solid rgba(88, 184, 234, 0.34);
+  border-radius: 9px;
+  background: rgba(8, 13, 18, 0.86);
+  color: #edf4f7;
+  padding: 0 11px;
+  outline: none;
+  font-size: 13px;
+}
+
+.launchpad-title {
+  display: flex;
+  align-items: center;
+  color: #aebdc6;
+}
+
+.launchpad-search-input:focus {
+  border-color: rgba(88, 184, 234, 0.78);
+  box-shadow: 0 0 0 2px rgba(88, 184, 234, 0.13);
+}
+
+.launchpad-gear-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: #edf4f7;
+  cursor: pointer;
+}
+
+.launchpad-menu,
+.launchpad-add-picker {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  background: rgba(15, 23, 31, 0.98);
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.36);
+  padding: 8px;
+}
+
+.launchpad-menu {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.launchpad-menu button,
+.launchpad-add-result,
+.launchpad-recent-row {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.045);
+  color: #dce7ed;
+  min-height: 30px;
+  text-align: left;
+  padding: 6px 9px;
+  cursor: pointer;
+}
+
+.launchpad-body {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+}
+
+.launchpad-section-title {
+  margin: 4px 2px 7px;
+  color: #7f929d;
+  font-size: 10px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.launchpad-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.launchpad-tile {
+  position: relative;
+  min-height: 70px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.045);
+  color: #aebdc6;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color .12s ease, background .12s ease, color .12s ease, transform .12s ease;
+}
+
+.launchpad-tile:hover,
+.launchpad-tile.active {
+  border-color: rgba(244, 200, 93, 0.72);
+  background: rgba(244, 200, 93, 0.13);
+  color: #edf4f7;
+}
+
+.launchpad-tile.editable {
+  cursor: grab;
+}
+
+.launchpad-tile.reordering {
+  cursor: grabbing;
+  border-color: rgba(88, 184, 234, 0.72);
+  background: rgba(88, 184, 234, 0.16);
+  transform: scale(.98);
+}
+
+.launchpad-reorder-active .launchpad-tile:not(.reordering) {
+  transition: transform .14s ease, border-color .12s ease, background .12s ease;
+}
+
+.launchpad-tile-icon {
+  width: 25px;
+  height: 25px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.07);
+  color: #edf4f7;
+  font-size: 12px;
+}
+
+.launchpad-tile-label {
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 0 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.launchpad-tile-kind {
+  color: #7f929d;
+  font-size: 9px;
+}
+
+.launchpad-remove {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(255, 123, 123, 0.18);
+  border: 1px solid rgba(255, 123, 123, 0.46);
+  color: #ffd1d1;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+}
+
+.launchpad-add-picker {
+  max-height: 180px;
+  overflow: auto;
+}
+
+.launchpad-add-title {
+  color: #edf4f7;
+  font-weight: 650;
+  font-size: 13px;
+  margin: 2px 2px 8px;
+}
+
+.launchpad-add-results {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.launchpad-recent-list {
+  display: grid;
+  gap: 5px;
+}
+
+.launchpad-empty {
+  grid-column: 1 / -1;
+  border: 1px dashed rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  color: #7f929d;
+  padding: 16px;
+}
+
+.launchpad-status {
+  flex: 1;
+  min-height: 0;
+  border: 1px solid rgba(88, 184, 234, 0.22);
+  border-radius: 12px;
+  background: rgba(8, 13, 18, 0.72);
+  padding: 11px;
+  overflow: auto;
+}
+
+.launchpad-status[data-state="error"] {
+  border-color: rgba(255, 123, 123, 0.4);
+}
+
+.launchpad-status-title {
+  margin-bottom: 8px;
+  font-weight: 650;
+  color: #edf4f7;
+}
+
+.launchpad-status pre {
+  margin: 0;
+  white-space: pre-wrap;
+  color: #b9c9d2;
+  font-size: 12px;
+}
+
+.launchpad-footer {
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  padding-top: 8px;
+  color: #7f929d;
+  font-size: 10px;
+}
+
 /* ── Image Upload Modal ───────────────────────────────────── */
 
 .image-upload-modal {

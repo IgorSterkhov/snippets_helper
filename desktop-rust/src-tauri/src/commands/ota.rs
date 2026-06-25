@@ -247,6 +247,7 @@ fn is_frontend_window_label(label: &str) -> bool {
     label == "main"
         || label == "whisper-overlay"
         || label == crate::commands::micro_picker::picker_label()
+        || label == crate::commands::launchpad::window_label()
         || label.starts_with("module_")
 }
 
@@ -278,6 +279,20 @@ pub async fn clear_frontend_browsing_data(app: AppHandle) -> Result<Vec<String>,
     let clear_errors = clear_frontend_browsing_data_for_frontend_windows(&app);
     reload_frontend_windows(&app);
     Ok(clear_errors)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_frontend_window_label;
+
+    #[test]
+    fn frontend_window_labels_include_micro_launchpad() {
+        assert!(is_frontend_window_label("main"));
+        assert!(is_frontend_window_label(crate::commands::micro_picker::picker_label()));
+        assert!(is_frontend_window_label(crate::commands::launchpad::window_label()));
+        assert!(is_frontend_window_label("module_tasks"));
+        assert!(!is_frontend_window_label("settings"));
+    }
 }
 
 /// Called by the frontend once it has successfully booted. Clears the

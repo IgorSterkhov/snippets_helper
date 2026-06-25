@@ -16,6 +16,8 @@ const i18n = {
     sidebar_groups_desc: 'Developer-oriented modules are grouped under the compact DEV sidebar button. SQL, Superset, Commits, Search, and ClickHouse expand below DEV when clicked or when one of them is active, including activation through Ctrl+Tab or app commands. Switching to another module collapses the group again.',
     view_history_name: 'Recent view switching',
     view_history_desc: 'Ctrl+Tab switches back to the previous recent view, such as the exact snippet, task, or note you had open. Press Ctrl+Tab repeatedly in the same sequence to show a compact switcher overlay and cycle through recent views; Ctrl+Shift+Tab cycles backward. The switcher ignores active modal dialogs.',
+    launchpad_name: 'Micro Launchpad',
+    launchpad_desc: 'Ctrl+Alt+L opens a frameless always-on-top Launchpad window for quick keyboard-first access. It can open detached module windows, open specific tasks, notes, or snippets inside detached module windows, and run Exec commands directly with a compact status/output view. The gear menu toggles Search and Recent, opens Add item, and enters Edit Launchpad mode; Ctrl+E toggles edit mode, Escape leaves edit/status modes before closing the window. Launchpad layout and recent items are stored per machine.',
     html_cards_name: 'Sandbox HTML cards',
     html_cards_desc: 'Notes and Snippets can upload a single-file UTF-8 HTML artifact from the Markdown toolbar and insert it as a portable HTML Card token. Desktop previews and public share pages render the artifact in a sandboxed iframe with scripts allowed but same-origin access, external frames, network fetches, forms, workers, and object/embed content blocked by server CSP. Raw HTML typed directly into Markdown remains escaped.',
     telegraph_share_name: 'Telegra.ph publishing',
@@ -71,6 +73,7 @@ const i18n = {
     hotkey_tab_switch: 'Switch between recent snippets, tasks, notes, and module views',
     hotkey_whisper: 'Whisper: start/stop local or live dictation (global)',
     hotkey_micro_picker: 'Open compact code snippet picker for `code_` snippets (global)',
+    hotkey_launchpad: 'Open compact Launchpad for modules, objects, and commands (global)',
 
     // Changelog
     changelog_loading: 'Loading changelog...',
@@ -89,6 +92,8 @@ const i18n = {
     sidebar_groups_desc: 'Developer-модули сгруппированы под компактной кнопкой DEV в левой панели. SQL, Superset, Commits, Search и ClickHouse раскрываются под DEV по клику или когда один из них активен, включая переход через Ctrl+Tab или команды приложения. При переходе в другой модуль группа снова сворачивается.',
     view_history_name: 'Переключение недавних представлений',
     view_history_desc: 'Ctrl+Tab возвращает к предыдущему недавнему представлению: конкретному сниппету, задаче или заметке. Повторные Ctrl+Tab в той же последовательности показывают компактный switcher и перебирают недавние представления; Ctrl+Shift+Tab идет назад. При открытых модальных окнах переключатель не срабатывает.',
+    launchpad_name: 'Микро-Launchpad',
+    launchpad_desc: 'Ctrl+Alt+L открывает frameless окно Launchpad поверх остальных окон для быстрого доступа с клавиатуры. Оно умеет открывать модули в отдельных окнах, открывать конкретные задачи, заметки и сниппеты внутри отдельных окон модулей, а также запускать Exec-команды прямо из микропанели с компактным статусом и выводом. В меню шестеренки можно включать Search и Recent, добавлять элементы и входить в Edit Launchpad; Ctrl+E переключает режим редактирования, Escape сначала выходит из edit/status-режима и только потом закрывает окно. Раскладка Launchpad и recent хранятся локально для текущей машины.',
     html_cards_name: 'Sandbox HTML-карточки',
     html_cards_desc: 'В заметки и сниппеты можно загрузить single-file UTF-8 HTML из Markdown toolbar и вставить его как переносимый HTML Card token. Десктопный предпросмотр и публичные share-страницы показывают артефакт в sandbox iframe: scripts разрешены, но same-origin доступ, внешние iframe, сетевые fetch-запросы, формы, workers и object/embed блокируются серверным CSP. Raw HTML, введенный прямо в Markdown, остается экранированным текстом.',
     telegraph_share_name: 'Публикация в Telegra.ph',
@@ -144,6 +149,7 @@ const i18n = {
     hotkey_tab_switch: 'Переключение между недавними сниппетами, задачами, заметками и модулями',
     hotkey_whisper: 'Whisper: старт/стоп локальной или live-диктовки (глобально)',
     hotkey_micro_picker: 'Открыть компактный picker для `code_` сниппетов (глобально)',
+    hotkey_launchpad: 'Открыть компактный Launchpad для модулей, объектов и команд (глобально)',
 
     // Changelog
     changelog_loading: 'Загрузка истории изменений...',
@@ -324,6 +330,7 @@ function renderFeatures(container, lang) {
     { name: t(lang, 'detached_windows_name'), desc: t(lang, 'detached_windows_desc') },
     { name: t(lang, 'sidebar_groups_name'), desc: t(lang, 'sidebar_groups_desc') },
     { name: t(lang, 'view_history_name'), desc: t(lang, 'view_history_desc') },
+    { name: t(lang, 'launchpad_name'), desc: t(lang, 'launchpad_desc') },
     { name: t(lang, 'html_cards_name'), desc: t(lang, 'html_cards_desc') },
     { name: t(lang, 'telegraph_share_name'), desc: t(lang, 'telegraph_share_desc') },
     { name: t(lang, 'shortcuts_name'), desc: t(lang, 'shortcuts_desc') },
@@ -362,6 +369,7 @@ function renderHotkeys(container, lang) {
     { key: 'Ctrl+Tab / Ctrl+Shift+Tab', desc: t(lang, 'hotkey_tab_switch') },
     { key: 'Ctrl+Alt+Space',            desc: t(lang, 'hotkey_whisper') },
     { key: 'Ctrl+Alt+K',                desc: t(lang, 'hotkey_micro_picker') },
+    { key: 'Ctrl+Alt+L',                desc: t(lang, 'hotkey_launchpad') },
   ];
 
   for (const h of hotkeys) {

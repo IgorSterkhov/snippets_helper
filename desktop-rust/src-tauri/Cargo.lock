@@ -2591,7 +2591,7 @@ dependencies = [
 
 [[package]]
 name = "keyboard-helper"
-version = "1.19.1"
+version = "1.20.0"
 dependencies = [
  "arboard",
  "base64 0.22.1",
@@ -2608,6 +2608,7 @@ dependencies = [
  "libc",
  "log",
  "minisign-verify",
+ "percent-encoding",
  "prost",
  "rdev",
  "regex",

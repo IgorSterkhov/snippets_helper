@@ -5466,6 +5466,38 @@ async def run_tests():
             timeout=5,
         )
         assert has_task_text is True
+
+        await cdp.eval("""(() => {
+          const tasks = JSON.parse(localStorage.getItem('mock.tasks') || '[]');
+          const idx = tasks.findIndex(t => Number(t.id) === 880);
+          const row = {
+            id: 880,
+            uuid: 'standalone-route-task-uuid',
+            title: 'Standalone route task',
+            category_id: null,
+            status_id: null,
+            is_pinned: false,
+            bg_color: null,
+            tracker_url: null,
+            notes_md: '',
+            sort_order: 880,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          };
+          if (idx >= 0) tasks[idx] = { ...tasks[idx], ...row };
+          else tasks.push(row);
+          localStorage.setItem('mock.tasks', JSON.stringify(tasks));
+        })()""")
+        await cdp.send('Page.navigate', url=f'{TEST_URL}?standalone=1&module=tasks&objectType=task&objectId=880&title=Standalone%20route%20task')
+        await asyncio.sleep(0.8)
+        await wait_until(cdp, "document.body.classList.contains('standalone-module-window')", timeout=8)
+        opened_task = await wait_until(
+            cdp,
+            "document.querySelector('.task-card.expanded[data-task-id=\"880\"]')?.innerText.includes('Standalone route task') || document.querySelector('.tasks-focus-row.active[data-task-id=\"880\"]')?.innerText.includes('Standalone route task')",
+            timeout=5,
+        )
+        assert opened_task is True, 'standalone object route did not expand deterministic task'
+
         stored_tab = await cdp.eval(
             "JSON.parse(localStorage.getItem('mock.settings') || '{}').last_active_tab"
         )
@@ -5502,6 +5534,127 @@ async def run_tests():
         )
         assert active_tab == 'notes', f'main window did not keep last_active_tab: {active_tab!r}'
     await check('T28 Detached module windows', t28_detached_module_context_menu_and_standalone_boot)
+
+    # ── T29: Micro Launchpad ───────────────────────────────
+    async def t29_micro_launchpad_shell_settings_search_actions():
+        await cdp.send('Page.navigate', url=f'{TEST_URL}?launchpad=1')
+        await asyncio.sleep(0.8)
+        await wait_until(cdp, "document.body.classList.contains('micro-launchpad-window')", timeout=8)
+
+        has_sidebar = await cdp.eval("!!document.querySelector('.tab-bar')")
+        assert has_sidebar is False, 'launchpad rendered main sidebar'
+        has_status_bar = await cdp.eval("!!document.querySelector('#status-bar')")
+        assert has_status_bar is False, 'launchpad rendered main status bar'
+        sync_calls = await cdp.eval("window.__mockSyncCalls || 0")
+        assert sync_calls == 0, f'launchpad boot called sync: {sync_calls}'
+
+        await wait_until(cdp, "!!document.querySelector('.micro-launchpad')", timeout=5)
+        await wait_until(cdp, "!!document.querySelector('.launchpad-gear-btn')", timeout=5)
+        await cdp.eval("document.querySelector('.launchpad-gear-btn').click()")
+        await wait_until(cdp, "!!document.querySelector('.launchpad-menu')", timeout=3)
+        menu_text = await cdp.eval("document.querySelector('.launchpad-menu').innerText")
+        assert 'Edit Launchpad' in menu_text, menu_text
+        assert 'Show search' in menu_text, menu_text
+        assert 'Show recent' in menu_text, menu_text
+
+        await cdp.eval("document.querySelector('[data-launchpad-setting=\"show-search\"]').click()")
+        show_search = await wait_until(
+            cdp,
+            "JSON.parse(localStorage.getItem('mock.settings') || '{}')['launchpad.show_search'] === '0' && '0'",
+            timeout=3,
+        )
+        assert show_search == '0', show_search
+
+        await cdp.eval("""document.dispatchEvent(new KeyboardEvent('keydown', {
+          key: 'e', code: 'KeyE', ctrlKey: true, bubbles: true, cancelable: true
+        }))""")
+        await wait_until(cdp, "document.body.classList.contains('launchpad-edit-mode')", timeout=3)
+        await cdp.eval("""document.dispatchEvent(new KeyboardEvent('keydown', {
+          key: 'Escape', code: 'Escape', bubbles: true, cancelable: true
+        }))""")
+        await wait_until(cdp, "!document.body.classList.contains('launchpad-edit-mode')", timeout=3)
+
+        await cdp.eval("document.querySelector('.launchpad-gear-btn').click()")
+        await wait_until(cdp, "!!document.querySelector('.launchpad-menu')", timeout=3)
+        await cdp.eval("[...document.querySelectorAll('.launchpad-menu button')].find(x => x.textContent.includes('Add item')).click()")
+        await wait_until(cdp, "!!document.querySelector('.launchpad-add-picker')", timeout=3)
+        await cdp.eval("[...document.querySelectorAll('.launchpad-add-result')].find(x => x.textContent.includes('Tasks')).click()")
+        items = await cdp.eval("JSON.parse(JSON.parse(localStorage.getItem('mock.settings') || '{}')['launchpad.items'] || '[]')")
+        assert items and items[0]['type'] == 'module' and items[0]['moduleId'] == 'tasks', items
+
+        await cdp.eval("""(() => {
+          const settings = JSON.parse(localStorage.getItem('mock.settings') || '{}');
+          settings['launchpad.show_search'] = '1';
+          settings['launchpad.show_recent'] = '1';
+          settings['launchpad.items'] = JSON.stringify([
+            { type: 'module', moduleId: 'tasks', label: 'Tasks', icon: '✓' },
+            { type: 'task', moduleId: 'tasks', objectType: 'task', objectId: 1, objectUuid: 'task-uuid-1', label: 'Regular mock task', icon: '✓' },
+            { type: 'exec_command', commandId: 1, label: 'ls project', icon: '⚡', command: 'ls', shell: 'host' }
+          ]);
+          localStorage.setItem('mock.settings', JSON.stringify(settings));
+          const snippets = JSON.parse(localStorage.getItem('mock.shortcuts') || '[]');
+          if (!snippets.some(s => s.name === 'wb_doc_kylin')) {
+            snippets.push({
+              id: 9001,
+              uuid: 'snippet-kylin-uuid',
+              name: 'wb_doc_kylin',
+              value: 'kylin connection notes',
+              description: 'deterministic launchpad search fixture',
+              links: [],
+              obsidian_note: null,
+              is_pinned: false,
+              pinned_sort_order: 0,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            });
+            localStorage.setItem('mock.shortcuts', JSON.stringify(snippets));
+          }
+        })()""")
+        await cdp.send('Page.navigate', url=f'{TEST_URL}?launchpad=1')
+        await asyncio.sleep(0.8)
+        await wait_until(cdp, "document.querySelectorAll('.launchpad-tile').length >= 3", timeout=5)
+
+        await cdp.eval("window.__mockOpenedModuleWindows = []")
+        await cdp.eval("[...document.querySelectorAll('.launchpad-tile')].find(x => x.textContent.includes('Tasks')).click()")
+        opened_module = await wait_until(
+            cdp,
+            "window.__mockOpenedModuleWindows && window.__mockOpenedModuleWindows.includes('tasks')",
+            timeout=3,
+        )
+        assert opened_module is True, 'module tile did not open Tasks window'
+
+        await cdp.eval("window.__mockOpenedModuleObjectWindows = []")
+        await cdp.eval("[...document.querySelectorAll('.launchpad-tile')].find(x => x.textContent.includes('Regular mock task')).click()")
+        opened_object = await wait_until(
+            cdp,
+            "window.__mockOpenedModuleObjectWindows && window.__mockOpenedModuleObjectWindows[0]?.objectUuid === 'task-uuid-1'",
+            timeout=3,
+        )
+        assert opened_object is True, 'task tile did not call open_module_object_window'
+
+        await cdp.eval("window.__mockCommandLog = []")
+        await cdp.eval("[...document.querySelectorAll('.launchpad-tile')].find(x => x.textContent.includes('ls project')).click()")
+        await wait_until(cdp, "document.querySelector('.launchpad-status')?.innerText.includes('OK')", timeout=5)
+        ran_command = await cdp.eval("window.__mockCommandLog && window.__mockCommandLog[0]?.command === 'run_command' && window.__mockCommandLog[0]?.payload?.command === 'ls'")
+        assert ran_command is True, 'exec tile did not run command'
+
+        recent = await cdp.eval("JSON.parse(JSON.parse(localStorage.getItem('mock.settings') || '{}')['launchpad.recent'] || '[]')")
+        assert recent and recent[0]['type'] == 'exec_command', recent
+
+        await cdp.eval("""document.dispatchEvent(new KeyboardEvent('keydown', {
+          key: 'Escape', code: 'Escape', bubbles: true, cancelable: true
+        }))""")
+        await wait_until(cdp, "!document.querySelector('.launchpad-status')", timeout=3)
+
+        input_exists = await cdp.eval("!!document.querySelector('.launchpad-search-input')")
+        assert input_exists is True, 'search input missing after command status'
+        await cdp.eval("""(() => {
+          const input = document.querySelector('.launchpad-search-input');
+          input.value = 'kylin';
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        })()""")
+        await wait_until(cdp, "document.body.innerText.includes('wb_doc_kylin')", timeout=5)
+    await check('T29 Micro Launchpad', t29_micro_launchpad_shell_settings_search_actions)
 
     # Summary
     print()

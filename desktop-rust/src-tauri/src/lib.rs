@@ -138,6 +138,7 @@ pub fn run() {
             commands::shortcuts::filter_shortcuts,
             commands::shortcuts::open_link_window,
             commands::module_windows::open_module_window,
+            commands::module_windows::open_module_object_window,
             commands::shortcuts::list_obsidian_vaults,
             commands::shortcuts::list_obsidian_folders,
             commands::shortcuts::list_obsidian_files,
@@ -188,6 +189,8 @@ pub fn run() {
             commands::micro_picker::open_snippet_micro_picker,
             commands::micro_picker::close_snippet_micro_picker,
             commands::micro_picker::insert_snippet_micro_picker_text,
+            commands::launchpad::open_launchpad,
+            commands::launchpad::close_launchpad,
             commands::notes::list_note_folders,
             commands::notes::create_note_folder,
             commands::notes::update_note_folder,
@@ -502,6 +505,45 @@ pub fn run() {
                     append_log(&format!(
                         "snippet micro picker hotkey '{}' registration failed: {}",
                         picker_hotkey, e
+                    ));
+                }
+            }
+
+            // Desktop micro Launchpad. Keep registration non-fatal because the
+            // user may already have Ctrl+Alt+L registered by the OS or another app.
+            {
+                use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+                let db_state = app.state::<db::DbState>();
+                let conn = db_state.lock_recover();
+                let launchpad_hotkey = db::queries::get_setting(
+                    &conn,
+                    &computer_id,
+                    "launchpad.hotkey",
+                )
+                .ok()
+                .flatten()
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| commands::launchpad::default_hotkey().to_string());
+                drop(conn);
+                let register_result = app.global_shortcut().on_shortcut(
+                    launchpad_hotkey.as_str(),
+                    move |app, _shortcut, event| {
+                        if event.state() == ShortcutState::Pressed {
+                            let app_clone = app.clone();
+                            tauri::async_runtime::spawn(async move {
+                                if let Err(err) =
+                                    commands::launchpad::open_launchpad(app_clone).await
+                                {
+                                    append_log(&format!("launchpad hotkey failed: {}", err));
+                                }
+                            });
+                        }
+                    },
+                );
+                if let Err(e) = register_result {
+                    append_log(&format!(
+                        "launchpad hotkey '{}' registration failed: {}",
+                        launchpad_hotkey, e
                     ));
                 }
             }

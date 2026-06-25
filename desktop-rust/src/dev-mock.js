@@ -1031,6 +1031,16 @@
       window.__mockOpenedModuleWindows = window.__mockOpenedModuleWindows || [];
       window.__mockOpenedModuleWindows.push(moduleId);
     },
+    async open_module_object_window(args) {
+      window.__mockOpenedModuleObjectWindows = window.__mockOpenedModuleObjectWindows || [];
+      window.__mockOpenedModuleObjectWindows.push({ ...args });
+    },
+    async open_launchpad() {
+      window.__mockLaunchpadOpened = true;
+    },
+    async close_launchpad() {
+      window.__mockLaunchpadClosed = true;
+    },
     async open_snippet_micro_picker() {
       window.__mockSnippetMicroPickerOpened = true;
     },
@@ -1854,7 +1864,8 @@
       });
     },
     async delete_exec_command({ id }) { deleteItem('exec_commands', id); },
-    async run_command({ command }) {
+    async run_command({ command, shell, wslDistro }) {
+      recordMockCall('run_command', { command, shell, wslDistro });
       await new Promise(r => setTimeout(r, 300));
       return `[mock] ${command}\nOK — executed in 0.3s\n(real shell disabled in browser)`;
     },

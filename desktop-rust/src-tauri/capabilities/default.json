@@ -1,6 +1,6 @@
 {
   "identifier": "default",
-  "windows": ["main", "whisper-overlay", "module_*"],
+  "windows": ["main", "whisper-overlay", "snippet_micro_picker", "micro_launchpad", "module_*"],
   "permissions": [
     "core:default",
     "core:window:allow-show",

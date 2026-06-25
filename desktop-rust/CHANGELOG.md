@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## v1.20.0 (2026-06-24)
+
+- **Micro Launchpad:** added a global `Ctrl+Alt+L` frameless Launchpad window
+  for opening detached modules, opening specific tasks/notes/snippets in those
+  detached windows, and running Exec commands with a compact status view.
+  Launchpad has a gear menu for Search/Recent visibility, Add item, and Edit
+  Launchpad mode, with per-machine saved tiles and recent items.
+
 ## f-20260624-6 (2026-06-24)
 
 - **Commands PowerShell copy fix:** the `Local copy` PowerShell template now
