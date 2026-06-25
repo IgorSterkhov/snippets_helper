@@ -321,6 +321,44 @@ async def run_tests():
         await cdp.eval("document.querySelector('.settings-overlay')?.remove()")
     await check('T2b2 Settings modal stable layout', t2b2_settings_modal_layout_stable)
 
+    # ── T2b2b: Settings exposes Launchpad hotkey ─────────────
+    async def t2b2b_settings_launchpad_hotkey():
+        await cdp.eval("""
+          document.querySelector('.settings-overlay')?.remove();
+          const settings = JSON.parse(localStorage.getItem('mock.settings') || '{}');
+          delete settings['launchpad.hotkey'];
+          localStorage.setItem('mock.settings', JSON.stringify(settings));
+          document.querySelector('.tab-btn[title="Settings"]').click();
+        """)
+        await wait_until(cdp, "!!document.querySelector('.settings-overlay')", timeout=3)
+        await cdp.eval("[...document.querySelectorAll('.settings-tab-btn')].find(b => b.textContent.trim() === 'Shortcuts').click()")
+        await wait_until(cdp, "document.querySelector('.settings-tab-btn.active')?.textContent.trim() === 'Shortcuts'", timeout=3)
+        await wait_until(cdp, "!!document.querySelector('[data-setting-key=\"launchpad.hotkey\"]')", timeout=3)
+        default_value = await cdp.eval("document.querySelector('[data-setting-key=\"launchpad.hotkey\"]')?.value")
+        assert default_value == 'Ctrl+Alt+Space', default_value
+        await cdp.eval("""
+          const input = document.querySelector('[data-setting-key="launchpad.hotkey"]');
+          input.value = 'Ctrl+Shift+Space';
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+        """)
+        await wait_until(
+            cdp,
+            "JSON.parse(localStorage.getItem('mock.settings') || '{}')['launchpad.hotkey'] === 'Ctrl+Shift+Space'",
+            timeout=3,
+        )
+        await cdp.eval("[...document.querySelectorAll('.settings-content button')].find(b => b.textContent.trim() === 'Reset Launchpad hotkey').click()")
+        await wait_until(
+            cdp,
+            "JSON.parse(localStorage.getItem('mock.settings') || '{}')['launchpad.hotkey'] === 'Ctrl+Alt+Space'",
+            timeout=3,
+        )
+        reset_value = await cdp.eval("document.querySelector('[data-setting-key=\"launchpad.hotkey\"]')?.value")
+        assert reset_value == 'Ctrl+Alt+Space', reset_value
+        help_text = await cdp.eval("document.querySelector('.settings-overlay')?.textContent || ''")
+        assert 'Restart the app' in help_text, help_text
+        await cdp.eval("document.querySelector('.settings-overlay')?.remove()")
+    await check('T2b2b Settings Launchpad hotkey', t2b2b_settings_launchpad_hotkey)
+
     # ── T2b3: Settings exposes frontend cache reset ──────────
     async def t2b3_settings_frontend_cache_reset_action():
         await cdp.eval("""

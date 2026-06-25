@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v1.20.1 (2026-06-25)
+
+- **Micro Launchpad hotkey fix:** changed the default Launchpad hotkey to
+  `Ctrl+Alt+Space`, added `Settings > Shortcuts` controls for
+  `launchpad.hotkey`, and made Launchpad win if it conflicts with the Whisper
+  hotkey so the recovery panel stays reachable.
+
 ## v1.20.0 (2026-06-24)
 
 - **Micro Launchpad:** added a global `Ctrl+Alt+L` frameless Launchpad window

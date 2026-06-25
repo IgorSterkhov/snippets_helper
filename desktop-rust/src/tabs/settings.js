@@ -6,6 +6,7 @@ import { qrcode } from '../lib/qrcode.js';
 let root = null;
 let activeSubTab = 'general';
 let adminTabVisible = false;
+const DEFAULT_LAUNCHPAD_HOTKEY = 'Ctrl+Alt+Space';
 
 const BASE_SUB_TABS = [
   { id: 'general',    label: 'General',       icon: '⚙' },
@@ -293,6 +294,7 @@ async function renderShortcuts(container) {
 
   const listFontSize = await getSetting('shortcuts_font_size') || '13';
   const leftPanelWidth = await getSetting('shortcuts_left_width') || '300';
+  const launchpadHotkey = await getSetting('launchpad.hotkey') || DEFAULT_LAUNCHPAD_HOTKEY;
 
   const fontRow = makeFormRow('List font size:');
   const fontInput = document.createElement('input');
@@ -331,6 +333,35 @@ async function renderShortcuts(container) {
   expandInput.addEventListener('change', () => saveSetting('snippet_expand_multiplier', expandInput.value));
   expandRow.appendChild(expandInput);
   container.appendChild(expandRow);
+
+  const launchpadRow = makeFormRow('Micro Launchpad hotkey:');
+  const launchpadInput = document.createElement('input');
+  launchpadInput.type = 'text';
+  launchpadInput.className = 'settings-input';
+  launchpadInput.dataset.settingKey = 'launchpad.hotkey';
+  launchpadInput.placeholder = DEFAULT_LAUNCHPAD_HOTKEY;
+  launchpadInput.value = launchpadHotkey;
+  launchpadInput.style.width = '180px';
+  launchpadInput.addEventListener('change', () => {
+    const value = launchpadInput.value.trim() || DEFAULT_LAUNCHPAD_HOTKEY;
+    launchpadInput.value = value;
+    saveSetting('launchpad.hotkey', value);
+  });
+  launchpadRow.appendChild(launchpadInput);
+
+  const resetLaunchpad = el('button', { text: 'Reset Launchpad hotkey', class: 'btn-secondary btn-small' });
+  resetLaunchpad.addEventListener('click', async () => {
+    launchpadInput.value = DEFAULT_LAUNCHPAD_HOTKEY;
+    await saveSetting('launchpad.hotkey', DEFAULT_LAUNCHPAD_HOTKEY);
+  });
+  launchpadRow.appendChild(resetLaunchpad);
+  container.appendChild(launchpadRow);
+
+  const launchpadHelp = document.createElement('p');
+  launchpadHelp.className = 'settings-help';
+  launchpadHelp.style.cssText = 'font-size:11px;color:var(--text-muted);margin:4px 0 12px';
+  launchpadHelp.textContent = 'Restart the app after changing this global hotkey. If it matches the Whisper hotkey, Launchpad takes priority so this panel remains reachable.';
+  container.appendChild(launchpadHelp);
 }
 
 // ── Tasks ─────────────────────────────────────────────────────

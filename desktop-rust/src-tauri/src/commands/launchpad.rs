@@ -1,7 +1,7 @@
 use tauri::{AppHandle, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder};
 
 const WINDOW_LABEL: &str = "micro_launchpad";
-const DEFAULT_HOTKEY: &str = "Ctrl+Alt+L";
+const DEFAULT_HOTKEY: &str = "Ctrl+Alt+Space";
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LaunchpadWindowSpec {
@@ -91,7 +91,7 @@ mod tests {
 
     #[test]
     fn launchpad_hotkey_and_label_are_stable() {
-        assert_eq!(default_hotkey(), "Ctrl+Alt+L");
+        assert_eq!(default_hotkey(), "Ctrl+Alt+Space");
         assert_eq!(window_label(), "micro_launchpad");
     }
 

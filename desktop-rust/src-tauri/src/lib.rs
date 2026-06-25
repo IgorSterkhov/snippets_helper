@@ -434,8 +434,10 @@ pub fn run() {
 
             // Whisper global hotkey — registered separately from the main-
             // window toggle. User-configurable via `whisper.hotkey` setting
-            // (default Ctrl+Alt+Space). Fires on Pressed; handler toggles
-            // start/stop based on current service state.
+            // (default Ctrl+Alt+W). Fires on Pressed; handler toggles
+            // start/stop based on current service state. If the user assigns
+            // the same shortcut to Launchpad, Launchpad wins so the recovery
+            // panel stays reachable.
             {
                 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
                 let db_state = app.state::<db::DbState>();
@@ -443,26 +445,43 @@ pub fn run() {
                 let whisper_hotkey = db::queries::get_setting(&conn, &computer_id, "whisper.hotkey")
                     .ok().flatten()
                     .filter(|s| !s.is_empty())
-                    .unwrap_or_else(|| "Ctrl+Alt+Space".to_string());
+                    .unwrap_or_else(|| "Ctrl+Alt+W".to_string());
+                let launchpad_hotkey = db::queries::get_setting(
+                    &conn,
+                    &computer_id,
+                    "launchpad.hotkey",
+                )
+                .ok()
+                .flatten()
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| commands::launchpad::default_hotkey().to_string());
                 drop(conn);
-                let register_result = app.global_shortcut().on_shortcut(
-                    whisper_hotkey.as_str(),
-                    move |app, _shortcut, event| {
-                        if event.state() == ShortcutState::Pressed {
-                            let app_clone = app.clone();
-                            tauri::async_runtime::spawn(async move {
-                                commands::whisper::hotkey_toggle(app_clone).await;
-                            });
-                        }
-                    },
-                );
-                if let Err(e) = register_result {
-                    // Don't fail app startup — just log. User may have a
-                    // conflicting hotkey or an unparseable string.
+
+                if whisper_hotkey.eq_ignore_ascii_case(&launchpad_hotkey) {
                     write_log(&format!(
-                        "whisper global hotkey '{}' registration failed: {}",
-                        whisper_hotkey, e
+                        "whisper global hotkey '{}' skipped: Launchpad uses the same shortcut",
+                        whisper_hotkey
                     ));
+                } else {
+                    let register_result = app.global_shortcut().on_shortcut(
+                        whisper_hotkey.as_str(),
+                        move |app, _shortcut, event| {
+                            if event.state() == ShortcutState::Pressed {
+                                let app_clone = app.clone();
+                                tauri::async_runtime::spawn(async move {
+                                    commands::whisper::hotkey_toggle(app_clone).await;
+                                });
+                            }
+                        },
+                    );
+                    if let Err(e) = register_result {
+                        // Don't fail app startup — just log. User may have a
+                        // conflicting hotkey or an unparseable string.
+                        write_log(&format!(
+                            "whisper global hotkey '{}' registration failed: {}",
+                            whisper_hotkey, e
+                        ));
+                    }
                 }
             }
 
@@ -510,7 +529,8 @@ pub fn run() {
             }
 
             // Desktop micro Launchpad. Keep registration non-fatal because the
-            // user may already have Ctrl+Alt+L registered by the OS or another app.
+            // user may already have the configured shortcut registered by the
+            // OS or another app.
             {
                 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
                 let db_state = app.state::<db::DbState>();

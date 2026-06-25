@@ -40,7 +40,7 @@ export async function openSettingsModal(opts = {}) {
   }));
   content.appendChild(section('Язык', langSelect(s['whisper.language'] || 'auto')));
   const hotkeySection = section('Hotkey (глобальный — работает при скрытом окне)',
-    textInput('hotkey', s['whisper.hotkey'] || 'Ctrl+Alt+Space', 'напр. Ctrl+Alt+Space'));
+    textInput('hotkey', s['whisper.hotkey'] || 'Ctrl+Alt+W', 'напр. Ctrl+Alt+W'));
   const hkNote = document.createElement('div');
   hkNote.textContent = 'После изменения — перезапусти приложение для применения.';
   hkNote.style.cssText = 'font-size:11px;color:var(--text-muted,#8b949e);font-style:italic;margin-top:-2px';
