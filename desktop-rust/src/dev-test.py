@@ -5609,12 +5609,41 @@ async def run_tests():
 
         await wait_until(cdp, "!!document.querySelector('.micro-launchpad')", timeout=5)
         await wait_until(cdp, "!!document.querySelector('.launchpad-gear-btn')", timeout=5)
+        add_tile_exists = await cdp.eval("!!document.querySelector('.launchpad-add-tile')")
+        assert add_tile_exists is False, 'Add tile should not consume Launchpad grid space'
+        add_button_exists = await cdp.eval("!!document.querySelector('.launchpad-plus-btn')")
+        assert add_button_exists is True, 'topbar + button missing'
         await cdp.eval("document.querySelector('.launchpad-gear-btn').click()")
         await wait_until(cdp, "!!document.querySelector('.launchpad-menu')", timeout=3)
         menu_text = await cdp.eval("document.querySelector('.launchpad-menu').innerText")
         assert 'Edit Launchpad' in menu_text, menu_text
         assert 'Show search' in menu_text, menu_text
         assert 'Show recent' in menu_text, menu_text
+        assert 'Columns' in menu_text and 'Rows' in menu_text, menu_text
+        await cdp.eval("""(() => {
+          const cols = document.querySelector('[data-launchpad-size="columns"]');
+          const rows = document.querySelector('[data-launchpad-size="rows"]');
+          cols.value = '5';
+          rows.value = '4';
+          cols.dispatchEvent(new Event('change', { bubbles: true }));
+          rows.dispatchEvent(new Event('change', { bubbles: true }));
+        })()""")
+        await wait_until(
+            cdp,
+            "JSON.parse(localStorage.getItem('mock.settings') || '{}')['launchpad.columns'] === '5'",
+            timeout=3,
+        )
+        await wait_until(
+            cdp,
+            "JSON.parse(localStorage.getItem('mock.settings') || '{}')['launchpad.rows'] === '4'",
+            timeout=3,
+        )
+        resize_call = await wait_until(
+            cdp,
+            "window.__mockLaunchpadResizeCalls && window.__mockLaunchpadResizeCalls.length >= 1 && window.__mockLaunchpadResizeCalls.at(-1)",
+            timeout=3,
+        )
+        assert int(resize_call['columns']) == 5 and int(resize_call['rows']) == 4, resize_call
 
         await cdp.eval("document.querySelector('[data-launchpad-setting=\"show-search\"]').click()")
         show_search = await wait_until(
@@ -5633,13 +5662,29 @@ async def run_tests():
         }))""")
         await wait_until(cdp, "!document.body.classList.contains('launchpad-edit-mode')", timeout=3)
 
-        await cdp.eval("document.querySelector('.launchpad-gear-btn').click()")
-        await wait_until(cdp, "!!document.querySelector('.launchpad-menu')", timeout=3)
-        await cdp.eval("[...document.querySelectorAll('.launchpad-menu button')].find(x => x.textContent.includes('Add item')).click()")
+        await cdp.eval("document.querySelector('.launchpad-plus-btn').click()")
+        await wait_until(cdp, "!!document.querySelector('.launchpad-add-menu')", timeout=3)
+        add_menu_text = await cdp.eval("document.querySelector('.launchpad-add-menu').innerText")
+        assert 'Add item' in add_menu_text and 'Add container' in add_menu_text and 'Add separator' in add_menu_text, add_menu_text
+        await cdp.eval("[...document.querySelectorAll('.launchpad-add-menu button')].find(x => x.textContent.includes('Add container')).click()")
+        await wait_until(cdp, "!!document.querySelector('.launchpad-container-entry')", timeout=3)
+        items = await cdp.eval("JSON.parse(JSON.parse(localStorage.getItem('mock.settings') || '{}')['launchpad.items'] || '[]')")
+        assert any(item.get('layoutType') == 'container' and int(item.get('w') or 0) >= 2 and int(item.get('h') or 0) >= 1 for item in items), items
+
+        await cdp.eval("document.querySelector('.launchpad-plus-btn').click()")
+        await wait_until(cdp, "!!document.querySelector('.launchpad-add-menu')", timeout=3)
+        await cdp.eval("[...document.querySelectorAll('.launchpad-add-menu button')].find(x => x.textContent.includes('Add separator')).click()")
+        await wait_until(cdp, "!!document.querySelector('.launchpad-separator-entry')", timeout=3)
+        items = await cdp.eval("JSON.parse(JSON.parse(localStorage.getItem('mock.settings') || '{}')['launchpad.items'] || '[]')")
+        assert any(item.get('layoutType') == 'separator' for item in items), items
+
+        await cdp.eval("document.querySelector('.launchpad-plus-btn').click()")
+        await wait_until(cdp, "!!document.querySelector('.launchpad-add-menu')", timeout=3)
+        await cdp.eval("[...document.querySelectorAll('.launchpad-add-menu button')].find(x => x.textContent.includes('Add item')).click()")
         await wait_until(cdp, "!!document.querySelector('.launchpad-add-picker')", timeout=3)
         await cdp.eval("[...document.querySelectorAll('.launchpad-module-add')].find(x => x.closest('.launchpad-add-module-row')?.textContent.includes('Tasks')).click()")
         items = await cdp.eval("JSON.parse(JSON.parse(localStorage.getItem('mock.settings') || '{}')['launchpad.items'] || '[]')")
-        assert items and items[0]['type'] == 'module' and items[0]['moduleId'] == 'tasks', items
+        assert any((item.get('layoutType') == 'tile' and item.get('item', {}).get('type') == 'module' and item.get('item', {}).get('moduleId') == 'tasks') or (item.get('type') == 'module' and item.get('moduleId') == 'tasks') for item in items), items
 
         await cdp.eval("""(() => {
           const snippets = JSON.parse(localStorage.getItem('mock.shortcuts') || '[]');
@@ -5660,7 +5705,9 @@ async def run_tests():
             localStorage.setItem('mock.shortcuts', JSON.stringify(snippets));
           }
         })()""")
-        await cdp.eval("document.querySelector('.launchpad-add-tile').click()")
+        await cdp.eval("document.querySelector('.launchpad-plus-btn').click()")
+        await wait_until(cdp, "!!document.querySelector('.launchpad-add-menu')", timeout=3)
+        await cdp.eval("[...document.querySelectorAll('.launchpad-add-menu button')].find(x => x.textContent.includes('Add item')).click()")
         await wait_until(cdp, "!!document.querySelector('.launchpad-add-picker')", timeout=3)
         await cdp.eval("[...document.querySelectorAll('.launchpad-module-browse')].find(x => x.closest('.launchpad-add-module-row')?.textContent.includes('Snippets')).click()")
         await wait_until(cdp, "document.querySelector('.launchpad-add-title')?.textContent.includes('Snippets')", timeout=3)
@@ -5672,9 +5719,11 @@ async def run_tests():
         await wait_until(cdp, "[...document.querySelectorAll('.launchpad-add-result')].some(x => x.textContent.includes('wb_doc_kylin'))", timeout=5)
         await cdp.eval("[...document.querySelectorAll('.launchpad-add-result')].find(x => x.textContent.includes('wb_doc_kylin')).click()")
         items = await cdp.eval("JSON.parse(JSON.parse(localStorage.getItem('mock.settings') || '{}')['launchpad.items'] || '[]')")
-        assert any(item.get('type') == 'snippet' and item.get('objectUuid') == 'snippet-kylin-uuid' for item in items), items
+        assert any((item.get('layoutType') == 'tile' and item.get('item', {}).get('type') == 'snippet' and item.get('item', {}).get('objectUuid') == 'snippet-kylin-uuid') or (item.get('type') == 'snippet' and item.get('objectUuid') == 'snippet-kylin-uuid') for item in items), items
 
-        await cdp.eval("document.querySelector('.launchpad-add-tile').click()")
+        await cdp.eval("document.querySelector('.launchpad-plus-btn').click()")
+        await wait_until(cdp, "!!document.querySelector('.launchpad-add-menu')", timeout=3)
+        await cdp.eval("[...document.querySelectorAll('.launchpad-add-menu button')].find(x => x.textContent.includes('Add item')).click()")
         await wait_until(cdp, "!!document.querySelector('.launchpad-add-picker')", timeout=3)
         await cdp.eval("[...document.querySelectorAll('.launchpad-module-browse')].find(x => x.closest('.launchpad-add-module-row')?.textContent.includes('Finance')).click()")
         await wait_until(cdp, "document.querySelector('.launchpad-add-title')?.textContent.includes('Finance')", timeout=3)
@@ -5686,16 +5735,17 @@ async def run_tests():
         await wait_until(cdp, "[...document.querySelectorAll('.launchpad-add-result')].some(x => x.textContent.includes('Project expenses'))", timeout=5)
         await cdp.eval("[...document.querySelectorAll('.launchpad-add-result')].find(x => x.textContent.includes('Project expenses')).click()")
         items = await cdp.eval("JSON.parse(JSON.parse(localStorage.getItem('mock.settings') || '{}')['launchpad.items'] || '[]')")
-        assert any(item.get('type') == 'finance_plan' and item.get('moduleId') == 'finance' for item in items), items
+        assert any((item.get('layoutType') == 'tile' and item.get('item', {}).get('type') == 'finance_plan' and item.get('item', {}).get('moduleId') == 'finance') or (item.get('type') == 'finance_plan' and item.get('moduleId') == 'finance') for item in items), items
 
         await cdp.eval("""(() => {
           const settings = JSON.parse(localStorage.getItem('mock.settings') || '{}');
           settings['launchpad.show_search'] = '1';
           settings['launchpad.show_recent'] = '1';
           settings['launchpad.items'] = JSON.stringify([
-            { type: 'module', moduleId: 'tasks', label: 'Tasks', icon: '✓' },
-            { type: 'task', moduleId: 'tasks', objectType: 'task', objectId: 1, objectUuid: 'task-uuid-1', label: 'Regular mock task', icon: '✓' },
-            { type: 'exec_command', commandId: 1, label: 'ls project', icon: '⚡', command: 'ls', shell: 'host' }
+            { layoutType: 'container', id: 'dev-container', title: 'Dev tray', w: 2, h: 2, children: [] },
+            { layoutType: 'tile', id: 'tile-tasks', w: 1, h: 1, item: { type: 'module', moduleId: 'tasks', label: 'Tasks', icon: '✓' } },
+            { layoutType: 'tile', id: 'tile-task', w: 1, h: 1, item: { type: 'task', moduleId: 'tasks', objectType: 'task', objectId: 1, objectUuid: 'task-uuid-1', label: 'Regular mock task', icon: '✓' } },
+            { layoutType: 'tile', id: 'tile-exec', w: 1, h: 1, item: { type: 'exec_command', commandId: 1, label: 'ls project', icon: '⚡', command: 'ls', shell: 'host' } }
           ]);
           localStorage.setItem('mock.settings', JSON.stringify(settings));
           const plans = JSON.parse(localStorage.getItem('mock.finance_plans') || '[]');
@@ -5723,8 +5773,15 @@ async def run_tests():
         await cdp.send('Page.navigate', url=f'{TEST_URL}?launchpad=1')
         await asyncio.sleep(0.8)
         await wait_until(cdp, "document.querySelectorAll('.launchpad-tile').length >= 3", timeout=5)
+        await wait_until(cdp, "!!document.querySelector('.launchpad-container-entry')", timeout=5)
+        body_overflow = await cdp.eval("""(() => {
+          const body = document.querySelector('.launchpad-body');
+          return body && getComputedStyle(body).overflowY;
+        })()""")
+        assert body_overflow in ('auto', 'scroll'), body_overflow
 
         await cdp.eval("window.__mockOpenedModuleWindows = []")
+        await cdp.eval("window.__mockLaunchpadClosed = false")
         await cdp.eval("[...document.querySelectorAll('.launchpad-tile')].find(x => x.textContent.includes('Tasks')).click()")
         opened_module = await wait_until(
             cdp,
@@ -5732,8 +5789,11 @@ async def run_tests():
             timeout=3,
         )
         assert opened_module is True, 'module tile did not open Tasks window'
+        closed_after_module = await wait_until(cdp, "window.__mockLaunchpadClosed === true", timeout=3)
+        assert closed_after_module is True, 'Launchpad did not close after opening module window'
 
         await cdp.eval("window.__mockOpenedModuleObjectWindows = []")
+        await cdp.eval("window.__mockLaunchpadClosed = false")
         await cdp.eval("[...document.querySelectorAll('.launchpad-tile')].find(x => x.textContent.includes('Regular mock task')).click()")
         opened_object = await wait_until(
             cdp,
@@ -5741,12 +5801,17 @@ async def run_tests():
             timeout=3,
         )
         assert opened_object is True, 'task tile did not call open_module_object_window'
+        closed_after_object = await wait_until(cdp, "window.__mockLaunchpadClosed === true", timeout=3)
+        assert closed_after_object is True, 'Launchpad did not close after opening object window'
 
         await cdp.eval("window.__mockCommandLog = []")
+        await cdp.eval("window.__mockLaunchpadClosed = false")
         await cdp.eval("[...document.querySelectorAll('.launchpad-tile')].find(x => x.textContent.includes('ls project')).click()")
         await wait_until(cdp, "document.querySelector('.launchpad-status')?.innerText.includes('OK')", timeout=5)
         ran_command = await cdp.eval("window.__mockCommandLog && window.__mockCommandLog[0]?.command === 'run_command' && window.__mockCommandLog[0]?.payload?.command === 'ls'")
         assert ran_command is True, 'exec tile did not run command'
+        closed_after_command = await cdp.eval("window.__mockLaunchpadClosed === true")
+        assert closed_after_command is False, 'Launchpad should stay open after running a command'
 
         recent = await cdp.eval("JSON.parse(JSON.parse(localStorage.getItem('mock.settings') || '{}')['launchpad.recent'] || '[]')")
         assert recent and recent[0]['type'] == 'exec_command', recent
@@ -5756,14 +5821,81 @@ async def run_tests():
         }))""")
         await wait_until(cdp, "!document.querySelector('.launchpad-status')", timeout=3)
 
+        await cdp.eval("""document.dispatchEvent(new KeyboardEvent('keydown', {
+          key: 'e', code: 'KeyE', ctrlKey: true, bubbles: true, cancelable: true
+        }))""")
+        await wait_until(cdp, "document.body.classList.contains('launchpad-edit-mode')", timeout=3)
+        await cdp.eval("""(() => {
+          const tile = [...document.querySelectorAll('.launchpad-tile')].find(x => x.textContent.includes('ls project'));
+          const container = document.querySelector('.launchpad-container-entry');
+          tile.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 7, button: 0, clientX: 20, clientY: 20, bubbles: true }));
+          container.dispatchEvent(new PointerEvent('pointermove', { pointerId: 7, clientX: 60, clientY: 60, bubbles: true }));
+          document.dispatchEvent(new PointerEvent('pointerup', { pointerId: 7, clientX: 60, clientY: 60, bubbles: true }));
+        })()""")
+        await wait_until(
+            cdp,
+            """(() => {
+              const items = JSON.parse(JSON.parse(localStorage.getItem('mock.settings') || '{}')['launchpad.items'] || '[]');
+              const container = items.find(x => x.layoutType === 'container');
+              return container?.children?.some(child => child.type === 'exec_command' || child.item?.type === 'exec_command');
+            })()""",
+            timeout=3,
+        )
+        await cdp.eval("""(() => {
+          const container = document.querySelector('.launchpad-container-entry');
+          const rect = container.getBoundingClientRect();
+          const handle = container.querySelector('.launchpad-resize-handle');
+          handle.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 8, button: 0, clientX: rect.right - 3, clientY: rect.bottom - 3, bubbles: true }));
+          document.dispatchEvent(new PointerEvent('pointermove', { pointerId: 8, clientX: rect.right + 180, clientY: rect.bottom + 110, bubbles: true }));
+          document.dispatchEvent(new PointerEvent('pointerup', { pointerId: 8, clientX: rect.right + 180, clientY: rect.bottom + 110, bubbles: true }));
+        })()""")
+        resized = await wait_until(
+            cdp,
+            """(() => {
+              const items = JSON.parse(JSON.parse(localStorage.getItem('mock.settings') || '{}')['launchpad.items'] || '[]');
+              const container = items.find(x => x.layoutType === 'container');
+              return container && Number(container.w) >= 3 && Number(container.h) >= 3 ? container : null;
+            })()""",
+            timeout=3,
+        )
+        assert int(resized['w']) >= 3 and int(resized['h']) >= 3, resized
+        await cdp.eval("document.querySelector('.launchpad-container-remove').click()")
+        unwrapped = await wait_until(
+            cdp,
+            """(() => {
+              const items = JSON.parse(JSON.parse(localStorage.getItem('mock.settings') || '{}')['launchpad.items'] || '[]');
+              return !items.some(x => x.layoutType === 'container') && items.some(x => x.layoutType === 'tile' && x.item?.type === 'exec_command');
+            })()""",
+            timeout=3,
+        )
+        assert unwrapped is True, 'deleting container did not unwrap children'
+
+        await cdp.eval("""(() => {
+          const settings = JSON.parse(localStorage.getItem('mock.settings') || '{}');
+          settings['launchpad.items'] = JSON.stringify([
+            { type: 'module', moduleId: 'tasks', label: 'Legacy Tasks', icon: '✓' },
+            { layoutType: 'container', id: 'search-container', title: 'Search tray', w: 2, h: 1, children: [
+              { type: 'exec_command', commandId: 44, label: 'container search command', icon: '⚡', command: 'echo nested', shell: 'host' }
+            ] }
+          ]);
+          localStorage.setItem('mock.settings', JSON.stringify(settings));
+        })()""")
+        await cdp.send('Page.navigate', url=f'{TEST_URL}?launchpad=1')
+        await asyncio.sleep(0.8)
+        await wait_until(cdp, "document.body.innerText.includes('Legacy Tasks')", timeout=5)
+        await cdp.eval("window.__mockOpenedModuleWindows = []")
+        await cdp.eval("[...document.querySelectorAll('.launchpad-tile')].find(x => x.textContent.includes('Legacy Tasks')).click()")
+        legacy_opened = await wait_until(cdp, "window.__mockOpenedModuleWindows?.includes('tasks')", timeout=3)
+        assert legacy_opened is True, 'legacy flat tile was not activatable after normalization'
+
         input_exists = await cdp.eval("!!document.querySelector('.launchpad-search-input')")
         assert input_exists is True, 'search input missing after command status'
         await cdp.eval("""(() => {
           const input = document.querySelector('.launchpad-search-input');
-          input.value = 'kylin';
+          input.value = 'container search';
           input.dispatchEvent(new Event('input', { bubbles: true }));
         })()""")
-        await wait_until(cdp, "document.body.innerText.includes('wb_doc_kylin')", timeout=5)
+        await wait_until(cdp, "document.body.innerText.includes('container search command')", timeout=5)
     await check('T29 Micro Launchpad', t29_micro_launchpad_shell_settings_search_actions)
 
     # Summary

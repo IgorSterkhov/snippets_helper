@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## v1.21.0 (2026-06-25)
+
+- **Micro Launchpad containers:** the `+` button now adds items, containers,
+  and separators without taking a tile slot in the grid. The gear menu controls
+  Search/Recent visibility plus Launchpad columns and rows. Edit mode supports
+  dragging tiles into/out of containers, dragging container contents, resizing
+  containers by handle or numeric span, and removing a container without
+  deleting its contents. Opening module/object tiles closes Launchpad, while
+  Exec commands keep it open with their run output.
+
 ## v1.20.2 (2026-06-25)
 
 - **Whisper hotkey default:** changed the default Whisper recording hotkey to

@@ -139,6 +139,37 @@ For split panes that users can resize, keep the behavior local and predictable:
   cursor overrides, and selection locks on both `pointerup` and
   `pointercancel`.
 
+### Grid launchers with containers
+
+**Used in:** Micro Launchpad
+
+For compact launcher windows that can contain modules, object shortcuts,
+commands, visual containers, and separators:
+
+- Persist layout as an ordered list of entries, not absolute x/y positions.
+  Use `layoutType: "tile" | "container" | "separator"` and optional `w`/`h`
+  span fields. Normalize legacy flat item arrays into one-cell tile entries on
+  load so existing user layouts continue to work.
+- Render top-level entries with CSS Grid auto-placement. Let `w` and `h`
+  become `grid-column: span N` and `grid-row: span N`; clamp spans to the
+  current grid column/row limits. If content exceeds the visible window, scroll
+  the launcher body instead of resizing the frameless window unexpectedly.
+- Keep app actions out of the grid. Use compact header controls for Add and
+  Settings so an "Add" affordance does not consume a user tile slot.
+- For containers, store child tiles inside the container entry. Dragging a
+  tile over a container appends or inserts it into the container; dragging a
+  child back over the top-level grid unwraps only that child. Deleting a
+  container unwraps children back into the parent grid instead of deleting
+  them.
+- Container resizing should work both by lower-right pointer handle and by
+  explicit width/height fields in edit mode. Persist only normalized spans.
+- Keyboard navigation uses the flattened actionable list: top-level tiles plus
+  container children. Containers and separators are edit affordances, not
+  launch targets.
+- If a launcher opens a detached module/object window, close the launcher
+  afterwards. If it runs an inline command/status flow, keep the launcher open
+  and show output in place.
+
 ---
 
 ## §3 Sidebar module groups

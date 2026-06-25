@@ -17,9 +17,10 @@ const BROWSABLE_MODULES = new Set(['shortcuts', 'notes', 'tasks', 'exec', 'finan
 
 let root = null;
 let reorderDrag = null;
+let resizeDrag = null;
 let suppressTileClickUntil = 0;
 let state = {
-  settings: { showSearch: true, showRecent: true },
+  settings: { showSearch: true, showRecent: true, columns: 4, rows: 3 },
   items: [],
   recent: [],
   results: [],
@@ -27,6 +28,7 @@ let state = {
   selectedIndex: 0,
   editMode: false,
   menuOpen: false,
+  addMenuOpen: false,
   addOpen: false,
   addModuleId: null,
   addQuery: '',
@@ -64,20 +66,33 @@ function parseArray(raw) {
 }
 
 async function loadState() {
-  const [showSearch, showRecent, itemsRaw, recentRaw] = await Promise.all([
+  const [showSearch, showRecent, columns, rows, itemsRaw, recentRaw] = await Promise.all([
     getSetting('launchpad.show_search', '1'),
     getSetting('launchpad.show_recent', '1'),
+    getSetting('launchpad.columns', '4'),
+    getSetting('launchpad.rows', '3'),
     getSetting('launchpad.items', '[]'),
     getSetting('launchpad.recent', '[]'),
   ]);
   state.settings.showSearch = showSearch !== '0';
   state.settings.showRecent = showRecent !== '0';
-  state.items = parseArray(itemsRaw);
+  state.settings.columns = normalizeInt(columns, 4, 3, 8);
+  state.settings.rows = normalizeInt(rows, 3, 2, 6);
+  state.items = normalizeEntries(parseArray(itemsRaw));
   state.recent = parseArray(recentRaw);
 }
 
 async function persistItems() {
   await setSetting('launchpad.items', JSON.stringify(state.items));
+}
+
+async function persistGridSize() {
+  await setSetting('launchpad.columns', state.settings.columns);
+  await setSetting('launchpad.rows', state.settings.rows);
+  await call('resize_launchpad_window', {
+    columns: state.settings.columns,
+    rows: state.settings.rows,
+  }).catch(() => {});
 }
 
 async function persistRecent() {
@@ -90,12 +105,77 @@ function render() {
   root.innerHTML = '';
   const shell = document.createElement('div');
   shell.className = 'micro-launchpad';
+  shell.style.setProperty('--launchpad-columns', String(state.settings.columns));
+  shell.style.setProperty('--launchpad-rows', String(state.settings.rows));
   shell.appendChild(renderTopline());
   if (state.menuOpen) shell.appendChild(renderMenu());
+  if (state.addMenuOpen) shell.appendChild(renderAddMenu());
   if (state.addOpen) shell.appendChild(renderAddPicker());
   shell.appendChild(state.status ? renderStatus() : renderGrid());
   shell.appendChild(renderFooter());
   root.appendChild(shell);
+}
+
+function normalizeInt(value, fallback, min, max) {
+  const n = Number.parseInt(String(value ?? ''), 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
+}
+
+function makeId(prefix) {
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function normalizeEntries(items) {
+  return (Array.isArray(items) ? items : []).map(entry => normalizeEntry(entry)).filter(Boolean);
+}
+
+function normalizeEntry(entry) {
+  if (!entry || typeof entry !== 'object') return null;
+  if (entry.layoutType === 'container') {
+    return {
+      layoutType: 'container',
+      id: entry.id || makeId('container'),
+      title: entry.title || entry.label || 'Container',
+      w: clampSpan(entry.w, 2, 1, state.settings.columns),
+      h: clampSpan(entry.h, 1, 1, 4),
+      children: normalizeContainerChildren(entry.children || []),
+    };
+  }
+  if (entry.layoutType === 'separator') {
+    return {
+      layoutType: 'separator',
+      id: entry.id || makeId('separator'),
+      w: clampSpan(entry.w, state.settings.columns, 1, state.settings.columns),
+      h: 1,
+    };
+  }
+  if (entry.layoutType === 'tile') {
+    const item = entry.item || entry;
+    return {
+      layoutType: 'tile',
+      id: entry.id || makeId('tile'),
+      w: clampSpan(entry.w, 1, 1, state.settings.columns),
+      h: clampSpan(entry.h, 1, 1, 4),
+      item: { ...item },
+    };
+  }
+  return {
+    layoutType: 'tile',
+    id: makeId('tile'),
+    w: 1,
+    h: 1,
+    item: { ...entry },
+  };
+}
+
+function normalizeContainerChildren(children) {
+  return (Array.isArray(children) ? children : []).map(child => child?.item || child).filter(Boolean);
+}
+
+function clampSpan(value, fallback, min, max) {
+  const n = Number.parseInt(String(value ?? ''), 10);
+  return Math.max(min, Math.min(max, Number.isFinite(n) ? n : fallback));
 }
 
 function renderTopline() {
@@ -121,6 +201,18 @@ function renderTopline() {
     title.textContent = state.editMode ? 'Edit Launchpad' : 'Launchpad';
     top.appendChild(title);
   }
+  const plus = document.createElement('button');
+  plus.type = 'button';
+  plus.className = 'launchpad-plus-btn';
+  plus.title = 'Add to Launchpad';
+  plus.textContent = '+';
+  plus.addEventListener('click', () => {
+    state.addMenuOpen = !state.addMenuOpen;
+    state.menuOpen = false;
+    state.addOpen = false;
+    render();
+  });
+  top.appendChild(plus);
   const gear = document.createElement('button');
   gear.type = 'button';
   gear.className = 'launchpad-gear-btn';
@@ -129,6 +221,7 @@ function renderTopline() {
   gear.addEventListener('click', () => {
     state.menuOpen = !state.menuOpen;
     state.addOpen = false;
+    state.addMenuOpen = false;
     render();
   });
   top.appendChild(gear);
@@ -143,13 +236,6 @@ function renderMenu() {
     state.menuOpen = false;
     render();
   }));
-  menu.appendChild(menuButton('Add item', () => {
-    state.addOpen = true;
-    state.addModuleId = null;
-    state.addQuery = '';
-    state.menuOpen = false;
-    render();
-  }));
   menu.appendChild(settingButton('Show search', 'show-search', state.settings.showSearch, async () => {
     state.settings.showSearch = !state.settings.showSearch;
     await setSetting('launchpad.show_search', state.settings.showSearch ? '1' : '0');
@@ -160,6 +246,23 @@ function renderMenu() {
     await setSetting('launchpad.show_recent', state.settings.showRecent ? '1' : '0');
     render();
   }));
+  menu.appendChild(sizeControl('Columns', 'columns', 3, 8));
+  menu.appendChild(sizeControl('Rows', 'rows', 2, 6));
+  return menu;
+}
+
+function renderAddMenu() {
+  const menu = document.createElement('div');
+  menu.className = 'launchpad-add-menu';
+  menu.appendChild(menuButton('Add item', () => {
+    state.addOpen = true;
+    state.addMenuOpen = false;
+    state.addModuleId = null;
+    state.addQuery = '';
+    render();
+  }));
+  menu.appendChild(menuButton('Add container', () => addContainer()));
+  menu.appendChild(menuButton('Add separator', () => addSeparator()));
   return menu;
 }
 
@@ -177,6 +280,28 @@ function settingButton(text, name, checked, onClick) {
   return btn;
 }
 
+function sizeControl(label, key, min, max) {
+  const wrap = document.createElement('label');
+  wrap.className = 'launchpad-size-control';
+  wrap.textContent = label;
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.min = String(min);
+  input.max = String(max);
+  input.value = String(state.settings[key]);
+  input.dataset.launchpadSize = key;
+  input.addEventListener('change', async () => {
+    state.settings[key] = normalizeInt(input.value, state.settings[key], min, max);
+    input.value = String(state.settings[key]);
+    state.items = normalizeEntries(state.items);
+    await persistGridSize();
+    await persistItems();
+    render();
+  });
+  wrap.appendChild(input);
+  return wrap;
+}
+
 function renderGrid() {
   const wrap = document.createElement('div');
   wrap.className = 'launchpad-body';
@@ -187,8 +312,11 @@ function renderGrid() {
   const grid = document.createElement('div');
   grid.className = 'launchpad-grid';
   const items = visibleItems();
-  items.forEach((item, index) => grid.appendChild(renderTile(item, index)));
-  if (!state.query.trim()) grid.appendChild(renderAddTile());
+  if (state.query.trim()) {
+    items.forEach((item, index) => grid.appendChild(renderTile(item, index, { source: 'search' })));
+  } else {
+    state.items.forEach((entry, entryIndex) => grid.appendChild(renderEntry(entry, entryIndex)));
+  }
   if (!items.length && state.query.trim()) {
     const empty = document.createElement('div');
     empty.className = 'launchpad-empty';
@@ -217,16 +345,29 @@ function renderGrid() {
 }
 
 function visibleItems() {
-  return state.query.trim() ? state.results : state.items;
+  return state.query.trim() ? state.results : flattenEntries(state.items).map(x => x.item);
 }
 
-function renderTile(item, index) {
+function renderEntry(entry, entryIndex) {
+  if (entry.layoutType === 'container') return renderContainer(entry, entryIndex);
+  if (entry.layoutType === 'separator') return renderSeparator(entry, entryIndex);
+  return renderTile(entry.item, flatIndexForPath([entryIndex]), { entry, path: [entryIndex] });
+}
+
+function renderTile(item, index, opts = {}) {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'launchpad-tile' + (index === state.selectedIndex ? ' active' : '');
   if (state.editMode && !state.query.trim()) btn.classList.add('editable');
   if (reorderDrag?.active && reorderDrag.currentIndex === index) btn.classList.add('reordering');
   btn.dataset.index = String(index);
+  if (opts.path) btn.dataset.path = opts.path.join('.');
+  if (opts.entry) {
+    btn.classList.add('launchpad-entry');
+    btn.dataset.entryIndex = String(opts.path?.[0] ?? index);
+    btn.style.gridColumn = `span ${clampSpan(opts.entry.w, 1, 1, state.settings.columns)}`;
+    btn.style.gridRow = `span ${clampSpan(opts.entry.h, 1, 1, 4)}`;
+  }
   btn.innerHTML = `
     ${state.editMode && !state.query.trim() ? '<span class="launchpad-remove">×</span>' : ''}
     <span class="launchpad-tile-icon">${escapeHtml(item.icon || iconFor(item))}</span>
@@ -239,7 +380,7 @@ function renderTile(item, index) {
       return;
     }
     if (state.editMode && event.target?.classList?.contains('launchpad-remove')) {
-      removeItem(index);
+      removePath(opts.path || [index]);
       return;
     }
     if (state.editMode) {
@@ -249,23 +390,129 @@ function renderTile(item, index) {
     }
     activateItem(item);
   });
-  btn.addEventListener('pointerdown', event => startPointerReorder(event, index));
+  btn.addEventListener('pointerdown', event => startPointerReorder(event, opts.path || [index]));
   return btn;
 }
 
-function startPointerReorder(event, index) {
+function renderContainer(entry, entryIndex) {
+  const box = document.createElement('div');
+  box.className = 'launchpad-entry launchpad-container-entry';
+  box.dataset.entryIndex = String(entryIndex);
+  box.style.gridColumn = `span ${clampSpan(entry.w, 2, 1, state.settings.columns)}`;
+  box.style.gridRow = `span ${clampSpan(entry.h, 1, 1, 4)}`;
+  const header = document.createElement('div');
+  header.className = 'launchpad-container-header';
+  const title = document.createElement('span');
+  title.className = 'launchpad-container-title';
+  title.textContent = entry.title || 'Container';
+  header.appendChild(title);
+  if (state.editMode) {
+    const dims = document.createElement('span');
+    dims.className = 'launchpad-container-dims';
+    dims.textContent = `${entry.w}×${entry.h}`;
+    header.appendChild(dims);
+    const wInput = spanInput(entry, entryIndex, 'w', 1, state.settings.columns);
+    const hInput = spanInput(entry, entryIndex, 'h', 1, 4);
+    header.appendChild(wInput);
+    header.appendChild(hInput);
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'launchpad-container-remove';
+    remove.textContent = '×';
+    remove.title = 'Remove container';
+    remove.addEventListener('click', () => unwrapContainer(entryIndex));
+    header.appendChild(remove);
+  }
+  box.appendChild(header);
+  const children = document.createElement('div');
+  children.className = 'launchpad-container-children';
+  (entry.children || []).forEach((child, childIndex) => {
+    children.appendChild(renderTile(child, flatIndexForPath([entryIndex, childIndex]), {
+      path: [entryIndex, childIndex],
+    }));
+  });
+  if (!entry.children?.length) {
+    const empty = document.createElement('div');
+    empty.className = 'launchpad-container-empty';
+    empty.textContent = state.editMode ? 'Drop items here' : '';
+    children.appendChild(empty);
+  }
+  box.appendChild(children);
+  if (state.editMode) {
+    const handle = document.createElement('div');
+    handle.className = 'launchpad-resize-handle';
+    handle.addEventListener('pointerdown', event => startContainerResize(event, entryIndex));
+    box.appendChild(handle);
+    box.addEventListener('pointerdown', event => {
+      if (event.target.closest('.launchpad-tile, input, button, .launchpad-resize-handle')) return;
+      startPointerReorder(event, [entryIndex]);
+    });
+  }
+  return box;
+}
+
+function renderSeparator(entry, entryIndex) {
+  const sep = document.createElement('div');
+  sep.className = 'launchpad-entry launchpad-separator-entry';
+  sep.dataset.entryIndex = String(entryIndex);
+  sep.style.gridColumn = `span ${clampSpan(entry.w, state.settings.columns, 1, state.settings.columns)}`;
+  sep.innerHTML = state.editMode
+    ? '<span></span><button type="button" class="launchpad-separator-remove">×</button>'
+    : '<span></span>';
+  sep.querySelector('.launchpad-separator-remove')?.addEventListener('click', () => removePath([entryIndex]));
+  sep.addEventListener('pointerdown', event => startPointerReorder(event, [entryIndex]));
+  return sep;
+}
+
+function spanInput(entry, entryIndex, key, min, max) {
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.min = String(min);
+  input.max = String(max);
+  input.value = String(entry[key]);
+  input.className = 'launchpad-span-input';
+  input.addEventListener('change', async () => {
+    entry[key] = clampSpan(input.value, entry[key], min, max);
+    input.value = String(entry[key]);
+    await persistItems();
+    render();
+  });
+  input.addEventListener('pointerdown', event => event.stopPropagation());
+  return input;
+}
+
+function flattenEntries(entries) {
+  const flat = [];
+  entries.forEach((entry, entryIndex) => {
+    if (entry.layoutType === 'tile') {
+      flat.push({ item: entry.item, path: [entryIndex] });
+    } else if (entry.layoutType === 'container') {
+      (entry.children || []).forEach((child, childIndex) => {
+        flat.push({ item: child, path: [entryIndex, childIndex] });
+      });
+    }
+  });
+  return flat;
+}
+
+function flatIndexForPath(path) {
+  return flattenEntries(state.items).findIndex(x => x.path.join('.') === path.join('.'));
+}
+
+function startPointerReorder(event, path) {
   if (!state.editMode || state.query.trim() || event.button !== 0) return;
   if (event.target?.classList?.contains('launchpad-remove')) return;
-  if (!state.items[index]) return;
+  if (!getByPath(path)) return;
   reorderDrag = {
     pointerId: event.pointerId,
     startX: event.clientX,
     startY: event.clientY,
-    currentIndex: index,
+    path,
+    currentIndex: flatIndexForPath(path),
     active: false,
     changed: false,
   };
-  event.currentTarget.setPointerCapture?.(event.pointerId);
+  capturePointer(event.currentTarget, event.pointerId);
   document.addEventListener('pointermove', onPointerReorderMove, true);
   document.addEventListener('pointerup', finishPointerReorder, true);
   document.addEventListener('pointercancel', cancelPointerReorder, true);
@@ -279,15 +526,81 @@ function onPointerReorderMove(event) {
   reorderDrag.active = true;
   event.preventDefault();
   document.body.classList.add('launchpad-reorder-active');
-  const target = document.elementFromPoint(event.clientX, event.clientY)?.closest?.('.launchpad-tile[data-index]');
-  const targetIndex = Number(target?.dataset?.index);
-  if (!Number.isFinite(targetIndex) || targetIndex < 0 || targetIndex >= state.items.length) return;
-  if (targetIndex === reorderDrag.currentIndex) return;
-  const [moved] = state.items.splice(reorderDrag.currentIndex, 1);
-  state.items.splice(targetIndex, 0, moved);
-  reorderDrag.currentIndex = targetIndex;
+  const pointEl = document.elementFromPoint(event.clientX, event.clientY);
+  const eventEl = event.target?.closest ? event.target : null;
+  const target = pointEl?.closest?.('.launchpad-tile[data-path], .launchpad-container-entry[data-entry-index], .launchpad-separator-entry[data-entry-index]')
+    || eventEl?.closest?.('.launchpad-tile[data-path], .launchpad-container-entry[data-entry-index], .launchpad-separator-entry[data-entry-index]');
+  const targetPath = parseTargetPath(target);
+  if (!targetPath) return;
+
+  if (pathLength(targetPath) === 2 && canMovePathAsTile(reorderDrag.path)) {
+    if (reorderDrag.path.join('.') === targetPath.join('.')) return;
+    const targetContainer = state.items[targetPath[0]];
+    let insertAt = targetPath[1];
+    if (!targetContainer || targetContainer.layoutType !== 'container') return;
+    if (pathLength(reorderDrag.path) === 2 && state.items[reorderDrag.path[0]] === targetContainer && reorderDrag.path[1] < insertAt) {
+      insertAt -= 1;
+    }
+    const moved = removeByPath(reorderDrag.path);
+    if (moved?.layoutType === 'tile') {
+      targetContainer.children = targetContainer.children || [];
+      targetContainer.children.splice(Math.max(0, insertAt), 0, moved.item);
+      const containerIndex = state.items.indexOf(targetContainer);
+      reorderDrag.path = [containerIndex, Math.max(0, insertAt)];
+      reorderDrag.currentIndex = flatIndexForPath(reorderDrag.path);
+      reorderDrag.changed = true;
+      state.selectedIndex = Math.max(0, reorderDrag.currentIndex);
+      render();
+      document.body.classList.add('launchpad-reorder-active');
+    }
+    return;
+  }
+
+  const containerEl = pointEl?.closest?.('.launchpad-container-entry[data-entry-index]')
+    || eventEl?.closest?.('.launchpad-container-entry[data-entry-index]');
+  if (containerEl && canMovePathAsTile(reorderDrag.path)) {
+    const targetContainer = state.items[Number(containerEl.dataset.entryIndex)];
+    if (targetContainer?.layoutType === 'container' && !sameContainerPath(reorderDrag.path, targetContainer)) {
+      const moved = removeByPath(reorderDrag.path);
+      if (moved?.layoutType === 'tile') {
+        targetContainer.children = targetContainer.children || [];
+        targetContainer.children.push(moved.item);
+        const containerIndex = state.items.indexOf(targetContainer);
+        reorderDrag.path = [containerIndex, targetContainer.children.length - 1];
+        reorderDrag.currentIndex = flatIndexForPath(reorderDrag.path);
+        reorderDrag.changed = true;
+        state.selectedIndex = Math.max(0, reorderDrag.currentIndex);
+        render();
+        document.body.classList.add('launchpad-reorder-active');
+      }
+    }
+    return;
+  }
+
+  if (pathLength(reorderDrag.path) === 2 && pathLength(targetPath) === 1) {
+    const moved = removeByPath(reorderDrag.path);
+    if (moved?.layoutType === 'tile') {
+      const insertAt = Math.max(0, Math.min(state.items.length, targetPath[0]));
+      state.items.splice(insertAt, 0, moved);
+      reorderDrag.path = [insertAt];
+      reorderDrag.currentIndex = flatIndexForPath(reorderDrag.path);
+      reorderDrag.changed = true;
+      state.selectedIndex = Math.max(0, reorderDrag.currentIndex);
+      render();
+      document.body.classList.add('launchpad-reorder-active');
+    }
+    return;
+  }
+  if (pathLength(reorderDrag.path) !== 1 || pathLength(targetPath) !== 1) return;
+  const from = reorderDrag.path[0];
+  const to = targetPath[0];
+  if (from === to || !state.items[from] || !state.items[to]) return;
+  const [moved] = state.items.splice(from, 1);
+  state.items.splice(to, 0, moved);
+  reorderDrag.path = [to];
+  reorderDrag.currentIndex = flatIndexForPath([to]);
   reorderDrag.changed = true;
-  state.selectedIndex = targetIndex;
+  state.selectedIndex = Math.max(0, reorderDrag.currentIndex);
   render();
   document.body.classList.add('launchpad-reorder-active');
 }
@@ -316,18 +629,158 @@ function cleanupPointerReorder() {
   document.removeEventListener('pointercancel', cancelPointerReorder, true);
 }
 
-function renderAddTile() {
-  const add = document.createElement('button');
-  add.type = 'button';
-  add.className = 'launchpad-tile launchpad-add-tile';
-  add.innerHTML = '<span class="launchpad-tile-icon">+</span><span class="launchpad-tile-label">Add</span><span class="launchpad-tile-kind">Item</span>';
-  add.addEventListener('click', () => {
-    state.addOpen = true;
-    state.addModuleId = null;
-    state.addQuery = '';
-    render();
+function parseTargetPath(target) {
+  if (!target) return null;
+  if (target.dataset?.path) return target.dataset.path.split('.').map(Number);
+  if (target.dataset?.entryIndex != null) return [Number(target.dataset.entryIndex)];
+  return null;
+}
+
+function sameContainerPath(path, containerEntry) {
+  return pathLength(path) === 2 && state.items[path[0]] === containerEntry;
+}
+
+function canMovePathAsTile(path) {
+  const value = getByPath(path);
+  return pathLength(path) === 2 || value?.layoutType === 'tile';
+}
+
+function capturePointer(target, pointerId) {
+  try {
+    target?.setPointerCapture?.(pointerId);
+  } catch {
+    // Synthetic browser-smoke events do not always have an active pointer.
+  }
+}
+
+function pathLength(path) {
+  return Array.isArray(path) ? path.length : 0;
+}
+
+function getByPath(path) {
+  if (!Array.isArray(path)) return null;
+  const entry = state.items[path[0]];
+  if (path.length === 1) return entry || null;
+  return entry?.children?.[path[1]] || null;
+}
+
+function removeByPath(path) {
+  if (!Array.isArray(path)) return null;
+  if (path.length === 1) {
+    const [removed] = state.items.splice(path[0], 1);
+    return removed || null;
+  }
+  const entry = state.items[path[0]];
+  if (entry?.layoutType !== 'container') return null;
+  const [removed] = entry.children.splice(path[1], 1);
+  return removed ? { layoutType: 'tile', id: makeId('tile'), w: 1, h: 1, item: removed } : null;
+}
+
+async function removePath(path) {
+  const entry = getByPath(path);
+  if (path.length === 1 && entry?.layoutType === 'container') {
+    await unwrapContainer(path[0]);
+    return;
+  }
+  removeByPath(path);
+  await persistItems();
+  render();
+}
+
+async function unwrapContainer(index) {
+  const entry = state.items[index];
+  if (!entry || entry.layoutType !== 'container') return;
+  const children = (entry.children || []).map(child => ({
+    layoutType: 'tile',
+    id: makeId('tile'),
+    w: 1,
+    h: 1,
+    item: { ...child },
+  }));
+  state.items.splice(index, 1, ...children);
+  await persistItems();
+  render();
+}
+
+async function addContainer() {
+  state.items.push({
+    layoutType: 'container',
+    id: makeId('container'),
+    title: 'Container',
+    w: Math.min(2, state.settings.columns),
+    h: 1,
+    children: [],
   });
-  return add;
+  state.addMenuOpen = false;
+  await persistItems();
+  render();
+}
+
+async function addSeparator() {
+  state.items.push({
+    layoutType: 'separator',
+    id: makeId('separator'),
+    w: state.settings.columns,
+    h: 1,
+  });
+  state.addMenuOpen = false;
+  await persistItems();
+  render();
+}
+
+function startContainerResize(event, entryIndex) {
+  if (!state.editMode || event.button !== 0) return;
+  const entry = state.items[entryIndex];
+  if (!entry || entry.layoutType !== 'container') return;
+  resizeDrag = {
+    pointerId: event.pointerId,
+    entryIndex,
+    startX: event.clientX,
+    startY: event.clientY,
+    startW: Number(entry.w) || 1,
+    startH: Number(entry.h) || 1,
+  };
+  event.preventDefault();
+  event.stopPropagation();
+  capturePointer(event.currentTarget, event.pointerId);
+  document.addEventListener('pointermove', onContainerResizeMove, true);
+  document.addEventListener('pointerup', finishContainerResize, true);
+  document.addEventListener('pointercancel', cancelContainerResize, true);
+  document.body.classList.add('launchpad-resize-active');
+}
+
+function onContainerResizeMove(event) {
+  if (!resizeDrag || event.pointerId !== resizeDrag.pointerId) return;
+  event.preventDefault();
+  const entry = state.items[resizeDrag.entryIndex];
+  if (!entry || entry.layoutType !== 'container') return;
+  const dw = Math.floor((event.clientX - resizeDrag.startX) / 120);
+  const dh = Math.floor((event.clientY - resizeDrag.startY) / 78);
+  entry.w = clampSpan(resizeDrag.startW + dw, resizeDrag.startW, 1, state.settings.columns);
+  entry.h = clampSpan(resizeDrag.startH + dh, resizeDrag.startH, 1, 4);
+  render();
+  document.body.classList.add('launchpad-resize-active');
+}
+
+async function finishContainerResize(event) {
+  if (!resizeDrag || event.pointerId !== resizeDrag.pointerId) return;
+  cleanupContainerResize();
+  await persistItems();
+  render();
+}
+
+function cancelContainerResize(event) {
+  if (!resizeDrag || event.pointerId !== resizeDrag.pointerId) return;
+  cleanupContainerResize();
+  render();
+}
+
+function cleanupContainerResize() {
+  resizeDrag = null;
+  document.body.classList.remove('launchpad-resize-active');
+  document.removeEventListener('pointermove', onContainerResizeMove, true);
+  document.removeEventListener('pointerup', finishContainerResize, true);
+  document.removeEventListener('pointercancel', cancelContainerResize, true);
 }
 
 function renderAddPicker() {
@@ -451,16 +904,16 @@ function addResult(item) {
 }
 
 async function addItem(item) {
-  state.items.push({ ...item });
+  state.items.push({
+    layoutType: 'tile',
+    id: makeId('tile'),
+    w: 1,
+    h: 1,
+    item: { ...item },
+  });
   state.addOpen = false;
   state.addModuleId = null;
   state.addQuery = '';
-  await persistItems();
-  render();
-}
-
-async function removeItem(index) {
-  state.items.splice(index, 1);
   await persistItems();
   render();
 }
@@ -519,7 +972,8 @@ async function collectCandidates() {
     collectExecCommands(),
     collectFinancePlans(),
   ]);
-  return [
+  return dedupeCandidates([
+    ...flattenEntries(state.items).map(x => x.item),
     ...MODULES,
     ...tasks.map(t => ({
       type: 'task', moduleId: 'tasks', objectType: 'task', objectId: t.id,
@@ -541,7 +995,17 @@ async function collectCandidates() {
       wslDistro: c.wsl_distro || null, description: c.description,
     })),
     ...financePlans.map(p => financePlanItem(p)),
-  ];
+  ]);
+}
+
+function dedupeCandidates(items) {
+  const seen = new Set();
+  return items.filter(item => {
+    const key = itemKey(item);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 async function collectAddObjects(moduleId) {
@@ -618,6 +1082,7 @@ async function activateItem(item) {
   if (item.type === 'module') {
     await call('open_module_window', { moduleId: item.moduleId });
     await recordRecent(item);
+    await closeLaunchpadWindow();
   } else if (item.type === 'task' || item.type === 'note' || item.type === 'snippet' || item.type === 'finance_plan') {
     await call('open_module_object_window', {
       moduleId: item.moduleId,
@@ -628,9 +1093,14 @@ async function activateItem(item) {
       detailTab: item.detailTab || null,
     });
     await recordRecent(item);
+    await closeLaunchpadWindow();
   } else if (item.type === 'exec_command') {
     await runExecItem(item);
   }
+}
+
+async function closeLaunchpadWindow() {
+  await call('close_launchpad').catch(() => window.close());
 }
 
 async function runExecItem(item) {
@@ -685,7 +1155,7 @@ async function onKeydown(event) {
       render();
       return;
     }
-    if (state.addOpen || state.menuOpen) {
+    if (state.addOpen || state.addMenuOpen || state.menuOpen) {
       if (state.addOpen && state.addModuleId) {
         state.addModuleId = null;
         state.addQuery = '';
@@ -693,6 +1163,7 @@ async function onKeydown(event) {
         return;
       }
       state.addOpen = false;
+      state.addMenuOpen = false;
       state.menuOpen = false;
       render();
       return;
@@ -702,7 +1173,7 @@ async function onKeydown(event) {
       render();
       return;
     }
-    await call('close_launchpad').catch(() => window.close());
+    await closeLaunchpadWindow();
     return;
   }
   if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {

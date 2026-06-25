@@ -191,6 +191,7 @@ pub fn run() {
             commands::micro_picker::insert_snippet_micro_picker_text,
             commands::launchpad::open_launchpad,
             commands::launchpad::close_launchpad,
+            commands::launchpad::resize_launchpad_window,
             commands::notes::list_note_folders,
             commands::notes::create_note_folder,
             commands::notes::update_note_folder,

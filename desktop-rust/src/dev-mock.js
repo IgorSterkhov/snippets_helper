@@ -1041,6 +1041,10 @@
     async close_launchpad() {
       window.__mockLaunchpadClosed = true;
     },
+    async resize_launchpad_window({ columns, rows }) {
+      window.__mockLaunchpadResizeCalls = window.__mockLaunchpadResizeCalls || [];
+      window.__mockLaunchpadResizeCalls.push({ columns, rows });
+    },
     async open_snippet_micro_picker() {
       window.__mockSnippetMicroPickerOpened = true;
     },
