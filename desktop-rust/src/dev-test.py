@@ -279,6 +279,12 @@ async def run_tests():
             "document.querySelector('.help-changelog')?.textContent.includes('f-20260522-6')",
             timeout=3,
         )
+        await cdp.eval("document.querySelector('.help-tab-btn[data-tab-id=\"hotkeys\"]').click()")
+        await wait_until(
+            cdp,
+            "document.querySelector('.help-overlay')?.textContent.includes('Ctrl+Alt+Insert')",
+            timeout=3,
+        )
         await cdp.eval("document.querySelector('.help-close-btn').click()")
         await wait_until(cdp, "!document.querySelector('.help-overlay')", timeout=3)
     await check('T2b Help changelog shows frontend OTA notes', t2b_help_changelog_shows_frontend_ota_notes)
@@ -592,6 +598,8 @@ async def run_tests():
         await wait_until(cdp, "document.body.textContent.includes('Deepgram live dictation')", timeout=3)
         has_key = await cdp.eval("!!document.querySelector('.modal-overlay [data-key=\"whisper.deepgram_api_key\"]')")
         assert has_key, 'Deepgram API key input missing'
+        hotkey_value = await cdp.eval("document.querySelector('.modal-overlay [data-key=\"whisper.hotkey\"]')?.value || ''")
+        assert hotkey_value == 'Ctrl+Alt+Insert', hotkey_value
         settings_text = await cdp.eval("document.querySelector('.modal-overlay')?.textContent || ''")
         assert 'secret value' in settings_text, settings_text
         assert 'not the key ID' in settings_text, settings_text

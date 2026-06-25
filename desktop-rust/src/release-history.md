@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v1.20.2 (2026-06-25)
+
+- **Whisper hotkey default:** changed the default Whisper recording hotkey to
+  `Ctrl+Alt+Insert` so voice dictation no longer uses a letter key. Existing
+  local `Ctrl+Alt+Space` Whisper settings are migrated to `Ctrl+Alt+Insert`
+  when Launchpad also uses `Ctrl+Alt+Space`.
+
 ## f-20260625-1 (2026-06-25)
 
 - **Micro Launchpad Add drill-down:** `Add item` now lets you add either a

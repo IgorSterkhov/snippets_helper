@@ -434,7 +434,7 @@ pub fn run() {
 
             // Whisper global hotkey — registered separately from the main-
             // window toggle. User-configurable via `whisper.hotkey` setting
-            // (default Ctrl+Alt+W). Fires on Pressed; handler toggles
+            // (default Ctrl+Alt+Insert). Fires on Pressed; handler toggles
             // start/stop based on current service state. If the user assigns
             // the same shortcut to Launchpad, Launchpad wins so the recovery
             // panel stays reachable.
@@ -442,10 +442,10 @@ pub fn run() {
                 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
                 let db_state = app.state::<db::DbState>();
                 let conn = db_state.lock_recover();
-                let whisper_hotkey = db::queries::get_setting(&conn, &computer_id, "whisper.hotkey")
-                    .ok().flatten()
-                    .filter(|s| !s.is_empty())
-                    .unwrap_or_else(|| "Ctrl+Alt+W".to_string());
+                let stored_whisper_hotkey =
+                    db::queries::get_setting(&conn, &computer_id, "whisper.hotkey")
+                        .ok()
+                        .flatten();
                 let launchpad_hotkey = db::queries::get_setting(
                     &conn,
                     &computer_id,
@@ -455,6 +455,19 @@ pub fn run() {
                 .flatten()
                 .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| commands::launchpad::default_hotkey().to_string());
+                let whisper_hotkey = commands::whisper::resolve_hotkey_for_registration(
+                    stored_whisper_hotkey.as_deref(),
+                    &launchpad_hotkey,
+                );
+                if stored_whisper_hotkey.as_deref().map(str::trim) != Some(whisper_hotkey.as_str())
+                {
+                    let _ = db::queries::set_setting(
+                        &conn,
+                        &computer_id,
+                        "whisper.hotkey",
+                        &whisper_hotkey,
+                    );
+                }
                 drop(conn);
 
                 if whisper_hotkey.eq_ignore_ascii_case(&launchpad_hotkey) {

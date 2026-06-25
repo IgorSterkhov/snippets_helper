@@ -1,6 +1,8 @@
 import { whisperApi } from './whisper-api.js';
 import { gemmaApi, onGemmaEvent } from './gemma-api.js';
 
+const DEFAULT_WHISPER_HOTKEY = 'Ctrl+Alt+Insert';
+
 export async function openSettingsModal(opts = {}) {
   const backdrop = document.createElement('div');
   backdrop.className = 'modal-overlay';
@@ -40,7 +42,7 @@ export async function openSettingsModal(opts = {}) {
   }));
   content.appendChild(section('Язык', langSelect(s['whisper.language'] || 'auto')));
   const hotkeySection = section('Hotkey (глобальный — работает при скрытом окне)',
-    textInput('hotkey', s['whisper.hotkey'] || 'Ctrl+Alt+W', 'напр. Ctrl+Alt+W'));
+    textInput('hotkey', s['whisper.hotkey'] || DEFAULT_WHISPER_HOTKEY, `напр. ${DEFAULT_WHISPER_HOTKEY}`));
   const hkNote = document.createElement('div');
   hkNote.textContent = 'После изменения — перезапусти приложение для применения.';
   hkNote.style.cssText = 'font-size:11px;color:var(--text-muted,#8b949e);font-style:italic;margin-top:-2px';

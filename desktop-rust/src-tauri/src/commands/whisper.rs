@@ -16,6 +16,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::{AppHandle, Manager, State};
 
 const HOTKEY_DEBOUNCE_MS: u64 = 700;
+const DEFAULT_HOTKEY: &str = "Ctrl+Alt+Insert";
+const OLD_SPACE_HOTKEY: &str = "Ctrl+Alt+Space";
 static LAST_WHISPER_HOTKEY_MS: AtomicU64 = AtomicU64::new(0);
 const YANDEX_FOLDER_ID_MISSING_MESSAGE: &str = "Yandex batch recognition needs Folder ID. Add Yandex Folder ID in Whisper Settings, or enable Live dictate to use Yandex streaming instead.";
 
@@ -68,6 +70,20 @@ impl LiveProvider {
 }
 
 // --- helpers -----------------------------------------------------------------
+
+pub fn resolve_hotkey_for_registration(stored: Option<&str>, launchpad_hotkey: &str) -> String {
+    let trimmed = stored.map(str::trim).filter(|s| !s.is_empty());
+    let Some(value) = trimmed else {
+        return DEFAULT_HOTKEY.to_string();
+    };
+    if value.eq_ignore_ascii_case(OLD_SPACE_HOTKEY)
+        && launchpad_hotkey.trim().eq_ignore_ascii_case(OLD_SPACE_HOTKEY)
+    {
+        DEFAULT_HOTKEY.to_string()
+    } else {
+        value.to_string()
+    }
+}
 
 /// F2: computer_id is derived from hostname, matching the existing settings.rs
 /// and lib.rs patterns. Do NOT read a "computer_id" setting from the DB.
@@ -1077,6 +1093,31 @@ mod tests {
         assert!(YANDEX_FOLDER_ID_MISSING_MESSAGE.contains("Yandex batch recognition"));
         assert!(YANDEX_FOLDER_ID_MISSING_MESSAGE.contains("Folder ID"));
         assert!(YANDEX_FOLDER_ID_MISSING_MESSAGE.contains("Live dictate"));
+    }
+
+    #[test]
+    fn whisper_hotkey_defaults_to_non_text_insert_shortcut() {
+        assert_eq!(resolve_hotkey_for_registration(None, "Ctrl+Alt+Space"), "Ctrl+Alt+Insert");
+        assert_eq!(resolve_hotkey_for_registration(Some(""), "Ctrl+Alt+Space"), "Ctrl+Alt+Insert");
+    }
+
+    #[test]
+    fn old_whisper_space_hotkey_migrates_when_launchpad_uses_space() {
+        assert_eq!(
+            resolve_hotkey_for_registration(Some("Ctrl+Alt+Space"), "Ctrl+Alt+Space"),
+            "Ctrl+Alt+Insert"
+        );
+        assert_eq!(
+            resolve_hotkey_for_registration(Some("Ctrl+Alt+F12"), "Ctrl+Alt+Space"),
+            "Ctrl+Alt+F12"
+        );
+    }
+
+    #[test]
+    fn default_whisper_hotkey_is_supported_by_global_shortcut_parser() {
+        let parsed: Result<tauri_plugin_global_shortcut::Shortcut, _> =
+            resolve_hotkey_for_registration(None, "Ctrl+Alt+Space").parse();
+        assert!(parsed.is_ok(), "{parsed:?}");
     }
 
     #[test]
