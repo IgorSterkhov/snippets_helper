@@ -6,13 +6,14 @@ export function showModal({
   confirmText = 'Confirm',
   cancelText = 'Cancel',
   extraActions = [],
+  modalClassName = '',
 }) {
   return new Promise((resolve, reject) => {
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
 
     const modal = document.createElement('div');
-    modal.className = 'modal';
+    modal.className = ['modal', modalClassName].filter(Boolean).join(' ');
 
     const titleEl = document.createElement('h3');
     titleEl.textContent = title || '';

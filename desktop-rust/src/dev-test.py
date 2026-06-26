@@ -5385,6 +5385,19 @@ async def run_tests():
           row?.querySelector('.finance-fact-actions button')?.click();
         })()""")
         await wait_until(cdp, "!!document.querySelector('.modal-overlay .finance-tree-select')", timeout=4)
+        fact_modal_style = await cdp.eval("""(() => {
+          const modal = document.querySelector('.modal-overlay .modal.finance-facts-modal');
+          if (!modal) return null;
+          const style = getComputedStyle(modal);
+          return {
+            className: modal.className,
+            boxShadow: style.boxShadow,
+            borderColor: style.borderTopColor,
+          };
+        })()""")
+        assert fact_modal_style and 'finance-facts-modal' in fact_modal_style['className'], fact_modal_style
+        assert fact_modal_style['boxShadow'] != 'none', fact_modal_style
+        assert fact_modal_style['borderColor'], fact_modal_style
         await cdp.eval("document.querySelector('.modal-overlay .finance-tree-select-trigger')?.click()")
         await wait_until(cdp, "!!document.querySelector('.modal-overlay .finance-tree-select-menu')", timeout=3)
         tree_state = await cdp.eval("""(() => {
@@ -5408,6 +5421,8 @@ async def run_tests():
         await cdp.eval("""(() => [...document.querySelectorAll('.modal-overlay .modal-actions button')]
           .find(btn => btn.textContent.trim() === 'Create rule from fact')?.click())()""")
         await wait_until(cdp, "document.querySelector('.modal-overlay h3')?.textContent.trim() === 'Finance mapping rules'", timeout=4)
+        rule_seed_modal_class = await cdp.eval("document.querySelector('.modal-overlay .modal')?.className || ''")
+        assert 'finance-facts-modal' in rule_seed_modal_class, rule_seed_modal_class
         seeded_rule = await cdp.eval("""(() => ({
           category: document.querySelector('.modal-overlay [data-rule-field="category"]')?.value || '',
           description: document.querySelector('.modal-overlay [data-rule-field="description"]')?.value || '',
@@ -5482,6 +5497,8 @@ async def run_tests():
         await wait_until(cdp, "!!document.querySelector('.modal-overlay [data-rule-field=\"category\"]')", timeout=4)
         rules_title = await cdp.eval("document.querySelector('.modal-overlay h3')?.textContent || ''")
         assert rules_title == 'Finance mapping rules', rules_title
+        rules_modal_class = await cdp.eval("document.querySelector('.modal-overlay .modal')?.className || ''")
+        assert 'finance-facts-modal' in rules_modal_class, rules_modal_class
         await close_modals()
 
     await check('T26j Finance facts import and rules', t26j_finance_facts_import_and_rules)

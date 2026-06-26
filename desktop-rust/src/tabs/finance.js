@@ -693,6 +693,43 @@ function injectStyles() {
 .finance-modal-grid select {
   min-width: 0;
 }
+.modal.finance-facts-modal {
+  position: relative;
+  background:
+    linear-gradient(180deg, rgba(38, 127, 149, 0.18), rgba(38, 127, 149, 0.04) 150px),
+    color-mix(in srgb, var(--bg-secondary) 80%, #0b151a);
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  box-shadow:
+    0 26px 76px rgba(0, 0, 0, 0.62),
+    0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+}
+.modal.finance-facts-modal::before {
+  content: "";
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  top: 0;
+  height: 3px;
+  border-radius: 0 0 5px 5px;
+  background: linear-gradient(90deg, #2b9ab4, #79c8d8);
+}
+.modal.finance-facts-modal h3 {
+  color: #e8fbff;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  padding-bottom: 12px;
+}
+.modal.finance-facts-modal .finance-modal-note:first-child {
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.035);
+  color: color-mix(in srgb, var(--text) 86%, var(--text-muted));
+}
+.modal.finance-facts-modal .modal-actions {
+  margin: 2px -4px -4px;
+  padding-top: 14px;
+  border-top: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+}
 .finance-modal-note {
   grid-column: 1 / -1;
   color: var(--text-muted);
@@ -2803,6 +2840,7 @@ async function openFactAssignmentModal(transaction, allocation) {
       title: 'Map finance fact',
       body,
       confirmText: 'Save mapping',
+      modalClassName: 'finance-facts-modal',
       extraActions: [
         {
           text: 'Create rule from fact',
@@ -3060,6 +3098,7 @@ async function openFinanceRulesModal(seed = {}) {
       title: 'Finance mapping rules',
       body,
       confirmText: seed.seedTransaction ? 'Create and apply rule' : 'Create rule',
+      modalClassName: 'finance-facts-modal',
       onConfirm: async () => {
         const name = body.querySelector('[data-rule-field="name"]')?.value.trim() || 'New mapping rule';
         const targetItemValue = body.querySelector('[data-rule-field="item-id"]')?.value || '';

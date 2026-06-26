@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## f-20260626-3 (2026-06-26)
+
+- **Finance Facts modal contrast:** the `Map finance fact` and
+  `Finance mapping rules` dialogs now use a dedicated Finance modal surface
+  with a stronger background, accent edge, border, and shadow so the dialog
+  boundary is readable against the Facts screen.
+
 ## f-20260626-2 (2026-06-26)
 
 - **Finance Facts month picker fix:** the month picker popup now stays within
