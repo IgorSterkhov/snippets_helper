@@ -5081,11 +5081,11 @@ async def run_tests():
         await seed_finance_calendar()
         await reload_finance()
 
-        view_buttons = await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-segment-btn')]
+        view_buttons = await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-view-bar .finance-segment-btn')]
           .map(btn => btn.textContent.trim()).join('|'))()""")
         assert view_buttons == 'Structure|Calendar', view_buttons
 
-        await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-segment-btn')]
+        await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-view-bar .finance-segment-btn')]
           .find(btn => btn.textContent.trim() === 'Calendar').click())()""")
         await wait_until(cdp, "!!document.querySelector('#panel-finance .finance-calendar-row[data-id=\"2\"]')", timeout=4)
 
@@ -5142,13 +5142,146 @@ async def run_tests():
             timeout=4,
         )
         project_buttons = await cdp.eval(
-            "document.querySelectorAll('#panel-finance .finance-segment-btn').length"
+            "document.querySelectorAll('#panel-finance .finance-view-bar .finance-segment-btn').length"
         )
         assert project_buttons == 0, project_buttons
 
     await check('T26i Finance payment calendar', t26i_finance_payment_calendar)
 
-    async def t26j_clickhouse_docs_slow_tree_fallback():
+    async def t26j_finance_facts_import_and_rules():
+        async def seed_finance_facts():
+            plans = [
+                {
+                    'id': 1,
+                    'uuid': 'fp-facts-1',
+                    'name': 'Regular monthly',
+                    'currency': 'RUB',
+                    'kind': 'monthly',
+                    'sort_order': 0,
+                    'created_at': '2026-01-01T00:00:00Z',
+                    'updated_at': '2026-01-01T00:00:00Z',
+                    'sync_status': 'pending',
+                    'user_id': 'mock-user',
+                },
+                {
+                    'id': 2,
+                    'uuid': 'fp-facts-2',
+                    'name': 'Project expenses',
+                    'currency': 'RUB',
+                    'kind': 'project',
+                    'sort_order': 1,
+                    'created_at': '2026-01-01T00:00:00Z',
+                    'updated_at': '2026-01-01T00:00:00Z',
+                    'sync_status': 'pending',
+                    'user_id': 'mock-user',
+                },
+            ]
+            items = [
+                {
+                    'id': 1,
+                    'uuid': 'fi-facts-1',
+                    'plan_id': 1,
+                    'parent_id': None,
+                    'name': 'Transport',
+                    'amount_cents': 0,
+                    'due_day': None,
+                    'due_date': None,
+                    'note': '',
+                    'sort_order': 0,
+                    'created_at': '2026-01-01T00:00:00Z',
+                    'updated_at': '2026-01-01T00:00:00Z',
+                    'sync_status': 'pending',
+                    'user_id': 'mock-user',
+                },
+            ]
+            transactions = [
+                {
+                    'id': 1,
+                    'uuid': 'ft-facts-1',
+                    'source': 'tbank_csv',
+                    'source_fingerprint': 'facts-taxi-1',
+                    'import_batch_id': None,
+                    'operation_at': '2026-04-30 17:38:55',
+                    'payment_date': '2026-04-30',
+                    'card_mask': '*7857',
+                    'status': 'OK',
+                    'amount_cents': -50600,
+                    'currency': 'RUB',
+                    'operation_amount_cents': -50600,
+                    'operation_currency': 'RUB',
+                    'payment_amount_cents': -50600,
+                    'payment_currency': 'RUB',
+                    'cashback_cents': 2500,
+                    'bank_category': 'Такси',
+                    'mcc': '3990',
+                    'description': 'Яндекс Такси',
+                    'bonuses_cents': 2500,
+                    'invest_rounding_cents': 9400,
+                    'rounded_amount_cents': -60000,
+                    'raw_json': '{}',
+                    'rules_locked': False,
+                    'created_at': '2026-01-01T00:00:00Z',
+                    'updated_at': '2026-01-01T00:00:00Z',
+                    'sync_status': 'pending',
+                    'user_id': 'mock-user',
+                },
+            ]
+            await cdp.eval(f"""(() => {{
+              localStorage.setItem('mock.finance_plans', JSON.stringify({json.dumps(plans)}));
+              localStorage.setItem('mock.__seq.finance_plans', '2');
+              localStorage.setItem('mock.finance_items', JSON.stringify({json.dumps(items)}));
+              localStorage.setItem('mock.__seq.finance_items', '1');
+              localStorage.setItem('mock.finance_payments', JSON.stringify([]));
+              localStorage.setItem('mock.__seq.finance_payments', '0');
+              localStorage.setItem('mock.finance_transactions', JSON.stringify({json.dumps(transactions)}));
+              localStorage.setItem('mock.__seq.finance_transactions', '1');
+              localStorage.setItem('mock.finance_transaction_allocations', JSON.stringify([]));
+              localStorage.setItem('mock.__seq.finance_transaction_allocations', '0');
+              localStorage.setItem('mock.finance_mapping_rules', JSON.stringify([]));
+              localStorage.setItem('mock.__seq.finance_mapping_rules', '0');
+              localStorage.setItem('mock.finance_import_batches', JSON.stringify([]));
+              localStorage.setItem('mock.__seq.finance_import_batches', '0');
+            }})()""")
+
+        async def reload_finance():
+            await cdp.send('Page.navigate', url=TEST_URL)
+            await asyncio.sleep(0.8)
+            await wait_until(cdp, "!!document.querySelector('.tab-btn')", timeout=8)
+            await wait_until(cdp, "!!window.__TAURI__ && !!window.__TAURI__.core", timeout=5)
+            await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"finance\"]').click()")
+            await wait_until(cdp, "!!document.querySelector('#panel-finance .finance-mode-bar')", timeout=5)
+
+        await seed_finance_facts()
+        await reload_finance()
+        mode_buttons = await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-mode-bar .finance-segment-btn')]
+          .map(btn => btn.textContent.trim()).join('|'))()""")
+        assert mode_buttons == 'Lists|Facts', mode_buttons
+
+        await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-mode-bar .finance-segment-btn')]
+          .find(btn => btn.textContent.trim() === 'Facts').click())()""")
+        await wait_until(cdp, "!!document.querySelector('#panel-finance .finance-facts-table')", timeout=4)
+        first_fact = await cdp.eval(
+            "document.querySelector('#panel-finance .finance-fact-row .finance-fact-description')?.textContent.trim() || ''"
+        )
+        assert first_fact == 'Яндекс Такси', first_fact
+
+        await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-facts-header button')]
+          .find(btn => btn.textContent.trim() === 'Import CSV').click())()""")
+        await wait_until(cdp, "!!document.querySelector('.modal-overlay .finance-import-preview')", timeout=4)
+        preview_text = await cdp.eval("document.querySelector('.modal-overlay .finance-import-preview')?.textContent || ''")
+        assert 'New' in preview_text and 'Duplicates' in preview_text, preview_text
+        await close_modals()
+
+        await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-facts-header button')]
+          .find(btn => btn.textContent.trim() === 'Rules').click())()""")
+        await wait_until(cdp, "!!document.querySelector('.modal-overlay [data-rule-field=\"category\"]')", timeout=4)
+        rules_title = await cdp.eval("document.querySelector('.modal-overlay h3')?.textContent || ''")
+        assert rules_title == 'Finance mapping rules', rules_title
+        await close_modals()
+
+    await check('T26j Finance facts import and rules', t26j_finance_facts_import_and_rules)
+
+    async def t26k_clickhouse_docs_slow_tree_fallback():
         clickhouse_rs_path = os.path.join(SRC_DIR, '..', 'src-tauri', 'src', 'commands', 'clickhouse_docs.rs')
         with open(clickhouse_rs_path, 'r', encoding='utf-8') as fh:
             clickhouse_rs = fh.read()
@@ -5203,7 +5336,7 @@ async def run_tests():
               delete window.__CLICKHOUSE_DOCS_LOAD_TIMEOUT_MS;
             })()""")
 
-    await check('T26j ClickHouse docs slow tree fallback', t26j_clickhouse_docs_slow_tree_fallback)
+    await check('T26k ClickHouse docs slow tree fallback', t26k_clickhouse_docs_slow_tree_fallback)
 
     # ── T27: ClickHouse docs module ───────────────────────
     async def t27_clickhouse_docs_module():

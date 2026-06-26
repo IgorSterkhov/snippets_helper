@@ -1,10 +1,19 @@
+import json
 from datetime import date, datetime, timedelta
 from uuid import UUID
 from fastapi import APIRouter, Depends
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from api.database import get_db
-from api.models import FinanceItem, FinancePayment, FinancePlan, User, TABLE_MODELS
+from api.models import (
+    FinanceItem,
+    FinanceMappingRule,
+    FinancePayment,
+    FinancePlan,
+    FinanceTransaction,
+    User,
+    TABLE_MODELS,
+)
 from api.schemas import (
     PushRequest, PushResponse, ConflictInfo,
     PullRequest, PullResponse,
@@ -44,6 +53,12 @@ def _has_required_uuid_relations(table_name: str, row: dict) -> bool:
         return bool(row.get("plan_uuid"))
     if table_name == "finance_payments":
         return bool(row.get("plan_uuid")) and bool(row.get("item_uuid"))
+    if table_name == "finance_transactions":
+        return True
+    if table_name == "finance_mapping_rules":
+        return bool(row.get("target_plan_uuid"))
+    if table_name == "finance_transaction_allocations":
+        return bool(row.get("transaction_uuid")) and bool(row.get("plan_uuid"))
     return True
 
 
@@ -135,6 +150,99 @@ def _valid_finance_payment_values(extra: dict) -> bool:
     return True
 
 
+def _valid_iso_date_text(value: str, *, with_time: bool) -> bool:
+    try:
+        if with_time:
+            datetime.fromisoformat(value)
+        else:
+            date.fromisoformat(value)
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def _valid_finance_transaction_values(extra: dict) -> bool:
+    source = str(extra.get("source") or "").strip()
+    fingerprint = str(extra.get("source_fingerprint") or "").strip()
+    if not source or not fingerprint:
+        return False
+    if not _valid_iso_date_text(str(extra.get("operation_at") or ""), with_time=True):
+        return False
+    if not _valid_iso_date_text(str(extra.get("payment_date") or ""), with_time=False):
+        return False
+    for key in (
+        "amount_cents",
+        "operation_amount_cents",
+        "payment_amount_cents",
+        "cashback_cents",
+        "bonuses_cents",
+        "invest_rounding_cents",
+        "rounded_amount_cents",
+    ):
+        value = extra.get(key)
+        if value in (None, ""):
+            continue
+        try:
+            int(value)
+        except (TypeError, ValueError):
+            return False
+    if not isinstance(extra.get("rules_locked", False), bool):
+        extra["rules_locked"] = bool(extra.get("rules_locked"))
+    return True
+
+
+def _valid_finance_mapping_rule_values(extra: dict) -> bool:
+    match_mode = str(extra.get("match_mode") or "all").strip().lower()
+    if match_mode not in {"all", "any"}:
+        return False
+    extra["match_mode"] = match_mode
+    try:
+        priority = int(extra.get("priority") or 0)
+    except (TypeError, ValueError):
+        return False
+    extra["priority"] = priority
+    conditions_json = str(extra.get("conditions_json") or "[]")
+    if len(conditions_json) > 20000:
+        return False
+    try:
+        parsed_conditions = json.loads(conditions_json)
+    except (TypeError, ValueError):
+        return False
+    if not isinstance(parsed_conditions, list):
+        return False
+    return True
+
+
+async def _finance_transaction_exists(
+    db: AsyncSession,
+    user_id: UUID,
+    transaction_uuid: UUID,
+) -> bool:
+    result = await db.execute(
+        select(FinanceTransaction.uuid).where(
+            FinanceTransaction.uuid == transaction_uuid,
+            FinanceTransaction.user_id == user_id,
+            FinanceTransaction.is_deleted == False,  # noqa: E712
+        )
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def _finance_mapping_rule_exists(
+    db: AsyncSession,
+    user_id: UUID,
+    rule_uuid: UUID,
+) -> bool:
+    result = await db.execute(
+        select(FinanceMappingRule.uuid).where(
+            FinanceMappingRule.uuid == rule_uuid,
+            FinanceMappingRule.user_id == user_id,
+            FinanceMappingRule.is_deleted == False,  # noqa: E712
+        )
+    )
+    return result.scalar_one_or_none() is not None
+
+
 async def _finance_plan_exists(db: AsyncSession, user_id: UUID, plan_uuid: UUID) -> bool:
     result = await db.execute(
         select(FinancePlan.uuid).where(
@@ -205,6 +313,58 @@ async def _valid_finance_row(
         return True
 
     if table_name != "finance_items":
+        if table_name == "finance_transactions":
+            if not _valid_finance_transaction_values(extra):
+                return False
+            import_batch_uuid = _parse_optional_uuid(extra.get("import_batch_uuid"))
+            if import_batch_uuid:
+                # Import batch is useful metadata, not required for a valid fact.
+                extra["import_batch_uuid"] = import_batch_uuid
+            return True
+
+        if table_name == "finance_mapping_rules":
+            if not _valid_finance_mapping_rule_values(extra):
+                return False
+            plan_uuid = _parse_optional_uuid(extra.get("target_plan_uuid"))
+            if not plan_uuid:
+                return False
+            if plan_uuid not in batch_plan_kinds and not await _finance_plan_exists(db, user_id, plan_uuid):
+                return False
+            item_uuid = _parse_optional_uuid(extra.get("target_item_uuid"))
+            if item_uuid:
+                item_plan_uuid = batch_item_plans.get(item_uuid)
+                if item_plan_uuid is None:
+                    item_plan_uuid = await _finance_item_plan_uuid(db, user_id, item_uuid)
+                if item_plan_uuid != plan_uuid:
+                    return False
+            return True
+
+        if table_name == "finance_transaction_allocations":
+            transaction_uuid = _parse_optional_uuid(extra.get("transaction_uuid"))
+            plan_uuid = _parse_optional_uuid(extra.get("plan_uuid"))
+            if not transaction_uuid or not plan_uuid:
+                return False
+            if not await _finance_transaction_exists(db, user_id, transaction_uuid):
+                return False
+            if plan_uuid not in batch_plan_kinds and not await _finance_plan_exists(db, user_id, plan_uuid):
+                return False
+            item_uuid = _parse_optional_uuid(extra.get("item_uuid"))
+            if item_uuid:
+                item_plan_uuid = batch_item_plans.get(item_uuid)
+                if item_plan_uuid is None:
+                    item_plan_uuid = await _finance_item_plan_uuid(db, user_id, item_uuid)
+                if item_plan_uuid != plan_uuid:
+                    return False
+            rule_uuid = _parse_optional_uuid(extra.get("rule_uuid"))
+            if rule_uuid and not await _finance_mapping_rule_exists(db, user_id, rule_uuid):
+                return False
+            assigned_by = str(extra.get("assigned_by") or "manual").strip()
+            if assigned_by not in {"manual", "rule"}:
+                return False
+            extra["assigned_by"] = assigned_by
+            extra["is_active"] = bool(extra.get("is_active", True))
+            return True
+
         if table_name != "finance_payments":
             return True
 
@@ -342,6 +502,22 @@ async def push(
                             FinancePayment.user_id == user.id,
                             FinancePayment.item_uuid == item_uuid,
                             FinancePayment.month_key == month_key,
+                        )
+                    )
+                    natural_uuid = natural_result.scalar_one_or_none()
+                    if natural_uuid and natural_uuid != row_uuid:
+                        rejected_uuids.setdefault(table_name, []).append(str(row_uuid))
+                        continue
+
+            if table_name == "finance_transactions" and not existing and not is_deleted:
+                source = str(extra.get("source") or "").strip()
+                source_fingerprint = str(extra.get("source_fingerprint") or "").strip()
+                if source and source_fingerprint:
+                    natural_result = await db.execute(
+                        select(FinanceTransaction.uuid).where(
+                            FinanceTransaction.user_id == user.id,
+                            FinanceTransaction.source == source,
+                            FinanceTransaction.source_fingerprint == source_fingerprint,
                         )
                     )
                     natural_uuid = natural_result.scalar_one_or_none()

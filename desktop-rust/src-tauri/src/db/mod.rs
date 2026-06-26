@@ -298,6 +298,89 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
             UNIQUE(plan_id, item_id, month_key)
         );
 
+        CREATE TABLE IF NOT EXISTS finance_import_batches (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            source              TEXT NOT NULL DEFAULT 'tbank_csv',
+            file_name           TEXT NOT NULL DEFAULT '',
+            total_rows          INTEGER NOT NULL DEFAULT 0,
+            imported_rows       INTEGER NOT NULL DEFAULT 0,
+            duplicate_rows      INTEGER NOT NULL DEFAULT 0,
+            error_rows          INTEGER NOT NULL DEFAULT 0,
+            date_from           TEXT,
+            date_to             TEXT,
+            expense_total_cents INTEGER NOT NULL DEFAULT 0,
+            income_total_cents  INTEGER NOT NULL DEFAULT 0,
+            currency            TEXT NOT NULL DEFAULT 'RUB',
+            created_at          TIMESTAMP NOT NULL,
+            updated_at          TIMESTAMP NOT NULL,
+            uuid                TEXT UNIQUE NOT NULL,
+            sync_status         TEXT NOT NULL DEFAULT 'pending',
+            user_id             TEXT NOT NULL DEFAULT ''
+        );
+
+        CREATE TABLE IF NOT EXISTS finance_transactions (
+            id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+            source                  TEXT NOT NULL DEFAULT 'tbank_csv',
+            source_fingerprint      TEXT NOT NULL,
+            import_batch_id         INTEGER REFERENCES finance_import_batches(id) ON DELETE SET NULL,
+            operation_at            TEXT NOT NULL DEFAULT '',
+            payment_date            TEXT NOT NULL DEFAULT '',
+            card_mask               TEXT NOT NULL DEFAULT '',
+            status                  TEXT NOT NULL DEFAULT '',
+            amount_cents            INTEGER NOT NULL DEFAULT 0,
+            currency                TEXT NOT NULL DEFAULT 'RUB',
+            operation_amount_cents  INTEGER NOT NULL DEFAULT 0,
+            operation_currency      TEXT NOT NULL DEFAULT 'RUB',
+            payment_amount_cents    INTEGER NOT NULL DEFAULT 0,
+            payment_currency        TEXT NOT NULL DEFAULT 'RUB',
+            cashback_cents          INTEGER,
+            bank_category           TEXT NOT NULL DEFAULT '',
+            mcc                     TEXT NOT NULL DEFAULT '',
+            description             TEXT NOT NULL DEFAULT '',
+            bonuses_cents           INTEGER,
+            invest_rounding_cents   INTEGER,
+            rounded_amount_cents    INTEGER,
+            raw_json                TEXT NOT NULL DEFAULT '{}',
+            rules_locked            INTEGER NOT NULL DEFAULT 0 CHECK (rules_locked IN (0, 1)),
+            created_at              TIMESTAMP NOT NULL,
+            updated_at              TIMESTAMP NOT NULL,
+            uuid                    TEXT UNIQUE NOT NULL,
+            sync_status             TEXT NOT NULL DEFAULT 'pending',
+            user_id                 TEXT NOT NULL DEFAULT '',
+            UNIQUE(source, source_fingerprint)
+        );
+
+        CREATE TABLE IF NOT EXISTS finance_mapping_rules (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            name                TEXT NOT NULL DEFAULT '',
+            is_enabled          INTEGER NOT NULL DEFAULT 1 CHECK (is_enabled IN (0, 1)),
+            priority            INTEGER NOT NULL DEFAULT 0,
+            match_mode          TEXT NOT NULL DEFAULT 'all' CHECK (match_mode IN ('all', 'any')),
+            conditions_json     TEXT NOT NULL DEFAULT '[]',
+            target_plan_id      INTEGER NOT NULL REFERENCES finance_plans(id) ON DELETE CASCADE,
+            target_item_id      INTEGER REFERENCES finance_items(id) ON DELETE SET NULL,
+            created_at          TIMESTAMP NOT NULL,
+            updated_at          TIMESTAMP NOT NULL,
+            uuid                TEXT UNIQUE NOT NULL,
+            sync_status         TEXT NOT NULL DEFAULT 'pending',
+            user_id             TEXT NOT NULL DEFAULT ''
+        );
+
+        CREATE TABLE IF NOT EXISTS finance_transaction_allocations (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            transaction_id      INTEGER NOT NULL REFERENCES finance_transactions(id) ON DELETE CASCADE,
+            plan_id             INTEGER NOT NULL REFERENCES finance_plans(id) ON DELETE CASCADE,
+            item_id             INTEGER REFERENCES finance_items(id) ON DELETE SET NULL,
+            assigned_by         TEXT NOT NULL DEFAULT 'manual' CHECK (assigned_by IN ('manual', 'rule')),
+            rule_id             INTEGER REFERENCES finance_mapping_rules(id) ON DELETE SET NULL,
+            is_active           INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+            created_at          TIMESTAMP NOT NULL,
+            updated_at          TIMESTAMP NOT NULL,
+            uuid                TEXT UNIQUE NOT NULL,
+            sync_status         TEXT NOT NULL DEFAULT 'pending',
+            user_id             TEXT NOT NULL DEFAULT ''
+        );
+
         CREATE TABLE IF NOT EXISTS clickhouse_doc_pages (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             source_url      TEXT UNIQUE NOT NULL,
@@ -358,6 +441,12 @@ pub fn run_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
         CREATE INDEX IF NOT EXISTS idx_finance_items_plan ON finance_items(plan_id, parent_id, sort_order);
         CREATE INDEX IF NOT EXISTS idx_finance_payments_plan_month ON finance_payments(plan_id, month_key, item_id);
         CREATE INDEX IF NOT EXISTS idx_finance_payments_item ON finance_payments(item_id, month_key);
+        CREATE INDEX IF NOT EXISTS idx_finance_import_batches_imported ON finance_import_batches(created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_finance_transactions_source_fingerprint ON finance_transactions(source, source_fingerprint);
+        CREATE INDEX IF NOT EXISTS idx_finance_transactions_payment_date ON finance_transactions(payment_date, id);
+        CREATE INDEX IF NOT EXISTS idx_finance_allocations_plan_item ON finance_transaction_allocations(plan_id, item_id, transaction_id);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_finance_allocations_one_active ON finance_transaction_allocations(transaction_id) WHERE is_active = 1;
+        CREATE INDEX IF NOT EXISTS idx_finance_mapping_rules_sort ON finance_mapping_rules(is_enabled DESC, priority ASC, id ASC);
         CREATE INDEX IF NOT EXISTS idx_clickhouse_doc_pages_category ON clickhouse_doc_pages(category, title);
         CREATE INDEX IF NOT EXISTS idx_clickhouse_doc_sections_page ON clickhouse_doc_sections(page_id, sort_order);
         CREATE INDEX IF NOT EXISTS idx_clickhouse_doc_sections_title ON clickhouse_doc_sections(title);

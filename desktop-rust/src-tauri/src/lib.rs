@@ -253,6 +253,18 @@ pub fn run() {
             commands::finance::delete_finance_item,
             commands::finance::list_finance_payments,
             commands::finance::upsert_finance_payment,
+            commands::finance::pick_finance_csv_file,
+            commands::finance::preview_finance_bank_csv,
+            commands::finance::import_finance_bank_csv,
+            commands::finance::list_finance_transactions,
+            commands::finance::list_finance_transaction_allocations,
+            commands::finance::list_finance_mapping_rules,
+            commands::finance::create_finance_mapping_rule,
+            commands::finance::update_finance_mapping_rule,
+            commands::finance::delete_finance_mapping_rule,
+            commands::finance::apply_finance_mapping_rule,
+            commands::finance::assign_finance_transaction,
+            commands::finance::set_finance_transaction_rules_locked,
             // Help
             commands::help::get_changelog,
             // Repo Search

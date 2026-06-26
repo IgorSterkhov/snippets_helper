@@ -218,6 +218,92 @@ pub struct FinancePayment {
     pub user_id: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FinanceImportBatch {
+    pub id: Option<i64>,
+    pub source: String,
+    pub file_name: String,
+    pub total_rows: i64,
+    pub imported_rows: i64,
+    pub duplicate_rows: i64,
+    pub error_rows: i64,
+    pub date_from: Option<String>,
+    pub date_to: Option<String>,
+    pub expense_total_cents: i64,
+    pub income_total_cents: i64,
+    pub currency: String,
+    pub created_at: NaiveDateTime,
+    pub updated_at: NaiveDateTime,
+    pub uuid: String,
+    pub sync_status: String,
+    pub user_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FinanceTransaction {
+    pub id: Option<i64>,
+    pub source: String,
+    pub source_fingerprint: String,
+    pub import_batch_id: Option<i64>,
+    pub operation_at: String,
+    pub payment_date: String,
+    pub card_mask: String,
+    pub status: String,
+    pub amount_cents: i64,
+    pub currency: String,
+    pub operation_amount_cents: i64,
+    pub operation_currency: String,
+    pub payment_amount_cents: i64,
+    pub payment_currency: String,
+    pub cashback_cents: Option<i64>,
+    pub bank_category: String,
+    pub mcc: String,
+    pub description: String,
+    pub bonuses_cents: Option<i64>,
+    pub invest_rounding_cents: Option<i64>,
+    pub rounded_amount_cents: Option<i64>,
+    pub raw_json: String,
+    pub rules_locked: bool,
+    pub created_at: NaiveDateTime,
+    pub updated_at: NaiveDateTime,
+    pub uuid: String,
+    pub sync_status: String,
+    pub user_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FinanceTransactionAllocation {
+    pub id: Option<i64>,
+    pub transaction_id: i64,
+    pub plan_id: i64,
+    pub item_id: Option<i64>,
+    pub assigned_by: String,
+    pub rule_id: Option<i64>,
+    pub is_active: bool,
+    pub created_at: NaiveDateTime,
+    pub updated_at: NaiveDateTime,
+    pub uuid: String,
+    pub sync_status: String,
+    pub user_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FinanceMappingRule {
+    pub id: Option<i64>,
+    pub name: String,
+    pub is_enabled: bool,
+    pub priority: i32,
+    pub match_mode: String,
+    pub conditions_json: String,
+    pub target_plan_id: i64,
+    pub target_item_id: Option<i64>,
+    pub created_at: NaiveDateTime,
+    pub updated_at: NaiveDateTime,
+    pub uuid: String,
+    pub sync_status: String,
+    pub user_id: String,
+}
+
 // ── Local tables ─────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

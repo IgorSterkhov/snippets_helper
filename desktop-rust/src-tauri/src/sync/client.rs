@@ -257,6 +257,90 @@ impl SyncClient {
                     obj.insert("item_uuid".to_string(), Value::String(item_uuid));
                 }
 
+                if table == "finance_transactions" {
+                    if let Some(import_batch_id) =
+                        obj.get("import_batch_id").and_then(|v| v.as_i64())
+                    {
+                        let import_batch_uuid =
+                            queries::get_finance_import_batch_uuid_by_id(conn, import_batch_id)
+                                .map_err(|e| format!("get_finance_import_batch_uuid_by_id: {e}"))?;
+                        obj.insert(
+                            "import_batch_uuid".to_string(),
+                            import_batch_uuid.map(Value::String).unwrap_or(Value::Null),
+                        );
+                    } else {
+                        obj.insert("import_batch_uuid".to_string(), Value::Null);
+                    }
+                }
+
+                if table == "finance_mapping_rules" {
+                    let Some(plan_id) = obj.get("target_plan_id").and_then(|v| v.as_i64()) else {
+                        continue;
+                    };
+                    let plan_uuid = queries::get_finance_plan_uuid_by_id(conn, plan_id)
+                        .map_err(|e| format!("get_finance_plan_uuid_by_id: {e}"))?;
+                    let Some(plan_uuid) = plan_uuid else {
+                        continue;
+                    };
+                    obj.insert("target_plan_uuid".to_string(), Value::String(plan_uuid));
+                    if let Some(item_id) = obj.get("target_item_id").and_then(|v| v.as_i64()) {
+                        let item_uuid = queries::get_finance_item_uuid_by_id(conn, item_id)
+                            .map_err(|e| format!("get_finance_item_uuid_by_id: {e}"))?;
+                        obj.insert(
+                            "target_item_uuid".to_string(),
+                            item_uuid.map(Value::String).unwrap_or(Value::Null),
+                        );
+                    } else {
+                        obj.insert("target_item_uuid".to_string(), Value::Null);
+                    }
+                }
+
+                if table == "finance_transaction_allocations" {
+                    let Some(transaction_id) =
+                        obj.get("transaction_id").and_then(|v| v.as_i64())
+                    else {
+                        continue;
+                    };
+                    let Some(plan_id) = obj.get("plan_id").and_then(|v| v.as_i64()) else {
+                        continue;
+                    };
+                    let transaction_uuid =
+                        queries::get_finance_transaction_uuid_by_id(conn, transaction_id)
+                            .map_err(|e| format!("get_finance_transaction_uuid_by_id: {e}"))?;
+                    let plan_uuid = queries::get_finance_plan_uuid_by_id(conn, plan_id)
+                        .map_err(|e| format!("get_finance_plan_uuid_by_id: {e}"))?;
+                    let (Some(transaction_uuid), Some(plan_uuid)) =
+                        (transaction_uuid, plan_uuid)
+                    else {
+                        continue;
+                    };
+                    obj.insert(
+                        "transaction_uuid".to_string(),
+                        Value::String(transaction_uuid),
+                    );
+                    obj.insert("plan_uuid".to_string(), Value::String(plan_uuid));
+                    if let Some(item_id) = obj.get("item_id").and_then(|v| v.as_i64()) {
+                        let item_uuid = queries::get_finance_item_uuid_by_id(conn, item_id)
+                            .map_err(|e| format!("get_finance_item_uuid_by_id: {e}"))?;
+                        obj.insert(
+                            "item_uuid".to_string(),
+                            item_uuid.map(Value::String).unwrap_or(Value::Null),
+                        );
+                    } else {
+                        obj.insert("item_uuid".to_string(), Value::Null);
+                    }
+                    if let Some(rule_id) = obj.get("rule_id").and_then(|v| v.as_i64()) {
+                        let rule_uuid = queries::get_finance_mapping_rule_uuid_by_id(conn, rule_id)
+                            .map_err(|e| format!("get_finance_mapping_rule_uuid_by_id: {e}"))?;
+                        obj.insert(
+                            "rule_uuid".to_string(),
+                            rule_uuid.map(Value::String).unwrap_or(Value::Null),
+                        );
+                    } else {
+                        obj.insert("rule_uuid".to_string(), Value::Null);
+                    }
+                }
+
                 table_names.push(display_name);
                 rows_to_push.push(row_data);
             }
@@ -308,8 +392,16 @@ impl SyncClient {
                         .filter_map(|v| v.as_str().map(String::from))
                         .collect()
                 });
-            let requires_explicit_acceptance =
-                table == "finance_plans" || table == "finance_items" || table == "finance_payments";
+            let requires_explicit_acceptance = matches!(
+                table.as_str(),
+                "finance_plans"
+                    | "finance_items"
+                    | "finance_payments"
+                    | "finance_import_batches"
+                    | "finance_transactions"
+                    | "finance_mapping_rules"
+                    | "finance_transaction_allocations"
+            );
             let is_accepted = |uuid: &str| -> bool {
                 if let Some(accepted) = &accepted_for_table {
                     accepted.contains(uuid)
@@ -718,6 +810,176 @@ impl SyncClient {
                     }
                 }
 
+                if table == "finance_transactions" {
+                    let before = rows_owned.len();
+                    rows_owned.retain_mut(|row| {
+                        let Some(obj) = row.as_object_mut() else {
+                            return false;
+                        };
+                        if let Some(import_batch_uuid) = obj
+                            .get("import_batch_uuid")
+                            .and_then(|v| v.as_str())
+                            .map(String::from)
+                        {
+                            let import_batch_id =
+                                queries::get_finance_import_batch_id_by_uuid(
+                                    conn,
+                                    &import_batch_uuid,
+                                )
+                                .ok()
+                                .flatten();
+                            obj.insert(
+                                "import_batch_id".to_string(),
+                                import_batch_id
+                                    .map(|v| Value::Number(v.into()))
+                                    .unwrap_or(Value::Null),
+                            );
+                        } else {
+                            obj.insert("import_batch_id".to_string(), Value::Null);
+                        }
+                        true
+                    });
+                    let skipped = before.saturating_sub(rows_owned.len());
+                    if skipped > 0 {
+                        skipped_counts.insert(table.to_string(), skipped);
+                    }
+                }
+
+                if table == "finance_mapping_rules" {
+                    let before = rows_owned.len();
+                    rows_owned.retain_mut(|row| {
+                        let Some(obj) = row.as_object_mut() else {
+                            return false;
+                        };
+                        let Some(plan_uuid) = obj
+                            .get("target_plan_uuid")
+                            .and_then(|v| v.as_str())
+                            .map(String::from)
+                        else {
+                            return false;
+                        };
+                        let plan_id = queries::get_finance_plan_id_by_uuid(conn, &plan_uuid)
+                            .ok()
+                            .flatten();
+                        let Some(plan_id) = plan_id else {
+                            return false;
+                        };
+                        obj.insert("target_plan_id".to_string(), Value::Number(plan_id.into()));
+
+                        if let Some(item_uuid) = obj
+                            .get("target_item_uuid")
+                            .and_then(|v| v.as_str())
+                            .map(String::from)
+                        {
+                            let item_id = queries::get_finance_item_id_by_uuid(conn, &item_uuid)
+                                .ok()
+                                .flatten()
+                                .filter(|item_id| {
+                                    queries::get_finance_item_plan_id_by_id(conn, *item_id)
+                                        .ok()
+                                        .flatten()
+                                        == Some(plan_id)
+                                });
+                            obj.insert(
+                                "target_item_id".to_string(),
+                                item_id
+                                    .map(|v| Value::Number(v.into()))
+                                    .unwrap_or(Value::Null),
+                            );
+                        } else {
+                            obj.insert("target_item_id".to_string(), Value::Null);
+                        }
+                        true
+                    });
+                    let skipped = before.saturating_sub(rows_owned.len());
+                    if skipped > 0 {
+                        skipped_counts.insert(table.to_string(), skipped);
+                    }
+                }
+
+                if table == "finance_transaction_allocations" {
+                    let before = rows_owned.len();
+                    rows_owned.retain_mut(|row| {
+                        let Some(obj) = row.as_object_mut() else {
+                            return false;
+                        };
+                        let Some(transaction_uuid) = obj
+                            .get("transaction_uuid")
+                            .and_then(|v| v.as_str())
+                            .map(String::from)
+                        else {
+                            return false;
+                        };
+                        let Some(plan_uuid) = obj
+                            .get("plan_uuid")
+                            .and_then(|v| v.as_str())
+                            .map(String::from)
+                        else {
+                            return false;
+                        };
+                        let transaction_id =
+                            queries::get_finance_transaction_id_by_uuid(conn, &transaction_uuid)
+                                .ok()
+                                .flatten();
+                        let plan_id = queries::get_finance_plan_id_by_uuid(conn, &plan_uuid)
+                            .ok()
+                            .flatten();
+                        let (Some(transaction_id), Some(plan_id)) = (transaction_id, plan_id)
+                        else {
+                            return false;
+                        };
+                        obj.insert(
+                            "transaction_id".to_string(),
+                            Value::Number(transaction_id.into()),
+                        );
+                        obj.insert("plan_id".to_string(), Value::Number(plan_id.into()));
+
+                        if let Some(item_uuid) =
+                            obj.get("item_uuid").and_then(|v| v.as_str()).map(String::from)
+                        {
+                            let item_id = queries::get_finance_item_id_by_uuid(conn, &item_uuid)
+                                .ok()
+                                .flatten()
+                                .filter(|item_id| {
+                                    queries::get_finance_item_plan_id_by_id(conn, *item_id)
+                                        .ok()
+                                        .flatten()
+                                        == Some(plan_id)
+                                });
+                            obj.insert(
+                                "item_id".to_string(),
+                                item_id
+                                    .map(|v| Value::Number(v.into()))
+                                    .unwrap_or(Value::Null),
+                            );
+                        } else {
+                            obj.insert("item_id".to_string(), Value::Null);
+                        }
+
+                        if let Some(rule_uuid) =
+                            obj.get("rule_uuid").and_then(|v| v.as_str()).map(String::from)
+                        {
+                            let rule_id =
+                                queries::get_finance_mapping_rule_id_by_uuid(conn, &rule_uuid)
+                                    .ok()
+                                    .flatten();
+                            obj.insert(
+                                "rule_id".to_string(),
+                                rule_id
+                                    .map(|v| Value::Number(v.into()))
+                                    .unwrap_or(Value::Null),
+                            );
+                        } else {
+                            obj.insert("rule_id".to_string(), Value::Null);
+                        }
+                        true
+                    });
+                    let skipped = before.saturating_sub(rows_owned.len());
+                    if skipped > 0 {
+                        skipped_counts.insert(table.to_string(), skipped);
+                    }
+                }
+
                 queries::upsert_from_server(conn, table, &rows_owned)
                     .map_err(|e| format!("upsert_from_server({table}): {e}"))?;
 
@@ -788,8 +1050,12 @@ impl SyncClient {
             | "task_categories"
             | "task_statuses"
             | "finance_plans"
-            | "finance_items" => "name",
+            | "finance_items"
+            | "finance_mapping_rules" => "name",
             "finance_payments" => "month_key",
+            "finance_transactions" => "description",
+            "finance_import_batches" => "file_name",
+            "finance_transaction_allocations" => "assigned_by",
             "notes" | "tasks" => "title",
             "task_checkboxes" => "text",
             "sql_macrosing_templates" => "template_name",

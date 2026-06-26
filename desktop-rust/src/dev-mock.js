@@ -428,6 +428,90 @@
     storeSet('__seq.finance_items', 4);
     storeSet('finance_payments', []);
     storeSet('__seq.finance_payments', 0);
+    storeSet('finance_import_batches', []);
+    storeSet('__seq.finance_import_batches', 0);
+    storeSet('finance_transactions', [
+      {
+        id: 1,
+        uuid: uuid(),
+        source: 'tbank_csv',
+        source_fingerprint: 'mock-taxi-1',
+        import_batch_id: null,
+        operation_at: '2026-04-30 17:38:55',
+        payment_date: '2026-04-30',
+        card_mask: '*7857',
+        status: 'OK',
+        amount_cents: -50600,
+        currency: 'RUB',
+        operation_amount_cents: -50600,
+        operation_currency: 'RUB',
+        payment_amount_cents: -50600,
+        payment_currency: 'RUB',
+        cashback_cents: 2500,
+        bank_category: 'Такси',
+        mcc: '3990',
+        description: 'Яндекс Такси',
+        bonuses_cents: 2500,
+        invest_rounding_cents: 9400,
+        rounded_amount_cents: -60000,
+        raw_json: '{}',
+        rules_locked: false,
+        created_at: now(),
+        updated_at: now(),
+        sync_status: 'pending',
+        user_id: 'mock-user',
+      },
+      {
+        id: 2,
+        uuid: uuid(),
+        source: 'tbank_csv',
+        source_fingerprint: 'mock-mobile-1',
+        import_batch_id: null,
+        operation_at: '2026-04-30 21:14:16',
+        payment_date: '2026-04-30',
+        card_mask: '*8907',
+        status: 'OK',
+        amount_cents: -19000,
+        currency: 'RUB',
+        operation_amount_cents: -19000,
+        operation_currency: 'RUB',
+        payment_amount_cents: -19000,
+        payment_currency: 'RUB',
+        cashback_cents: null,
+        bank_category: 'Мобильная связь',
+        mcc: '',
+        description: 'Т-Мобайл +7 995 644-94-38',
+        bonuses_cents: 0,
+        invest_rounding_cents: 0,
+        rounded_amount_cents: -19000,
+        raw_json: '{}',
+        rules_locked: true,
+        created_at: now(),
+        updated_at: now(),
+        sync_status: 'pending',
+        user_id: 'mock-user',
+      },
+    ]);
+    storeSet('__seq.finance_transactions', 2);
+    storeSet('finance_transaction_allocations', [
+      {
+        id: 1,
+        uuid: uuid(),
+        transaction_id: 1,
+        plan_id: 1,
+        item_id: 4,
+        assigned_by: 'manual',
+        rule_id: null,
+        is_active: true,
+        created_at: now(),
+        updated_at: now(),
+        sync_status: 'pending',
+        user_id: 'mock-user',
+      },
+    ]);
+    storeSet('__seq.finance_transaction_allocations', 1);
+    storeSet('finance_mapping_rules', []);
+    storeSet('__seq.finance_mapping_rules', 0);
 
     storeSet('__init', true);
   }
@@ -452,6 +536,164 @@
     items.push(item);
     storeSet(table, items);
     return item;
+  }
+  function optionalNumber(value) {
+    return value == null || value === '' ? null : Number(value);
+  }
+
+  function mockFinanceCsvRows() {
+    return [
+      {
+        source: 'tbank_csv',
+        source_fingerprint: 'mock-csv-taxi-2',
+        operation_at: '2026-04-29 19:20:36',
+        payment_date: '2026-04-29',
+        card_mask: '*7857',
+        status: 'OK',
+        amount_cents: -23900,
+        currency: 'RUB',
+        operation_amount_cents: -23900,
+        operation_currency: 'RUB',
+        payment_amount_cents: -23900,
+        payment_currency: 'RUB',
+        cashback_cents: 1100,
+        bank_category: 'Такси',
+        mcc: '3990',
+        description: 'Яндекс Такси',
+        bonuses_cents: 1100,
+        invest_rounding_cents: 1100,
+        rounded_amount_cents: -25000,
+        raw_json: '{}',
+      },
+      {
+        source: 'tbank_csv',
+        source_fingerprint: 'mock-csv-pharmacy-1',
+        operation_at: '2026-04-27 09:03:13',
+        payment_date: '2026-04-27',
+        card_mask: '*7857',
+        status: 'OK',
+        amount_cents: -28700,
+        currency: 'RUB',
+        operation_amount_cents: -28700,
+        operation_currency: 'RUB',
+        payment_amount_cents: -28700,
+        payment_currency: 'RUB',
+        cashback_cents: 200,
+        bank_category: 'Аптеки',
+        mcc: '5912',
+        description: 'Планета Здоровья',
+        bonuses_cents: 200,
+        invest_rounding_cents: 1300,
+        rounded_amount_cents: -30000,
+        raw_json: '{}',
+      },
+    ];
+  }
+
+  function mockFinanceImportPreview() {
+    const existing = new Set(storeGet('finance_transactions', []).map(row => row.source_fingerprint));
+    const rows = mockFinanceCsvRows();
+    const newRows = rows.filter(row => !existing.has(row.source_fingerprint));
+    const duplicateRows = rows.length - newRows.length;
+    return {
+      source: 'tbank_csv',
+      total_rows: rows.length,
+      new_rows: newRows.length,
+      duplicate_rows: duplicateRows,
+      error_rows: 0,
+      date_from: '2026-04-27',
+      date_to: '2026-04-29',
+      expense_total_cents: rows.filter(row => row.amount_cents < 0).reduce((sum, row) => sum + Math.abs(row.amount_cents), 0),
+      income_total_cents: rows.filter(row => row.amount_cents > 0).reduce((sum, row) => sum + row.amount_cents, 0),
+      currencies: ['RUB'],
+    };
+  }
+
+  function mockFinanceTransactionHasAllocation(transactionId) {
+    return storeGet('finance_transaction_allocations', []).some(allocation =>
+      Number(allocation.transaction_id) === Number(transactionId)
+      && allocation.is_active !== false
+      && allocation.sync_status !== 'deleted'
+    );
+  }
+
+  function mockFinanceConditionMatches(transaction, condition) {
+    const field = String(condition?.field || '');
+    const op = String(condition?.op || 'equals');
+    const value = String(condition?.value ?? '');
+    if (field === 'direction') {
+      const direction = Number(transaction.amount_cents) < 0 ? 'expense' : Number(transaction.amount_cents) > 0 ? 'income' : 'zero';
+      return value === 'any' || direction === value;
+    }
+    if (field === 'amount' || field === 'amount_cents') {
+      const expected = Number(String(value).replace(',', '.'));
+      const actual = Number(transaction.amount_cents) / 100;
+      if (!Number.isFinite(expected)) return false;
+      if (op === 'gte' || op === '>=') return actual >= expected;
+      if (op === 'lte' || op === '<=') return actual <= expected;
+      if (op === 'gt' || op === '>') return actual > expected;
+      if (op === 'lt' || op === '<') return actual < expected;
+      return Math.abs(actual - expected) < 0.005;
+    }
+    const values = {
+      category: transaction.bank_category,
+      bank_category: transaction.bank_category,
+      mcc: transaction.mcc,
+      description: transaction.description,
+      card: transaction.card_mask,
+      card_mask: transaction.card_mask,
+      status: transaction.status,
+      currency: transaction.currency,
+    };
+    const actual = String(values[field] || '').toLowerCase();
+    const expected = value.toLowerCase();
+    if (op === 'contains') return actual.includes(expected);
+    if (op === 'starts' || op === 'starts_with') return actual.startsWith(expected);
+    if (op === 'not_equals' || op === '!=') return actual !== expected;
+    return actual === expected;
+  }
+
+  function mockFinanceRuleMatches(rule, transaction) {
+    let conditions = [];
+    try {
+      conditions = JSON.parse(rule.conditions_json || '[]');
+    } catch {
+      return false;
+    }
+    if (!Array.isArray(conditions) || !conditions.length) return false;
+    const results = conditions.map(condition => mockFinanceConditionMatches(transaction, condition));
+    return rule.match_mode === 'any' ? results.some(Boolean) : results.every(Boolean);
+  }
+
+  function mockApplyFinanceRule(ruleIdValue, remapAssigned = false) {
+    const rule = storeGet('finance_mapping_rules', [])
+      .find(item => Number(item.id) === Number(ruleIdValue) && item.sync_status !== 'deleted');
+    if (!rule || !rule.is_enabled) return 0;
+    let applied = 0;
+    for (const transaction of storeGet('finance_transactions', [])) {
+      if (transaction.sync_status === 'deleted' || transaction.rules_locked) continue;
+      if (!remapAssigned && mockFinanceTransactionHasAllocation(transaction.id)) continue;
+      if (!mockFinanceRuleMatches(rule, transaction)) continue;
+      const allocations = storeGet('finance_transaction_allocations', []).map(allocation => (
+        Number(allocation.transaction_id) === Number(transaction.id) && allocation.is_active !== false
+          ? { ...allocation, is_active: false, sync_status: 'pending', updated_at: now() }
+          : allocation
+      ));
+      storeSet('finance_transaction_allocations', allocations);
+      createItem('finance_transaction_allocations', {
+        uuid: uuid(),
+        transaction_id: Number(transaction.id),
+        plan_id: Number(rule.target_plan_id),
+        item_id: rule.target_item_id == null ? null : Number(rule.target_item_id),
+        assigned_by: 'rule',
+        rule_id: Number(rule.id),
+        is_active: true,
+        sync_status: 'pending',
+        user_id: 'mock-user',
+      });
+      applied += 1;
+    }
+    return applied;
   }
 
   function recordMockCall(command, payload = {}) {
@@ -1654,6 +1896,182 @@
         sync_status: 'pending',
         user_id: 'mock-user',
       });
+    },
+    async pick_finance_csv_file() {
+      return '/mock/tbank-export.csv';
+    },
+    async preview_finance_bank_csv() {
+      return mockFinanceImportPreview();
+    },
+    async import_finance_bank_csv() {
+      const preview = mockFinanceImportPreview();
+      const batch = createItem('finance_import_batches', {
+        uuid: uuid(),
+        source: 'tbank_csv',
+        file_name: 'tbank-export.csv',
+        total_rows: preview.total_rows,
+        imported_rows: preview.new_rows,
+        duplicate_rows: preview.duplicate_rows,
+        error_rows: preview.error_rows,
+        date_from: preview.date_from,
+        date_to: preview.date_to,
+        expense_total_cents: preview.expense_total_cents,
+        income_total_cents: preview.income_total_cents,
+        currency: 'RUB',
+        sync_status: 'pending',
+        user_id: 'mock-user',
+      });
+      const existing = new Set(storeGet('finance_transactions', []).map(row => row.source_fingerprint));
+      for (const row of mockFinanceCsvRows()) {
+        if (existing.has(row.source_fingerprint)) continue;
+        createItem('finance_transactions', {
+          uuid: uuid(),
+          ...row,
+          import_batch_id: batch.id,
+          rules_locked: false,
+          sync_status: 'pending',
+          user_id: 'mock-user',
+        });
+      }
+      let mappedRows = 0;
+      for (const rule of storeGet('finance_mapping_rules', []).filter(rule => rule.is_enabled && rule.sync_status !== 'deleted')) {
+        mappedRows += mockApplyFinanceRule(rule.id, false);
+      }
+      return { batch_id: batch.id, preview, mapped_rows: mappedRows };
+    },
+    async list_finance_transactions({ planId, plan_id, unmappedOnly, unmapped_only } = {}) {
+      const targetPlanId = planId ?? plan_id;
+      const unmapped = Boolean(unmappedOnly ?? unmapped_only);
+      const activeAllocations = storeGet('finance_transaction_allocations', [])
+        .filter(allocation => allocation.is_active !== false && allocation.sync_status !== 'deleted');
+      const allocatedIds = new Set(activeAllocations.map(allocation => Number(allocation.transaction_id)));
+      let rows = [...storeGet('finance_transactions', [])].filter(row => row.sync_status !== 'deleted');
+      if (targetPlanId != null) {
+        const ids = new Set(activeAllocations
+          .filter(allocation => Number(allocation.plan_id) === Number(targetPlanId))
+          .map(allocation => Number(allocation.transaction_id)));
+        rows = rows.filter(row => ids.has(Number(row.id)));
+      }
+      if (unmapped) rows = rows.filter(row => !allocatedIds.has(Number(row.id)));
+      return rows.sort((a, b) =>
+        String(b.payment_date || '').localeCompare(String(a.payment_date || ''))
+        || String(b.operation_at || '').localeCompare(String(a.operation_at || ''))
+        || Number(b.id) - Number(a.id)
+      );
+    },
+    async list_finance_transaction_allocations({ planId, plan_id } = {}) {
+      const targetPlanId = planId ?? plan_id;
+      return [...storeGet('finance_transaction_allocations', [])]
+        .filter(allocation =>
+          allocation.sync_status !== 'deleted'
+          && (targetPlanId == null || Number(allocation.plan_id) === Number(targetPlanId))
+        )
+        .sort((a, b) => Number(a.id) - Number(b.id));
+    },
+    async list_finance_mapping_rules() {
+      return [...storeGet('finance_mapping_rules', [])]
+        .filter(rule => rule.sync_status !== 'deleted')
+        .sort((a, b) =>
+          (Number(a.priority) || 0) - (Number(b.priority) || 0)
+          || String(a.name || '').localeCompare(String(b.name || ''))
+          || Number(a.id) - Number(b.id)
+        );
+    },
+    async create_finance_mapping_rule({
+      name,
+      isEnabled,
+      is_enabled,
+      priority,
+      matchMode,
+      match_mode,
+      conditionsJson,
+      conditions_json,
+      targetPlanId,
+      target_plan_id,
+      targetItemId,
+      target_item_id,
+    }) {
+      return createItem('finance_mapping_rules', {
+        uuid: uuid(),
+        name: name || 'New mapping rule',
+        is_enabled: Boolean(isEnabled ?? is_enabled ?? true),
+        priority: Number(priority) || 0,
+        match_mode: String(matchMode ?? match_mode ?? 'all'),
+        conditions_json: String(conditionsJson ?? conditions_json ?? '[]'),
+        target_plan_id: Number(targetPlanId ?? target_plan_id),
+        target_item_id: optionalNumber(targetItemId ?? target_item_id),
+        sync_status: 'pending',
+        user_id: 'mock-user',
+      });
+    },
+    async update_finance_mapping_rule({
+      id,
+      name,
+      isEnabled,
+      is_enabled,
+      priority,
+      matchMode,
+      match_mode,
+      conditionsJson,
+      conditions_json,
+      targetPlanId,
+      target_plan_id,
+      targetItemId,
+      target_item_id,
+    }) {
+      return updateItem('finance_mapping_rules', Number(id), {
+        name: name || 'New mapping rule',
+        is_enabled: Boolean(isEnabled ?? is_enabled ?? true),
+        priority: Number(priority) || 0,
+        match_mode: String(matchMode ?? match_mode ?? 'all'),
+        conditions_json: String(conditionsJson ?? conditions_json ?? '[]'),
+        target_plan_id: Number(targetPlanId ?? target_plan_id),
+        target_item_id: optionalNumber(targetItemId ?? target_item_id),
+        sync_status: 'pending',
+      });
+    },
+    async delete_finance_mapping_rule({ id }) {
+      return updateItem('finance_mapping_rules', Number(id), {
+        sync_status: 'deleted',
+      });
+    },
+    async apply_finance_mapping_rule({ id, remapAssigned, remap_assigned }) {
+      return mockApplyFinanceRule(Number(id), Boolean(remapAssigned ?? remap_assigned));
+    },
+    async assign_finance_transaction({ transactionId, transaction_id, planId, plan_id, itemId, item_id, rulesLocked, rules_locked }) {
+      const txId = Number(transactionId ?? transaction_id);
+      const allocations = storeGet('finance_transaction_allocations', []).map(allocation => (
+        Number(allocation.transaction_id) === txId && allocation.is_active !== false
+          ? { ...allocation, is_active: false, sync_status: 'pending', updated_at: now() }
+          : allocation
+      ));
+      storeSet('finance_transaction_allocations', allocations);
+      if (rulesLocked !== undefined || rules_locked !== undefined) {
+        storeSet('finance_transactions', storeGet('finance_transactions', []).map(row => (
+          Number(row.id) === txId
+            ? { ...row, rules_locked: Boolean(rulesLocked ?? rules_locked), sync_status: 'pending', updated_at: now() }
+            : row
+        )));
+      }
+      return createItem('finance_transaction_allocations', {
+        uuid: uuid(),
+        transaction_id: txId,
+        plan_id: Number(planId ?? plan_id),
+        item_id: optionalNumber(itemId ?? item_id),
+        assigned_by: 'manual',
+        rule_id: null,
+        is_active: true,
+        sync_status: 'pending',
+        user_id: 'mock-user',
+      });
+    },
+    async set_finance_transaction_rules_locked({ transactionId, transaction_id, rulesLocked, rules_locked }) {
+      const txId = Number(transactionId ?? transaction_id);
+      storeSet('finance_transactions', storeGet('finance_transactions', []).map(row => (
+        Number(row.id) === txId
+          ? { ...row, rules_locked: Boolean(rulesLocked ?? rules_locked), sync_status: 'pending', updated_at: now() }
+          : row
+      )));
     },
 
     // ── Tasks ───────────────────────────────────────────

@@ -74,7 +74,7 @@ def _finance_kind_label(kind: str | None) -> str:
     }.get(kind or "", "General")
 
 
-def public_finance_plan_payload(plan, rows) -> dict:
+def public_finance_plan_payload(plan, rows, facts: list[dict] | None = None) -> dict:
     by_uuid = {}
     children: dict[str | None, list[dict]] = {}
     for row in rows:
@@ -133,6 +133,21 @@ def public_finance_plan_payload(plan, rows) -> dict:
     for root in roots:
         visit(root, 0)
 
+    item_names = {item["uuid"]: item["name"] for item in rendered_rows}
+    safe_facts = []
+    for fact in facts or []:
+        item_uuid = str(fact.get("item_uuid") or "")
+        safe_facts.append({
+            "payment_date": str(fact.get("payment_date") or ""),
+            "description": str(fact.get("description") or ""),
+            "bank_category": str(fact.get("bank_category") or ""),
+            "mcc": str(fact.get("mcc") or ""),
+            "amount_cents": int(fact.get("amount_cents") or 0),
+            "currency": str(fact.get("currency") or plan.currency or "RUB"),
+            "item_uuid": item_uuid,
+            "item_name": item_names.get(item_uuid, ""),
+        })
+
     return {
         "type": "finance_plan",
         "title": plan.name or "Finance list",
@@ -141,6 +156,7 @@ def public_finance_plan_payload(plan, rows) -> dict:
         "kind_label": _finance_kind_label(plan.kind),
         "total_cents": sum(total_for(root) for root in roots),
         "items": rendered_rows,
+        "facts": safe_facts,
     }
 
 
@@ -459,6 +475,67 @@ def _finance_date_text(item: dict, kind: str) -> str:
     return str(item.get("due_date") or "")
 
 
+def _finance_fact_month(date_text: str) -> str:
+    text = str(date_text or "")
+    return text[:7] if re.match(r"^\d{4}-\d{2}", text) else "No month"
+
+
+def _render_finance_facts_share(payload: dict) -> str:
+    facts = payload.get("facts") or []
+    if not facts:
+        return ""
+    currency = str(payload.get("currency") or "RUB")
+    groups: dict[tuple[str, str], list[dict]] = {}
+    for fact in facts:
+        item_name = str(fact.get("item_name") or "Unassigned item")
+        month = _finance_fact_month(str(fact.get("payment_date") or ""))
+        groups.setdefault((item_name, month), []).append(fact)
+
+    details_html = []
+    for (item_name, month), rows in sorted(groups.items(), key=lambda pair: (pair[0][1], pair[0][0]), reverse=True):
+        total = sum(int(row.get("amount_cents") or 0) for row in rows)
+        total_text = html.escape(_format_money_cents(total, currency))
+        summary = (
+            "<summary>"
+            f"<span>{html.escape(item_name)}</span>"
+            f"<span>{html.escape(month)}</span>"
+            f"<span>{len(rows)} operation(s)</span>"
+            f"<strong>{total_text}</strong>"
+            "</summary>"
+        )
+        row_html = []
+        for fact in sorted(rows, key=lambda row: str(row.get("payment_date") or ""), reverse=True):
+            date = html.escape(str(fact.get("payment_date") or ""))
+            description = html.escape(str(fact.get("description") or ""))
+            category = html.escape(str(fact.get("bank_category") or ""))
+            mcc = html.escape(str(fact.get("mcc") or ""))
+            amount = html.escape(_format_money_cents(int(fact.get("amount_cents") or 0), str(fact.get("currency") or currency)))
+            row_html.append(
+                "<tr>"
+                f"<td>{date}</td>"
+                f"<td>{description}</td>"
+                f"<td>{category}</td>"
+                f"<td>{mcc}</td>"
+                f"<td class='money'>{amount}</td>"
+                "</tr>"
+            )
+        table = (
+            "<div class='share-table-scroll'>"
+            "<table class='finance-share-table finance-facts-table'>"
+            "<thead><tr><th>Date</th><th>Description</th><th>Bank</th><th>MCC</th><th>Amount</th></tr></thead>"
+            f"<tbody>{''.join(row_html)}</tbody>"
+            "</table>"
+            "</div>"
+        )
+        details_html.append(f"<details class='finance-fact-group' open>{summary}{table}</details>")
+    return (
+        "<section class='finance-facts-section'>"
+        "<h2>Facts</h2>"
+        f"{''.join(details_html)}"
+        "</section>"
+    )
+
+
 def _render_finance_share(payload: dict) -> str:
     currency = str(payload.get("currency") or "RUB")
     kind = str(payload.get("kind") or "general")
@@ -494,6 +571,7 @@ def _render_finance_share(payload: dict) -> str:
     else:
         table = "<div class='share-empty'>No expense rows.</div>"
     total = html.escape(_format_money_cents(payload.get("total_cents") or 0, currency))
+    facts_html = _render_finance_facts_share(payload)
     return (
         f"<div class='share-meta'>{html.escape(meta)}</div>"
         "<section class='finance-share-summary'>"
@@ -501,6 +579,7 @@ def _render_finance_share(payload: dict) -> str:
         f"<div class='finance-share-total'>{total}</div>"
         "</section>"
         f"{table}"
+        f"{facts_html}"
     )
 
 
@@ -705,6 +784,12 @@ def render_share_html(payload: dict) -> str:
     .finance-share-table th {{ background: #161b22; color: #f0f6fc; font-weight: 700; text-align: left; }}
     .finance-share-table .money {{ text-align: right; white-space: nowrap; }}
     .finance-share-table .strong {{ color: #f0f6fc; font-weight: 700; }}
+    .finance-facts-section {{ margin-top: 22px; }}
+    .finance-facts-section h2 {{ color: #f0f6fc; font-size: 20px; margin: 0 0 12px; }}
+    .finance-fact-group {{ border: 1px solid #30363d; border-radius: 8px; background: #0d1117; margin: 10px 0; overflow: hidden; }}
+    .finance-fact-group summary {{ display: grid; grid-template-columns: minmax(160px, 1fr) 92px 110px 140px; gap: 10px; align-items: center; padding: 9px 12px; cursor: pointer; background: #161b22; color: #c9d1d9; }}
+    .finance-fact-group summary strong {{ color: #f0f6fc; text-align: right; }}
+    .finance-facts-table {{ min-width: 680px; margin: 0; }}
     .finance-indent {{ display: inline-block; width: calc(var(--depth) * 18px); }}
     .figure-card {{ margin: 14px 0; border: 1px solid #30363d; border-radius: 8px; overflow: hidden; background: #161b22; }}
     .figure-card img {{ display: block; max-width: 100%; height: auto; margin: 0 auto; }}

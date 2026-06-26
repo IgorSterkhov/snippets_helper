@@ -12,7 +12,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.auth import get_current_user
 from api.database import get_db
 from api.media_utils import public_html_base_url
-from api.models import FinanceItem, FinancePlan, Note, ShareLink, Shortcut, TelegraphPage, User
+from api.models import (
+    FinanceItem,
+    FinancePlan,
+    FinanceTransaction,
+    FinanceTransactionAllocation,
+    Note,
+    ShareLink,
+    Shortcut,
+    TelegraphPage,
+    User,
+)
 from api.schemas import (
     ShareLinkRequest,
     ShareLinkResponse,
@@ -411,7 +421,35 @@ async def _public_payload(token: str, db: AsyncSession) -> dict:
             )
         )
         items = result.scalars().all()
-        return public_finance_plan_payload(row, items)
+        facts_result = await db.execute(
+            select(FinanceTransactionAllocation, FinanceTransaction)
+            .join(
+                FinanceTransaction,
+                FinanceTransaction.uuid == FinanceTransactionAllocation.transaction_uuid,
+            )
+            .where(
+                FinanceTransactionAllocation.user_id == link.user_id,
+                FinanceTransactionAllocation.plan_uuid == link.item_uuid,
+                FinanceTransactionAllocation.is_active == True,  # noqa: E712
+                FinanceTransactionAllocation.is_deleted == False,  # noqa: E712
+                FinanceTransaction.user_id == link.user_id,
+                FinanceTransaction.is_deleted == False,  # noqa: E712
+            )
+            .order_by(FinanceTransaction.payment_date.desc(), FinanceTransaction.operation_at.desc())
+        )
+        facts = [
+            {
+                "item_uuid": str(allocation.item_uuid) if allocation.item_uuid else "",
+                "payment_date": transaction.payment_date,
+                "description": transaction.description,
+                "bank_category": transaction.bank_category,
+                "mcc": transaction.mcc,
+                "amount_cents": transaction.amount_cents,
+                "currency": transaction.currency,
+            }
+            for allocation, transaction in facts_result.all()
+        ]
+        return public_finance_plan_payload(row, items, facts)
     return public_shortcut_payload(row)
 
 

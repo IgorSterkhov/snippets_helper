@@ -34,9 +34,15 @@ let financeViewHistoryListenerInstalled = false;
 let state = {
   plans: [],
   items: [],
+  allItems: [],
   payments: [],
+  transactions: [],
+  allocations: [],
+  mappingRules: [],
   activePlanId: null,
+  activeMode: 'lists',
   activeView: 'structure',
+  factsFilter: 'all',
   calendarShowOldMonths: false,
   collapsed: new Set(),
   itemDrag: null,
@@ -158,6 +164,9 @@ function injectStyles() {
   background: color-mix(in srgb, var(--accent) 18%, var(--bg-secondary));
   border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
 }
+.finance-plan-card.dimmed {
+  opacity: 0.72;
+}
 .finance-plan-grip,
 .finance-row-grip {
   width: 18px;
@@ -203,6 +212,16 @@ function injectStyles() {
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+.finance-mode-bar {
+  min-height: 38px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-secondary) 70%, var(--bg-primary));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
 .finance-plan-edit {
   display: grid;
@@ -283,6 +302,9 @@ function injectStyles() {
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
 }
+.finance-facts-summary {
+  grid-template-columns: repeat(4, minmax(112px, 1fr));
+}
 .finance-stat {
   border: 1px solid var(--border);
   border-radius: 7px;
@@ -348,6 +370,159 @@ function injectStyles() {
   min-height: 0;
   overflow: auto;
   padding: 8px 10px 12px;
+}
+.finance-facts-header {
+  min-height: 50px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bg-secondary) 74%, transparent), var(--bg-primary));
+}
+.finance-facts-kicker {
+  color: var(--text-muted);
+  font-size: 11px;
+  margin-top: 2px;
+}
+.finance-facts-actions,
+.finance-facts-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.finance-facts-table {
+  min-width: 980px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-primary);
+}
+.finance-facts-head,
+.finance-fact-row {
+  display: grid;
+  grid-template-columns: 92px minmax(220px, 1.4fr) minmax(130px, .8fr) 112px minmax(200px, 1fr) 96px 78px;
+  align-items: center;
+}
+.finance-facts-head {
+  min-height: 30px;
+  color: var(--text-muted);
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+.finance-facts-head > div,
+.finance-fact-row > div {
+  min-width: 0;
+  padding: 5px 8px;
+}
+.finance-fact-row {
+  min-height: 34px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  font-size: 12px;
+}
+.finance-fact-row:last-child {
+  border-bottom: 0;
+}
+.finance-fact-row:hover {
+  background: var(--finance-row-hover);
+}
+.finance-fact-description,
+.finance-fact-bank,
+.finance-fact-target {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.finance-fact-date {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.finance-fact-money {
+  font-weight: 760;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.finance-fact-money.expense {
+  color: #ffb4a8;
+}
+.finance-fact-money.income {
+  color: #8dd9a8;
+}
+.finance-fact-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  background: var(--bg-secondary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.finance-fact-state.mapped {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 44%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-secondary));
+}
+.finance-fact-state.locked {
+  border-color: color-mix(in srgb, #f2cc60 52%, var(--border));
+}
+.finance-fact-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+.finance-modal-grid {
+  display: grid;
+  grid-template-columns: 144px minmax(220px, 1fr);
+  gap: 10px 12px;
+  align-items: center;
+  min-width: min(620px, 76vw);
+}
+.finance-modal-grid label {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.finance-modal-grid input,
+.finance-modal-grid select {
+  min-width: 0;
+}
+.finance-modal-note {
+  grid-column: 1 / -1;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.finance-import-preview {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(160px, 1fr));
+  gap: 8px;
+  min-width: min(520px, 74vw);
+}
+.finance-import-preview div {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 8px 10px;
+  background: var(--bg-secondary);
+}
+.finance-import-preview span {
+  display: block;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.finance-import-preview strong {
+  display: block;
+  margin-top: 3px;
+  color: var(--text);
+  font-size: 15px;
 }
 .finance-tree {
   min-width: 900px;
@@ -713,6 +888,18 @@ function itemId(item) {
   return normalizeId(item?.id);
 }
 
+function transactionId(transaction) {
+  return normalizeId(transaction?.id);
+}
+
+function allocationId(allocation) {
+  return normalizeId(allocation?.id);
+}
+
+function ruleId(rule) {
+  return normalizeId(rule?.id);
+}
+
 function currencyOfActivePlan() {
   return state.plans.find((plan) => planId(plan) === state.activePlanId)?.currency || 'RUB';
 }
@@ -728,6 +915,87 @@ function activePlanKind() {
 
 function planKindLabel(kind) {
   return PLAN_KIND_LABELS[kind] || PLAN_KIND_LABELS.monthly;
+}
+
+function planName(id) {
+  const normalized = normalizeId(id);
+  return state.plans.find((plan) => planId(plan) === normalized)?.name || 'Unmapped';
+}
+
+function itemName(id) {
+  const normalized = normalizeId(id);
+  return (state.allItems || state.items).find((item) => itemId(item) === normalized)?.name || '';
+}
+
+function allocationMap() {
+  const map = new Map();
+  for (const allocation of state.allocations || []) {
+    if (allocation?.is_active === false || allocation?.is_deleted === true) continue;
+    const txId = normalizeId(allocation.transaction_id);
+    if (txId != null && !map.has(txId)) map.set(txId, allocation);
+  }
+  return map;
+}
+
+function factRows() {
+  const allocations = allocationMap();
+  let rows = (state.transactions || []).map((transaction) => ({
+    transaction,
+    allocation: allocations.get(transactionId(transaction)) || null,
+  }));
+  if (state.factsFilter === 'unmapped') rows = rows.filter((row) => !row.allocation);
+  if (state.factsFilter === 'locked') rows = rows.filter((row) => Boolean(row.transaction.rules_locked));
+  return rows.sort((a, b) =>
+    String(b.transaction.payment_date || '').localeCompare(String(a.transaction.payment_date || ''))
+    || String(b.transaction.operation_at || '').localeCompare(String(a.transaction.operation_at || ''))
+    || transactionId(b.transaction) - transactionId(a.transaction)
+  );
+}
+
+function formatFactDate(value) {
+  const text = String(value || '');
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    const [year, month, day] = text.split('-');
+    return `${day}.${month}.${year}`;
+  }
+  return text;
+}
+
+function parseRuleConditions(rule) {
+  try {
+    const parsed = JSON.parse(rule?.conditions_json || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function describeRuleConditions(rule) {
+  const conditions = parseRuleConditions(rule);
+  if (!conditions.length) return 'Any transaction';
+  return conditions.map((condition) => {
+    const field = String(condition.field || '').replace(/_/g, ' ');
+    const op = String(condition.op || 'contains');
+    const value = String(condition.value ?? '').trim();
+    return `${field} ${op} ${value}`.trim();
+  }).join(rule.match_mode === 'any' ? ' OR ' : ' AND ');
+}
+
+function makeRuleConditionsFromForm(body) {
+  const conditions = [];
+  const category = body.querySelector('[data-rule-field="category"]')?.value.trim();
+  const description = body.querySelector('[data-rule-field="description"]')?.value.trim();
+  const mcc = body.querySelector('[data-rule-field="mcc"]')?.value.trim();
+  const direction = body.querySelector('[data-rule-field="direction"]')?.value;
+  const minAmount = parseMoneyToSignedCents(body.querySelector('[data-rule-field="min-amount"]')?.value);
+  const maxAmount = parseMoneyToSignedCents(body.querySelector('[data-rule-field="max-amount"]')?.value);
+  if (category) conditions.push({ field: 'bank_category', op: 'contains', value: category });
+  if (description) conditions.push({ field: 'description', op: 'contains', value: description });
+  if (mcc) conditions.push({ field: 'mcc', op: 'equals', value: mcc });
+  if (direction && direction !== 'any') conditions.push({ field: 'direction', op: 'exact', value: direction });
+  if (minAmount != null) conditions.push({ field: 'amount_cents', op: 'gte', value: String(minAmount / 100) });
+  if (maxAmount != null) conditions.push({ field: 'amount_cents', op: 'lte', value: String(maxAmount / 100) });
+  return JSON.stringify(conditions);
 }
 
 function normalizeHexColor(value, fallback) {
@@ -865,6 +1133,20 @@ function parseMoneyToCents(value) {
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed < 0) return null;
   return Math.round(parsed * 100);
+}
+
+function parseMoneyToSignedCents(value) {
+  const input = String(value || '').trim();
+  if (!input) return null;
+  const sign = input.startsWith('-') ? -1 : 1;
+  const raw = input
+    .replace(/\s+/g, '')
+    .replace(',', '.')
+    .replace(/[^\d.]/g, '');
+  if (!raw) return null;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.round(parsed * 100) * sign;
 }
 
 function amountInputValue(amountCents) {
@@ -1051,8 +1333,17 @@ async function loadAll(selectPlanId = state.activePlanId) {
   state.activePlanId = state.plans.some((plan) => planId(plan) === wanted)
     ? wanted
     : planId(state.plans[0]);
-  state.items = await call('list_finance_items', { planId: state.activePlanId });
-  state.payments = await call('list_finance_payments', { planId: state.activePlanId });
+  const allItemLists = await Promise.all(
+    state.plans.map((plan) => call('list_finance_items', { planId: planId(plan) }))
+  );
+  state.allItems = allItemLists.flat();
+  state.items = state.allItems.filter((item) => normalizeId(item.plan_id) === state.activePlanId);
+  [state.payments, state.transactions, state.allocations, state.mappingRules] = await Promise.all([
+    call('list_finance_payments', { planId: state.activePlanId }),
+    call('list_finance_transactions', { planId: null, unmappedOnly: false }),
+    call('list_finance_transaction_allocations', { planId: null }),
+    call('list_finance_mapping_rules'),
+  ]);
   if (activePlanKind() !== 'monthly') state.activeView = 'structure';
   render();
 }
@@ -1128,7 +1419,9 @@ function renderSidebar() {
 function renderPlanCard(plan) {
   const id = planId(plan);
   const card = document.createElement('div');
-  card.className = 'finance-plan-card' + (id === state.activePlanId ? ' active' : '');
+  card.className = 'finance-plan-card'
+    + (state.activeMode === 'lists' && id === state.activePlanId ? ' active' : '')
+    + (state.activeMode === 'facts' ? ' dimmed' : '');
   card.dataset.id = String(id);
 
   const grip = document.createElement('button');
@@ -1160,6 +1453,7 @@ function renderPlanCard(plan) {
     } catch {
       return;
     }
+    state.activeMode = 'lists';
     await loadAll(id);
   });
 
@@ -1171,6 +1465,14 @@ function renderMain() {
   const main = document.createElement('main');
   main.className = 'finance-main';
   const activePlan = state.plans.find((plan) => planId(plan) === state.activePlanId) || null;
+
+  main.appendChild(renderFinanceModeBar());
+  if (state.activeMode === 'facts') {
+    main.appendChild(renderFactsHeader());
+    main.appendChild(renderFactsSummary());
+    main.appendChild(renderFactsTable());
+    return main;
+  }
 
   main.appendChild(renderMainHeader(activePlan));
 
@@ -1196,6 +1498,40 @@ function renderMain() {
       : renderTree(roots, children, totals)
   );
   return main;
+}
+
+function renderFinanceModeBar() {
+  const bar = document.createElement('div');
+  bar.className = 'finance-mode-bar';
+  const segment = document.createElement('div');
+  segment.className = 'finance-segment';
+  [
+    ['lists', 'Lists'],
+    ['facts', 'Facts'],
+  ].forEach(([mode, label]) => {
+    const btn = document.createElement('button');
+    btn.className = 'finance-segment-btn' + (state.activeMode === mode ? ' active' : '');
+    btn.type = 'button';
+    btn.textContent = label;
+    btn.addEventListener('click', async () => {
+      if (state.activeMode === mode) return;
+      try {
+        await saveActivePlanHeaderFromDom();
+      } catch {
+        return;
+      }
+      state.activeMode = mode;
+      render();
+    });
+    segment.appendChild(btn);
+  });
+  const hint = document.createElement('div');
+  hint.className = 'finance-calendar-status';
+  hint.textContent = state.activeMode === 'facts'
+    ? 'Imported bank operations and rule mapping'
+    : 'Plans, structure, and payment calendar';
+  bar.append(segment, hint);
+  return bar;
 }
 
 function renderMainHeader(plan) {
@@ -1292,6 +1628,9 @@ function renderMainHeader(plan) {
 
 async function saveActivePlanHeaderFromDom() {
   if (!state.activePlanId || !rootEl) return null;
+  if (!rootEl.querySelector('[data-plan-field="name"]')) {
+    return state.plans.find((item) => planId(item) === state.activePlanId) || null;
+  }
   clearFinanceHeaderSaveTimer();
   const draft = readActivePlanHeaderDraft();
   const plan = state.plans.find((item) => planId(item) === state.activePlanId) || {};
@@ -1592,6 +1931,544 @@ function renderFinanceViewBar() {
 
   bar.append(segment, actions);
   return bar;
+}
+
+function renderFactsHeader() {
+  const header = document.createElement('div');
+  header.className = 'finance-facts-header';
+  const text = document.createElement('div');
+  const title = document.createElement('div');
+  title.className = 'finance-title';
+  title.textContent = 'Finance facts';
+  const kicker = document.createElement('div');
+  kicker.className = 'finance-facts-kicker';
+  kicker.textContent = 'Import bank CSV files, map operations to finance lists, and lock manual assignments.';
+  text.append(title, kicker);
+
+  const actions = document.createElement('div');
+  actions.className = 'finance-facts-actions';
+  const filter = document.createElement('div');
+  filter.className = 'finance-segment finance-facts-filter';
+  [
+    ['all', 'All'],
+    ['unmapped', 'Unmapped'],
+    ['locked', 'Locked'],
+  ].forEach(([value, label]) => {
+    const btn = document.createElement('button');
+    btn.className = 'finance-segment-btn' + (state.factsFilter === value ? ' active' : '');
+    btn.type = 'button';
+    btn.textContent = label;
+    btn.addEventListener('click', () => {
+      state.factsFilter = value;
+      render();
+    });
+    filter.appendChild(btn);
+  });
+  const importBtn = document.createElement('button');
+  importBtn.className = 'finance-small-btn finance-primary-btn';
+  importBtn.type = 'button';
+  importBtn.textContent = 'Import CSV';
+  importBtn.addEventListener('click', openFinanceImportFlow);
+  const rulesBtn = document.createElement('button');
+  rulesBtn.className = 'finance-small-btn';
+  rulesBtn.type = 'button';
+  rulesBtn.textContent = 'Rules';
+  rulesBtn.addEventListener('click', openFinanceRulesModal);
+  actions.append(filter, importBtn, rulesBtn);
+  header.append(text, actions);
+  return header;
+}
+
+function renderFactsSummary() {
+  const summary = document.createElement('div');
+  summary.className = 'finance-summary finance-facts-summary';
+  const rows = state.transactions || [];
+  const allocations = allocationMap();
+  const expense = rows
+    .filter((row) => Number(row.amount_cents) < 0)
+    .reduce((sum, row) => sum + Math.abs(Number(row.amount_cents) || 0), 0);
+  const income = rows
+    .filter((row) => Number(row.amount_cents) > 0)
+    .reduce((sum, row) => sum + (Number(row.amount_cents) || 0), 0);
+  const unmapped = rows.filter((row) => !allocations.has(transactionId(row))).length;
+  [
+    ['Expenses', formatMoney(expense, 'RUB')],
+    ['Income / refunds', formatMoney(income, 'RUB')],
+    ['Facts', String(rows.length)],
+    ['Unmapped', String(unmapped)],
+  ].forEach(([label, value]) => {
+    const card = document.createElement('div');
+    card.className = 'finance-stat';
+    const l = document.createElement('div');
+    l.className = 'finance-stat-label';
+    l.textContent = label;
+    const v = document.createElement('div');
+    v.className = 'finance-stat-value';
+    v.textContent = value;
+    card.append(l, v);
+    summary.appendChild(card);
+  });
+  return summary;
+}
+
+function renderFactsTable() {
+  const wrap = document.createElement('div');
+  wrap.className = 'finance-table-wrap';
+  const rows = factRows();
+  if (!rows.length) {
+    const empty = document.createElement('div');
+    empty.className = 'finance-empty';
+    empty.textContent = state.factsFilter === 'all'
+      ? 'No imported bank facts yet. Import a CSV file to start mapping.'
+      : 'No facts match this filter.';
+    wrap.appendChild(empty);
+    return wrap;
+  }
+  const table = document.createElement('div');
+  table.className = 'finance-facts-table';
+  const head = document.createElement('div');
+  head.className = 'finance-facts-head';
+  ['Date', 'Description', 'Bank', 'Amount', 'Finance target', 'State', 'Actions'].forEach((label) => {
+    const cell = document.createElement('div');
+    cell.textContent = label;
+    head.appendChild(cell);
+  });
+  table.appendChild(head);
+  rows.forEach((row) => table.appendChild(renderFactRow(row.transaction, row.allocation)));
+  wrap.appendChild(table);
+  return wrap;
+}
+
+function renderFactRow(transaction, allocation) {
+  const row = document.createElement('div');
+  row.className = 'finance-fact-row';
+  row.dataset.id = String(transactionId(transaction));
+
+  const date = document.createElement('div');
+  date.className = 'finance-fact-date';
+  date.textContent = formatFactDate(transaction.payment_date);
+  date.title = transaction.operation_at || transaction.payment_date || '';
+
+  const description = document.createElement('div');
+  description.className = 'finance-fact-description';
+  description.textContent = transaction.description || '(no description)';
+  description.title = transaction.description || '';
+
+  const bank = document.createElement('div');
+  bank.className = 'finance-fact-bank';
+  bank.textContent = [transaction.bank_category, transaction.mcc].filter(Boolean).join(' · ') || 'Bank';
+  bank.title = bank.textContent;
+
+  const amount = document.createElement('div');
+  amount.className = 'finance-fact-money ' + (Number(transaction.amount_cents) < 0 ? 'expense' : 'income');
+  amount.textContent = formatMoney(transaction.amount_cents, transaction.currency || 'RUB');
+
+  const target = document.createElement('div');
+  target.className = 'finance-fact-target';
+  if (allocation) {
+    const parts = [planName(allocation.plan_id)];
+    const item = itemName(allocation.item_id);
+    if (item) parts.push(item);
+    target.textContent = parts.join(' / ');
+  } else {
+    target.textContent = 'Unmapped';
+  }
+  target.title = target.textContent;
+
+  const stateCell = document.createElement('div');
+  const badge = document.createElement('span');
+  badge.className = 'finance-fact-state'
+    + (allocation ? ' mapped' : '')
+    + (transaction.rules_locked ? ' locked' : '');
+  badge.textContent = transaction.rules_locked
+    ? (allocation ? 'Locked' : 'Locked unmapped')
+    : (allocation ? 'Mapped' : 'Unmapped');
+  stateCell.appendChild(badge);
+
+  const actions = document.createElement('div');
+  actions.className = 'finance-fact-actions';
+  const mapBtn = document.createElement('button');
+  mapBtn.className = 'finance-small-btn';
+  mapBtn.type = 'button';
+  mapBtn.textContent = allocation ? 'Edit' : 'Map';
+  mapBtn.addEventListener('click', () => openFactAssignmentModal(transaction, allocation));
+  const lockBtn = document.createElement('button');
+  lockBtn.className = 'finance-icon-btn';
+  lockBtn.type = 'button';
+  lockBtn.title = transaction.rules_locked ? 'Unlock from mapping rules' : 'Lock from mapping rules';
+  lockBtn.textContent = transaction.rules_locked ? '🔒' : '🔓';
+  lockBtn.addEventListener('click', () => toggleFactLock(transaction));
+  actions.append(mapBtn, lockBtn);
+
+  row.append(date, description, bank, amount, target, stateCell, actions);
+  return row;
+}
+
+function renderImportPreview(preview) {
+  const body = document.createElement('div');
+  body.className = 'finance-import-preview';
+  const rows = [
+    ['Rows', `${preview.total_rows ?? 0}`],
+    ['New', `${preview.new_rows ?? 0}`],
+    ['Duplicates', `${preview.duplicate_rows ?? 0}`],
+    ['Range', [preview.date_from, preview.date_to].filter(Boolean).join(' - ') || 'No dates'],
+    ['Expenses', formatMoney(preview.expense_total_cents || 0, preview.currencies?.[0] || 'RUB')],
+    ['Income', formatMoney(preview.income_total_cents || 0, preview.currencies?.[0] || 'RUB')],
+  ];
+  for (const [label, value] of rows) {
+    const card = document.createElement('div');
+    const l = document.createElement('span');
+    l.textContent = label;
+    const v = document.createElement('strong');
+    v.textContent = value;
+    card.append(l, v);
+    body.appendChild(card);
+  }
+  return body;
+}
+
+async function openFinanceImportFlow() {
+  try {
+    const path = await call('pick_finance_csv_file');
+    if (!path) return;
+    const preview = await call('preview_finance_bank_csv', { path });
+    await showModal({
+      title: 'Import bank CSV',
+      body: renderImportPreview(preview),
+      confirmText: 'Import',
+      onConfirm: async () => {
+        const result = await call('import_finance_bank_csv', { path });
+        showToast(`Imported ${result.preview?.new_rows ?? 0} new fact(s), mapped ${result.mapped_rows ?? 0}`, 'success');
+        await loadAll(state.activePlanId);
+      },
+    });
+  } catch (err) {
+    if (String(err?.message || err) !== 'cancelled') {
+      showToast(`Finance import failed: ${err}`, 'error');
+    }
+  }
+}
+
+function appendPlanOptions(select, selectedId = null) {
+  select.innerHTML = '';
+  for (const plan of state.plans) {
+    const option = document.createElement('option');
+    option.value = String(planId(plan));
+    option.textContent = plan.name || 'Untitled list';
+    select.appendChild(option);
+  }
+  if (selectedId != null) select.value = String(selectedId);
+}
+
+function appendItemOptions(select, planIdValue, selectedId = null, { includeNone = true } = {}) {
+  select.innerHTML = '';
+  if (includeNone) {
+    const none = document.createElement('option');
+    none.value = '';
+    none.textContent = 'List only';
+    select.appendChild(none);
+  }
+  for (const item of state.allItems || []) {
+    if (normalizeId(item.plan_id) !== normalizeId(planIdValue)) continue;
+    const option = document.createElement('option');
+    option.value = String(itemId(item));
+    option.textContent = item.name || FINANCE_PLACEHOLDER_ITEM_NAME;
+    select.appendChild(option);
+  }
+  if (selectedId != null) select.value = String(selectedId);
+}
+
+function financeModalInput(type = 'text', value = '') {
+  const input = document.createElement('input');
+  input.className = 'finance-input';
+  input.type = type;
+  input.value = value == null ? '' : String(value);
+  return input;
+}
+
+async function openFactAssignmentModal(transaction, allocation) {
+  const body = document.createElement('div');
+  body.className = 'finance-modal-grid';
+  const description = document.createElement('div');
+  description.className = 'finance-modal-note';
+  description.textContent = `${formatFactDate(transaction.payment_date)} · ${transaction.description || 'No description'} · ${formatMoney(transaction.amount_cents, transaction.currency || 'RUB')}`;
+
+  const planLabel = document.createElement('label');
+  planLabel.textContent = 'Finance list';
+  const planSelect = document.createElement('select');
+  planSelect.className = 'finance-select';
+  appendPlanOptions(planSelect, allocation?.plan_id || state.activePlanId);
+
+  const itemLabel = document.createElement('label');
+  itemLabel.textContent = 'Finance item';
+  const itemSelect = document.createElement('select');
+  itemSelect.className = 'finance-select';
+  appendItemOptions(itemSelect, Number(planSelect.value), allocation?.item_id || null);
+  planSelect.addEventListener('change', () => appendItemOptions(itemSelect, Number(planSelect.value), null));
+
+  const lockLabel = document.createElement('label');
+  lockLabel.textContent = 'Rules lock';
+  const lockWrap = document.createElement('label');
+  lockWrap.className = 'finance-modal-note';
+  const lock = document.createElement('input');
+  lock.type = 'checkbox';
+  lock.checked = Boolean(transaction.rules_locked);
+  lockWrap.append(lock, document.createTextNode(' Keep this manual assignment unchanged when rules run'));
+
+  body.append(description, planLabel, planSelect, itemLabel, itemSelect, lockLabel, lockWrap);
+  try {
+    await showModal({
+      title: 'Map finance fact',
+      body,
+      confirmText: 'Save mapping',
+      onConfirm: async () => {
+        await call('assign_finance_transaction', {
+          transactionId: transactionId(transaction),
+          planId: Number(planSelect.value),
+          itemId: itemSelect.value ? Number(itemSelect.value) : null,
+          rulesLocked: lock.checked,
+        });
+        await loadAll(state.activePlanId);
+      },
+    });
+  } catch (err) {
+    if (String(err?.message || err) !== 'cancelled') {
+      showToast(`Failed to map fact: ${err}`, 'error');
+    }
+  }
+}
+
+async function toggleFactLock(transaction) {
+  try {
+    await call('set_finance_transaction_rules_locked', {
+      transactionId: transactionId(transaction),
+      rulesLocked: !transaction.rules_locked,
+    });
+    await loadAll(state.activePlanId);
+  } catch (err) {
+    showToast(`Failed to update fact lock: ${err}`, 'error');
+  }
+}
+
+function renderExistingRulesList(body) {
+  const rules = document.createElement('div');
+  rules.className = 'finance-modal-note';
+  if (!state.mappingRules.length) {
+    rules.textContent = 'No rules yet. Create a rule below, then apply it to future imports or existing facts.';
+    return rules;
+  }
+  rules.textContent = 'Existing rules';
+  const list = document.createElement('div');
+  list.style.display = 'grid';
+  list.style.gap = '6px';
+  list.style.marginTop = '8px';
+  for (const rule of state.mappingRules) {
+    const row = document.createElement('div');
+    row.style.display = 'grid';
+    row.style.gridTemplateColumns = '1fr auto auto';
+    row.style.gap = '6px';
+    row.style.alignItems = 'center';
+    row.style.border = '1px solid var(--border)';
+    row.style.borderRadius = '7px';
+    row.style.padding = '7px 8px';
+    const text = document.createElement('div');
+    text.style.minWidth = '0';
+    text.textContent = `${rule.is_enabled ? '' : '[off] '}${rule.name || 'Untitled rule'} → ${planName(rule.target_plan_id)}${itemName(rule.target_item_id) ? ` / ${itemName(rule.target_item_id)}` : ''}`;
+    text.title = describeRuleConditions(rule);
+    const apply = document.createElement('button');
+    apply.className = 'finance-small-btn';
+    apply.type = 'button';
+    apply.textContent = 'Apply';
+    apply.addEventListener('click', async () => {
+      const count = await call('apply_finance_mapping_rule', { id: ruleId(rule), remapAssigned: false });
+      showToast(`Rule applied to ${count} fact(s)`, 'success');
+      await loadAll(state.activePlanId);
+    });
+    const del = document.createElement('button');
+    del.className = 'finance-icon-btn';
+    del.type = 'button';
+    del.title = 'Delete rule';
+    del.textContent = '🗑';
+    del.addEventListener('click', async () => {
+      await call('delete_finance_mapping_rule', { id: ruleId(rule) });
+      showToast('Rule deleted', 'success');
+      await loadAll(state.activePlanId);
+      body.replaceChildren(renderRulesModalContent(body));
+    });
+    row.append(text, apply, del);
+    list.appendChild(row);
+  }
+  rules.appendChild(list);
+  return rules;
+}
+
+function renderRulesModalContent(containerRef = null) {
+  const body = document.createElement('div');
+  body.className = 'finance-modal-grid';
+  body.appendChild(renderExistingRulesList(containerRef || body));
+
+  const nameLabel = document.createElement('label');
+  nameLabel.textContent = 'Rule name';
+  const nameInput = financeModalInput('text', '');
+  nameInput.dataset.ruleField = 'name';
+  nameInput.placeholder = 'Taxi to Regular payments';
+
+  const enabledLabel = document.createElement('label');
+  enabledLabel.textContent = 'Enabled';
+  const enabled = document.createElement('input');
+  enabled.type = 'checkbox';
+  enabled.checked = true;
+  enabled.dataset.ruleField = 'enabled';
+
+  const priorityLabel = document.createElement('label');
+  priorityLabel.textContent = 'Priority';
+  const priority = financeModalInput('number', String((state.mappingRules?.length || 0) + 1));
+  priority.dataset.ruleField = 'priority';
+
+  const modeLabel = document.createElement('label');
+  modeLabel.textContent = 'Match mode';
+  const matchMode = document.createElement('select');
+  matchMode.className = 'finance-select';
+  matchMode.dataset.ruleField = 'match-mode';
+  [['all', 'All conditions'], ['any', 'Any condition']].forEach(([value, label]) => {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    matchMode.appendChild(option);
+  });
+
+  const categoryLabel = document.createElement('label');
+  categoryLabel.textContent = 'Bank category';
+  const category = financeModalInput('text', '');
+  category.dataset.ruleField = 'category';
+  category.placeholder = 'Такси';
+
+  const descriptionLabel = document.createElement('label');
+  descriptionLabel.textContent = 'Description contains';
+  const description = financeModalInput('text', '');
+  description.dataset.ruleField = 'description';
+  description.placeholder = 'Яндекс';
+
+  const mccLabel = document.createElement('label');
+  mccLabel.textContent = 'MCC';
+  const mcc = financeModalInput('text', '');
+  mcc.dataset.ruleField = 'mcc';
+  mcc.placeholder = '3990';
+
+  const directionLabel = document.createElement('label');
+  directionLabel.textContent = 'Direction';
+  const direction = document.createElement('select');
+  direction.className = 'finance-select';
+  direction.dataset.ruleField = 'direction';
+  [['any', 'Any'], ['expense', 'Expense'], ['income', 'Income/refund']].forEach(([value, label]) => {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    direction.appendChild(option);
+  });
+
+  const amountLabel = document.createElement('label');
+  amountLabel.textContent = 'Amount range';
+  const amountGrid = document.createElement('div');
+  amountGrid.style.display = 'grid';
+  amountGrid.style.gridTemplateColumns = '1fr 1fr';
+  amountGrid.style.gap = '6px';
+  const minAmount = financeModalInput('text', '');
+  minAmount.dataset.ruleField = 'min-amount';
+  minAmount.placeholder = 'from, e.g. -1000';
+  const maxAmount = financeModalInput('text', '');
+  maxAmount.dataset.ruleField = 'max-amount';
+  maxAmount.placeholder = 'to, e.g. -100';
+  amountGrid.append(minAmount, maxAmount);
+
+  const planLabel = document.createElement('label');
+  planLabel.textContent = 'Target list';
+  const planSelect = document.createElement('select');
+  planSelect.className = 'finance-select';
+  planSelect.dataset.ruleField = 'plan-id';
+  appendPlanOptions(planSelect, state.activePlanId);
+
+  const itemLabel = document.createElement('label');
+  itemLabel.textContent = 'Target item';
+  const itemSelect = document.createElement('select');
+  itemSelect.className = 'finance-select';
+  itemSelect.dataset.ruleField = 'item-id';
+  appendItemOptions(itemSelect, Number(planSelect.value), null);
+  planSelect.addEventListener('change', () => appendItemOptions(itemSelect, Number(planSelect.value), null));
+
+  const applyLabel = document.createElement('label');
+  applyLabel.textContent = 'Apply now';
+  const applyWrap = document.createElement('label');
+  applyWrap.className = 'finance-modal-note';
+  const applyExisting = document.createElement('input');
+  applyExisting.type = 'checkbox';
+  applyExisting.dataset.ruleField = 'apply-existing';
+  applyWrap.append(applyExisting, document.createTextNode(' Apply this rule to currently unmapped facts after saving'));
+
+  const remapLabel = document.createElement('label');
+  remapLabel.textContent = 'Remap assigned';
+  const remapWrap = document.createElement('label');
+  remapWrap.className = 'finance-modal-note';
+  const remap = document.createElement('input');
+  remap.type = 'checkbox';
+  remap.dataset.ruleField = 'remap-assigned';
+  remapWrap.append(remap, document.createTextNode(' Also remap already assigned unlocked facts'));
+
+  body.append(
+    nameLabel, nameInput,
+    enabledLabel, enabled,
+    priorityLabel, priority,
+    modeLabel, matchMode,
+    categoryLabel, category,
+    descriptionLabel, description,
+    mccLabel, mcc,
+    directionLabel, direction,
+    amountLabel, amountGrid,
+    planLabel, planSelect,
+    itemLabel, itemSelect,
+    applyLabel, applyWrap,
+    remapLabel, remapWrap,
+  );
+  return body;
+}
+
+async function openFinanceRulesModal() {
+  const body = renderRulesModalContent();
+  try {
+    await showModal({
+      title: 'Finance mapping rules',
+      body,
+      confirmText: 'Create rule',
+      onConfirm: async () => {
+        const name = body.querySelector('[data-rule-field="name"]')?.value.trim() || 'New mapping rule';
+        const rule = await call('create_finance_mapping_rule', {
+          name,
+          isEnabled: body.querySelector('[data-rule-field="enabled"]')?.checked ?? true,
+          priority: Number(body.querySelector('[data-rule-field="priority"]')?.value || 0),
+          matchMode: body.querySelector('[data-rule-field="match-mode"]')?.value || 'all',
+          conditionsJson: makeRuleConditionsFromForm(body),
+          targetPlanId: Number(body.querySelector('[data-rule-field="plan-id"]')?.value),
+          targetItemId: body.querySelector('[data-rule-field="item-id"]')?.value
+            ? Number(body.querySelector('[data-rule-field="item-id"]')?.value)
+            : null,
+        });
+        if (body.querySelector('[data-rule-field="apply-existing"]')?.checked) {
+          const count = await call('apply_finance_mapping_rule', {
+            id: ruleId(rule),
+            remapAssigned: Boolean(body.querySelector('[data-rule-field="remap-assigned"]')?.checked),
+          });
+          showToast(`Rule created and applied to ${count} fact(s)`, 'success');
+        } else {
+          showToast('Rule created', 'success');
+        }
+        await loadAll(state.activePlanId);
+      },
+    });
+  } catch (err) {
+    if (String(err?.message || err) !== 'cancelled') {
+      showToast(`Failed to update rules: ${err}`, 'error');
+    }
+  }
 }
 
 function paymentMap() {

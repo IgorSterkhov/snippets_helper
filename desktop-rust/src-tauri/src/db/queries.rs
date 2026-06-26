@@ -1326,6 +1326,109 @@ fn read_finance_payment(row: &rusqlite::Row) -> rusqlite::Result<FinancePayment>
     })
 }
 
+fn read_finance_import_batch(row: &rusqlite::Row) -> rusqlite::Result<FinanceImportBatch> {
+    let created: String = row.get(12)?;
+    let updated: String = row.get(13)?;
+    Ok(FinanceImportBatch {
+        id: row.get(0)?,
+        source: row.get(1)?,
+        file_name: row.get(2)?,
+        total_rows: row.get(3)?,
+        imported_rows: row.get(4)?,
+        duplicate_rows: row.get(5)?,
+        error_rows: row.get(6)?,
+        date_from: row.get(7)?,
+        date_to: row.get(8)?,
+        expense_total_cents: row.get(9)?,
+        income_total_cents: row.get(10)?,
+        currency: row.get(11)?,
+        created_at: parse_dt(&created),
+        updated_at: parse_dt(&updated),
+        uuid: row.get(14)?,
+        sync_status: row.get(15)?,
+        user_id: row.get(16)?,
+    })
+}
+
+fn read_finance_transaction(row: &rusqlite::Row) -> rusqlite::Result<FinanceTransaction> {
+    let rules_locked: i64 = row.get(22)?;
+    let created: String = row.get(23)?;
+    let updated: String = row.get(24)?;
+    Ok(FinanceTransaction {
+        id: row.get(0)?,
+        source: row.get(1)?,
+        source_fingerprint: row.get(2)?,
+        import_batch_id: row.get(3)?,
+        operation_at: row.get(4)?,
+        payment_date: row.get(5)?,
+        card_mask: row.get(6)?,
+        status: row.get(7)?,
+        amount_cents: row.get(8)?,
+        currency: row.get(9)?,
+        operation_amount_cents: row.get(10)?,
+        operation_currency: row.get(11)?,
+        payment_amount_cents: row.get(12)?,
+        payment_currency: row.get(13)?,
+        cashback_cents: row.get(14)?,
+        bank_category: row.get(15)?,
+        mcc: row.get(16)?,
+        description: row.get(17)?,
+        bonuses_cents: row.get(18)?,
+        invest_rounding_cents: row.get(19)?,
+        rounded_amount_cents: row.get(20)?,
+        raw_json: row.get(21)?,
+        rules_locked: rules_locked != 0,
+        created_at: parse_dt(&created),
+        updated_at: parse_dt(&updated),
+        uuid: row.get(25)?,
+        sync_status: row.get(26)?,
+        user_id: row.get(27)?,
+    })
+}
+
+fn read_finance_transaction_allocation(
+    row: &rusqlite::Row,
+) -> rusqlite::Result<FinanceTransactionAllocation> {
+    let is_active: i64 = row.get(6)?;
+    let created: String = row.get(7)?;
+    let updated: String = row.get(8)?;
+    Ok(FinanceTransactionAllocation {
+        id: row.get(0)?,
+        transaction_id: row.get(1)?,
+        plan_id: row.get(2)?,
+        item_id: row.get(3)?,
+        assigned_by: row.get(4)?,
+        rule_id: row.get(5)?,
+        is_active: is_active != 0,
+        created_at: parse_dt(&created),
+        updated_at: parse_dt(&updated),
+        uuid: row.get(9)?,
+        sync_status: row.get(10)?,
+        user_id: row.get(11)?,
+    })
+}
+
+fn read_finance_mapping_rule(row: &rusqlite::Row) -> rusqlite::Result<FinanceMappingRule> {
+    let is_enabled: i64 = row.get(2)?;
+    let created: String = row.get(8)?;
+    let updated: String = row.get(9)?;
+    Ok(FinanceMappingRule {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        is_enabled: is_enabled != 0,
+        priority: row.get(3)?,
+        match_mode: row.get(4)?,
+        conditions_json: row.get(5)?,
+        target_plan_id: row.get(6)?,
+        target_item_id: row.get(7)?,
+        created_at: parse_dt(&created),
+        updated_at: parse_dt(&updated),
+        uuid: row.get(10)?,
+        sync_status: row.get(11)?,
+        user_id: row.get(12)?,
+    })
+}
+
 fn normalize_finance_kind(kind: &str) -> Result<String> {
     let normalized = kind.trim().to_lowercase().replace('-', "_");
     match normalized.as_str() {
@@ -1892,6 +1995,584 @@ pub fn upsert_finance_payment(
     )
 }
 
+pub fn create_finance_import_batch(
+    conn: &Connection,
+    source: &str,
+    file_name: &str,
+    total_rows: i64,
+    imported_rows: i64,
+    duplicate_rows: i64,
+    error_rows: i64,
+    date_from: Option<&str>,
+    date_to: Option<&str>,
+    expense_total_cents: i64,
+    income_total_cents: i64,
+    currency: &str,
+) -> Result<FinanceImportBatch> {
+    let uuid = Uuid::new_v4().to_string();
+    let now = now_str();
+    conn.execute(
+        "INSERT INTO finance_import_batches
+            (source, file_name, total_rows, imported_rows, duplicate_rows, error_rows,
+             date_from, date_to, expense_total_cents, income_total_cents, currency,
+             created_at, updated_at, uuid, sync_status, user_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12, ?13, 'pending', '')",
+        params![
+            source,
+            file_name,
+            total_rows,
+            imported_rows,
+            duplicate_rows,
+            error_rows,
+            date_from,
+            date_to,
+            expense_total_cents,
+            income_total_cents,
+            currency,
+            now,
+            uuid
+        ],
+    )?;
+    conn.query_row(
+        "SELECT id, source, file_name, total_rows, imported_rows, duplicate_rows, error_rows,
+                date_from, date_to, expense_total_cents, income_total_cents, currency,
+                created_at, updated_at, uuid, sync_status, user_id
+         FROM finance_import_batches WHERE uuid = ?1",
+        params![uuid],
+        read_finance_import_batch,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn upsert_finance_transaction(
+    conn: &Connection,
+    source: &str,
+    source_fingerprint: &str,
+    import_batch_id: Option<i64>,
+    operation_at: &str,
+    payment_date: &str,
+    card_mask: &str,
+    status: &str,
+    amount_cents: i64,
+    currency: &str,
+    operation_amount_cents: i64,
+    operation_currency: &str,
+    payment_amount_cents: i64,
+    payment_currency: &str,
+    cashback_cents: Option<i64>,
+    bank_category: &str,
+    mcc: &str,
+    description: &str,
+    bonuses_cents: Option<i64>,
+    invest_rounding_cents: Option<i64>,
+    rounded_amount_cents: Option<i64>,
+    raw_json: &str,
+) -> Result<FinanceTransaction> {
+    if let Some(existing) = conn
+        .query_row(
+            "SELECT id, source, source_fingerprint, import_batch_id, operation_at, payment_date,
+                    card_mask, status, amount_cents, currency, operation_amount_cents,
+                    operation_currency, payment_amount_cents, payment_currency, cashback_cents,
+                    bank_category, mcc, description, bonuses_cents, invest_rounding_cents,
+                    rounded_amount_cents, raw_json, rules_locked, created_at, updated_at,
+                    uuid, sync_status, user_id
+             FROM finance_transactions
+             WHERE source = ?1 AND source_fingerprint = ?2",
+            params![source, source_fingerprint],
+            read_finance_transaction,
+        )
+        .optional()?
+    {
+        return Ok(existing);
+    }
+
+    let uuid = Uuid::new_v4().to_string();
+    let now = now_str();
+    conn.execute(
+        "INSERT INTO finance_transactions
+            (source, source_fingerprint, import_batch_id, operation_at, payment_date,
+             card_mask, status, amount_cents, currency, operation_amount_cents,
+             operation_currency, payment_amount_cents, payment_currency, cashback_cents,
+             bank_category, mcc, description, bonuses_cents, invest_rounding_cents,
+             rounded_amount_cents, raw_json, rules_locked, created_at, updated_at,
+             uuid, sync_status, user_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
+                 ?15, ?16, ?17, ?18, ?19, ?20, ?21, 0, ?22, ?22, ?23, 'pending', '')",
+        params![
+            source,
+            source_fingerprint,
+            import_batch_id,
+            operation_at,
+            payment_date,
+            card_mask,
+            status,
+            amount_cents,
+            currency,
+            operation_amount_cents,
+            operation_currency,
+            payment_amount_cents,
+            payment_currency,
+            cashback_cents,
+            bank_category,
+            mcc,
+            description,
+            bonuses_cents,
+            invest_rounding_cents,
+            rounded_amount_cents,
+            raw_json,
+            now,
+            uuid
+        ],
+    )?;
+    conn.query_row(
+        "SELECT id, source, source_fingerprint, import_batch_id, operation_at, payment_date,
+                card_mask, status, amount_cents, currency, operation_amount_cents,
+                operation_currency, payment_amount_cents, payment_currency, cashback_cents,
+                bank_category, mcc, description, bonuses_cents, invest_rounding_cents,
+                rounded_amount_cents, raw_json, rules_locked, created_at, updated_at,
+                uuid, sync_status, user_id
+         FROM finance_transactions WHERE uuid = ?1",
+        params![uuid],
+        read_finance_transaction,
+    )
+}
+
+pub fn list_finance_transactions(
+    conn: &Connection,
+    plan_id: Option<i64>,
+    unmapped_only: bool,
+) -> Result<Vec<FinanceTransaction>> {
+    let select_cols = "t.id, t.source, t.source_fingerprint, t.import_batch_id, t.operation_at,
+        t.payment_date, t.card_mask, t.status, t.amount_cents, t.currency,
+        t.operation_amount_cents, t.operation_currency, t.payment_amount_cents,
+        t.payment_currency, t.cashback_cents, t.bank_category, t.mcc, t.description,
+        t.bonuses_cents, t.invest_rounding_cents, t.rounded_amount_cents, t.raw_json,
+        t.rules_locked, t.created_at, t.updated_at, t.uuid, t.sync_status, t.user_id";
+    match (plan_id, unmapped_only) {
+        (Some(plan_id), _) => {
+            let mut stmt = conn.prepare(&format!(
+                "SELECT {select_cols}
+                 FROM finance_transactions t
+                 INNER JOIN finance_transaction_allocations a
+                   ON a.transaction_id = t.id AND a.is_active = 1
+                 WHERE a.plan_id = ?1 AND t.sync_status != 'deleted' AND a.sync_status != 'deleted'
+                 ORDER BY t.payment_date DESC, t.operation_at DESC, t.id DESC"
+            ))?;
+            let rows = stmt.query_map(params![plan_id], read_finance_transaction)?;
+            rows.collect()
+        }
+        (None, true) => {
+            let mut stmt = conn.prepare(&format!(
+                "SELECT {select_cols}
+                 FROM finance_transactions t
+                 LEFT JOIN finance_transaction_allocations a
+                   ON a.transaction_id = t.id AND a.is_active = 1 AND a.sync_status != 'deleted'
+                 WHERE t.sync_status != 'deleted' AND a.id IS NULL
+                 ORDER BY t.payment_date DESC, t.operation_at DESC, t.id DESC"
+            ))?;
+            let rows = stmt.query_map([], read_finance_transaction)?;
+            rows.collect()
+        }
+        (None, false) => {
+            let mut stmt = conn.prepare(&format!(
+                "SELECT {select_cols}
+                 FROM finance_transactions t
+                 WHERE t.sync_status != 'deleted'
+                 ORDER BY t.payment_date DESC, t.operation_at DESC, t.id DESC"
+            ))?;
+            let rows = stmt.query_map([], read_finance_transaction)?;
+            rows.collect()
+        }
+    }
+}
+
+fn finance_transaction_exists(conn: &Connection, id: i64) -> Result<bool> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM finance_transactions WHERE id = ?1 AND sync_status != 'deleted'",
+        params![id],
+        |r| r.get(0),
+    )?;
+    Ok(count > 0)
+}
+
+fn validate_finance_allocation_target(
+    conn: &Connection,
+    plan_id: i64,
+    item_id: Option<i64>,
+) -> Result<()> {
+    if finance_plan_kind(conn, plan_id)?.is_none() {
+        return Err(rusqlite::Error::InvalidParameterName(
+            "finance plan not found".to_string(),
+        ));
+    }
+    if let Some(item_id) = item_id {
+        if finance_item_plan(conn, item_id)? != Some(plan_id) {
+            return Err(rusqlite::Error::InvalidParameterName(
+                "finance item must belong to the same plan".to_string(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub fn create_finance_transaction_allocation(
+    conn: &Connection,
+    transaction_id: i64,
+    plan_id: i64,
+    item_id: Option<i64>,
+    assigned_by: &str,
+    rule_id: Option<i64>,
+) -> Result<FinanceTransactionAllocation> {
+    if !finance_transaction_exists(conn, transaction_id)? {
+        return Err(rusqlite::Error::InvalidParameterName(
+            "finance transaction not found".to_string(),
+        ));
+    }
+    validate_finance_allocation_target(conn, plan_id, item_id)?;
+    if !matches!(assigned_by, "manual" | "rule") {
+        return Err(rusqlite::Error::InvalidParameterName(
+            "assigned_by must be manual or rule".to_string(),
+        ));
+    }
+    let now = now_str();
+    let uuid = Uuid::new_v4().to_string();
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
+        "UPDATE finance_transaction_allocations
+         SET is_active = 0, updated_at = ?1, sync_status = 'pending'
+         WHERE transaction_id = ?2 AND is_active = 1 AND sync_status != 'deleted'",
+        params![now, transaction_id],
+    )?;
+    tx.execute(
+        "INSERT INTO finance_transaction_allocations
+            (transaction_id, plan_id, item_id, assigned_by, rule_id, is_active,
+             created_at, updated_at, uuid, sync_status, user_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?6, ?7, 'pending', '')",
+        params![transaction_id, plan_id, item_id, assigned_by, rule_id, now, uuid],
+    )?;
+    tx.commit()?;
+    conn.query_row(
+        "SELECT id, transaction_id, plan_id, item_id, assigned_by, rule_id, is_active,
+                created_at, updated_at, uuid, sync_status, user_id
+         FROM finance_transaction_allocations WHERE uuid = ?1",
+        params![uuid],
+        read_finance_transaction_allocation,
+    )
+}
+
+pub fn list_finance_transaction_allocations(
+    conn: &Connection,
+    plan_id: i64,
+) -> Result<Vec<FinanceTransactionAllocation>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, transaction_id, plan_id, item_id, assigned_by, rule_id, is_active,
+                created_at, updated_at, uuid, sync_status, user_id
+         FROM finance_transaction_allocations
+         WHERE plan_id = ?1 AND is_active = 1 AND sync_status != 'deleted'
+         ORDER BY updated_at DESC, id DESC",
+    )?;
+    let rows = stmt.query_map(params![plan_id], read_finance_transaction_allocation)?;
+    rows.collect()
+}
+
+pub fn list_all_finance_transaction_allocations(
+    conn: &Connection,
+) -> Result<Vec<FinanceTransactionAllocation>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, transaction_id, plan_id, item_id, assigned_by, rule_id, is_active,
+                created_at, updated_at, uuid, sync_status, user_id
+         FROM finance_transaction_allocations
+         WHERE is_active = 1 AND sync_status != 'deleted'
+         ORDER BY updated_at DESC, id DESC",
+    )?;
+    let rows = stmt.query_map([], read_finance_transaction_allocation)?;
+    rows.collect()
+}
+
+pub fn finance_transaction_fingerprint_exists(
+    conn: &Connection,
+    source: &str,
+    source_fingerprint: &str,
+) -> Result<bool> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*)
+         FROM finance_transactions
+         WHERE source = ?1 AND source_fingerprint = ?2 AND sync_status != 'deleted'",
+        params![source, source_fingerprint],
+        |r| r.get(0),
+    )?;
+    Ok(count > 0)
+}
+
+pub fn set_finance_transaction_rules_locked(
+    conn: &Connection,
+    transaction_id: i64,
+    rules_locked: bool,
+) -> Result<()> {
+    let now = now_str();
+    conn.execute(
+        "UPDATE finance_transactions
+         SET rules_locked = ?1, updated_at = ?2, sync_status = 'pending'
+         WHERE id = ?3 AND sync_status != 'deleted'",
+        params![if rules_locked { 1 } else { 0 }, now, transaction_id],
+    )?;
+    Ok(())
+}
+
+fn normalize_finance_rule_match_mode(match_mode: &str) -> Result<String> {
+    let mode = match_mode.trim().to_lowercase();
+    match mode.as_str() {
+        "all" | "any" => Ok(mode),
+        _ => Err(rusqlite::Error::InvalidParameterName(
+            "match_mode must be all or any".to_string(),
+        )),
+    }
+}
+
+fn validate_finance_rule_conditions(conditions_json: &str) -> Result<()> {
+    let parsed: Value = serde_json::from_str(conditions_json).map_err(|_| {
+        rusqlite::Error::InvalidParameterName("conditions_json must be valid JSON".to_string())
+    })?;
+    if !parsed.is_array() {
+        return Err(rusqlite::Error::InvalidParameterName(
+            "conditions_json must be an array".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+pub fn create_finance_mapping_rule(
+    conn: &Connection,
+    name: &str,
+    is_enabled: bool,
+    priority: i32,
+    match_mode: &str,
+    conditions_json: &str,
+    target_plan_id: i64,
+    target_item_id: Option<i64>,
+) -> Result<FinanceMappingRule> {
+    let match_mode = normalize_finance_rule_match_mode(match_mode)?;
+    validate_finance_rule_conditions(conditions_json)?;
+    validate_finance_allocation_target(conn, target_plan_id, target_item_id)?;
+    let uuid = Uuid::new_v4().to_string();
+    let now = now_str();
+    conn.execute(
+        "INSERT INTO finance_mapping_rules
+            (name, is_enabled, priority, match_mode, conditions_json, target_plan_id,
+             target_item_id, created_at, updated_at, uuid, sync_status, user_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8, ?9, 'pending', '')",
+        params![
+            name,
+            if is_enabled { 1 } else { 0 },
+            priority,
+            match_mode,
+            conditions_json,
+            target_plan_id,
+            target_item_id,
+            now,
+            uuid
+        ],
+    )?;
+    conn.query_row(
+        "SELECT id, name, is_enabled, priority, match_mode, conditions_json,
+                target_plan_id, target_item_id, created_at, updated_at, uuid, sync_status, user_id
+         FROM finance_mapping_rules WHERE uuid = ?1",
+        params![uuid],
+        read_finance_mapping_rule,
+    )
+}
+
+pub fn list_finance_mapping_rules(conn: &Connection) -> Result<Vec<FinanceMappingRule>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, name, is_enabled, priority, match_mode, conditions_json,
+                target_plan_id, target_item_id, created_at, updated_at, uuid, sync_status, user_id
+         FROM finance_mapping_rules
+         WHERE sync_status != 'deleted'
+         ORDER BY priority ASC, id ASC",
+    )?;
+    let rows = stmt.query_map([], read_finance_mapping_rule)?;
+    rows.collect()
+}
+
+pub fn update_finance_mapping_rule(
+    conn: &Connection,
+    id: i64,
+    name: &str,
+    is_enabled: bool,
+    priority: i32,
+    match_mode: &str,
+    conditions_json: &str,
+    target_plan_id: i64,
+    target_item_id: Option<i64>,
+) -> Result<()> {
+    let match_mode = normalize_finance_rule_match_mode(match_mode)?;
+    validate_finance_rule_conditions(conditions_json)?;
+    validate_finance_allocation_target(conn, target_plan_id, target_item_id)?;
+    let now = now_str();
+    conn.execute(
+        "UPDATE finance_mapping_rules
+         SET name = ?1, is_enabled = ?2, priority = ?3, match_mode = ?4,
+             conditions_json = ?5, target_plan_id = ?6, target_item_id = ?7,
+             updated_at = ?8, sync_status = 'pending'
+         WHERE id = ?9 AND sync_status != 'deleted'",
+        params![
+            name,
+            if is_enabled { 1 } else { 0 },
+            priority,
+            match_mode,
+            conditions_json,
+            target_plan_id,
+            target_item_id,
+            now,
+            id
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn delete_finance_mapping_rule(conn: &Connection, id: i64) -> Result<()> {
+    let now = now_str();
+    conn.execute(
+        "UPDATE finance_mapping_rules
+         SET sync_status = 'deleted', updated_at = ?1
+         WHERE id = ?2",
+        params![now, id],
+    )?;
+    Ok(())
+}
+
+fn finance_transaction_has_active_allocation(conn: &Connection, transaction_id: i64) -> Result<bool> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*)
+         FROM finance_transaction_allocations
+         WHERE transaction_id = ?1 AND is_active = 1 AND sync_status != 'deleted'",
+        params![transaction_id],
+        |r| r.get(0),
+    )?;
+    Ok(count > 0)
+}
+
+fn condition_string_value(transaction: &FinanceTransaction, field: &str) -> String {
+    match field {
+        "category" | "bank_category" => transaction.bank_category.clone(),
+        "mcc" => transaction.mcc.clone(),
+        "description" => transaction.description.clone(),
+        "card" | "card_mask" => transaction.card_mask.clone(),
+        "status" => transaction.status.clone(),
+        "currency" => transaction.currency.clone(),
+        _ => String::new(),
+    }
+}
+
+fn transaction_direction(transaction: &FinanceTransaction) -> &'static str {
+    if transaction.amount_cents < 0 {
+        "expense"
+    } else if transaction.amount_cents > 0 {
+        "income"
+    } else {
+        "zero"
+    }
+}
+
+fn finance_rule_condition_matches(transaction: &FinanceTransaction, condition: &Value) -> bool {
+    let Some(obj) = condition.as_object() else {
+        return false;
+    };
+    let field = obj.get("field").and_then(Value::as_str).unwrap_or("");
+    let op = obj.get("op").and_then(Value::as_str).unwrap_or("equals");
+    let value = obj.get("value").and_then(Value::as_str).unwrap_or("");
+    if field == "direction" {
+        return value == "any" || transaction_direction(transaction) == value;
+    }
+    if field == "amount" || field == "amount_cents" {
+        let Ok(expected) = value.replace(',', ".").parse::<f64>() else {
+            return false;
+        };
+        let actual = transaction.amount_cents as f64 / 100.0;
+        return match op {
+            "equals" | "=" => (actual - expected).abs() < 0.005,
+            "gt" | ">" => actual > expected,
+            "gte" | ">=" => actual >= expected,
+            "lt" | "<" => actual < expected,
+            "lte" | "<=" => actual <= expected,
+            _ => false,
+        };
+    }
+    let actual = condition_string_value(transaction, field).to_lowercase();
+    let expected = value.to_lowercase();
+    match op {
+        "equals" | "=" => actual == expected,
+        "contains" => actual.contains(&expected),
+        "starts" | "starts_with" => actual.starts_with(&expected),
+        "not_equals" | "!=" => actual != expected,
+        _ => false,
+    }
+}
+
+fn finance_rule_matches(rule: &FinanceMappingRule, transaction: &FinanceTransaction) -> Result<bool> {
+    let parsed: Value = serde_json::from_str(&rule.conditions_json).map_err(|_| {
+        rusqlite::Error::InvalidParameterName("conditions_json must be valid JSON".to_string())
+    })?;
+    let conditions = parsed.as_array().ok_or_else(|| {
+        rusqlite::Error::InvalidParameterName("conditions_json must be an array".to_string())
+    })?;
+    if conditions.is_empty() {
+        return Ok(false);
+    }
+    let matches: Vec<bool> = conditions
+        .iter()
+        .map(|condition| finance_rule_condition_matches(transaction, condition))
+        .collect();
+    Ok(if rule.match_mode == "any" {
+        matches.iter().any(|matched| *matched)
+    } else {
+        matches.iter().all(|matched| *matched)
+    })
+}
+
+pub fn apply_finance_mapping_rule(
+    conn: &Connection,
+    rule_id: i64,
+    remap_assigned: bool,
+) -> Result<i64> {
+    let rule = conn.query_row(
+        "SELECT id, name, is_enabled, priority, match_mode, conditions_json,
+                target_plan_id, target_item_id, created_at, updated_at, uuid, sync_status, user_id
+         FROM finance_mapping_rules
+         WHERE id = ?1 AND sync_status != 'deleted'",
+        params![rule_id],
+        read_finance_mapping_rule,
+    )?;
+    if !rule.is_enabled {
+        return Ok(0);
+    }
+    let transactions = list_finance_transactions(conn, None, false)?;
+    let mut applied = 0;
+    for transaction in transactions {
+        let Some(transaction_id) = transaction.id else {
+            continue;
+        };
+        if transaction.rules_locked {
+            continue;
+        }
+        if !remap_assigned && finance_transaction_has_active_allocation(conn, transaction_id)? {
+            continue;
+        }
+        if finance_rule_matches(&rule, &transaction)? {
+            create_finance_transaction_allocation(
+                conn,
+                transaction_id,
+                rule.target_plan_id,
+                rule.target_item_id,
+                "rule",
+                rule.id,
+            )?;
+            applied += 1;
+        }
+    }
+    Ok(applied)
+}
+
 // ── Sync Helpers ────────────────────────────────────────────
 
 fn validate_table(table: &str) -> Result<()> {
@@ -2071,6 +2752,21 @@ pub fn upsert_from_server(conn: &Connection, table: &str, rows: &[Value]) -> Res
             None => continue,
         };
 
+        if table == "finance_transactions" {
+            if let (Some(uuid), Some(source), Some(source_fingerprint)) = (
+                obj.get("uuid").and_then(|v| v.as_str()),
+                obj.get("source").and_then(|v| v.as_str()),
+                obj.get("source_fingerprint").and_then(|v| v.as_str()),
+            ) {
+                conn.execute(
+                    "UPDATE finance_transactions
+                     SET uuid = ?1
+                     WHERE source = ?2 AND source_fingerprint = ?3 AND uuid != ?1",
+                    params![uuid, source, source_fingerprint],
+                )?;
+            }
+        }
+
         let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = cols
             .iter()
             .map(|&col| -> Box<dyn rusqlite::types::ToSql> {
@@ -2197,12 +2893,36 @@ pub fn get_finance_item_uuid_by_id(conn: &Connection, id: i64) -> Result<Option<
     get_uuid_by_id(conn, "finance_items", id)
 }
 
+pub fn get_finance_transaction_uuid_by_id(conn: &Connection, id: i64) -> Result<Option<String>> {
+    get_uuid_by_id(conn, "finance_transactions", id)
+}
+
+pub fn get_finance_import_batch_uuid_by_id(conn: &Connection, id: i64) -> Result<Option<String>> {
+    get_uuid_by_id(conn, "finance_import_batches", id)
+}
+
+pub fn get_finance_mapping_rule_uuid_by_id(conn: &Connection, id: i64) -> Result<Option<String>> {
+    get_uuid_by_id(conn, "finance_mapping_rules", id)
+}
+
 pub fn get_finance_plan_id_by_uuid(conn: &Connection, uuid: &str) -> Result<Option<i64>> {
     get_id_by_uuid(conn, "finance_plans", uuid)
 }
 
 pub fn get_finance_item_id_by_uuid(conn: &Connection, uuid: &str) -> Result<Option<i64>> {
     get_id_by_uuid(conn, "finance_items", uuid)
+}
+
+pub fn get_finance_transaction_id_by_uuid(conn: &Connection, uuid: &str) -> Result<Option<i64>> {
+    get_id_by_uuid(conn, "finance_transactions", uuid)
+}
+
+pub fn get_finance_import_batch_id_by_uuid(conn: &Connection, uuid: &str) -> Result<Option<i64>> {
+    get_id_by_uuid(conn, "finance_import_batches", uuid)
+}
+
+pub fn get_finance_mapping_rule_id_by_uuid(conn: &Connection, uuid: &str) -> Result<Option<i64>> {
+    get_id_by_uuid(conn, "finance_mapping_rules", uuid)
 }
 
 pub fn get_finance_item_plan_id_by_id(conn: &Connection, id: i64) -> Result<Option<i64>> {
@@ -3867,6 +4587,254 @@ mod tests {
             )
             .unwrap();
         assert_eq!(status, "deleted");
+    }
+
+    #[test]
+    fn test_finance_transaction_deduplicates_by_source_fingerprint() {
+        let conn = init_test_db();
+        let batch = create_finance_import_batch(
+            &conn,
+            "tbank_csv",
+            "april.csv",
+            2,
+            1,
+            1,
+            0,
+            Some("2026-04-23"),
+            Some("2026-04-30"),
+            -19000,
+            18100,
+            "RUB",
+        )
+        .unwrap();
+        let first = upsert_finance_transaction(
+            &conn,
+            "tbank_csv",
+            "same-row-hash",
+            batch.id,
+            "2026-04-30 21:14:16",
+            "2026-04-30",
+            "*8907",
+            "OK",
+            -19000,
+            "RUB",
+            -19000,
+            "RUB",
+            -19000,
+            "RUB",
+            Some(0),
+            "Мобильная связь",
+            "",
+            "Т-Мобайл +7 995 644-94-38",
+            Some(0),
+            Some(0),
+            Some(-19000),
+            "{}",
+        )
+        .unwrap();
+        let second = upsert_finance_transaction(
+            &conn,
+            "tbank_csv",
+            "same-row-hash",
+            batch.id,
+            "2026-04-30 21:14:16",
+            "2026-04-30",
+            "*8907",
+            "OK",
+            -19000,
+            "RUB",
+            -19000,
+            "RUB",
+            -19000,
+            "RUB",
+            Some(0),
+            "Мобильная связь",
+            "",
+            "Т-Мобайл +7 995 644-94-38",
+            Some(0),
+            Some(0),
+            Some(-19000),
+            "{}",
+        )
+        .unwrap();
+
+        assert_eq!(first.id, second.id);
+        let rows = list_finance_transactions(&conn, None, false).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].amount_cents, -19000);
+        assert_eq!(rows[0].source_fingerprint, "same-row-hash");
+    }
+
+    #[test]
+    fn test_finance_transaction_allocation_validates_plan_item_and_lock() {
+        let conn = init_test_db();
+        let plan_id = list_finance_plans(&conn).unwrap()[0].id.unwrap();
+        let item =
+            create_finance_item(&conn, plan_id, None, "Taxi", 0, None, None, "").unwrap();
+        let other_plan = create_finance_plan(&conn, "Project", "RUB", "project").unwrap();
+        let other_item =
+            create_finance_item(&conn, other_plan.id.unwrap(), None, "Foreign", 0, None, None, "")
+                .unwrap();
+        let batch = create_finance_import_batch(
+            &conn,
+            "tbank_csv",
+            "april.csv",
+            1,
+            1,
+            0,
+            0,
+            Some("2026-04-30"),
+            Some("2026-04-30"),
+            -50600,
+            0,
+            "RUB",
+        )
+        .unwrap();
+        let tx = upsert_finance_transaction(
+            &conn,
+            "tbank_csv",
+            "taxi-hash",
+            batch.id,
+            "2026-04-30 17:38:55",
+            "2026-04-30",
+            "*7857",
+            "OK",
+            -50600,
+            "RUB",
+            -50600,
+            "RUB",
+            -50600,
+            "RUB",
+            Some(2500),
+            "Такси",
+            "3990",
+            "Яндекс Такси",
+            Some(2500),
+            Some(9400),
+            Some(-60000),
+            "{}",
+        )
+        .unwrap();
+
+        let err = create_finance_transaction_allocation(
+            &conn,
+            tx.id.unwrap(),
+            plan_id,
+            other_item.id,
+            "manual",
+            None,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("same plan"));
+
+        let allocation = create_finance_transaction_allocation(
+            &conn,
+            tx.id.unwrap(),
+            plan_id,
+            item.id,
+            "manual",
+            None,
+        )
+        .unwrap();
+        assert_eq!(allocation.plan_id, plan_id);
+        assert_eq!(allocation.item_id, item.id);
+
+        set_finance_transaction_rules_locked(&conn, tx.id.unwrap(), true).unwrap();
+        let rows = list_finance_transactions(&conn, None, false).unwrap();
+        assert!(rows[0].rules_locked);
+    }
+
+    #[test]
+    fn test_finance_mapping_rule_skips_locked_transactions() {
+        let conn = init_test_db();
+        let plan_id = list_finance_plans(&conn).unwrap()[0].id.unwrap();
+        let item =
+            create_finance_item(&conn, plan_id, None, "Taxi", 0, None, None, "").unwrap();
+        let batch = create_finance_import_batch(
+            &conn,
+            "tbank_csv",
+            "april.csv",
+            2,
+            2,
+            0,
+            0,
+            Some("2026-04-29"),
+            Some("2026-04-30"),
+            -74500,
+            0,
+            "RUB",
+        )
+        .unwrap();
+        let unlocked = upsert_finance_transaction(
+            &conn,
+            "tbank_csv",
+            "taxi-open",
+            batch.id,
+            "2026-04-30 17:38:55",
+            "2026-04-30",
+            "*7857",
+            "OK",
+            -50600,
+            "RUB",
+            -50600,
+            "RUB",
+            -50600,
+            "RUB",
+            Some(2500),
+            "Такси",
+            "3990",
+            "Яндекс Такси",
+            Some(2500),
+            Some(9400),
+            Some(-60000),
+            "{}",
+        )
+        .unwrap();
+        let locked = upsert_finance_transaction(
+            &conn,
+            "tbank_csv",
+            "taxi-locked",
+            batch.id,
+            "2026-04-29 19:20:36",
+            "2026-04-29",
+            "*7857",
+            "OK",
+            -23900,
+            "RUB",
+            -23900,
+            "RUB",
+            -23900,
+            "RUB",
+            Some(1100),
+            "Такси",
+            "3990",
+            "Яндекс Такси",
+            Some(1100),
+            Some(1100),
+            Some(-25000),
+            "{}",
+        )
+        .unwrap();
+        set_finance_transaction_rules_locked(&conn, locked.id.unwrap(), true).unwrap();
+
+        let rule = create_finance_mapping_rule(
+            &conn,
+            "Taxi rule",
+            true,
+            10,
+            "all",
+            r#"[{"field":"category","op":"equals","value":"Такси"}]"#,
+            plan_id,
+            item.id,
+        )
+        .unwrap();
+        let applied = apply_finance_mapping_rule(&conn, rule.id.unwrap(), true).unwrap();
+        assert_eq!(applied, 1);
+
+        let allocations = list_finance_transaction_allocations(&conn, plan_id).unwrap();
+        assert_eq!(allocations.len(), 1);
+        assert_eq!(allocations[0].transaction_id, unlocked.id.unwrap());
+        assert_ne!(allocations[0].transaction_id, locked.id.unwrap());
     }
 
     // ── Task Categories / Statuses ───────────────────────────

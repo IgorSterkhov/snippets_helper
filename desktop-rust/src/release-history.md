@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## v1.22.0 (2026-06-26)
+
+- **Finance Facts import:** added a global Finance Facts ledger for importing
+  T-Bank CSV bank exports, deduplicating overlapping files by
+  source/fingerprint, mapping operations to Finance lists/items through rules,
+  and manually locking facts so rules cannot overwrite curated assignments.
+  Finance facts, allocations, mapping rules, and import batches sync through
+  the API. Public Finance shares now include only safe assigned fact details
+  for the shared list: date, description, bank category, MCC, amount, and
+  assigned item.
+
 ## v1.21.0 (2026-06-25)
 
 - **Micro Launchpad containers:** the `+` button now adds items, containers,

@@ -349,6 +349,126 @@ class FinancePayment(Base):
     )
 
 
+class FinanceImportBatch(Base):
+    __tablename__ = "finance_import_batches"
+
+    uuid: Mapped[uuid_mod.UUID] = mapped_column(Uuid, primary_key=True, default=uuid_mod.uuid4)
+    user_id: Mapped[uuid_mod.UUID] = mapped_column(Uuid, ForeignKey("users.id"), nullable=False)
+    id: Mapped[int | None] = mapped_column(Integer)
+    source: Mapped[str] = mapped_column(String, nullable=False, default="tbank_csv")
+    file_name: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    total_rows: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    imported_rows: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    duplicate_rows: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    error_rows: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    date_from: Mapped[str | None] = mapped_column(String(10))
+    date_to: Mapped[str | None] = mapped_column(String(10))
+    expense_total_cents: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    income_total_cents: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    currency: Mapped[str] = mapped_column(String, nullable=False, default="RUB")
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    __table_args__ = (
+        Index("idx_finance_import_batches_user_updated", "user_id", "updated_at"),
+        Index("idx_finance_import_batches_imported", "user_id", "created_at"),
+    )
+
+
+class FinanceTransaction(Base):
+    __tablename__ = "finance_transactions"
+
+    uuid: Mapped[uuid_mod.UUID] = mapped_column(Uuid, primary_key=True, default=uuid_mod.uuid4)
+    user_id: Mapped[uuid_mod.UUID] = mapped_column(Uuid, ForeignKey("users.id"), nullable=False)
+    id: Mapped[int | None] = mapped_column(Integer)
+    source: Mapped[str] = mapped_column(String, nullable=False, default="tbank_csv")
+    source_fingerprint: Mapped[str] = mapped_column(String(128), nullable=False)
+    import_batch_id: Mapped[int | None] = mapped_column(Integer)
+    import_batch_uuid: Mapped[uuid_mod.UUID | None] = mapped_column(Uuid)
+    operation_at: Mapped[str] = mapped_column(String(19), nullable=False, default="")
+    payment_date: Mapped[str] = mapped_column(String(10), nullable=False, default="")
+    card_mask: Mapped[str] = mapped_column(String, nullable=False, default="")
+    status: Mapped[str] = mapped_column(String, nullable=False, default="")
+    amount_cents: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    currency: Mapped[str] = mapped_column(String, nullable=False, default="RUB")
+    operation_amount_cents: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    operation_currency: Mapped[str] = mapped_column(String, nullable=False, default="RUB")
+    payment_amount_cents: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    payment_currency: Mapped[str] = mapped_column(String, nullable=False, default="RUB")
+    cashback_cents: Mapped[int | None] = mapped_column(BigInteger)
+    bank_category: Mapped[str] = mapped_column(String, nullable=False, default="")
+    mcc: Mapped[str] = mapped_column(String, nullable=False, default="")
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    bonuses_cents: Mapped[int | None] = mapped_column(BigInteger)
+    invest_rounding_cents: Mapped[int | None] = mapped_column(BigInteger)
+    rounded_amount_cents: Mapped[int | None] = mapped_column(BigInteger)
+    raw_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    rules_locked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "source", "source_fingerprint", name="uq_finance_transactions_user_source_fingerprint"),
+        Index("idx_finance_transactions_user_updated", "user_id", "updated_at"),
+        Index("idx_finance_transactions_payment_date", "user_id", "payment_date"),
+    )
+
+
+class FinanceMappingRule(Base):
+    __tablename__ = "finance_mapping_rules"
+
+    uuid: Mapped[uuid_mod.UUID] = mapped_column(Uuid, primary_key=True, default=uuid_mod.uuid4)
+    user_id: Mapped[uuid_mod.UUID] = mapped_column(Uuid, ForeignKey("users.id"), nullable=False)
+    id: Mapped[int | None] = mapped_column(Integer)
+    name: Mapped[str] = mapped_column(String, nullable=False, default="")
+    is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    match_mode: Mapped[str] = mapped_column(String, nullable=False, default="all")
+    conditions_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    target_plan_id: Mapped[int | None] = mapped_column(Integer)
+    target_plan_uuid: Mapped[uuid_mod.UUID | None] = mapped_column(Uuid)
+    target_item_id: Mapped[int | None] = mapped_column(Integer)
+    target_item_uuid: Mapped[uuid_mod.UUID | None] = mapped_column(Uuid)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    __table_args__ = (
+        CheckConstraint("match_mode IN ('all', 'any')", name="ck_finance_mapping_rules_match_mode"),
+        Index("idx_finance_mapping_rules_user_updated", "user_id", "updated_at"),
+        Index("idx_finance_mapping_rules_sort", "user_id", "is_enabled", "priority"),
+    )
+
+
+class FinanceTransactionAllocation(Base):
+    __tablename__ = "finance_transaction_allocations"
+
+    uuid: Mapped[uuid_mod.UUID] = mapped_column(Uuid, primary_key=True, default=uuid_mod.uuid4)
+    user_id: Mapped[uuid_mod.UUID] = mapped_column(Uuid, ForeignKey("users.id"), nullable=False)
+    id: Mapped[int | None] = mapped_column(Integer)
+    transaction_id: Mapped[int | None] = mapped_column(Integer)
+    transaction_uuid: Mapped[uuid_mod.UUID | None] = mapped_column(Uuid)
+    plan_id: Mapped[int | None] = mapped_column(Integer)
+    plan_uuid: Mapped[uuid_mod.UUID | None] = mapped_column(Uuid)
+    item_id: Mapped[int | None] = mapped_column(Integer)
+    item_uuid: Mapped[uuid_mod.UUID | None] = mapped_column(Uuid)
+    assigned_by: Mapped[str] = mapped_column(String, nullable=False, default="manual")
+    rule_id: Mapped[int | None] = mapped_column(Integer)
+    rule_uuid: Mapped[uuid_mod.UUID | None] = mapped_column(Uuid)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    __table_args__ = (
+        CheckConstraint("assigned_by IN ('manual', 'rule')", name="ck_finance_allocations_assigned_by"),
+        Index("idx_finance_allocations_user_updated", "user_id", "updated_at"),
+        Index("idx_finance_allocations_plan_item", "user_id", "plan_uuid", "item_uuid", "transaction_uuid"),
+    )
+
+
 class ShareLink(Base):
     __tablename__ = "share_links"
 
@@ -496,4 +616,8 @@ TABLE_MODELS = {
     "finance_plans": FinancePlan,
     "finance_items": FinanceItem,
     "finance_payments": FinancePayment,
+    "finance_import_batches": FinanceImportBatch,
+    "finance_transactions": FinanceTransaction,
+    "finance_mapping_rules": FinanceMappingRule,
+    "finance_transaction_allocations": FinanceTransactionAllocation,
 }
