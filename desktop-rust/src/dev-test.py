@@ -5199,7 +5199,7 @@ async def run_tests():
                     'plan_id': 1,
                     'parent_id': 1,
                     'name': 'Taxi',
-                    'amount_cents': 0,
+                    'amount_cents': 125000,
                     'due_day': None,
                     'due_date': None,
                     'note': '',
@@ -5406,23 +5406,49 @@ async def run_tests():
           group.click();
           const valueAfterGroupClick = root.querySelector('.finance-tree-select-value')?.value || '';
           const terminal = root.querySelector('.finance-tree-select-option[data-item-id="2"]');
+          const amountText = terminal.querySelector('.finance-tree-select-amount')?.textContent || '';
           terminal.click();
           return {
             groupDisabled: group.getAttribute('aria-disabled') === 'true',
             valueAfterGroupClick,
             selectedValue: root.querySelector('.finance-tree-select-value')?.value || '',
             selectedLabel: root.querySelector('.finance-tree-select-trigger')?.textContent || '',
+            amountText,
           };
         })()""")
         assert tree_state['groupDisabled'], tree_state
         assert tree_state['valueAfterGroupClick'] != '1', tree_state
         assert tree_state['selectedValue'] == '2', tree_state
         assert 'Taxi' in tree_state['selectedLabel'], tree_state
+        assert '1\xa0250' in tree_state['amountText'], tree_state
         await cdp.eval("""(() => [...document.querySelectorAll('.modal-overlay .modal-actions button')]
           .find(btn => btn.textContent.trim() === 'Create rule from fact')?.click())()""")
         await wait_until(cdp, "document.querySelector('.modal-overlay h3')?.textContent.trim() === 'Finance mapping rules'", timeout=4)
         rule_seed_modal_class = await cdp.eval("document.querySelector('.modal-overlay .modal')?.className || ''")
         assert 'finance-facts-modal' in rule_seed_modal_class, rule_seed_modal_class
+        rule_modal_layout = await cdp.eval("""(() => {
+          const modal = document.querySelector('.modal-overlay .modal.finance-facts-modal');
+          const body = modal?.querySelector('.modal-body');
+          const input = modal?.querySelector('[data-rule-field="name"]');
+          const actions = modal?.querySelector('.modal-actions');
+          const modalRect = modal.getBoundingClientRect();
+          const inputRect = input.getBoundingClientRect();
+          const actionsRect = actions.getBoundingClientRect();
+          const bodyStyle = getComputedStyle(body);
+          return {
+            modalRight: Math.round(modalRect.right),
+            viewportWidth: window.innerWidth,
+            inputRight: Math.round(inputRect.right),
+            actionsBottom: Math.round(actionsRect.bottom),
+            viewportHeight: window.innerHeight,
+            bodyOverflowY: bodyStyle.overflowY,
+            bodyMaxHeight: bodyStyle.maxHeight,
+          };
+        })()""")
+        assert rule_modal_layout['modalRight'] <= rule_modal_layout['viewportWidth'], rule_modal_layout
+        assert rule_modal_layout['inputRight'] <= rule_modal_layout['modalRight'], rule_modal_layout
+        assert rule_modal_layout['actionsBottom'] <= rule_modal_layout['viewportHeight'], rule_modal_layout
+        assert rule_modal_layout['bodyOverflowY'] in ('auto', 'scroll'), rule_modal_layout
         seeded_rule = await cdp.eval("""(() => ({
           category: document.querySelector('.modal-overlay [data-rule-field="category"]')?.value || '',
           description: document.querySelector('.modal-overlay [data-rule-field="description"]')?.value || '',
@@ -5492,6 +5518,29 @@ async def run_tests():
         assert 'New' in preview_text and 'Duplicates' in preview_text, preview_text
         await close_modals()
 
+        await cdp.eval("""(() => {
+          const rules = Array.from({ length: 32 }, (_, index) => ({
+            id: index + 1,
+            uuid: `rule-overflow-${index + 1}`,
+            name: `Long mapping rule ${index + 1} for modal overflow regression`,
+            is_enabled: true,
+            priority: index + 1,
+            match_mode: 'all',
+            conditions_json: JSON.stringify([{ field: 'description', op: 'contains', value: `merchant ${index + 1}` }]),
+            target_plan_id: 1,
+            target_item_id: 2,
+            created_at: '2026-01-01T00:00:00Z',
+            updated_at: '2026-01-01T00:00:00Z',
+            sync_status: 'pending',
+            user_id: 'mock-user',
+          }));
+          localStorage.setItem('mock.finance_mapping_rules', JSON.stringify(rules));
+          localStorage.setItem('mock.__seq.finance_mapping_rules', '32');
+        })()""")
+        await reload_finance()
+        await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-mode-bar .finance-segment-btn')]
+          .find(btn => btn.textContent.trim() === 'Facts').click())()""")
+        await wait_until(cdp, "!!document.querySelector('#panel-finance .finance-facts-table')", timeout=4)
         await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-facts-header button')]
           .find(btn => btn.textContent.trim() === 'Rules').click())()""")
         await wait_until(cdp, "!!document.querySelector('.modal-overlay [data-rule-field=\"category\"]')", timeout=4)
@@ -5499,6 +5548,30 @@ async def run_tests():
         assert rules_title == 'Finance mapping rules', rules_title
         rules_modal_class = await cdp.eval("document.querySelector('.modal-overlay .modal')?.className || ''")
         assert 'finance-facts-modal' in rules_modal_class, rules_modal_class
+        overflow_layout = await cdp.eval("""(() => {
+          const modal = document.querySelector('.modal-overlay .modal.finance-facts-modal');
+          const body = modal.querySelector('.modal-body');
+          const input = modal.querySelector('[data-rule-field="name"]');
+          const actions = modal.querySelector('.modal-actions');
+          const modalRect = modal.getBoundingClientRect();
+          const bodyRect = body.getBoundingClientRect();
+          const inputRect = input.getBoundingClientRect();
+          const actionsRect = actions.getBoundingClientRect();
+          return {
+            modalRight: Math.round(modalRect.right),
+            inputRight: Math.round(inputRect.right),
+            actionsBottom: Math.round(actionsRect.bottom),
+            viewportWidth: window.innerWidth,
+            viewportHeight: window.innerHeight,
+            bodyHasVerticalScroll: body.scrollHeight > body.clientHeight,
+            bodyBottomBeforeActions: Math.round(bodyRect.bottom) <= Math.round(actionsRect.top),
+          };
+        })()""")
+        assert overflow_layout['modalRight'] <= overflow_layout['viewportWidth'], overflow_layout
+        assert overflow_layout['inputRight'] <= overflow_layout['modalRight'], overflow_layout
+        assert overflow_layout['actionsBottom'] <= overflow_layout['viewportHeight'], overflow_layout
+        assert overflow_layout['bodyHasVerticalScroll'], overflow_layout
+        assert overflow_layout['bodyBottomBeforeActions'], overflow_layout
         await close_modals()
 
     await check('T26j Finance facts import and rules', t26j_finance_facts_import_and_rules)

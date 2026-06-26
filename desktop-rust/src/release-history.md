@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## f-20260626-4 (2026-06-26)
+
+- **Finance Facts mapping dialogs:** the hierarchical item picker now shows
+  planned amounts on the right, including aggregated parent totals. The
+  `Finance mapping rules` dialog now keeps its action buttons inside the
+  screen and scrolls the rule/form body when there are many existing rules.
+
 ## f-20260626-3 (2026-06-26)
 
 - **Finance Facts modal contrast:** the `Map finance fact` and

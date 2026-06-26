@@ -313,9 +313,21 @@ function injectStyles() {
   padding: 4px 8px 4px calc(8px + var(--depth, 0) * 16px);
   text-align: left;
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 7px;
+}
+.finance-tree-select-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.finance-tree-select-amount {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  justify-self: end;
+  white-space: nowrap;
 }
 .finance-tree-select-option:hover {
   border-color: color-mix(in srgb, var(--accent) 44%, var(--border));
@@ -695,6 +707,13 @@ function injectStyles() {
 }
 .modal.finance-facts-modal {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: min(760px, calc(100vw - 32px));
+  max-width: none;
+  max-height: calc(100vh - 36px);
+  overflow: hidden;
   background:
     linear-gradient(180deg, rgba(38, 127, 149, 0.18), rgba(38, 127, 149, 0.04) 150px),
     color-mix(in srgb, var(--bg-secondary) 80%, #0b151a);
@@ -714,9 +733,33 @@ function injectStyles() {
   background: linear-gradient(90deg, #2b9ab4, #79c8d8);
 }
 .modal.finance-facts-modal h3 {
+  flex: 0 0 auto;
   color: #e8fbff;
   border-bottom: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
   padding-bottom: 12px;
+}
+.modal.finance-facts-modal .modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-bottom: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
+}
+.modal.finance-facts-modal .finance-modal-grid {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  grid-template-columns: 136px minmax(0, 1fr);
+}
+.modal.finance-facts-modal .finance-modal-grid > * {
+  min-width: 0;
+}
+.modal.finance-facts-modal .finance-modal-grid input:not([type="checkbox"]),
+.modal.finance-facts-modal .finance-modal-grid select,
+.modal.finance-facts-modal .finance-tree-select {
+  width: 100%;
+  box-sizing: border-box;
 }
 .modal.finance-facts-modal .finance-modal-note:first-child {
   padding: 8px 10px;
@@ -726,6 +769,7 @@ function injectStyles() {
   color: color-mix(in srgb, var(--text) 86%, var(--text-muted));
 }
 .modal.finance-facts-modal .modal-actions {
+  flex: 0 0 auto;
   margin: 2px -4px -4px;
   padding-top: 14px;
   border-top: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
@@ -1137,6 +1181,11 @@ function ruleId(rule) {
 
 function currencyOfActivePlan() {
   return state.plans.find((plan) => planId(plan) === state.activePlanId)?.currency || 'RUB';
+}
+
+function planCurrency(id) {
+  const normalized = normalizeId(id);
+  return state.plans.find((plan) => planId(plan) === normalized)?.currency || 'RUB';
 }
 
 function activePlan() {
@@ -2683,6 +2732,7 @@ function appendItemOptions(select, planIdValue, selectedId = null, { includeNone
 function flattenFinanceItemsForPlan(planIdValue) {
   const planItems = (state.allItems || []).filter((item) => normalizeId(item.plan_id) === normalizeId(planIdValue));
   const { roots, children } = buildTree(planItems);
+  const { totals } = computeTotals(roots, children);
   const rows = [];
   function visit(item, depth, parents = []) {
     const id = itemId(item);
@@ -2694,6 +2744,7 @@ function flattenFinanceItemsForPlan(planIdValue) {
       depth,
       isTerminal: kids.length === 0,
       path: [...parents, label].join(' / '),
+      totalCents: totals.get(id) || 0,
     });
     for (const child of kids) visit(child, depth + 1, [...parents, label]);
   }
@@ -2760,8 +2811,12 @@ function createFinanceItemTreeSelect({
       marker.className = 'finance-tree-select-marker';
       marker.textContent = row.isTerminal ? '•' : '▸';
       const text = document.createElement('span');
+      text.className = 'finance-tree-select-text';
       text.textContent = row.item.name || FINANCE_PLACEHOLDER_ITEM_NAME;
-      option.append(marker, text);
+      const amount = document.createElement('span');
+      amount.className = 'finance-tree-select-amount';
+      amount.textContent = formatMoney(row.totalCents, planCurrency(currentPlanId));
+      option.append(marker, text, amount);
       option.addEventListener('click', (event) => {
         event.preventDefault();
         event.stopPropagation();
