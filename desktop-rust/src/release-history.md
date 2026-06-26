@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## f-20260626-2 (2026-06-26)
+
+- **Finance Facts month picker fix:** the month picker popup now stays within
+  the Facts filter sidebar instead of sliding under the facts table, so all
+  month columns remain visible and clickable.
+
 ## f-20260626-1 (2026-06-26)
 
 - **Finance Facts mapping workflow:** the month filter now uses an in-app

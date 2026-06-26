@@ -265,6 +265,10 @@ function injectStyles() {
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.34);
   padding: 8px;
 }
+.finance-month-popover {
+  width: 100%;
+  box-sizing: border-box;
+}
 .finance-month-picker-head {
   display: grid;
   grid-template-columns: 30px 1fr 30px;

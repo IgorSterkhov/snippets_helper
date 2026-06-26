@@ -5359,6 +5359,17 @@ async def run_tests():
         await wait_until(cdp, "!!document.querySelector('#panel-finance .finance-month-picker-field')", timeout=3)
         await cdp.eval("document.querySelector('#panel-finance .finance-month-picker-field')?.click()")
         await wait_until(cdp, "!!document.querySelector('#panel-finance .finance-month-popover')", timeout=3)
+        month_picker_rect = await cdp.eval("""(() => {
+          const sidebar = document.querySelector('#panel-finance .finance-facts-sidebar').getBoundingClientRect();
+          const popover = document.querySelector('#panel-finance .finance-month-popover').getBoundingClientRect();
+          return {
+            sidebarRight: Math.round(sidebar.right),
+            popoverRight: Math.round(popover.right),
+            sidebarWidth: Math.round(sidebar.width),
+            popoverWidth: Math.round(popover.width),
+          };
+        })()""")
+        assert month_picker_rect['popoverRight'] <= month_picker_rect['sidebarRight'], month_picker_rect
         await cdp.eval("document.querySelector('#panel-finance .finance-month-option[data-month=\"2026-04\"]')?.click()")
         await wait_until(cdp, "document.querySelectorAll('#panel-finance .finance-fact-row').length === 1", timeout=3)
         month_fact = await cdp.eval(
