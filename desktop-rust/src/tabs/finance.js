@@ -220,6 +220,126 @@ function injectStyles() {
   font-size: 16px;
   font-variant-numeric: tabular-nums;
 }
+.finance-month-picker-field,
+.finance-tree-select {
+  position: relative;
+}
+.finance-month-picker-trigger,
+.finance-tree-select-trigger {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text);
+  padding: 2px 8px;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 8px;
+}
+.finance-month-picker-trigger:hover,
+.finance-tree-select-trigger:hover {
+  border-color: var(--accent);
+}
+.finance-month-picker-trigger::after,
+.finance-tree-select-trigger::after {
+  content: "⌄";
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.finance-month-popover,
+.finance-tree-select-menu {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 5px);
+  z-index: 1200;
+  width: min(280px, calc(100vw - 40px));
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-secondary) 94%, var(--bg-primary));
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.34);
+  padding: 8px;
+}
+.finance-month-picker-head {
+  display: grid;
+  grid-template-columns: 30px 1fr 30px;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 7px;
+}
+.finance-month-picker-head strong {
+  text-align: center;
+  font-size: 12px;
+}
+.finance-month-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px;
+}
+.finance-month-option,
+.finance-tree-select-option {
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+}
+.finance-month-option {
+  height: 28px;
+}
+.finance-month-option:hover,
+.finance-month-option.active {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-primary));
+}
+.finance-tree-select-menu {
+  width: min(360px, calc(100vw - 40px));
+  max-height: 300px;
+  overflow-y: auto;
+}
+.finance-tree-select-option {
+  width: 100%;
+  min-height: 28px;
+  padding: 4px 8px 4px calc(8px + var(--depth, 0) * 16px);
+  text-align: left;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 7px;
+}
+.finance-tree-select-option:hover {
+  border-color: color-mix(in srgb, var(--accent) 44%, var(--border));
+  background: color-mix(in srgb, var(--accent) 13%, var(--bg-primary));
+}
+.finance-tree-select-option.group {
+  color: var(--text-muted);
+  cursor: default;
+  font-weight: 700;
+}
+.finance-tree-select-option.group:hover {
+  border-color: transparent;
+  background: transparent;
+}
+.finance-tree-select-option.selected {
+  border-color: color-mix(in srgb, var(--accent) 56%, var(--border));
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-primary));
+}
+.finance-tree-select-marker {
+  width: 14px;
+  color: var(--text-muted);
+  text-align: center;
+}
+.finance-tree-select-empty {
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 8px;
+}
 .finance-plan-card {
   display: grid;
   grid-template-columns: 20px 1fr auto;
@@ -1644,9 +1764,7 @@ function appendFactsDateInputs(container) {
       state.factsDateTo = value;
     });
   } else if (state.factsDateMode === 'month') {
-    addInput('Month', 'month', state.factsMonth, (value) => {
-      state.factsMonth = value;
-    });
+    appendFactsMonthPicker(container);
   } else if (state.factsDateMode === 'year') {
     addInput('Year', 'number', state.factsYear, (value) => {
       state.factsYear = value.replace(/[^\d]/g, '').slice(0, 4);
@@ -1657,6 +1775,78 @@ function appendFactsDateInputs(container) {
     help.textContent = 'Choose an exact date, range, month, or year for large bank exports.';
     container.appendChild(help);
   }
+}
+
+function appendFactsMonthPicker(container) {
+  const field = document.createElement('div');
+  field.className = 'finance-filter-field finance-month-picker-field';
+  const label = document.createElement('label');
+  label.textContent = 'Month';
+  const trigger = document.createElement('button');
+  trigger.className = 'finance-month-picker-trigger';
+  trigger.type = 'button';
+  trigger.textContent = state.factsMonth ? monthLabel(state.factsMonth) : 'Choose month';
+  field.append(label, trigger);
+
+  let openYear = Number(String(state.factsMonth || currentMonthKey()).slice(0, 4)) || new Date().getFullYear();
+  const renderPicker = () => renderMonthPickerPopover(openYear, (nextYear) => {
+    openYear = nextYear;
+    const popover = field.querySelector('.finance-month-popover');
+    if (popover) popover.replaceWith(renderPicker());
+  });
+  const openPicker = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const existing = field.querySelector('.finance-month-popover');
+    if (existing) {
+      existing.remove();
+      return;
+    }
+    field.appendChild(renderPicker());
+  };
+  field.addEventListener('click', openPicker);
+  trigger.addEventListener('click', openPicker);
+  container.appendChild(field);
+}
+
+function renderMonthPickerPopover(year, onYearChange) {
+  const popover = document.createElement('div');
+  popover.className = 'finance-month-popover';
+  popover.addEventListener('click', (event) => event.stopPropagation());
+
+  const head = document.createElement('div');
+  head.className = 'finance-month-picker-head';
+  const prev = document.createElement('button');
+  prev.className = 'finance-icon-btn';
+  prev.type = 'button';
+  prev.textContent = '‹';
+  prev.addEventListener('click', () => onYearChange(year - 1));
+  const title = document.createElement('strong');
+  title.textContent = String(year);
+  const next = document.createElement('button');
+  next.className = 'finance-icon-btn';
+  next.type = 'button';
+  next.textContent = '›';
+  next.addEventListener('click', () => onYearChange(year + 1));
+  head.append(prev, title, next);
+
+  const grid = document.createElement('div');
+  grid.className = 'finance-month-picker-grid';
+  for (let month = 1; month <= 12; month += 1) {
+    const monthKey = `${year}-${String(month).padStart(2, '0')}`;
+    const btn = document.createElement('button');
+    btn.className = 'finance-month-option' + (state.factsMonth === monthKey ? ' active' : '');
+    btn.type = 'button';
+    btn.dataset.month = monthKey;
+    btn.textContent = new Intl.DateTimeFormat('ru-RU', { month: 'short' }).format(new Date(year, month - 1, 1));
+    btn.addEventListener('click', () => {
+      state.factsMonth = monthKey;
+      render();
+    });
+    grid.appendChild(btn);
+  }
+  popover.append(head, grid);
+  return popover;
 }
 
 function renderPlanCard(plan) {
@@ -2449,6 +2639,122 @@ function appendItemOptions(select, planIdValue, selectedId = null, { includeNone
   if (selectedId != null) select.value = String(selectedId);
 }
 
+function flattenFinanceItemsForPlan(planIdValue) {
+  const planItems = (state.allItems || []).filter((item) => normalizeId(item.plan_id) === normalizeId(planIdValue));
+  const { roots, children } = buildTree(planItems);
+  const rows = [];
+  function visit(item, depth, parents = []) {
+    const id = itemId(item);
+    const kids = children.get(id) || [];
+    const label = item.name || FINANCE_PLACEHOLDER_ITEM_NAME;
+    rows.push({
+      item,
+      id,
+      depth,
+      isTerminal: kids.length === 0,
+      path: [...parents, label].join(' / '),
+    });
+    for (const child of kids) visit(child, depth + 1, [...parents, label]);
+  }
+  for (const root of roots) visit(root, 0, []);
+  return rows;
+}
+
+function createFinanceItemTreeSelect({
+  planIdValue,
+  selectedId = null,
+  dataRuleField = null,
+  placeholder = 'Choose terminal item',
+} = {}) {
+  const wrap = document.createElement('div');
+  wrap.className = 'finance-tree-select';
+  const value = document.createElement('input');
+  value.type = 'hidden';
+  value.className = 'finance-tree-select-value';
+  if (dataRuleField) value.dataset.ruleField = dataRuleField;
+  const trigger = document.createElement('button');
+  trigger.className = 'finance-tree-select-trigger';
+  trigger.type = 'button';
+  wrap.append(trigger, value);
+
+  let currentPlanId = normalizeId(planIdValue);
+  let currentSelectedId = normalizeId(selectedId);
+
+  const rows = () => flattenFinanceItemsForPlan(currentPlanId);
+  const selectedRow = () => rows().find((row) => row.id === currentSelectedId && row.isTerminal) || null;
+  const closeMenu = () => wrap.querySelector('.finance-tree-select-menu')?.remove();
+  const sync = () => {
+    const row = selectedRow();
+    if (!row) currentSelectedId = null;
+    value.value = currentSelectedId == null ? '' : String(currentSelectedId);
+    trigger.textContent = row ? row.path : placeholder;
+    trigger.title = row ? row.path : placeholder;
+  };
+
+  const openMenu = () => {
+    const existing = wrap.querySelector('.finance-tree-select-menu');
+    if (existing) {
+      existing.remove();
+      return;
+    }
+    const menu = document.createElement('div');
+    menu.className = 'finance-tree-select-menu';
+    const currentRows = rows();
+    if (!currentRows.length) {
+      const empty = document.createElement('div');
+      empty.className = 'finance-tree-select-empty';
+      empty.textContent = 'No finance items in this list';
+      menu.appendChild(empty);
+    }
+    for (const row of currentRows) {
+      const option = document.createElement('button');
+      option.className = 'finance-tree-select-option'
+        + (row.isTerminal ? '' : ' group')
+        + (row.id === currentSelectedId ? ' selected' : '');
+      option.type = 'button';
+      option.dataset.itemId = String(row.id);
+      option.style.setProperty('--depth', String(row.depth));
+      option.setAttribute('aria-disabled', row.isTerminal ? 'false' : 'true');
+      const marker = document.createElement('span');
+      marker.className = 'finance-tree-select-marker';
+      marker.textContent = row.isTerminal ? '•' : '▸';
+      const text = document.createElement('span');
+      text.textContent = row.item.name || FINANCE_PLACEHOLDER_ITEM_NAME;
+      option.append(marker, text);
+      option.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!row.isTerminal) return;
+        currentSelectedId = row.id;
+        closeMenu();
+        sync();
+      });
+      menu.appendChild(option);
+    }
+    wrap.appendChild(menu);
+  };
+
+  trigger.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    openMenu();
+  });
+  wrap.addEventListener('click', (event) => event.stopPropagation());
+
+  sync();
+  return {
+    element: wrap,
+    value,
+    getValue: () => (value.value ? Number(value.value) : null),
+    setPlanId: (nextPlanId, nextSelectedId = null) => {
+      currentPlanId = normalizeId(nextPlanId);
+      currentSelectedId = normalizeId(nextSelectedId);
+      closeMenu();
+      sync();
+    },
+  };
+}
+
 function financeModalInput(type = 'text', value = '') {
   const input = document.createElement('input');
   input.className = 'finance-input';
@@ -2472,10 +2778,11 @@ async function openFactAssignmentModal(transaction, allocation) {
 
   const itemLabel = document.createElement('label');
   itemLabel.textContent = 'Finance item';
-  const itemSelect = document.createElement('select');
-  itemSelect.className = 'finance-select';
-  appendItemOptions(itemSelect, Number(planSelect.value), allocation?.item_id || null);
-  planSelect.addEventListener('change', () => appendItemOptions(itemSelect, Number(planSelect.value), null));
+  const itemSelect = createFinanceItemTreeSelect({
+    planIdValue: Number(planSelect.value),
+    selectedId: allocation?.item_id || null,
+  });
+  planSelect.addEventListener('change', () => itemSelect.setPlanId(Number(planSelect.value), null));
 
   const lockLabel = document.createElement('label');
   lockLabel.textContent = 'Rules lock';
@@ -2486,17 +2793,37 @@ async function openFactAssignmentModal(transaction, allocation) {
   lock.checked = Boolean(transaction.rules_locked);
   lockWrap.append(lock, document.createTextNode(' Keep this manual assignment unchanged when rules run'));
 
-  body.append(description, planLabel, planSelect, itemLabel, itemSelect, lockLabel, lockWrap);
+  body.append(description, planLabel, planSelect, itemLabel, itemSelect.element, lockLabel, lockWrap);
   try {
     await showModal({
       title: 'Map finance fact',
       body,
       confirmText: 'Save mapping',
+      extraActions: [
+        {
+          text: 'Create rule from fact',
+          className: 'btn-secondary',
+          onClick: async () => {
+            const targetItemId = itemSelect.getValue();
+            if (targetItemId == null) throw new Error('Choose a terminal finance item before creating a rule');
+            setTimeout(() => {
+              openFinanceRulesModal({
+                seedTransaction: transaction,
+                targetPlanId: Number(planSelect.value),
+                targetItemId,
+                applyExisting: true,
+              });
+            }, 0);
+          },
+        },
+      ],
       onConfirm: async () => {
+        const targetItemId = itemSelect.getValue();
+        if (targetItemId == null) throw new Error('Choose a terminal finance item');
         await call('assign_finance_transaction', {
           transactionId: transactionId(transaction),
           planId: Number(planSelect.value),
-          itemId: itemSelect.value ? Number(itemSelect.value) : null,
+          itemId: targetItemId,
           rulesLocked: lock.checked,
         });
         await loadAll(state.activePlanId);
@@ -2573,14 +2900,30 @@ function renderExistingRulesList(body) {
   return rules;
 }
 
-function renderRulesModalContent(containerRef = null) {
+function ruleSeedName(seedTransaction) {
+  if (!seedTransaction) return '';
+  const parts = [seedTransaction.bank_category, seedTransaction.description]
+    .map((part) => String(part || '').trim())
+    .filter(Boolean);
+  return parts.length ? parts.join(' · ') : 'New mapping rule';
+}
+
+function ruleDirectionFromTransaction(transaction) {
+  const amount = Number(transaction?.amount_cents) || 0;
+  if (amount < 0) return 'expense';
+  if (amount > 0) return 'income';
+  return 'any';
+}
+
+function renderRulesModalContent(containerRef = null, seed = {}) {
+  const seedTransaction = seed.seedTransaction || null;
   const body = document.createElement('div');
   body.className = 'finance-modal-grid';
   body.appendChild(renderExistingRulesList(containerRef || body));
 
   const nameLabel = document.createElement('label');
   nameLabel.textContent = 'Rule name';
-  const nameInput = financeModalInput('text', '');
+  const nameInput = financeModalInput('text', ruleSeedName(seedTransaction));
   nameInput.dataset.ruleField = 'name';
   nameInput.placeholder = 'Taxi to Regular payments';
 
@@ -2610,19 +2953,19 @@ function renderRulesModalContent(containerRef = null) {
 
   const categoryLabel = document.createElement('label');
   categoryLabel.textContent = 'Bank category';
-  const category = financeModalInput('text', '');
+  const category = financeModalInput('text', seedTransaction?.bank_category || '');
   category.dataset.ruleField = 'category';
   category.placeholder = 'Такси';
 
   const descriptionLabel = document.createElement('label');
   descriptionLabel.textContent = 'Description contains';
-  const description = financeModalInput('text', '');
+  const description = financeModalInput('text', seedTransaction?.description || '');
   description.dataset.ruleField = 'description';
   description.placeholder = 'Яндекс';
 
   const mccLabel = document.createElement('label');
   mccLabel.textContent = 'MCC';
-  const mcc = financeModalInput('text', '');
+  const mcc = financeModalInput('text', seedTransaction?.mcc || '');
   mcc.dataset.ruleField = 'mcc';
   mcc.placeholder = '3990';
 
@@ -2637,6 +2980,7 @@ function renderRulesModalContent(containerRef = null) {
     option.textContent = label;
     direction.appendChild(option);
   });
+  direction.value = ruleDirectionFromTransaction(seedTransaction);
 
   const amountLabel = document.createElement('label');
   amountLabel.textContent = 'Amount range';
@@ -2657,15 +3001,16 @@ function renderRulesModalContent(containerRef = null) {
   const planSelect = document.createElement('select');
   planSelect.className = 'finance-select';
   planSelect.dataset.ruleField = 'plan-id';
-  appendPlanOptions(planSelect, state.activePlanId);
+  appendPlanOptions(planSelect, seed.targetPlanId || state.activePlanId);
 
   const itemLabel = document.createElement('label');
   itemLabel.textContent = 'Target item';
-  const itemSelect = document.createElement('select');
-  itemSelect.className = 'finance-select';
-  itemSelect.dataset.ruleField = 'item-id';
-  appendItemOptions(itemSelect, Number(planSelect.value), null);
-  planSelect.addEventListener('change', () => appendItemOptions(itemSelect, Number(planSelect.value), null));
+  const itemSelect = createFinanceItemTreeSelect({
+    planIdValue: Number(planSelect.value),
+    selectedId: seed.targetItemId || null,
+    dataRuleField: 'item-id',
+  });
+  planSelect.addEventListener('change', () => itemSelect.setPlanId(Number(planSelect.value), null));
 
   const applyLabel = document.createElement('label');
   applyLabel.textContent = 'Apply now';
@@ -2674,6 +3019,7 @@ function renderRulesModalContent(containerRef = null) {
   const applyExisting = document.createElement('input');
   applyExisting.type = 'checkbox';
   applyExisting.dataset.ruleField = 'apply-existing';
+  applyExisting.checked = Boolean(seed.applyExisting);
   applyWrap.append(applyExisting, document.createTextNode(' Apply this rule to currently unmapped facts after saving'));
 
   const remapLabel = document.createElement('label');
@@ -2696,22 +3042,24 @@ function renderRulesModalContent(containerRef = null) {
     directionLabel, direction,
     amountLabel, amountGrid,
     planLabel, planSelect,
-    itemLabel, itemSelect,
+    itemLabel, itemSelect.element,
     applyLabel, applyWrap,
     remapLabel, remapWrap,
   );
   return body;
 }
 
-async function openFinanceRulesModal() {
-  const body = renderRulesModalContent();
+async function openFinanceRulesModal(seed = {}) {
+  const body = renderRulesModalContent(null, seed);
   try {
     await showModal({
       title: 'Finance mapping rules',
       body,
-      confirmText: 'Create rule',
+      confirmText: seed.seedTransaction ? 'Create and apply rule' : 'Create rule',
       onConfirm: async () => {
         const name = body.querySelector('[data-rule-field="name"]')?.value.trim() || 'New mapping rule';
+        const targetItemValue = body.querySelector('[data-rule-field="item-id"]')?.value || '';
+        if (!targetItemValue) throw new Error('Choose a terminal target item');
         const rule = await call('create_finance_mapping_rule', {
           name,
           isEnabled: body.querySelector('[data-rule-field="enabled"]')?.checked ?? true,
@@ -2719,9 +3067,7 @@ async function openFinanceRulesModal() {
           matchMode: body.querySelector('[data-rule-field="match-mode"]')?.value || 'all',
           conditionsJson: makeRuleConditionsFromForm(body),
           targetPlanId: Number(body.querySelector('[data-rule-field="plan-id"]')?.value),
-          targetItemId: body.querySelector('[data-rule-field="item-id"]')?.value
-            ? Number(body.querySelector('[data-rule-field="item-id"]')?.value)
-            : null,
+          targetItemId: Number(targetItemValue),
         });
         if (body.querySelector('[data-rule-field="apply-existing"]')?.checked) {
           const count = await call('apply_finance_mapping_rule', {

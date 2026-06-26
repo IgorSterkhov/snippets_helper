@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## f-20260626-1 (2026-06-26)
+
+- **Finance Facts mapping workflow:** the month filter now uses an in-app
+  month picker that opens reliably in the desktop WebView. Fact mapping now
+  uses a compact hierarchical Finance item selector where parent/group rows are
+  visible but only terminal rows can be selected. The fact Map modal also has a
+  `Create rule from fact` action that opens a prefilled rule form and can
+  immediately apply the new rule to existing unmapped facts.
+
 ## v1.22.1 (2026-06-26)
 
 - **Finance Facts import polish:** the Facts mode now uses a global date-filter

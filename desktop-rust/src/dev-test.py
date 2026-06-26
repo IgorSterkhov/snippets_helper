@@ -5193,6 +5193,38 @@ async def run_tests():
                     'sync_status': 'pending',
                     'user_id': 'mock-user',
                 },
+                {
+                    'id': 2,
+                    'uuid': 'fi-facts-2',
+                    'plan_id': 1,
+                    'parent_id': 1,
+                    'name': 'Taxi',
+                    'amount_cents': 0,
+                    'due_day': None,
+                    'due_date': None,
+                    'note': '',
+                    'sort_order': 0,
+                    'created_at': '2026-01-01T00:00:00Z',
+                    'updated_at': '2026-01-01T00:00:00Z',
+                    'sync_status': 'pending',
+                    'user_id': 'mock-user',
+                },
+                {
+                    'id': 3,
+                    'uuid': 'fi-facts-3',
+                    'plan_id': 1,
+                    'parent_id': 1,
+                    'name': 'Fuel',
+                    'amount_cents': 0,
+                    'due_day': None,
+                    'due_date': None,
+                    'note': '',
+                    'sort_order': 1,
+                    'created_at': '2026-01-01T00:00:00Z',
+                    'updated_at': '2026-01-01T00:00:00Z',
+                    'sync_status': 'pending',
+                    'user_id': 'mock-user',
+                },
             ]
             transactions = [
                 {
@@ -5260,7 +5292,7 @@ async def run_tests():
               localStorage.setItem('mock.finance_plans', JSON.stringify({json.dumps(plans)}));
               localStorage.setItem('mock.__seq.finance_plans', '2');
               localStorage.setItem('mock.finance_items', JSON.stringify({json.dumps(items)}));
-              localStorage.setItem('mock.__seq.finance_items', '1');
+              localStorage.setItem('mock.__seq.finance_items', '3');
               localStorage.setItem('mock.finance_payments', JSON.stringify([]));
               localStorage.setItem('mock.__seq.finance_payments', '0');
               localStorage.setItem('mock.finance_transactions', JSON.stringify({json.dumps(transactions)}));
@@ -5318,6 +5350,91 @@ async def run_tests():
         assert filtered_fact == 'Coffee test', filtered_fact
         await cdp.eval("document.querySelector('#panel-finance .finance-facts-sidebar button')?.click()")
         await wait_until(cdp, "document.querySelectorAll('#panel-finance .finance-fact-row').length === 2", timeout=3)
+
+        await cdp.eval("""(() => {
+          const select = document.querySelector('#panel-finance .finance-facts-sidebar select');
+          select.value = 'month';
+          select.dispatchEvent(new Event('change', { bubbles: true }));
+        })()""")
+        await wait_until(cdp, "!!document.querySelector('#panel-finance .finance-month-picker-field')", timeout=3)
+        await cdp.eval("document.querySelector('#panel-finance .finance-month-picker-field')?.click()")
+        await wait_until(cdp, "!!document.querySelector('#panel-finance .finance-month-popover')", timeout=3)
+        await cdp.eval("document.querySelector('#panel-finance .finance-month-option[data-month=\"2026-04\"]')?.click()")
+        await wait_until(cdp, "document.querySelectorAll('#panel-finance .finance-fact-row').length === 1", timeout=3)
+        month_fact = await cdp.eval(
+            "document.querySelector('#panel-finance .finance-fact-row .finance-fact-description')?.textContent.trim() || ''"
+        )
+        assert month_fact == 'Яндекс Такси', month_fact
+        await cdp.eval("document.querySelector('#panel-finance .finance-facts-sidebar button')?.click()")
+        await wait_until(cdp, "document.querySelectorAll('#panel-finance .finance-fact-row').length === 2", timeout=3)
+
+        await cdp.eval("""(() => {
+          const row = [...document.querySelectorAll('#panel-finance .finance-fact-row')]
+            .find(row => row.querySelector('.finance-fact-description')?.textContent.trim() === 'Яндекс Такси');
+          row?.querySelector('.finance-fact-actions button')?.click();
+        })()""")
+        await wait_until(cdp, "!!document.querySelector('.modal-overlay .finance-tree-select')", timeout=4)
+        await cdp.eval("document.querySelector('.modal-overlay .finance-tree-select-trigger')?.click()")
+        await wait_until(cdp, "!!document.querySelector('.modal-overlay .finance-tree-select-menu')", timeout=3)
+        tree_state = await cdp.eval("""(() => {
+          const root = document.querySelector('.modal-overlay .finance-tree-select');
+          const group = root.querySelector('.finance-tree-select-option[data-item-id="1"]');
+          group.click();
+          const valueAfterGroupClick = root.querySelector('.finance-tree-select-value')?.value || '';
+          const terminal = root.querySelector('.finance-tree-select-option[data-item-id="2"]');
+          terminal.click();
+          return {
+            groupDisabled: group.getAttribute('aria-disabled') === 'true',
+            valueAfterGroupClick,
+            selectedValue: root.querySelector('.finance-tree-select-value')?.value || '',
+            selectedLabel: root.querySelector('.finance-tree-select-trigger')?.textContent || '',
+          };
+        })()""")
+        assert tree_state['groupDisabled'], tree_state
+        assert tree_state['valueAfterGroupClick'] != '1', tree_state
+        assert tree_state['selectedValue'] == '2', tree_state
+        assert 'Taxi' in tree_state['selectedLabel'], tree_state
+        await cdp.eval("""(() => [...document.querySelectorAll('.modal-overlay .modal-actions button')]
+          .find(btn => btn.textContent.trim() === 'Create rule from fact')?.click())()""")
+        await wait_until(cdp, "document.querySelector('.modal-overlay h3')?.textContent.trim() === 'Finance mapping rules'", timeout=4)
+        seeded_rule = await cdp.eval("""(() => ({
+          category: document.querySelector('.modal-overlay [data-rule-field="category"]')?.value || '',
+          description: document.querySelector('.modal-overlay [data-rule-field="description"]')?.value || '',
+          mcc: document.querySelector('.modal-overlay [data-rule-field="mcc"]')?.value || '',
+          direction: document.querySelector('.modal-overlay [data-rule-field="direction"]')?.value || '',
+          planId: document.querySelector('.modal-overlay [data-rule-field="plan-id"]')?.value || '',
+          itemId: document.querySelector('.modal-overlay [data-rule-field="item-id"]')?.value || '',
+          applyExisting: document.querySelector('.modal-overlay [data-rule-field="apply-existing"]')?.checked || false,
+          targetLabel: document.querySelector('.modal-overlay .finance-tree-select-trigger')?.textContent || '',
+        }))()""")
+        assert seeded_rule['category'] == 'Такси', seeded_rule
+        assert seeded_rule['description'] == 'Яндекс Такси', seeded_rule
+        assert seeded_rule['mcc'] == '3990', seeded_rule
+        assert seeded_rule['direction'] == 'expense', seeded_rule
+        assert seeded_rule['planId'] == '1', seeded_rule
+        assert seeded_rule['itemId'] == '2', seeded_rule
+        assert seeded_rule['applyExisting'], seeded_rule
+        assert 'Taxi' in seeded_rule['targetLabel'], seeded_rule
+        await cdp.eval("""(() => [...document.querySelectorAll('.modal-overlay .modal-actions button')]
+          .find(btn => btn.textContent.trim().startsWith('Create'))?.click())()""")
+        await wait_until(cdp, "!document.querySelector('.modal-overlay')", timeout=5)
+        mapped_by_rule = await cdp.eval("""(() => {
+          const rules = JSON.parse(localStorage.getItem('mock.finance_mapping_rules') || '[]');
+          const allocations = JSON.parse(localStorage.getItem('mock.finance_transaction_allocations') || '[]')
+            .filter(row => row.is_active !== false);
+          return {
+            rules: rules.length,
+            allocationCount: allocations.length,
+            allocationItemId: String(allocations[0]?.item_id || ''),
+            assignedBy: allocations[0]?.assigned_by || '',
+          };
+        })()""")
+        assert mapped_by_rule == {
+            'rules': 1,
+            'allocationCount': 1,
+            'allocationItemId': '2',
+            'assignedBy': 'rule',
+        }, mapped_by_rule
 
         await cdp.eval("""(() => {
           const original = window.__TAURI__.core.invoke;
