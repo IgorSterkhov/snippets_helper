@@ -5225,6 +5225,36 @@ async def run_tests():
                     'sync_status': 'pending',
                     'user_id': 'mock-user',
                 },
+                {
+                    'id': 2,
+                    'uuid': 'ft-facts-2',
+                    'source': 'tbank_csv',
+                    'source_fingerprint': 'facts-coffee-1',
+                    'import_batch_id': None,
+                    'operation_at': '2025-12-15 09:10:11',
+                    'payment_date': '2025-12-15',
+                    'card_mask': '*7857',
+                    'status': 'OK',
+                    'amount_cents': -15000,
+                    'currency': 'RUB',
+                    'operation_amount_cents': -15000,
+                    'operation_currency': 'RUB',
+                    'payment_amount_cents': -15000,
+                    'payment_currency': 'RUB',
+                    'cashback_cents': 0,
+                    'bank_category': 'Кафе',
+                    'mcc': '5812',
+                    'description': 'Coffee test',
+                    'bonuses_cents': 0,
+                    'invest_rounding_cents': 0,
+                    'rounded_amount_cents': -15000,
+                    'raw_json': '{}',
+                    'rules_locked': False,
+                    'created_at': '2026-01-01T00:00:00Z',
+                    'updated_at': '2026-01-01T00:00:00Z',
+                    'sync_status': 'pending',
+                    'user_id': 'mock-user',
+                },
             ]
             await cdp.eval(f"""(() => {{
               localStorage.setItem('mock.finance_plans', JSON.stringify({json.dumps(plans)}));
@@ -5234,7 +5264,7 @@ async def run_tests():
               localStorage.setItem('mock.finance_payments', JSON.stringify([]));
               localStorage.setItem('mock.__seq.finance_payments', '0');
               localStorage.setItem('mock.finance_transactions', JSON.stringify({json.dumps(transactions)}));
-              localStorage.setItem('mock.__seq.finance_transactions', '1');
+              localStorage.setItem('mock.__seq.finance_transactions', '2');
               localStorage.setItem('mock.finance_transaction_allocations', JSON.stringify([]));
               localStorage.setItem('mock.__seq.finance_transaction_allocations', '0');
               localStorage.setItem('mock.finance_mapping_rules', JSON.stringify([]));
@@ -5260,10 +5290,57 @@ async def run_tests():
         await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-mode-bar .finance-segment-btn')]
           .find(btn => btn.textContent.trim() === 'Facts').click())()""")
         await wait_until(cdp, "!!document.querySelector('#panel-finance .finance-facts-table')", timeout=4)
+        has_filter_sidebar = await cdp.eval("!!document.querySelector('#panel-finance .finance-facts-sidebar')")
+        assert has_filter_sidebar, 'Facts mode must replace plan sidebar with filter sidebar'
+        has_plan_list = await cdp.eval("!!document.querySelector('#panel-finance .finance-plan-list')")
+        assert not has_plan_list, 'Facts mode must not show finance plan list'
         first_fact = await cdp.eval(
             "document.querySelector('#panel-finance .finance-fact-row .finance-fact-description')?.textContent.trim() || ''"
         )
         assert first_fact == 'Яндекс Такси', first_fact
+
+        await cdp.eval("""(() => {
+          const select = document.querySelector('#panel-finance .finance-facts-sidebar select');
+          select.value = 'year';
+          select.dispatchEvent(new Event('change', { bubbles: true }));
+        })()""")
+        await wait_until(cdp, "!!document.querySelector('#panel-finance .finance-facts-sidebar input[type=\"number\"]')", timeout=3)
+        await cdp.eval("""(() => {
+          const input = document.querySelector('#panel-finance .finance-facts-sidebar input[type="number"]');
+          input.value = '2025';
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+        })()""")
+        await wait_until(cdp, "document.querySelectorAll('#panel-finance .finance-fact-row').length === 1", timeout=3)
+        filtered_fact = await cdp.eval(
+            "document.querySelector('#panel-finance .finance-fact-row .finance-fact-description')?.textContent.trim() || ''"
+        )
+        assert filtered_fact == 'Coffee test', filtered_fact
+        await cdp.eval("document.querySelector('#panel-finance .finance-facts-sidebar button')?.click()")
+        await wait_until(cdp, "document.querySelectorAll('#panel-finance .finance-fact-row').length === 2", timeout=3)
+
+        await cdp.eval("""(() => {
+          const original = window.__TAURI__.core.invoke;
+          window.__financeFactsOriginalInvoke = original;
+          window.__TAURI__.core.invoke = async (command, args = {}) => {
+            if (command === 'preview_finance_bank_csv') {
+              throw new Error('invalid payment date: not-a-date\\n\\nColumn: Дата платежа\\nValue: not-a-date\\nCSV row 2:\\n"30.04.2026 17:38:55";"not-a-date";"*7857"');
+            }
+            return original(command, args);
+          };
+        })()""")
+        await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-facts-header button')]
+          .find(btn => btn.textContent.trim() === 'Import CSV').click())()""")
+        await wait_until(cdp, "!!document.querySelector('.error-dialog-overlay')", timeout=4)
+        import_error_details = await cdp.eval("document.querySelector('.error-dialog-details')?.textContent || ''")
+        assert 'preview' in import_error_details and 'CSV row 2' in import_error_details, import_error_details
+        await cdp.eval("""(() => {
+          if (window.__financeFactsOriginalInvoke) {
+            window.__TAURI__.core.invoke = window.__financeFactsOriginalInvoke;
+            delete window.__financeFactsOriginalInvoke;
+          }
+        })()""")
+        await close_modals()
 
         await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-facts-header button')]
           .find(btn => btn.textContent.trim() === 'Import CSV').click())()""")

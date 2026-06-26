@@ -1,3 +1,5 @@
+import { showErrorDialog } from './error-dialog.js';
+
 let container = null;
 
 function getContainer() {
@@ -10,6 +12,14 @@ function getContainer() {
 }
 
 export function showToast(message, type = 'info') {
+  if (type === 'error') {
+    showErrorDialog({
+      title: 'Error',
+      message: String(message || 'Unknown error'),
+    });
+    return;
+  }
+
   const toast = document.createElement('div');
   toast.className = `toast toast-${type}`;
   toast.textContent = message;

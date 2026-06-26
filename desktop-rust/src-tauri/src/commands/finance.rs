@@ -88,17 +88,36 @@ fn parse_csv_line(line: &str) -> Result<Vec<String>, String> {
     Ok(fields)
 }
 
-fn parse_tbank_date(value: &str, with_time: bool) -> Result<String, String> {
+fn parse_tbank_date(value: &str, with_time: bool, label: &str) -> Result<String, String> {
     let trimmed = value.trim();
     if with_time {
         let dt = NaiveDateTime::parse_from_str(trimmed, "%d.%m.%Y %H:%M:%S")
-            .map_err(|_| format!("invalid operation date: {value}"))?;
+            .map_err(|_| format!("invalid {label}: {value}"))?;
         Ok(dt.format("%Y-%m-%d %H:%M:%S").to_string())
     } else {
         let date = NaiveDate::parse_from_str(trimmed, "%d.%m.%Y")
-            .map_err(|_| format!("invalid payment date: {value}"))?;
+            .map_err(|_| format!("invalid {label}: {value}"))?;
         Ok(date.format("%Y-%m-%d").to_string())
     }
+}
+
+fn payment_date_from_row(payment_date_raw: &str, operation_at: &str) -> Result<String, String> {
+    let trimmed = payment_date_raw.trim();
+    if !trimmed.is_empty() {
+        return parse_tbank_date(trimmed, false, "payment date");
+    }
+    operation_at
+        .split_once(' ')
+        .map(|(date, _)| date.to_string())
+        .or_else(|| {
+            let fallback = operation_at.chars().take(10).collect::<String>();
+            if fallback.len() == 10 {
+                Some(fallback)
+            } else {
+                None
+            }
+        })
+        .ok_or_else(|| "missing payment date and operation date fallback".to_string())
 }
 
 fn parse_money_cents(value: &str) -> Result<i64, String> {
@@ -155,6 +174,22 @@ fn fingerprint(parts: &[&str]) -> String {
     hex::encode(hasher.finalize())
 }
 
+fn csv_row_error(row_no: usize, raw_row: &str, error: String) -> String {
+    format!("{error}\n\nCSV row {row_no}:\n{raw_row}")
+}
+
+fn csv_field_error(
+    row_no: usize,
+    raw_row: &str,
+    column: &str,
+    value: &str,
+    error: String,
+) -> String {
+    format!(
+        "{error}\n\nColumn: {column}\nValue: {value}\nCSV row {row_no}:\n{raw_row}"
+    )
+}
+
 fn parse_tbank_csv(content: &str) -> Result<Vec<ParsedBankTransaction>, String> {
     let mut lines = content.lines().filter(|line| !line.trim().is_empty());
     let header_line = lines.next().ok_or_else(|| "CSV is empty".to_string())?;
@@ -184,13 +219,18 @@ fn parse_tbank_csv(content: &str) -> Result<Vec<ParsedBankTransaction>, String> 
 
     let mut parsed = Vec::new();
     for (line_idx, line) in lines.enumerate() {
-        let values = parse_csv_line(line).map_err(|err| format!("row {}: {err}", line_idx + 2))?;
+        let row_no = line_idx + 2;
+        let values = parse_csv_line(line).map_err(|err| csv_row_error(row_no, line, err))?;
         if values.len() != headers.len() {
-            return Err(format!(
-                "row {}: expected {} fields, got {}",
-                line_idx + 2,
-                headers.len(),
-                values.len()
+            return Err(csv_row_error(
+                row_no,
+                line,
+                format!(
+                    "row {}: expected {} fields, got {}",
+                    row_no,
+                    headers.len(),
+                    values.len()
+                ),
             ));
         }
         let row: HashMap<String, String> = headers
@@ -214,14 +254,22 @@ fn parse_tbank_csv(content: &str) -> Result<Vec<ParsedBankTransaction>, String> 
         let invest_rounding_raw = required(&row, "Округление на инвесткопилку")?;
         let rounded_amount_raw = required(&row, "Сумма операции с округлением")?;
 
-        let operation_at = parse_tbank_date(operation_at_raw, true)?;
-        let payment_date = parse_tbank_date(payment_date_raw, false)?;
-        let operation_amount_cents = parse_money_cents(operation_amount_raw)?;
-        let payment_amount_cents = parse_money_cents(payment_amount_raw)?;
-        let cashback_cents = parse_optional_money_cents(cashback_raw)?;
-        let bonuses_cents = parse_optional_money_cents(bonuses_raw)?;
-        let invest_rounding_cents = parse_optional_money_cents(invest_rounding_raw)?;
-        let rounded_amount_cents = parse_optional_money_cents(rounded_amount_raw)?;
+        let operation_at = parse_tbank_date(operation_at_raw, true, "operation date")
+            .map_err(|err| csv_field_error(row_no, line, "Дата операции", operation_at_raw, err))?;
+        let payment_date = payment_date_from_row(payment_date_raw, &operation_at)
+            .map_err(|err| csv_field_error(row_no, line, "Дата платежа", payment_date_raw, err))?;
+        let operation_amount_cents = parse_money_cents(operation_amount_raw)
+            .map_err(|err| csv_field_error(row_no, line, "Сумма операции", operation_amount_raw, err))?;
+        let payment_amount_cents = parse_money_cents(payment_amount_raw)
+            .map_err(|err| csv_field_error(row_no, line, "Сумма платежа", payment_amount_raw, err))?;
+        let cashback_cents = parse_optional_money_cents(cashback_raw)
+            .map_err(|err| csv_field_error(row_no, line, "Кэшбэк", cashback_raw, err))?;
+        let bonuses_cents = parse_optional_money_cents(bonuses_raw)
+            .map_err(|err| csv_field_error(row_no, line, "Бонусы (включая кэшбэк)", bonuses_raw, err))?;
+        let invest_rounding_cents = parse_optional_money_cents(invest_rounding_raw)
+            .map_err(|err| csv_field_error(row_no, line, "Округление на инвесткопилку", invest_rounding_raw, err))?;
+        let rounded_amount_cents = parse_optional_money_cents(rounded_amount_raw)
+            .map_err(|err| csv_field_error(row_no, line, "Сумма операции с округлением", rounded_amount_raw, err))?;
         let source_fingerprint = fingerprint(&[
             TBANK_SOURCE,
             &operation_at,
@@ -746,6 +794,30 @@ mod tests {
         assert_eq!(rows[0].mcc, "3990");
         assert_eq!(rows[1].amount_cents, 18100);
         assert_eq!(rows[1].cashback_cents, Some(-900));
+    }
+
+    #[test]
+    fn test_parse_tbank_csv_uses_operation_date_when_payment_date_is_empty() {
+        let csv = SAMPLE_TBANK_CSV.replace("\"30.04.2026\";\"*7857\"", "\"\";\"*7857\"");
+        let rows = parse_tbank_csv(&csv).unwrap();
+        assert_eq!(rows[0].operation_at, "2026-04-30 17:38:55");
+        assert_eq!(rows[0].payment_date, "2026-04-30");
+    }
+
+    #[test]
+    fn test_parse_tbank_csv_error_includes_column_value_and_raw_row() {
+        let bad_row = "\"30.04.2026 17:38:55\";\"not-a-date\";\"*7857\";\"OK\";\"-506,00\";\"RUB\";\"-506,00\";\"RUB\";\"25,00\";\"Такси\";\"3990\";\"Яндекс Такси\";\"25,00\";\"94,00\";\"-600,00\"";
+        let csv = format!(
+            "{}\n{}\n",
+            SAMPLE_TBANK_CSV.lines().next().unwrap(),
+            bad_row
+        );
+        let error = parse_tbank_csv(&csv).unwrap_err();
+        assert!(error.contains("invalid payment date: not-a-date"), "{error}");
+        assert!(error.contains("Column: Дата платежа"), "{error}");
+        assert!(error.contains("Value: not-a-date"), "{error}");
+        assert!(error.contains("CSV row 2:"), "{error}");
+        assert!(error.contains(bad_row), "{error}");
     }
 
     #[test]

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## v1.22.1 (2026-06-26)
+
+- **Finance Facts import polish:** the Facts mode now uses a global date-filter
+  sidebar instead of the finance-list sidebar, with exact date, date range,
+  month, and year filters for large bank exports. CSV import failures now open
+  the persistent copyable error dialog and include parser context with the raw
+  source row when available. T-Bank rows with an empty payment date now fall
+  back to the operation date instead of aborting the whole import.
+
 ## v1.22.0 (2026-06-26)
 
 - **Finance Facts import:** added a global Finance Facts ledger for importing

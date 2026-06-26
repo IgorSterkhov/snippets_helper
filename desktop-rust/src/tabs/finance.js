@@ -2,6 +2,7 @@ import { call } from '../tauri-api.js';
 import { showModal } from '../components/modal.js';
 import { openShareLinkModal } from '../components/share-link-modal.js';
 import { showToast } from '../components/toast.js';
+import { showErrorDialog } from '../components/error-dialog.js';
 
 const COLLAPSE_KEY = 'finance.collapsed.items';
 const FINANCE_DISPLAY_SETTINGS = {
@@ -43,6 +44,12 @@ let state = {
   activeMode: 'lists',
   activeView: 'structure',
   factsFilter: 'all',
+  factsDateMode: 'all',
+  factsDate: '',
+  factsDateFrom: '',
+  factsDateTo: '',
+  factsMonth: '',
+  factsYear: '',
   calendarShowOldMonths: false,
   collapsed: new Set(),
   itemDrag: null,
@@ -91,6 +98,13 @@ function injectStyles() {
   display: flex;
   flex-direction: column;
   min-height: 0;
+}
+.finance-facts-sidebar {
+  width: 244px;
+  min-width: 220px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #20333c 20%, transparent), transparent 170px),
+    color-mix(in srgb, var(--bg-secondary) 70%, var(--bg-primary));
 }
 .finance-side-header,
 .finance-main-header {
@@ -145,6 +159,66 @@ function injectStyles() {
   min-height: 0;
   overflow-y: auto;
   padding: 8px;
+}
+.finance-filter-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px;
+}
+.finance-filter-section {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-primary) 72%, transparent);
+  padding: 10px;
+  margin-bottom: 10px;
+}
+.finance-filter-title {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 750;
+  margin-bottom: 8px;
+}
+.finance-filter-help {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.finance-filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 8px;
+}
+.finance-filter-field label {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.finance-filter-field input,
+.finance-filter-field select {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text);
+  padding: 2px 7px;
+  font-size: 12px;
+}
+.finance-filter-count {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: baseline;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.finance-filter-count strong {
+  color: var(--text);
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
 }
 .finance-plan-card {
   display: grid;
@@ -937,7 +1011,27 @@ function allocationMap() {
   return map;
 }
 
-function factRows() {
+function transactionMatchesDateFilter(transaction) {
+  const date = String(transaction?.payment_date || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return state.factsDateMode === 'all';
+  if (state.factsDateMode === 'date') {
+    return !state.factsDate || date === state.factsDate;
+  }
+  if (state.factsDateMode === 'range') {
+    if (state.factsDateFrom && date < state.factsDateFrom) return false;
+    if (state.factsDateTo && date > state.factsDateTo) return false;
+    return true;
+  }
+  if (state.factsDateMode === 'month') {
+    return !state.factsMonth || date.startsWith(`${state.factsMonth}-`);
+  }
+  if (state.factsDateMode === 'year') {
+    return !state.factsYear || date.startsWith(`${state.factsYear}-`);
+  }
+  return true;
+}
+
+function factRows({ applyDateFilter = true } = {}) {
   const allocations = allocationMap();
   let rows = (state.transactions || []).map((transaction) => ({
     transaction,
@@ -945,11 +1039,24 @@ function factRows() {
   }));
   if (state.factsFilter === 'unmapped') rows = rows.filter((row) => !row.allocation);
   if (state.factsFilter === 'locked') rows = rows.filter((row) => Boolean(row.transaction.rules_locked));
+  if (applyDateFilter) rows = rows.filter((row) => transactionMatchesDateFilter(row.transaction));
   return rows.sort((a, b) =>
     String(b.transaction.payment_date || '').localeCompare(String(a.transaction.payment_date || ''))
     || String(b.transaction.operation_at || '').localeCompare(String(a.transaction.operation_at || ''))
     || transactionId(b.transaction) - transactionId(a.transaction)
   );
+}
+
+function factsDateFilterLabel() {
+  if (state.factsDateMode === 'date') return state.factsDate ? formatFactDate(state.factsDate) : 'Exact date';
+  if (state.factsDateMode === 'range') {
+    const from = state.factsDateFrom ? formatFactDate(state.factsDateFrom) : 'start';
+    const to = state.factsDateTo ? formatFactDate(state.factsDateTo) : 'end';
+    return `${from} - ${to}`;
+  }
+  if (state.factsDateMode === 'month') return state.factsMonth || 'Month';
+  if (state.factsDateMode === 'year') return state.factsYear || 'Year';
+  return 'All dates';
 }
 
 function formatFactDate(value) {
@@ -1381,7 +1488,7 @@ function render() {
 
   const shell = document.createElement('div');
   shell.className = 'finance-shell';
-  shell.appendChild(renderSidebar());
+  shell.appendChild(state.activeMode === 'facts' ? renderFactsSidebar() : renderSidebar());
   shell.appendChild(renderMain());
   rootEl.appendChild(shell);
 }
@@ -1414,6 +1521,142 @@ function renderSidebar() {
   }
   sidebar.appendChild(list);
   return sidebar;
+}
+
+function renderFactsSidebar() {
+  const sidebar = document.createElement('aside');
+  sidebar.className = 'finance-sidebar finance-facts-sidebar';
+
+  const header = document.createElement('div');
+  header.className = 'finance-side-header';
+  const titleWrap = document.createElement('div');
+  const title = document.createElement('div');
+  title.className = 'finance-title';
+  title.textContent = 'Facts';
+  const subtitle = document.createElement('div');
+  subtitle.className = 'finance-facts-kicker';
+  subtitle.textContent = 'Date filters';
+  titleWrap.append(title, subtitle);
+  const resetBtn = document.createElement('button');
+  resetBtn.className = 'finance-small-btn';
+  resetBtn.type = 'button';
+  resetBtn.textContent = 'Reset';
+  resetBtn.addEventListener('click', () => {
+    state.factsDateMode = 'all';
+    state.factsDate = '';
+    state.factsDateFrom = '';
+    state.factsDateTo = '';
+    state.factsMonth = '';
+    state.factsYear = '';
+    render();
+  });
+  header.append(titleWrap, resetBtn);
+  sidebar.appendChild(header);
+
+  const body = document.createElement('div');
+  body.className = 'finance-filter-list';
+
+  const countSection = document.createElement('div');
+  countSection.className = 'finance-filter-section';
+  const visibleCount = factRows().length;
+  const baseCount = factRows({ applyDateFilter: false }).length;
+  const allCount = state.transactions.length;
+  const count = document.createElement('div');
+  count.className = 'finance-filter-count';
+  const countLabel = document.createElement('span');
+  countLabel.textContent = 'Visible facts';
+  const countValue = document.createElement('strong');
+  countValue.textContent = String(visibleCount);
+  count.append(countLabel, countValue);
+  const help = document.createElement('div');
+  help.className = 'finance-filter-help';
+  help.textContent = `${factsDateFilterLabel()} · ${baseCount} in status filter · ${allCount} total`;
+  countSection.append(count, help);
+  body.appendChild(countSection);
+
+  const dateSection = document.createElement('div');
+  dateSection.className = 'finance-filter-section';
+  const sectionTitle = document.createElement('div');
+  sectionTitle.className = 'finance-filter-title';
+  sectionTitle.textContent = 'Payment date';
+  dateSection.appendChild(sectionTitle);
+
+  const modeField = document.createElement('div');
+  modeField.className = 'finance-filter-field';
+  const modeLabel = document.createElement('label');
+  modeLabel.textContent = 'Filter';
+  const modeSelect = document.createElement('select');
+  [
+    ['all', 'All dates'],
+    ['date', 'Exact date'],
+    ['range', 'Date range'],
+    ['month', 'Month'],
+    ['year', 'Year'],
+  ].forEach(([value, label]) => {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    modeSelect.appendChild(option);
+  });
+  modeSelect.value = state.factsDateMode;
+  modeSelect.addEventListener('change', () => {
+    state.factsDateMode = modeSelect.value;
+    render();
+  });
+  modeField.append(modeLabel, modeSelect);
+  dateSection.appendChild(modeField);
+
+  appendFactsDateInputs(dateSection);
+  body.appendChild(dateSection);
+  sidebar.appendChild(body);
+  return sidebar;
+}
+
+function appendFactsDateInputs(container) {
+  const addInput = (labelText, type, value, onInput) => {
+    const field = document.createElement('div');
+    field.className = 'finance-filter-field';
+    const label = document.createElement('label');
+    label.textContent = labelText;
+    const input = document.createElement('input');
+    input.type = type;
+    input.value = value || '';
+    input.addEventListener('input', () => {
+      onInput(input.value);
+    });
+    input.addEventListener('change', () => {
+      onInput(input.value);
+      render();
+    });
+    field.append(label, input);
+    container.appendChild(field);
+  };
+
+  if (state.factsDateMode === 'date') {
+    addInput('Date', 'date', state.factsDate, (value) => {
+      state.factsDate = value;
+    });
+  } else if (state.factsDateMode === 'range') {
+    addInput('From', 'date', state.factsDateFrom, (value) => {
+      state.factsDateFrom = value;
+    });
+    addInput('To', 'date', state.factsDateTo, (value) => {
+      state.factsDateTo = value;
+    });
+  } else if (state.factsDateMode === 'month') {
+    addInput('Month', 'month', state.factsMonth, (value) => {
+      state.factsMonth = value;
+    });
+  } else if (state.factsDateMode === 'year') {
+    addInput('Year', 'number', state.factsYear, (value) => {
+      state.factsYear = value.replace(/[^\d]/g, '').slice(0, 4);
+    });
+  } else {
+    const help = document.createElement('div');
+    help.className = 'finance-filter-help';
+    help.textContent = 'Choose an exact date, range, month, or year for large bank exports.';
+    container.appendChild(help);
+  }
 }
 
 function renderPlanCard(plan) {
@@ -1982,7 +2225,7 @@ function renderFactsHeader() {
 function renderFactsSummary() {
   const summary = document.createElement('div');
   summary.className = 'finance-summary finance-facts-summary';
-  const rows = state.transactions || [];
+  const rows = factRows().map((row) => row.transaction);
   const allocations = allocationMap();
   const expense = rows
     .filter((row) => Number(row.amount_cents) < 0)
@@ -2128,25 +2371,53 @@ function renderImportPreview(preview) {
 }
 
 async function openFinanceImportFlow() {
+  let path = '';
+  let stage = 'pick';
   try {
-    const path = await call('pick_finance_csv_file');
+    path = await call('pick_finance_csv_file');
     if (!path) return;
+    stage = 'preview';
     const preview = await call('preview_finance_bank_csv', { path });
     await showModal({
       title: 'Import bank CSV',
       body: renderImportPreview(preview),
       confirmText: 'Import',
       onConfirm: async () => {
-        const result = await call('import_finance_bank_csv', { path });
-        showToast(`Imported ${result.preview?.new_rows ?? 0} new fact(s), mapped ${result.mapped_rows ?? 0}`, 'success');
-        await loadAll(state.activePlanId);
+        try {
+          stage = 'import';
+          const result = await call('import_finance_bank_csv', { path });
+          showToast(`Imported ${result.preview?.new_rows ?? 0} new fact(s), mapped ${result.mapped_rows ?? 0}`, 'success');
+          await loadAll(state.activePlanId);
+        } catch (err) {
+          showFinanceImportError(err, { stage, path });
+          return false;
+        }
       },
     });
   } catch (err) {
     if (String(err?.message || err) !== 'cancelled') {
-      showToast(`Finance import failed: ${err}`, 'error');
+      showFinanceImportError(err, { stage, path });
     }
   }
+}
+
+function showFinanceImportError(err, { stage = 'import', path = '' } = {}) {
+  const message = String(err?.message || err || 'Unknown import error');
+  showErrorDialog({
+    title: 'Finance import failed',
+    message: 'The bank CSV could not be imported. The details include the parser context and raw CSV row when available.',
+    details: {
+      stage,
+      path,
+      error: message,
+    },
+    copyText: [
+      'Finance import failed',
+      `Stage: ${stage}`,
+      path ? `File: ${path}` : '',
+      message,
+    ].filter(Boolean).join('\n\n'),
+  });
 }
 
 function appendPlanOptions(select, selectedId = null) {
