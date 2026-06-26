@@ -774,6 +774,13 @@ function injectStyles() {
   padding-top: 14px;
   border-top: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
 }
+.modal.finance-map-modal {
+  overflow: visible;
+}
+.modal.finance-map-modal .modal-body {
+  flex: 0 0 auto;
+  overflow: visible;
+}
 .finance-modal-note {
   grid-column: 1 / -1;
   color: var(--text-muted);
@@ -2895,7 +2902,7 @@ async function openFactAssignmentModal(transaction, allocation) {
       title: 'Map finance fact',
       body,
       confirmText: 'Save mapping',
-      modalClassName: 'finance-facts-modal',
+      modalClassName: 'finance-facts-modal finance-map-modal',
       extraActions: [
         {
           text: 'Create rule from fact',
@@ -3153,7 +3160,7 @@ async function openFinanceRulesModal(seed = {}) {
       title: 'Finance mapping rules',
       body,
       confirmText: seed.seedTransaction ? 'Create and apply rule' : 'Create rule',
-      modalClassName: 'finance-facts-modal',
+      modalClassName: 'finance-facts-modal finance-rules-modal',
       onConfirm: async () => {
         const name = body.querySelector('[data-rule-field="name"]')?.value.trim() || 'New mapping rule';
         const targetItemValue = body.querySelector('[data-rule-field="item-id"]')?.value || '';

@@ -5400,6 +5400,23 @@ async def run_tests():
         assert fact_modal_style['borderColor'], fact_modal_style
         await cdp.eval("document.querySelector('.modal-overlay .finance-tree-select-trigger')?.click()")
         await wait_until(cdp, "!!document.querySelector('.modal-overlay .finance-tree-select-menu')", timeout=3)
+        map_dropdown_layout = await cdp.eval("""(() => {
+          const modal = document.querySelector('.modal-overlay .modal.finance-map-modal');
+          const body = modal?.querySelector('.modal-body');
+          const menu = modal?.querySelector('.finance-tree-select-menu');
+          if (!modal || !body || !menu) return null;
+          const bodyStyle = getComputedStyle(body);
+          const modalStyle = getComputedStyle(modal);
+          const menuRect = menu.getBoundingClientRect();
+          return {
+            modalOverflow: modalStyle.overflow,
+            bodyOverflowY: bodyStyle.overflowY,
+            menuHeight: Math.round(menuRect.height),
+          };
+        })()""")
+        assert map_dropdown_layout['modalOverflow'] == 'visible', map_dropdown_layout
+        assert map_dropdown_layout['bodyOverflowY'] == 'visible', map_dropdown_layout
+        assert map_dropdown_layout['menuHeight'] >= 100, map_dropdown_layout
         tree_state = await cdp.eval("""(() => {
           const root = document.querySelector('.modal-overlay .finance-tree-select');
           const group = root.querySelector('.finance-tree-select-option[data-item-id="1"]');

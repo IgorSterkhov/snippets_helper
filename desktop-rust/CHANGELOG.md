@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## f-20260626-5 (2026-06-26)
+
+- **Finance Facts map dropdown fix:** the `Map finance fact` dialog now uses a
+  non-clipping modal body, so the hierarchical `Finance item` dropdown can show
+  the full visible list instead of being cut down to one or two rows. The large
+  rules dialog keeps its own scroll behavior.
+
 ## f-20260626-4 (2026-06-26)
 
 - **Finance Facts mapping dialogs:** the hierarchical item picker now shows
