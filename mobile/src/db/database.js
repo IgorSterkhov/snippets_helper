@@ -10,6 +10,7 @@ const FINANCE_SYNC_ENABLED_BACKFILL_KEY = 'finance_sync_enabled_backfill_v2';
 const FINANCE_SYNC_CURSOR_REPAIR_BACKFILL_KEY = 'finance_sync_cursor_repair_backfill_v1';
 const FINANCE_FACTS_SYNC_BACKFILL_KEY = 'finance_facts_sync_backfill_v1';
 const FINANCE_FACTS_SYNC_REPAIR_BACKFILL_KEY = 'finance_facts_sync_repair_backfill_v2';
+const FINANCE_ALLOCATIONS_DIRTY_BACKFILL_KEY = 'finance_allocations_dirty_backfill_v1';
 
 export function getDB() {
   return db;
@@ -165,6 +166,45 @@ async function runMigrations() {
     // loop was fixed. Force one more full pull for already-updated devices.
     await setLastSyncAt(null).catch(() => {});
     await setSyncMetaValue(FINANCE_FACTS_SYNC_REPAIR_BACKFILL_KEY, new Date().toISOString()).catch(() => {});
+  }
+
+  const hasFinanceAllocationDirty = await columnExists(db, 'finance_transaction_allocations', 'sync_dirty');
+  if (!hasFinanceAllocationDirty) {
+    await new Promise((resolve) => {
+      db.transaction(
+        (tx) => {
+          tx.executeSql('ALTER TABLE finance_transaction_allocations ADD COLUMN sync_dirty INTEGER DEFAULT 0');
+          tx.executeSql(
+            `UPDATE finance_transaction_allocations
+             SET sync_dirty = 1
+             WHERE is_active = 1 AND is_deleted = 0`,
+          );
+        },
+        () => resolve(),
+        () => resolve(),
+      );
+    });
+  }
+
+  const hasFinanceAllocationDirtyBackfill = await syncMetaKeyExists(db, FINANCE_ALLOCATIONS_DIRTY_BACKFILL_KEY);
+  if (!hasFinanceAllocationDirtyBackfill) {
+    // Existing mobile-only fact assignments can have updated_at older than the
+    // sync cursor. Mark active assignments dirty once so they are pushed after
+    // this OTA and then cleared only when the server accepts them.
+    await new Promise((resolve) => {
+      db.transaction(
+        (tx) => {
+          tx.executeSql(
+            `UPDATE finance_transaction_allocations
+             SET sync_dirty = 1
+             WHERE is_active = 1 AND is_deleted = 0`,
+          );
+        },
+        () => resolve(),
+        () => resolve(),
+      );
+    });
+    await setSyncMetaValue(FINANCE_ALLOCATIONS_DIRTY_BACKFILL_KEY, new Date().toISOString()).catch(() => {});
   }
 }
 
@@ -395,7 +435,8 @@ export async function initDB() {
         is_active INTEGER NOT NULL DEFAULT 1,
         created_at TEXT,
         updated_at TEXT NOT NULL,
-        is_deleted INTEGER DEFAULT 0
+        is_deleted INTEGER DEFAULT 0,
+        sync_dirty INTEGER DEFAULT 0
       )
     `);
 

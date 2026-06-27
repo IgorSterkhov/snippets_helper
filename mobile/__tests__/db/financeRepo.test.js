@@ -5,6 +5,7 @@ import {
   buildUpsertFinanceItem,
   buildUpsertFinanceMappingRule,
   buildUpsertFinancePlan,
+  clearSyncedFinanceTransactionAllocations,
   computeFinanceTotals,
   createFinanceMappingRule,
   createFinanceTransactionAllocation,
@@ -91,6 +92,8 @@ describe('financeRepo', () => {
     });
     expect(allocation.sql).toContain('finance_transaction_allocations');
     expect(allocation.params).toEqual(expect.arrayContaining(['allocation-1', 'tx-1', 'plan-1', 'item-1', 'rule-1']));
+    expect(allocation.sql).toContain('sync_dirty');
+    expect(allocation.params[allocation.params.length - 1]).toBe(0);
   });
 
   test('flattenFinanceTree returns depth-first hierarchy and totals', () => {
@@ -199,18 +202,35 @@ describe('financeRepo', () => {
       expect.any(Function),
       expect.any(Function),
     );
+    expect(mockExecuteSql.mock.calls[0][0]).toContain('sync_dirty = 1');
     expect(mockExecuteSql).toHaveBeenCalledWith(
       expect.stringContaining('finance_transaction_allocations'),
       expect.arrayContaining(['tx-1', 'plan-1', 'item-1', 'manual']),
       expect.any(Function),
       expect.any(Function),
     );
+    const allocationInsertCall = mockExecuteSql.mock.calls.find((call) => String(call[0]).includes('INSERT OR REPLACE INTO finance_transaction_allocations'));
+    expect(allocationInsertCall[0]).toContain('sync_dirty');
+    expect(allocationInsertCall[1][allocationInsertCall[1].length - 1]).toBe(1);
     expect(mockExecuteSql).toHaveBeenCalledWith(
       'UPDATE finance_transactions SET rules_locked = ?, updated_at = ? WHERE uuid = ?',
       [1, expect.any(String), 'tx-1'],
       expect.any(Function),
       expect.any(Function),
     );
+  });
+
+  test('clearSyncedFinanceTransactionAllocations clears dirty flags for accepted rows', async () => {
+    await clearSyncedFinanceTransactionAllocations(['allocation-1', 'allocation-2']);
+
+    expect(mockExecuteSql).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE finance_transaction_allocations'),
+      ['allocation-1', 'allocation-2'],
+      expect.any(Function),
+      expect.any(Function),
+    );
+    expect(mockExecuteSql.mock.calls[0][0]).toContain('sync_dirty = 0');
+    expect(mockExecuteSql.mock.calls[0][0]).toContain('uuid IN (?, ?)');
   });
 
   test('applyFinanceMappingRule maps matching unlocked facts only', async () => {

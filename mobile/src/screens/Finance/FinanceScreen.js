@@ -10,8 +10,10 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import ShareLinkSheet from '../../components/ShareLinkSheet';
 import SyncStatusBar from '../../components/SyncStatusBar';
@@ -53,6 +55,7 @@ const PLAN_KIND_LABELS = {
 const ROW_SAVE_DELAY_MS = 550;
 const INDENT_STEP = 16;
 const MAX_INDENT = 64;
+const FINANCE_FACTS_LAYOUT_KEY = 'finance.facts.layout';
 const FACT_FILTERS = [
   { value: 'all', label: 'All' },
   { value: 'unmapped', label: 'Unmapped' },
@@ -169,6 +172,7 @@ function transactionDirection(transaction) {
 
 export default function FinanceScreen() {
   const { colors } = useTheme();
+  const { width: windowWidth } = useWindowDimensions();
   const [activeMode, setActiveMode] = useState('lists');
   const [plans, setPlans] = useState([]);
   const [activePlanUuid, setActivePlanUuid] = useState(null);
@@ -179,6 +183,7 @@ export default function FinanceScreen() {
   const [mappingRules, setMappingRules] = useState([]);
   const [factsFilter, setFactsFilter] = useState('all');
   const [factsMonth, setFactsMonth] = useState('');
+  const [factsLayout, setFactsLayout] = useState('cards');
   const [mappingTransactionUuid, setMappingTransactionUuid] = useState(null);
   const [rulesVisible, setRulesVisible] = useState(false);
   const [ruleSeed, setRuleSeed] = useState(null);
@@ -272,6 +277,20 @@ export default function FinanceScreen() {
   useEffect(() => () => {
     Object.values(planTimers.current).forEach(clearTimeout);
     Object.values(itemTimers.current).forEach(clearTimeout);
+  }, []);
+
+  useEffect(() => {
+    AsyncStorage.getItem(FINANCE_FACTS_LAYOUT_KEY)
+      .then((value) => {
+        if (value === 'compact' || value === 'cards') setFactsLayout(value);
+      })
+      .catch(() => {});
+  }, []);
+
+  const updateFactsLayout = useCallback((layout) => {
+    const nextLayout = layout === 'compact' ? 'compact' : 'cards';
+    setFactsLayout(nextLayout);
+    AsyncStorage.setItem(FINANCE_FACTS_LAYOUT_KEY, nextLayout).catch(() => {});
   }, []);
 
   const savePlan = useCallback(async (plan) => {
@@ -823,12 +842,15 @@ export default function FinanceScreen() {
             facts={filteredFacts}
             factsFilter={factsFilter}
             factsMonth={factsMonth}
+            factsLayout={factsLayout}
+            isWide={windowWidth >= 640}
             factsLoading={factsLoading}
             allocationsByTransaction={allocationByTransaction}
             allocationLabel={allocationLabel}
             currencyByPlan={planByUuid}
             onFilterChange={setFactsFilter}
             onMonthChange={setFactsMonth}
+            onLayoutChange={updateFactsLayout}
             onMap={(transaction) => setMappingTransactionUuid(transaction.uuid)}
           />
         ) : null}
@@ -1000,11 +1022,14 @@ function FactsPanel({
   facts,
   factsFilter,
   factsMonth,
+  factsLayout,
+  isWide,
   factsLoading,
   allocationsByTransaction,
   allocationLabel,
   onFilterChange,
   onMonthChange,
+  onLayoutChange,
   onMap,
 }) {
   return (
@@ -1032,6 +1057,25 @@ function FactsPanel({
           placeholder="YYYY-MM"
           placeholderTextColor={colors.textMuted}
         />
+        <View style={[s.factsLayoutSwitch, { borderColor: colors.border, backgroundColor: colors.card }]}>
+          {[
+            ['cards', 'Cards'],
+            ['compact', 'Compact'],
+          ].map(([layout, label]) => (
+            <TouchableOpacity
+              key={layout}
+              style={[
+                s.factsLayoutBtn,
+                factsLayout === layout && { backgroundColor: colors.primaryLight },
+              ]}
+              onPress={() => onLayoutChange(layout)}
+            >
+              <Text style={[s.factsLayoutText, { color: factsLayout === layout ? colors.primary : colors.textSecondary }]}>
+                {label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
       </View>
 
       {factsLoading ? (
@@ -1045,6 +1089,8 @@ function FactsPanel({
             transaction={transaction}
             allocation={allocationsByTransaction.get(transaction.uuid)}
             allocationLabel={allocationLabel}
+            layout={factsLayout}
+            isWide={isWide}
             colors={colors}
             onMap={() => onMap(transaction)}
           />
@@ -1058,9 +1104,22 @@ function FactsPanel({
   );
 }
 
-function FactCard({ transaction, allocation, allocationLabel, colors, onMap }) {
+function FactCard({ transaction, allocation, allocationLabel, layout, isWide, colors, onMap }) {
   const mapped = !!allocation;
   const amountColor = Number(transaction.amount_cents) < 0 ? colors.danger : colors.success;
+  if (layout === 'compact') {
+    return (
+      <FactCompactRow
+        transaction={transaction}
+        allocation={allocation}
+        allocationLabel={allocationLabel}
+        amountColor={amountColor}
+        isWide={isWide}
+        colors={colors}
+        onMap={onMap}
+      />
+    );
+  }
   return (
     <TouchableOpacity
       style={[s.factCard, { borderColor: colors.border, backgroundColor: colors.card }]}
@@ -1095,6 +1154,55 @@ function FactCard({ transaction, allocation, allocationLabel, colors, onMap }) {
           <Text style={s.mapBtnText}>{mapped ? 'Edit' : 'Map'}</Text>
         </TouchableOpacity>
       </View>
+    </TouchableOpacity>
+  );
+}
+
+function FactCompactRow({ transaction, allocation, allocationLabel, amountColor, isWide, colors, onMap }) {
+  const mapped = !!allocation;
+  const categoryParts = [
+    transaction.bank_category,
+    transaction.card_mask,
+    transaction.mcc ? `MCC ${transaction.mcc}` : '',
+  ].filter(Boolean);
+  return (
+    <TouchableOpacity
+      style={[
+        s.factCompactRow,
+        { borderColor: colors.border, backgroundColor: colors.card },
+        !isWide && s.factCompactRowNarrow,
+      ]}
+      activeOpacity={0.88}
+      onPress={onMap}
+    >
+      <Text style={[s.factCompactDate, { color: colors.textMuted }]} numberOfLines={1}>
+        {formatDueDate(transaction.payment_date || transaction.operation_at)}
+      </Text>
+      <Text style={[s.factCompactAmount, { color: amountColor }]} numberOfLines={1}>
+        {formatMoney(transaction.amount_cents, transaction.currency || 'RUB')}
+      </Text>
+      <Text style={[s.factCompactDescription, { color: colors.text }]} numberOfLines={1}>
+        {transaction.description || 'Без описания'}
+      </Text>
+      <Text style={[s.factCompactMeta, { color: colors.textMuted }]} numberOfLines={1}>
+        {categoryParts.join(' · ') || 'Bank'}
+      </Text>
+      <View
+        style={[
+          s.factCompactMapping,
+          { borderColor: mapped ? colors.primary : colors.border, backgroundColor: mapped ? colors.primaryLight : colors.bgSecondary },
+        ]}
+      >
+        <Text style={[s.factCompactMappingText, { color: mapped ? colors.primary : colors.textMuted }]} numberOfLines={1}>
+          {allocationLabel(allocation)}
+        </Text>
+      </View>
+      {transaction.rules_locked ? (
+        <Text style={[s.factCompactLock, { color: colors.textMuted }]}>🔒</Text>
+      ) : null}
+      <TouchableOpacity style={[s.factCompactMapBtn, { backgroundColor: colors.primary }]} onPress={onMap}>
+        <Text style={s.mapBtnText}>{mapped ? 'Edit' : 'Map'}</Text>
+      </TouchableOpacity>
     </TouchableOpacity>
   );
 }
@@ -1738,6 +1846,9 @@ const s = StyleSheet.create({
   filterChip: { borderWidth: 1, borderRadius: 7, paddingHorizontal: 10, paddingVertical: 7 },
   filterChipText: { fontSize: 12, fontWeight: '800' },
   monthInput: { minWidth: 92, height: 32, borderWidth: 1, borderRadius: 7, paddingHorizontal: 9, paddingVertical: 5, fontSize: 12, fontWeight: '700' },
+  factsLayoutSwitch: { height: 32, borderWidth: 1, borderRadius: 7, padding: 2, flexDirection: 'row', gap: 2 },
+  factsLayoutBtn: { minWidth: 66, borderRadius: 5, paddingHorizontal: 8, alignItems: 'center', justifyContent: 'center' },
+  factsLayoutText: { fontSize: 11.5, fontWeight: '900' },
   factsLoading: { paddingHorizontal: 16, paddingVertical: 6, fontSize: 12, fontWeight: '700' },
   factCard: { borderWidth: 1, borderRadius: 8, marginHorizontal: 10, marginVertical: 4, padding: 10, gap: 5 },
   factTopRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 },
@@ -1751,6 +1862,27 @@ const s = StyleSheet.create({
   factLock: { fontSize: 14, fontWeight: '700' },
   mapBtn: { borderRadius: 7, paddingHorizontal: 12, paddingVertical: 7 },
   mapBtnText: { color: '#fff', fontSize: 12, fontWeight: '900' },
+  factCompactRow: {
+    minHeight: 36,
+    borderWidth: 1,
+    borderRadius: 7,
+    marginHorizontal: 8,
+    marginVertical: 2,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+  },
+  factCompactRowNarrow: { gap: 5, paddingHorizontal: 6 },
+  factCompactDate: { width: 76, fontSize: 10.5, fontWeight: '800', fontVariant: ['tabular-nums'] },
+  factCompactAmount: { width: 92, textAlign: 'right', fontSize: 11.5, fontWeight: '900', fontVariant: ['tabular-nums'] },
+  factCompactDescription: { flex: 1.4, minWidth: 90, fontSize: 12, fontWeight: '800' },
+  factCompactMeta: { flex: 1, minWidth: 80, fontSize: 10.5, fontWeight: '700' },
+  factCompactMapping: { flex: 1, minWidth: 96, maxWidth: 220, borderWidth: 1, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
+  factCompactMappingText: { fontSize: 10.5, fontWeight: '800' },
+  factCompactLock: { width: 16, fontSize: 12, fontWeight: '700', textAlign: 'center' },
+  factCompactMapBtn: { borderRadius: 6, paddingHorizontal: 9, paddingVertical: 5 },
   smallAction: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 9, paddingVertical: 6 },
   smallActionText: { fontSize: 12, fontWeight: '700' },
   sheetRoot: { flex: 1, justifyContent: 'flex-end' },

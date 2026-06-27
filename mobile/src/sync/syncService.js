@@ -20,7 +20,7 @@ import {
   buildUpsertFinanceMappingRule, buildUpsertFinanceTransactionAllocation,
   getModifiedFinancePlansSince, getModifiedFinanceItemsSince,
   getModifiedFinanceTransactionsSince, getModifiedFinanceMappingRulesSince,
-  getModifiedFinanceTransactionAllocationsSince,
+  getModifiedFinanceTransactionAllocationsSince, clearSyncedFinanceTransactionAllocations,
 } from '../db/financeRepo';
 
 const BUILDERS = {
@@ -277,6 +277,10 @@ export async function performSync() {
           })}`);
           warningError.syncWarning = true;
           throw warningError;
+        }
+        const acceptedFinanceAllocations = pushResult?.accepted_uuids?.finance_transaction_allocations || [];
+        if (acceptedFinanceAllocations.length) {
+          await clearSyncedFinanceTransactionAllocations(acceptedFinanceAllocations);
         }
       }
 

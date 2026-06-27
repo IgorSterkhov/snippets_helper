@@ -577,8 +577,8 @@ export function buildUpsertFinanceTransactionAllocation(allocation) {
     sql: `INSERT OR REPLACE INTO finance_transaction_allocations
           (uuid, id, transaction_id, transaction_uuid, plan_id, plan_uuid,
            item_id, item_uuid, assigned_by, rule_id, rule_uuid, is_active,
-           created_at, updated_at, is_deleted)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           created_at, updated_at, is_deleted, sync_dirty)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     params: [
       allocation.uuid,
       allocation.id ?? null,
@@ -595,6 +595,7 @@ export function buildUpsertFinanceTransactionAllocation(allocation) {
       createdAt(allocation),
       updatedAt(allocation),
       deletedFlag(allocation),
+      normalizeBool(allocation.sync_dirty, false),
     ],
   };
 }
@@ -612,9 +613,23 @@ export async function getModifiedFinanceMappingRulesSince(since) {
 }
 
 export async function getModifiedFinanceTransactionAllocationsSince(since) {
-  const sql = since ? 'SELECT * FROM finance_transaction_allocations WHERE updated_at > ?' : 'SELECT * FROM finance_transaction_allocations';
+  const sql = since
+    ? 'SELECT * FROM finance_transaction_allocations WHERE sync_dirty = 1 OR updated_at > ?'
+    : 'SELECT * FROM finance_transaction_allocations';
   const result = await query(sql, since ? [since] : []);
   return rowsToArray(result);
+}
+
+export async function clearSyncedFinanceTransactionAllocations(uuids = []) {
+  const cleanUuids = uuids.filter(Boolean);
+  if (!cleanUuids.length) return;
+  const placeholders = cleanUuids.map(() => '?').join(', ');
+  await query(
+    `UPDATE finance_transaction_allocations
+     SET sync_dirty = 0
+     WHERE uuid IN (${placeholders})`,
+    cleanUuids,
+  );
 }
 
 export async function getFinanceTransactions(options = {}) {
@@ -756,7 +771,7 @@ export async function createFinanceTransactionAllocation({
   const now = nowIso();
   await query(
     `UPDATE finance_transaction_allocations
-     SET is_active = 0, updated_at = ?
+     SET is_active = 0, updated_at = ?, sync_dirty = 1
      WHERE transaction_uuid = ? AND is_active = 1 AND is_deleted = 0`,
     [now, transaction.uuid],
   );
@@ -776,6 +791,7 @@ export async function createFinanceTransactionAllocation({
     created_at: now,
     updated_at: now,
     is_deleted: 0,
+    sync_dirty: 1,
   };
   const { sql, params } = buildUpsertFinanceTransactionAllocation(allocation);
   await query(sql, params);

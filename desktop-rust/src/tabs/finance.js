@@ -50,6 +50,7 @@ let state = {
   factsDateTo: '',
   factsMonth: '',
   factsYear: '',
+  factsSearch: '',
   calendarShowOldMonths: false,
   collapsed: new Set(),
   itemDrag: null,
@@ -601,6 +602,21 @@ function injectStyles() {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+.finance-facts-search {
+  width: clamp(180px, 22vw, 320px);
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--bg-primary) 88%, transparent);
+  color: var(--text);
+  padding: 0 9px;
+  font-size: 12px;
+  outline: none;
+}
+.finance-facts-search:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 .finance-facts-table {
   min-width: 980px;
@@ -1218,6 +1234,26 @@ function itemName(id) {
   return (state.allItems || state.items).find((item) => itemId(item) === normalized)?.name || '';
 }
 
+function planNameForAllocation(allocation) {
+  if (!allocation) return 'Unmapped';
+  const normalized = normalizeId(allocation.plan_id);
+  const plan = state.plans.find((item) => (
+    (normalized != null && planId(item) === normalized)
+    || (allocation.plan_uuid && item.uuid === allocation.plan_uuid)
+  ));
+  return plan?.name || 'Finance list';
+}
+
+function itemNameForAllocation(allocation) {
+  if (!allocation) return '';
+  const normalized = normalizeId(allocation.item_id);
+  const item = (state.allItems || state.items).find((row) => (
+    (normalized != null && itemId(row) === normalized)
+    || (allocation.item_uuid && row.uuid === allocation.item_uuid)
+  ));
+  return item?.name || '';
+}
+
 function allocationMap() {
   const map = new Map();
   for (const allocation of state.allocations || []) {
@@ -1248,6 +1284,52 @@ function transactionMatchesDateFilter(transaction) {
   return true;
 }
 
+function normalizedFactsSearchTerms() {
+  return String(state.factsSearch || '')
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function factSearchBlob(transaction, allocation) {
+  const target = allocation
+    ? [planNameForAllocation(allocation), itemNameForAllocation(allocation)].filter(Boolean).join(' / ')
+    : 'Unmapped';
+  return [
+    transaction?.payment_date,
+    transaction?.operation_at,
+    transaction?.card_mask,
+    transaction?.status,
+    transaction?.amount_cents,
+    transaction?.currency,
+    transaction?.operation_amount_cents,
+    transaction?.operation_currency,
+    transaction?.payment_amount_cents,
+    transaction?.payment_currency,
+    transaction?.cashback_cents,
+    transaction?.bank_category,
+    transaction?.mcc,
+    transaction?.description,
+    transaction?.bonuses_cents,
+    transaction?.invest_rounding_cents,
+    transaction?.rounded_amount_cents,
+    transaction?.source,
+    transaction?.source_fingerprint,
+    transaction?.raw_json,
+    target,
+    allocation ? 'mapped' : 'unmapped',
+    transaction?.rules_locked ? 'locked' : 'unlocked',
+  ].filter((value) => value != null).join(' ').toLowerCase();
+}
+
+function transactionMatchesSearch(transaction, allocation) {
+  const terms = normalizedFactsSearchTerms();
+  if (!terms.length) return true;
+  const blob = factSearchBlob(transaction, allocation);
+  return terms.every((term) => blob.includes(term));
+}
+
 function factRows({ applyDateFilter = true } = {}) {
   const allocations = allocationMap();
   let rows = (state.transactions || []).map((transaction) => ({
@@ -1257,6 +1339,7 @@ function factRows({ applyDateFilter = true } = {}) {
   if (state.factsFilter === 'unmapped') rows = rows.filter((row) => !row.allocation);
   if (state.factsFilter === 'locked') rows = rows.filter((row) => Boolean(row.transaction.rules_locked));
   if (applyDateFilter) rows = rows.filter((row) => transactionMatchesDateFilter(row.transaction));
+  rows = rows.filter((row) => transactionMatchesSearch(row.transaction, row.allocation));
   return rows.sort((a, b) =>
     String(b.transaction.payment_date || '').localeCompare(String(a.transaction.payment_date || ''))
     || String(b.transaction.operation_at || '').localeCompare(String(a.transaction.operation_at || ''))
@@ -1274,6 +1357,15 @@ function factsDateFilterLabel() {
   if (state.factsDateMode === 'month') return state.factsMonth || 'Month';
   if (state.factsDateMode === 'year') return state.factsYear || 'Year';
   return 'All dates';
+}
+
+function rerenderFactsResults() {
+  const main = rootEl?.querySelector('.finance-main');
+  if (!main) return;
+  const summary = main.querySelector('.finance-facts-summary');
+  if (summary) summary.replaceWith(renderFactsSummary());
+  const table = main.querySelector('.finance-table-wrap');
+  if (table) table.replaceWith(renderFactsTable());
 }
 
 function formatFactDate(value) {
@@ -2477,6 +2569,16 @@ function renderFactsHeader() {
 
   const actions = document.createElement('div');
   actions.className = 'finance-facts-actions';
+  const search = document.createElement('input');
+  search.className = 'finance-facts-search';
+  search.type = 'search';
+  search.placeholder = 'Search facts';
+  search.value = state.factsSearch || '';
+  search.setAttribute('aria-label', 'Search finance facts by any field');
+  search.addEventListener('input', () => {
+    state.factsSearch = search.value;
+    rerenderFactsResults();
+  });
   const filter = document.createElement('div');
   filter.className = 'finance-segment finance-facts-filter';
   [
@@ -2504,7 +2606,7 @@ function renderFactsHeader() {
   rulesBtn.type = 'button';
   rulesBtn.textContent = 'Rules';
   rulesBtn.addEventListener('click', openFinanceRulesModal);
-  actions.append(filter, importBtn, rulesBtn);
+  actions.append(search, filter, importBtn, rulesBtn);
   header.append(text, actions);
   return header;
 }
@@ -2548,7 +2650,9 @@ function renderFactsTable() {
   if (!rows.length) {
     const empty = document.createElement('div');
     empty.className = 'finance-empty';
-    empty.textContent = state.factsFilter === 'all'
+    empty.textContent = state.factsSearch
+      ? 'No facts match this search.'
+      : state.factsFilter === 'all'
       ? 'No imported bank facts yet. Import a CSV file to start mapping.'
       : 'No facts match this filter.';
     wrap.appendChild(empty);
@@ -2596,8 +2700,8 @@ function renderFactRow(transaction, allocation) {
   const target = document.createElement('div');
   target.className = 'finance-fact-target';
   if (allocation) {
-    const parts = [planName(allocation.plan_id)];
-    const item = itemName(allocation.item_id);
+    const parts = [planNameForAllocation(allocation)];
+    const item = itemNameForAllocation(allocation);
     if (item) parts.push(item);
     target.textContent = parts.join(' / ');
   } else {

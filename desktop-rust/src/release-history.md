@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## f-20260627-1 (2026-06-27)
+
+- **Finance Facts search and mobile mapping sync:** the desktop Facts registry
+  now has an all-fields search box for dates, descriptions, bank fields,
+  amounts, lock/mapping state, and Finance targets. Mobile fact assignments are
+  now explicitly marked dirty until the server accepts them, so mappings made
+  on the phone are retried even if the sync cursor already advanced. Mobile
+  Finance Facts also has a persistent compact view for wide/foldable screens.
+
 ## v1.22.2 (2026-06-27)
 
 - **Finance Facts sync recovery:** desktop sync now accepts Finance fact

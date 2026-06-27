@@ -327,6 +327,43 @@ describe('syncService', () => {
     );
   });
 
+  test('sync clears dirty finance allocations only after server accepts them', async () => {
+    syncMeta.getLastSyncAt.mockResolvedValue('2026-06-27T12:00:00');
+    endpoints.syncPull.mockResolvedValue({ changes: {}, server_time: '2026-06-27T12:30:00' });
+    snippetRepo.getModifiedSnippetsSince.mockResolvedValue([]);
+    snippetRepo.getModifiedTagsSince.mockResolvedValue([]);
+    noteRepo.getModifiedNotesSince.mockResolvedValue([]);
+    noteRepo.getModifiedFoldersSince.mockResolvedValue([]);
+    financeRepo.getModifiedFinanceTransactionAllocationsSince.mockResolvedValue([
+      {
+        uuid: 'allocation-dirty',
+        transaction_uuid: 'tx-boosty',
+        plan_uuid: 'plan-regular',
+        item_uuid: 'item-subscriptions',
+        updated_at: '2026-06-27T11:59:00',
+        sync_dirty: 1,
+      },
+    ]);
+    endpoints.syncPush.mockResolvedValue({
+      status: 'ok',
+      accepted: 1,
+      accepted_uuids: { finance_transaction_allocations: ['allocation-dirty'] },
+      rejected_uuids: {},
+      conflicts: [],
+    });
+
+    await performSync();
+
+    expect(endpoints.syncPush).toHaveBeenCalledWith(
+      expect.objectContaining({
+        finance_transaction_allocations: [
+          expect.objectContaining({ uuid: 'allocation-dirty', sync_dirty: 1 }),
+        ],
+      }),
+    );
+    expect(financeRepo.clearSyncedFinanceTransactionAllocations).toHaveBeenCalledWith(['allocation-dirty']);
+  });
+
   test('full pull does not push rows that were just pulled', async () => {
     syncMeta.getLastSyncAt.mockResolvedValue(null);
     endpoints.syncPull.mockResolvedValue({
