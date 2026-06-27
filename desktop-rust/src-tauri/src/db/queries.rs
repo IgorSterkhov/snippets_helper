@@ -2751,6 +2751,11 @@ pub fn upsert_from_server(conn: &Connection, table: &str, rows: &[Value]) -> Res
             Some(o) => o,
             None => continue,
         };
+        let finance_allocation_is_deleted = table == "finance_transaction_allocations"
+            && obj
+                .get("is_deleted")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
 
         if table == "finance_transactions" {
             if let (Some(uuid), Some(source), Some(source_fingerprint)) = (
@@ -2767,10 +2772,82 @@ pub fn upsert_from_server(conn: &Connection, table: &str, rows: &[Value]) -> Res
             }
         }
 
+        if table == "finance_transaction_allocations" {
+            let is_active = match obj.get("is_active") {
+                Some(Value::Bool(value)) => *value,
+                Some(Value::Number(value)) => value.as_i64().unwrap_or(0) != 0,
+                Some(Value::String(value)) => value == "1" || value.eq_ignore_ascii_case("true"),
+                _ => false,
+            };
+            if !finance_allocation_is_deleted && is_active {
+                if let (Some(transaction_id), Some(uuid)) = (
+                    obj.get("transaction_id").and_then(|v| v.as_i64()),
+                    obj.get("uuid").and_then(|v| v.as_str()),
+                ) {
+                    let incoming_updated_at = obj
+                        .get("updated_at")
+                        .and_then(|v| v.as_str())
+                        .and_then(normalize_dt_string);
+                    let local_active: Option<(String, String)> = conn
+                        .query_row(
+                            "SELECT updated_at, sync_status
+                             FROM finance_transaction_allocations
+                             WHERE transaction_id = ?1
+                               AND uuid != ?2
+                               AND is_active = 1
+                             LIMIT 1",
+                            params![transaction_id, uuid],
+                            |row| Ok((row.get(0)?, row.get(1)?)),
+                        )
+                        .optional()?;
+
+                    if let Some((local_updated_at, local_sync_status)) = local_active {
+                        let server_wins = match (
+                            incoming_updated_at.as_deref().and_then(parse_dt_opt),
+                            parse_dt_opt(&local_updated_at),
+                        ) {
+                            (Some(incoming), Some(local)) => incoming >= local,
+                            (Some(_), None) => true,
+                            (None, Some(_)) => false,
+                            (None, None) => true,
+                        };
+                        if !server_wins {
+                            if local_sync_status == "deleted" {
+                                conn.execute(
+                                    "UPDATE finance_transaction_allocations
+                                     SET is_active = 0
+                                     WHERE transaction_id = ?1
+                                       AND uuid != ?2
+                                       AND is_active = 1
+                                       AND sync_status = 'deleted'",
+                                    params![transaction_id, uuid],
+                                )?;
+                            }
+                            continue;
+                        }
+                        conn.execute(
+                            "UPDATE finance_transaction_allocations
+                             SET is_active = 0,
+                                 updated_at = COALESCE(?3, updated_at),
+                                 sync_status = CASE
+                                     WHEN sync_status = 'deleted' THEN sync_status
+                                     ELSE 'synced'
+                                 END
+                             WHERE transaction_id = ?1
+                               AND uuid != ?2
+                               AND is_active = 1",
+                            params![transaction_id, uuid, incoming_updated_at],
+                        )?;
+                    }
+                }
+            }
+        }
+
         let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = cols
             .iter()
             .map(|&col| -> Box<dyn rusqlite::types::ToSql> {
                 match obj.get(col) {
+                    _ if finance_allocation_is_deleted && col == "is_active" => Box::new(0_i64),
                     Some(Value::String(s)) => {
                         if is_datetime_column(col) {
                             Box::new(normalize_dt_string(s).unwrap_or_else(|| s.clone()))
@@ -4742,6 +4819,271 @@ mod tests {
         set_finance_transaction_rules_locked(&conn, tx.id.unwrap(), true).unwrap();
         let rows = list_finance_transactions(&conn, None, false).unwrap();
         assert!(rows[0].rules_locked);
+    }
+
+    fn create_finance_allocation_sync_fixture(
+        conn: &Connection,
+        fingerprint: &str,
+    ) -> (i64, FinanceItem, FinanceItem, FinanceTransaction) {
+        let plan_id = list_finance_plans(conn).unwrap()[0].id.unwrap();
+        let local_item =
+            create_finance_item(conn, plan_id, None, "Taxi local", 0, None, None, "").unwrap();
+        let server_item =
+            create_finance_item(conn, plan_id, None, "Taxi server", 0, None, None, "").unwrap();
+        let batch = create_finance_import_batch(
+            conn,
+            "tbank_csv",
+            "april.csv",
+            1,
+            1,
+            0,
+            0,
+            Some("2026-04-30"),
+            Some("2026-04-30"),
+            -50600,
+            0,
+            "RUB",
+        )
+        .unwrap();
+        let tx = upsert_finance_transaction(
+            conn,
+            "tbank_csv",
+            fingerprint,
+            batch.id,
+            "2026-04-30 17:38:55",
+            "2026-04-30",
+            "*7857",
+            "OK",
+            -50600,
+            "RUB",
+            -50600,
+            "RUB",
+            -50600,
+            "RUB",
+            Some(2500),
+            "Такси",
+            "3990",
+            "Яндекс Такси",
+            Some(2500),
+            Some(9400),
+            Some(-60000),
+            "{}",
+        )
+        .unwrap();
+        (plan_id, local_item, server_item, tx)
+    }
+
+    #[test]
+    fn test_upsert_server_finance_allocation_replaces_local_active_allocation() {
+        let conn = init_test_db();
+        let (plan_id, local_item, server_item, tx) =
+            create_finance_allocation_sync_fixture(&conn, "taxi-conflict");
+
+        let local_allocation = create_finance_transaction_allocation(
+            &conn,
+            tx.id.unwrap(),
+            plan_id,
+            local_item.id,
+            "manual",
+            None,
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE finance_transaction_allocations
+             SET updated_at = '2026-06-27 12:00:00'
+             WHERE uuid = ?1",
+            params![local_allocation.uuid],
+        )
+        .unwrap();
+
+        let server_allocation_uuid = Uuid::new_v4().to_string();
+        let server_row = serde_json::json!({
+            "transaction_id": tx.id.unwrap(),
+            "plan_id": plan_id,
+            "item_id": server_item.id,
+            "assigned_by": "rule",
+            "rule_id": null,
+            "is_active": true,
+            "created_at": "2026-06-27T12:10:00",
+            "updated_at": "2026-06-27T12:10:00",
+            "uuid": server_allocation_uuid,
+            "user_id": "user-1",
+            "is_deleted": false,
+        });
+
+        upsert_from_server(&conn, "finance_transaction_allocations", &[server_row]).unwrap();
+
+        let active = list_finance_transaction_allocations(&conn, plan_id).unwrap();
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].uuid, server_allocation_uuid);
+        assert_eq!(active[0].item_id, server_item.id);
+
+        let local_is_active: i64 = conn
+            .query_row(
+                "SELECT is_active FROM finance_transaction_allocations WHERE uuid = ?1",
+                params![local_allocation.uuid],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(local_is_active, 0);
+    }
+
+    #[test]
+    fn test_upsert_server_finance_allocation_keeps_newer_local_active_allocation() {
+        let conn = init_test_db();
+        let (plan_id, local_item, server_item, tx) =
+            create_finance_allocation_sync_fixture(&conn, "taxi-newer-local-conflict");
+
+        let local_allocation = create_finance_transaction_allocation(
+            &conn,
+            tx.id.unwrap(),
+            plan_id,
+            local_item.id,
+            "manual",
+            None,
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE finance_transaction_allocations
+             SET updated_at = '2026-06-27 12:20:00'
+             WHERE uuid = ?1",
+            params![local_allocation.uuid],
+        )
+        .unwrap();
+
+        let server_allocation_uuid = Uuid::new_v4().to_string();
+        let server_row = serde_json::json!({
+            "transaction_id": tx.id.unwrap(),
+            "plan_id": plan_id,
+            "item_id": server_item.id,
+            "assigned_by": "rule",
+            "rule_id": null,
+            "is_active": true,
+            "created_at": "2026-06-27T12:10:00",
+            "updated_at": "2026-06-27T12:10:00",
+            "uuid": server_allocation_uuid,
+            "user_id": "user-1",
+            "is_deleted": false,
+        });
+
+        upsert_from_server(&conn, "finance_transaction_allocations", &[server_row]).unwrap();
+
+        let active = list_finance_transaction_allocations(&conn, plan_id).unwrap();
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].uuid, local_allocation.uuid);
+        assert_eq!(active[0].item_id, local_item.id);
+
+        let server_row_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM finance_transaction_allocations WHERE uuid = ?1",
+                params![server_allocation_uuid],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(server_row_count, 0);
+    }
+
+    #[test]
+    fn test_upsert_server_finance_allocation_clears_deleted_active_tombstone() {
+        let conn = init_test_db();
+        let (plan_id, local_item, server_item, tx) =
+            create_finance_allocation_sync_fixture(&conn, "taxi-deleted-local-conflict");
+        let local_allocation = create_finance_transaction_allocation(
+            &conn,
+            tx.id.unwrap(),
+            plan_id,
+            local_item.id,
+            "manual",
+            None,
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE finance_transaction_allocations
+             SET sync_status = 'deleted', updated_at = '2026-06-27 12:00:00'
+             WHERE uuid = ?1",
+            params![local_allocation.uuid],
+        )
+        .unwrap();
+
+        let server_allocation_uuid = Uuid::new_v4().to_string();
+        let server_row = serde_json::json!({
+            "transaction_id": tx.id.unwrap(),
+            "plan_id": plan_id,
+            "item_id": server_item.id,
+            "assigned_by": "rule",
+            "rule_id": null,
+            "is_active": true,
+            "created_at": "2026-06-27T12:10:00",
+            "updated_at": "2026-06-27T12:10:00",
+            "uuid": server_allocation_uuid,
+            "user_id": "user-1",
+            "is_deleted": false,
+        });
+
+        upsert_from_server(&conn, "finance_transaction_allocations", &[server_row]).unwrap();
+
+        let active = list_finance_transaction_allocations(&conn, plan_id).unwrap();
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].uuid, server_allocation_uuid);
+
+        let local_state: (i64, String) = conn
+            .query_row(
+                "SELECT is_active, sync_status
+                 FROM finance_transaction_allocations
+                 WHERE uuid = ?1",
+                params![local_allocation.uuid],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(local_state, (0, "deleted".to_string()));
+    }
+
+    #[test]
+    fn test_upsert_server_deleted_finance_allocation_does_not_claim_active_slot() {
+        let conn = init_test_db();
+        let (plan_id, local_item, server_item, tx) =
+            create_finance_allocation_sync_fixture(&conn, "taxi-incoming-deleted-conflict");
+        let local_allocation = create_finance_transaction_allocation(
+            &conn,
+            tx.id.unwrap(),
+            plan_id,
+            local_item.id,
+            "manual",
+            None,
+        )
+        .unwrap();
+
+        let server_deleted_uuid = Uuid::new_v4().to_string();
+        let server_row = serde_json::json!({
+            "transaction_id": tx.id.unwrap(),
+            "plan_id": plan_id,
+            "item_id": server_item.id,
+            "assigned_by": "rule",
+            "rule_id": null,
+            "is_active": true,
+            "created_at": "2026-06-27T12:10:00",
+            "updated_at": "2026-06-27T12:10:00",
+            "uuid": server_deleted_uuid,
+            "user_id": "user-1",
+            "is_deleted": true,
+        });
+
+        upsert_from_server(&conn, "finance_transaction_allocations", &[server_row]).unwrap();
+
+        let active = list_finance_transaction_allocations(&conn, plan_id).unwrap();
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].uuid, local_allocation.uuid);
+
+        let tombstone_state: (i64, String) = conn
+            .query_row(
+                "SELECT is_active, sync_status
+                 FROM finance_transaction_allocations
+                 WHERE uuid = ?1",
+                params![server_deleted_uuid],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(tombstone_state, (0, "deleted".to_string()));
     }
 
     #[test]

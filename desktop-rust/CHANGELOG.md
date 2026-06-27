@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## v1.22.2 (2026-06-27)
+
+- **Finance Facts sync recovery:** desktop sync now accepts Finance fact
+  mappings that were changed on another device by deactivating the stale local
+  active allocation before applying the server allocation. This prevents the
+  local SQLite `finance_transaction_allocations.transaction_id` unique
+  constraint failure after mobile mapping-rule sync.
+
 ## f-20260626-5 (2026-06-26)
 
 - **Finance Facts map dropdown fix:** the `Map finance fact` dialog now uses a
