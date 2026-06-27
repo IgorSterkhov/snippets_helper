@@ -5,6 +5,7 @@ import {
   buildUpsertFinanceItem,
   buildUpsertFinanceMappingRule,
   buildUpsertFinancePlan,
+  clearSyncedFinanceRows,
   clearSyncedFinanceTransactionAllocations,
   computeFinanceTotals,
   createFinanceMappingRule,
@@ -13,6 +14,9 @@ import {
   financeBandSlotForDepth,
   flattenFinanceTree,
   getFinanceItemMoveAvailability,
+  getModifiedFinanceItemsSince,
+  getModifiedFinancePlansSince,
+  getModifiedFinanceTransactionAllocationsSince,
   maxFinanceTreeDepth,
   moveFinanceItemInTree,
 } from '../../src/db/financeRepo';
@@ -93,7 +97,37 @@ describe('financeRepo', () => {
     expect(allocation.sql).toContain('finance_transaction_allocations');
     expect(allocation.params).toEqual(expect.arrayContaining(['allocation-1', 'tx-1', 'plan-1', 'item-1', 'rule-1']));
     expect(allocation.sql).toContain('sync_dirty');
-    expect(allocation.params[allocation.params.length - 1]).toBe(0);
+    expect(allocation.sql).toContain('sync_status');
+    expect(allocation.params[allocation.params.length - 2]).toBe(0);
+    expect(allocation.params[allocation.params.length - 1]).toBe('synced');
+  });
+
+  test('pulled finance upserts preserve local pending rows', () => {
+    const plan = buildUpsertFinancePlan({
+      uuid: 'plan-1',
+      name: 'Server plan',
+      updated_at: '2026-06-27T12:00:00',
+      __preserve_pending_sync_status: true,
+    });
+    const item = buildUpsertFinanceItem({
+      uuid: 'item-1',
+      plan_uuid: 'plan-1',
+      name: 'Server item',
+      updated_at: '2026-06-27T12:00:00',
+      __preserve_pending_sync_status: true,
+    });
+    const allocation = buildUpsertFinanceTransactionAllocation({
+      uuid: 'allocation-1',
+      transaction_uuid: 'tx-1',
+      plan_uuid: 'plan-1',
+      updated_at: '2026-06-27T12:00:00',
+      __preserve_pending_sync_status: true,
+    });
+
+    for (const built of [plan, item, allocation]) {
+      expect(built.sql).toContain('ON CONFLICT(uuid) DO UPDATE');
+      expect(built.sql).toContain("sync_status NOT IN ('pending', 'deleted')");
+    }
   });
 
   test('flattenFinanceTree returns depth-first hierarchy and totals', () => {
@@ -175,17 +209,32 @@ describe('financeRepo', () => {
     await deleteFinancePlan('plan-1');
 
     expect(mockExecuteSql).toHaveBeenCalledWith(
-      'UPDATE finance_plans SET is_deleted = 1, updated_at = ? WHERE uuid = ?',
-      [expect.any(String), 'plan-1'],
+      'UPDATE finance_plans SET is_deleted = 1, updated_at = ?, sync_status = ? WHERE uuid = ?',
+      [expect.any(String), 'deleted', 'plan-1'],
       expect.any(Function),
       expect.any(Function),
     );
     expect(mockExecuteSql).toHaveBeenCalledWith(
-      'UPDATE finance_items SET is_deleted = 1, updated_at = ? WHERE plan_uuid = ?',
-      [expect.any(String), 'plan-1'],
+      'UPDATE finance_items SET is_deleted = 1, updated_at = ?, sync_status = ? WHERE plan_uuid = ?',
+      [expect.any(String), 'deleted', 'plan-1'],
       expect.any(Function),
       expect.any(Function),
     );
+  });
+
+  test('pending finance rows are selected even when older than sync cursor', async () => {
+    await getModifiedFinancePlansSince('2026-06-27T12:00:00');
+    await getModifiedFinanceItemsSince('2026-06-27T12:00:00');
+    await getModifiedFinanceTransactionAllocationsSince('2026-06-27T12:00:00');
+
+    const sqls = mockExecuteSql.mock.calls.map((call) => String(call[0]));
+    expect(sqls[0]).toContain("sync_status IN ('pending', 'deleted')");
+    expect(sqls[1]).toContain("sync_status IN ('pending', 'deleted')");
+    expect(sqls[2]).toContain("sync_status IN ('pending', 'deleted')");
+    expect(sqls[2]).toContain('sync_dirty = 1');
+    expect(mockExecuteSql.mock.calls[0][1]).toEqual(['2026-06-27T12:00:00']);
+    expect(mockExecuteSql.mock.calls[1][1]).toEqual(['2026-06-27T12:00:00']);
+    expect(mockExecuteSql.mock.calls[2][1]).toEqual(['2026-06-27T12:00:00']);
   });
 
   test('createFinanceTransactionAllocation writes UUID relations and locks rules when requested', async () => {
@@ -203,6 +252,7 @@ describe('financeRepo', () => {
       expect.any(Function),
     );
     expect(mockExecuteSql.mock.calls[0][0]).toContain('sync_dirty = 1');
+    expect(mockExecuteSql.mock.calls[0][0]).toContain("sync_status = 'pending'");
     expect(mockExecuteSql).toHaveBeenCalledWith(
       expect.stringContaining('finance_transaction_allocations'),
       expect.arrayContaining(['tx-1', 'plan-1', 'item-1', 'manual']),
@@ -211,17 +261,19 @@ describe('financeRepo', () => {
     );
     const allocationInsertCall = mockExecuteSql.mock.calls.find((call) => String(call[0]).includes('INSERT OR REPLACE INTO finance_transaction_allocations'));
     expect(allocationInsertCall[0]).toContain('sync_dirty');
-    expect(allocationInsertCall[1][allocationInsertCall[1].length - 1]).toBe(1);
+    expect(allocationInsertCall[0]).toContain('sync_status');
+    expect(allocationInsertCall[1][allocationInsertCall[1].length - 2]).toBe(1);
+    expect(allocationInsertCall[1][allocationInsertCall[1].length - 1]).toBe('pending');
     expect(mockExecuteSql).toHaveBeenCalledWith(
-      'UPDATE finance_transactions SET rules_locked = ?, updated_at = ? WHERE uuid = ?',
-      [1, expect.any(String), 'tx-1'],
+      'UPDATE finance_transactions SET rules_locked = ?, updated_at = ?, sync_status = ? WHERE uuid = ?',
+      [1, expect.any(String), 'pending', 'tx-1'],
       expect.any(Function),
       expect.any(Function),
     );
   });
 
-  test('clearSyncedFinanceTransactionAllocations clears dirty flags for accepted rows', async () => {
-    await clearSyncedFinanceTransactionAllocations(['allocation-1', 'allocation-2']);
+  test('clearSyncedFinanceRows marks accepted finance rows synced', async () => {
+    await clearSyncedFinanceRows('finance_transaction_allocations', ['allocation-1', 'allocation-2']);
 
     expect(mockExecuteSql).toHaveBeenCalledWith(
       expect.stringContaining('UPDATE finance_transaction_allocations'),
@@ -230,7 +282,15 @@ describe('financeRepo', () => {
       expect.any(Function),
     );
     expect(mockExecuteSql.mock.calls[0][0]).toContain('sync_dirty = 0');
+    expect(mockExecuteSql.mock.calls[0][0]).toContain("sync_status = 'synced'");
     expect(mockExecuteSql.mock.calls[0][0]).toContain('uuid IN (?, ?)');
+  });
+
+  test('clearSyncedFinanceTransactionAllocations remains a compatibility wrapper', async () => {
+    await clearSyncedFinanceTransactionAllocations(['allocation-1']);
+
+    expect(mockExecuteSql.mock.calls[0][0]).toContain('sync_status');
+    expect(mockExecuteSql.mock.calls[0][0]).toContain('sync_dirty');
   });
 
   test('applyFinanceMappingRule maps matching unlocked facts only', async () => {

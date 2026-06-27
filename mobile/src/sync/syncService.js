@@ -20,7 +20,7 @@ import {
   buildUpsertFinanceMappingRule, buildUpsertFinanceTransactionAllocation,
   getModifiedFinancePlansSince, getModifiedFinanceItemsSince,
   getModifiedFinanceTransactionsSince, getModifiedFinanceMappingRulesSince,
-  getModifiedFinanceTransactionAllocationsSince, clearSyncedFinanceTransactionAllocations,
+  getModifiedFinanceTransactionAllocationsSince, clearSyncedFinanceRows,
 } from '../db/financeRepo';
 
 const BUILDERS = {
@@ -56,6 +56,14 @@ const TABLE_ORDER = [
   'finance_mapping_rules',
   'finance_transaction_allocations',
 ];
+const FINANCE_TABLES = new Set([
+  'finance_plans',
+  'finance_items',
+  'finance_transactions',
+  'finance_mapping_rules',
+  'finance_transaction_allocations',
+]);
+const PRESERVE_PENDING_SYNC_STATUS_FLAG = '__preserve_pending_sync_status';
 
 function shouldApplyPulledRow(table, row) {
   if (!row || typeof row !== 'object') {
@@ -197,7 +205,10 @@ function applyPulledChanges(changes) {
           const build = BUILDERS[table];
           if (!build) continue;
           for (const row of rows) {
-            const { sql, params } = build(row);
+            const rowForBuild = FINANCE_TABLES.has(table)
+              ? { ...row, [PRESERVE_PENDING_SYNC_STATUS_FLAG]: true }
+              : row;
+            const { sql, params } = build(rowForBuild);
             tx.executeSql(sql, params);
           }
         }
@@ -278,9 +289,12 @@ export async function performSync() {
           warningError.syncWarning = true;
           throw warningError;
         }
-        const acceptedFinanceAllocations = pushResult?.accepted_uuids?.finance_transaction_allocations || [];
-        if (acceptedFinanceAllocations.length) {
-          await clearSyncedFinanceTransactionAllocations(acceptedFinanceAllocations);
+        const acceptedUuids = pushResult?.accepted_uuids || {};
+        for (const table of FINANCE_TABLES) {
+          const acceptedRows = acceptedUuids[table] || [];
+          if (acceptedRows.length) {
+            await clearSyncedFinanceRows(table, acceptedRows);
+          }
         }
       }
 

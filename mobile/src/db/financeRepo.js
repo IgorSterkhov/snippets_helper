@@ -2,6 +2,14 @@ import { getDB } from './database';
 import { uuidv4 } from '../lib/uuid';
 
 export const FINANCE_PLAN_KINDS = ['monthly', 'project', 'one_time', 'general'];
+const FINANCE_SYNC_TABLES = new Set([
+  'finance_plans',
+  'finance_items',
+  'finance_transactions',
+  'finance_mapping_rules',
+  'finance_transaction_allocations',
+]);
+const PRESERVE_PENDING_SYNC_STATUS_FLAG = '__preserve_pending_sync_status';
 
 function query(sql, params = []) {
   return new Promise((resolve, reject) => {
@@ -80,6 +88,37 @@ function normalizeBool(value, fallback = false) {
   if (typeof value === 'number') return value ? 1 : 0;
   const text = String(value).trim().toLowerCase();
   return ['1', 'true', 'yes', 'on'].includes(text) ? 1 : 0;
+}
+
+function normalizeSyncStatus(value, fallback = 'synced') {
+  const status = String(value || '').trim().toLowerCase();
+  return ['pending', 'synced', 'deleted'].includes(status) ? status : fallback;
+}
+
+function pendingFinanceSql(table) {
+  return `SELECT * FROM ${table} WHERE sync_status IN ('pending', 'deleted') OR updated_at > ?`;
+}
+
+function shouldPreservePendingSyncStatus(row) {
+  return !!row?.[PRESERVE_PENDING_SYNC_STATUS_FLAG];
+}
+
+function financeUpsertSql(table, columns, preservePendingSyncStatus = false) {
+  const placeholders = columns.map(() => '?').join(', ');
+  if (!preservePendingSyncStatus) {
+    return `INSERT OR REPLACE INTO ${table}
+          (${columns.join(', ')})
+          VALUES (${placeholders})`;
+  }
+  const updateAssignments = columns
+    .filter((column) => column !== 'uuid')
+    .map((column) => `${column} = excluded.${column}`)
+    .join(', ');
+  return `INSERT INTO ${table}
+          (${columns.join(', ')})
+          VALUES (${placeholders})
+          ON CONFLICT(uuid) DO UPDATE SET ${updateAssignments}
+          WHERE ${table}.sync_status NOT IN ('pending', 'deleted')`;
 }
 
 function normalizeMatchMode(value) {
@@ -387,10 +426,9 @@ export async function getFinancePlans() {
 }
 
 export function buildUpsertFinancePlan(plan) {
+  const columns = ['uuid', 'id', 'name', 'currency', 'kind', 'sort_order', 'created_at', 'updated_at', 'sync_status', 'is_deleted'];
   return {
-    sql: `INSERT OR REPLACE INTO finance_plans
-          (uuid, id, name, currency, kind, sort_order, created_at, updated_at, is_deleted)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    sql: financeUpsertSql('finance_plans', columns, shouldPreservePendingSyncStatus(plan)),
     params: [
       plan.uuid,
       plan.id ?? null,
@@ -400,24 +438,31 @@ export function buildUpsertFinancePlan(plan) {
       plan.sort_order || 0,
       createdAt(plan),
       updatedAt(plan),
+      normalizeSyncStatus(plan.sync_status, 'synced'),
       deletedFlag(plan),
     ],
   };
 }
 
 export async function upsertFinancePlan(plan) {
-  const { sql, params } = buildUpsertFinancePlan(plan);
+  const { sql, params } = buildUpsertFinancePlan({ ...plan, sync_status: 'pending' });
   await query(sql, params);
 }
 
 export async function deleteFinancePlan(uuid) {
   const now = nowIso();
-  await query('UPDATE finance_plans SET is_deleted = 1, updated_at = ? WHERE uuid = ?', [now, uuid]);
-  await query('UPDATE finance_items SET is_deleted = 1, updated_at = ? WHERE plan_uuid = ?', [now, uuid]);
+  await query(
+    'UPDATE finance_plans SET is_deleted = 1, updated_at = ?, sync_status = ? WHERE uuid = ?',
+    [now, 'deleted', uuid],
+  );
+  await query(
+    'UPDATE finance_items SET is_deleted = 1, updated_at = ?, sync_status = ? WHERE plan_uuid = ?',
+    [now, 'deleted', uuid],
+  );
 }
 
 export async function getModifiedFinancePlansSince(since) {
-  const sql = since ? 'SELECT * FROM finance_plans WHERE updated_at > ?' : 'SELECT * FROM finance_plans';
+  const sql = since ? pendingFinanceSql('finance_plans') : 'SELECT * FROM finance_plans';
   const result = await query(sql, since ? [since] : []);
   return rowsToArray(result);
 }
@@ -439,11 +484,12 @@ export async function getAllFinanceItems() {
 }
 
 export function buildUpsertFinanceItem(item) {
+  const columns = [
+    'uuid', 'id', 'plan_id', 'plan_uuid', 'parent_id', 'parent_uuid', 'name', 'amount_cents',
+    'due_day', 'due_date', 'note', 'sort_order', 'created_at', 'updated_at', 'sync_status', 'is_deleted',
+  ];
   return {
-    sql: `INSERT OR REPLACE INTO finance_items
-          (uuid, id, plan_id, plan_uuid, parent_id, parent_uuid, name, amount_cents,
-           due_day, due_date, note, sort_order, created_at, updated_at, is_deleted)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    sql: financeUpsertSql('finance_items', columns, shouldPreservePendingSyncStatus(item)),
     params: [
       item.uuid,
       item.id ?? null,
@@ -459,13 +505,14 @@ export function buildUpsertFinanceItem(item) {
       item.sort_order || 0,
       createdAt(item),
       updatedAt(item),
+      normalizeSyncStatus(item.sync_status, 'synced'),
       deletedFlag(item),
     ],
   };
 }
 
 export async function upsertFinanceItem(item) {
-  const { sql, params } = buildUpsertFinanceItem(item);
+  const { sql, params } = buildUpsertFinanceItem({ ...item, sync_status: 'pending' });
   await query(sql, params);
 }
 
@@ -493,26 +540,30 @@ export async function deleteFinanceItem(uuid) {
     }
   }
   for (const itemUuid of toDelete) {
-    await query('UPDATE finance_items SET is_deleted = 1, updated_at = ? WHERE uuid = ?', [now, itemUuid]);
+    await query(
+      'UPDATE finance_items SET is_deleted = 1, updated_at = ?, sync_status = ? WHERE uuid = ?',
+      [now, 'deleted', itemUuid],
+    );
   }
 }
 
 export async function getModifiedFinanceItemsSince(since) {
-  const sql = since ? 'SELECT * FROM finance_items WHERE updated_at > ?' : 'SELECT * FROM finance_items';
+  const sql = since ? pendingFinanceSql('finance_items') : 'SELECT * FROM finance_items';
   const result = await query(sql, since ? [since] : []);
   return rowsToArray(result);
 }
 
 export function buildUpsertFinanceTransaction(transaction) {
+  const columns = [
+    'uuid', 'id', 'source', 'source_fingerprint', 'import_batch_id', 'import_batch_uuid',
+    'operation_at', 'payment_date', 'card_mask', 'status', 'amount_cents', 'currency',
+    'operation_amount_cents', 'operation_currency', 'payment_amount_cents', 'payment_currency',
+    'cashback_cents', 'bank_category', 'mcc', 'description', 'bonuses_cents',
+    'invest_rounding_cents', 'rounded_amount_cents', 'raw_json', 'rules_locked',
+    'created_at', 'updated_at', 'sync_status', 'is_deleted',
+  ];
   return {
-    sql: `INSERT OR REPLACE INTO finance_transactions
-          (uuid, id, source, source_fingerprint, import_batch_id, import_batch_uuid,
-           operation_at, payment_date, card_mask, status, amount_cents, currency,
-           operation_amount_cents, operation_currency, payment_amount_cents, payment_currency,
-           cashback_cents, bank_category, mcc, description, bonuses_cents,
-           invest_rounding_cents, rounded_amount_cents, raw_json, rules_locked,
-           created_at, updated_at, is_deleted)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    sql: financeUpsertSql('finance_transactions', columns, shouldPreservePendingSyncStatus(transaction)),
     params: [
       transaction.uuid,
       transaction.id ?? null,
@@ -541,18 +592,20 @@ export function buildUpsertFinanceTransaction(transaction) {
       normalizeBool(transaction.rules_locked, false),
       createdAt(transaction),
       updatedAt(transaction),
+      normalizeSyncStatus(transaction.sync_status, 'synced'),
       deletedFlag(transaction),
     ],
   };
 }
 
 export function buildUpsertFinanceMappingRule(rule) {
+  const columns = [
+    'uuid', 'id', 'name', 'is_enabled', 'priority', 'match_mode', 'conditions_json',
+    'target_plan_id', 'target_plan_uuid', 'target_item_id', 'target_item_uuid',
+    'created_at', 'updated_at', 'sync_status', 'is_deleted',
+  ];
   return {
-    sql: `INSERT OR REPLACE INTO finance_mapping_rules
-          (uuid, id, name, is_enabled, priority, match_mode, conditions_json,
-           target_plan_id, target_plan_uuid, target_item_id, target_item_uuid,
-           created_at, updated_at, is_deleted)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    sql: financeUpsertSql('finance_mapping_rules', columns, shouldPreservePendingSyncStatus(rule)),
     params: [
       rule.uuid,
       rule.id ?? null,
@@ -567,18 +620,20 @@ export function buildUpsertFinanceMappingRule(rule) {
       rule.target_item_uuid || rule.targetItem?.uuid || null,
       createdAt(rule),
       updatedAt(rule),
+      normalizeSyncStatus(rule.sync_status, 'synced'),
       deletedFlag(rule),
     ],
   };
 }
 
 export function buildUpsertFinanceTransactionAllocation(allocation) {
+  const columns = [
+    'uuid', 'id', 'transaction_id', 'transaction_uuid', 'plan_id', 'plan_uuid',
+    'item_id', 'item_uuid', 'assigned_by', 'rule_id', 'rule_uuid', 'is_active',
+    'created_at', 'updated_at', 'is_deleted', 'sync_dirty', 'sync_status',
+  ];
   return {
-    sql: `INSERT OR REPLACE INTO finance_transaction_allocations
-          (uuid, id, transaction_id, transaction_uuid, plan_id, plan_uuid,
-           item_id, item_uuid, assigned_by, rule_id, rule_uuid, is_active,
-           created_at, updated_at, is_deleted, sync_dirty)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    sql: financeUpsertSql('finance_transaction_allocations', columns, shouldPreservePendingSyncStatus(allocation)),
     params: [
       allocation.uuid,
       allocation.id ?? null,
@@ -596,40 +651,52 @@ export function buildUpsertFinanceTransactionAllocation(allocation) {
       updatedAt(allocation),
       deletedFlag(allocation),
       normalizeBool(allocation.sync_dirty, false),
+      normalizeSyncStatus(allocation.sync_status, 'synced'),
     ],
   };
 }
 
 export async function getModifiedFinanceTransactionsSince(since) {
-  const sql = since ? 'SELECT * FROM finance_transactions WHERE updated_at > ?' : 'SELECT * FROM finance_transactions';
+  const sql = since ? pendingFinanceSql('finance_transactions') : 'SELECT * FROM finance_transactions';
   const result = await query(sql, since ? [since] : []);
   return rowsToArray(result);
 }
 
 export async function getModifiedFinanceMappingRulesSince(since) {
-  const sql = since ? 'SELECT * FROM finance_mapping_rules WHERE updated_at > ?' : 'SELECT * FROM finance_mapping_rules';
+  const sql = since ? pendingFinanceSql('finance_mapping_rules') : 'SELECT * FROM finance_mapping_rules';
   const result = await query(sql, since ? [since] : []);
   return rowsToArray(result);
 }
 
 export async function getModifiedFinanceTransactionAllocationsSince(since) {
   const sql = since
-    ? 'SELECT * FROM finance_transaction_allocations WHERE sync_dirty = 1 OR updated_at > ?'
+    ? `SELECT * FROM finance_transaction_allocations
+       WHERE sync_status IN ('pending', 'deleted') OR sync_dirty = 1 OR updated_at > ?`
     : 'SELECT * FROM finance_transaction_allocations';
   const result = await query(sql, since ? [since] : []);
   return rowsToArray(result);
 }
 
-export async function clearSyncedFinanceTransactionAllocations(uuids = []) {
+export async function clearSyncedFinanceRows(table, uuids = []) {
+  if (!FINANCE_SYNC_TABLES.has(table)) {
+    throw new Error(`Unsupported finance sync table: ${table}`);
+  }
   const cleanUuids = uuids.filter(Boolean);
   if (!cleanUuids.length) return;
   const placeholders = cleanUuids.map(() => '?').join(', ');
+  const setClause = table === 'finance_transaction_allocations'
+    ? "sync_status = 'synced', sync_dirty = 0"
+    : "sync_status = 'synced'";
   await query(
-    `UPDATE finance_transaction_allocations
-     SET sync_dirty = 0
+    `UPDATE ${table}
+     SET ${setClause}
      WHERE uuid IN (${placeholders})`,
     cleanUuids,
   );
+}
+
+export async function clearSyncedFinanceTransactionAllocations(uuids = []) {
+  await clearSyncedFinanceRows('finance_transaction_allocations', uuids);
 }
 
 export async function getFinanceTransactions(options = {}) {
@@ -771,7 +838,7 @@ export async function createFinanceTransactionAllocation({
   const now = nowIso();
   await query(
     `UPDATE finance_transaction_allocations
-     SET is_active = 0, updated_at = ?, sync_dirty = 1
+     SET is_active = 0, updated_at = ?, sync_dirty = 1, sync_status = 'pending'
      WHERE transaction_uuid = ? AND is_active = 1 AND is_deleted = 0`,
     [now, transaction.uuid],
   );
@@ -792,6 +859,7 @@ export async function createFinanceTransactionAllocation({
     updated_at: now,
     is_deleted: 0,
     sync_dirty: 1,
+    sync_status: 'pending',
   };
   const { sql, params } = buildUpsertFinanceTransactionAllocation(allocation);
   await query(sql, params);
@@ -803,8 +871,8 @@ export async function createFinanceTransactionAllocation({
 
 export async function setFinanceTransactionRulesLocked(transactionUuid, rulesLocked) {
   await query(
-    'UPDATE finance_transactions SET rules_locked = ?, updated_at = ? WHERE uuid = ?',
-    [normalizeBool(rulesLocked, false), nowIso(), transactionUuid],
+    'UPDATE finance_transactions SET rules_locked = ?, updated_at = ?, sync_status = ? WHERE uuid = ?',
+    [normalizeBool(rulesLocked, false), nowIso(), 'pending', transactionUuid],
   );
 }
 
@@ -868,6 +936,7 @@ export async function createFinanceMappingRule({
     created_at: now,
     updated_at: now,
     is_deleted: 0,
+    sync_status: 'pending',
   };
   const { sql, params } = buildUpsertFinanceMappingRule(rule);
   await query(sql, params);

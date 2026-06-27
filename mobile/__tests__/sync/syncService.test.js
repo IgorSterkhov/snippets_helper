@@ -361,7 +361,59 @@ describe('syncService', () => {
         ],
       }),
     );
-    expect(financeRepo.clearSyncedFinanceTransactionAllocations).toHaveBeenCalledWith(['allocation-dirty']);
+    expect(financeRepo.clearSyncedFinanceRows).toHaveBeenCalledWith('finance_transaction_allocations', ['allocation-dirty']);
+  });
+
+  test('sync marks accepted finance rows synced for every finance table', async () => {
+    syncMeta.getLastSyncAt.mockResolvedValue('2026-06-27T12:00:00');
+    endpoints.syncPull.mockResolvedValue({ changes: {}, server_time: '2026-06-27T12:30:00' });
+    snippetRepo.getModifiedSnippetsSince.mockResolvedValue([]);
+    snippetRepo.getModifiedTagsSince.mockResolvedValue([]);
+    noteRepo.getModifiedNotesSince.mockResolvedValue([]);
+    noteRepo.getModifiedFoldersSince.mockResolvedValue([]);
+    financeRepo.getModifiedFinancePlansSince.mockResolvedValue([
+      { uuid: 'plan-pending', sync_status: 'pending', updated_at: '2026-06-27T11:00:00' },
+    ]);
+    financeRepo.getModifiedFinanceItemsSince.mockResolvedValue([
+      { uuid: 'item-pending', plan_uuid: 'plan-pending', sync_status: 'pending', updated_at: '2026-06-27T11:01:00' },
+    ]);
+    financeRepo.getModifiedFinanceTransactionsSince.mockResolvedValue([
+      { uuid: 'tx-pending', sync_status: 'pending', updated_at: '2026-06-27T11:02:00' },
+    ]);
+    financeRepo.getModifiedFinanceMappingRulesSince.mockResolvedValue([
+      { uuid: 'rule-pending', target_plan_uuid: 'plan-pending', sync_status: 'pending', updated_at: '2026-06-27T11:03:00' },
+    ]);
+    financeRepo.getModifiedFinanceTransactionAllocationsSince.mockResolvedValue([
+      {
+        uuid: 'allocation-pending',
+        transaction_uuid: 'tx-pending',
+        plan_uuid: 'plan-pending',
+        item_uuid: 'item-pending',
+        sync_status: 'pending',
+        updated_at: '2026-06-27T11:04:00',
+      },
+    ]);
+    endpoints.syncPush.mockResolvedValue({
+      status: 'ok',
+      accepted: 5,
+      accepted_uuids: {
+        finance_plans: ['plan-pending'],
+        finance_items: ['item-pending'],
+        finance_transactions: ['tx-pending'],
+        finance_mapping_rules: ['rule-pending'],
+        finance_transaction_allocations: ['allocation-pending'],
+      },
+      rejected_uuids: {},
+      conflicts: [],
+    });
+
+    await performSync();
+
+    expect(financeRepo.clearSyncedFinanceRows).toHaveBeenCalledWith('finance_plans', ['plan-pending']);
+    expect(financeRepo.clearSyncedFinanceRows).toHaveBeenCalledWith('finance_items', ['item-pending']);
+    expect(financeRepo.clearSyncedFinanceRows).toHaveBeenCalledWith('finance_transactions', ['tx-pending']);
+    expect(financeRepo.clearSyncedFinanceRows).toHaveBeenCalledWith('finance_mapping_rules', ['rule-pending']);
+    expect(financeRepo.clearSyncedFinanceRows).toHaveBeenCalledWith('finance_transaction_allocations', ['allocation-pending']);
   });
 
   test('full pull does not push rows that were just pulled', async () => {

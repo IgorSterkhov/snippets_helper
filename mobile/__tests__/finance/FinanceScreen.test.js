@@ -2,6 +2,11 @@ import React from 'react';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import FinanceScreen from '../../src/screens/Finance/FinanceScreen';
 
+jest.mock('@react-native-async-storage/async-storage', () => ({
+  getItem: jest.fn().mockResolvedValue(null),
+  setItem: jest.fn().mockResolvedValue(undefined),
+}));
+
 jest.mock('@react-navigation/native', () => ({
   useFocusEffect: (callback) => {
     const ReactMock = require('react');

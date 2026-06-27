@@ -11,6 +11,13 @@ const FINANCE_SYNC_CURSOR_REPAIR_BACKFILL_KEY = 'finance_sync_cursor_repair_back
 const FINANCE_FACTS_SYNC_BACKFILL_KEY = 'finance_facts_sync_backfill_v1';
 const FINANCE_FACTS_SYNC_REPAIR_BACKFILL_KEY = 'finance_facts_sync_repair_backfill_v2';
 const FINANCE_ALLOCATIONS_DIRTY_BACKFILL_KEY = 'finance_allocations_dirty_backfill_v1';
+const FINANCE_SYNC_TABLES = [
+  'finance_plans',
+  'finance_items',
+  'finance_transactions',
+  'finance_mapping_rules',
+  'finance_transaction_allocations',
+];
 
 export function getDB() {
   return db;
@@ -168,6 +175,21 @@ async function runMigrations() {
     await setSyncMetaValue(FINANCE_FACTS_SYNC_REPAIR_BACKFILL_KEY, new Date().toISOString()).catch(() => {});
   }
 
+  for (const table of FINANCE_SYNC_TABLES) {
+    const hasFinanceSyncStatus = await columnExists(db, table, 'sync_status');
+    if (!hasFinanceSyncStatus) {
+      await new Promise((resolve) => {
+        db.transaction(
+          (tx) => {
+            tx.executeSql(`ALTER TABLE ${table} ADD COLUMN sync_status TEXT NOT NULL DEFAULT 'synced'`);
+          },
+          () => resolve(),
+          () => resolve(),
+        );
+      });
+    }
+  }
+
   const hasFinanceAllocationDirty = await columnExists(db, 'finance_transaction_allocations', 'sync_dirty');
   if (!hasFinanceAllocationDirty) {
     await new Promise((resolve) => {
@@ -176,7 +198,7 @@ async function runMigrations() {
           tx.executeSql('ALTER TABLE finance_transaction_allocations ADD COLUMN sync_dirty INTEGER DEFAULT 0');
           tx.executeSql(
             `UPDATE finance_transaction_allocations
-             SET sync_dirty = 1
+             SET sync_dirty = 1, sync_status = 'pending'
              WHERE is_active = 1 AND is_deleted = 0`,
           );
         },
@@ -196,7 +218,7 @@ async function runMigrations() {
         (tx) => {
           tx.executeSql(
             `UPDATE finance_transaction_allocations
-             SET sync_dirty = 1
+             SET sync_dirty = 1, sync_status = 'pending'
              WHERE is_active = 1 AND is_deleted = 0`,
           );
         },
@@ -206,6 +228,20 @@ async function runMigrations() {
     });
     await setSyncMetaValue(FINANCE_ALLOCATIONS_DIRTY_BACKFILL_KEY, new Date().toISOString()).catch(() => {});
   }
+
+  await new Promise((resolve) => {
+    db.transaction(
+      (tx) => {
+        tx.executeSql(
+          `UPDATE finance_transaction_allocations
+           SET sync_status = 'pending'
+           WHERE sync_dirty = 1 AND sync_status != 'pending'`,
+        );
+      },
+      () => resolve(),
+      () => resolve(),
+    );
+  });
 }
 
 export async function initDB() {
@@ -273,6 +309,7 @@ export async function initDB() {
         sort_order INTEGER DEFAULT 0,
         created_at TEXT,
         updated_at TEXT NOT NULL,
+        sync_status TEXT NOT NULL DEFAULT 'synced',
         is_deleted INTEGER DEFAULT 0
       )
     `);
@@ -363,6 +400,7 @@ export async function initDB() {
         sort_order INTEGER DEFAULT 0,
         created_at TEXT,
         updated_at TEXT NOT NULL,
+        sync_status TEXT NOT NULL DEFAULT 'synced',
         is_deleted INTEGER DEFAULT 0
       )
     `);
@@ -396,6 +434,7 @@ export async function initDB() {
         rules_locked INTEGER NOT NULL DEFAULT 0,
         created_at TEXT,
         updated_at TEXT NOT NULL,
+        sync_status TEXT NOT NULL DEFAULT 'synced',
         is_deleted INTEGER DEFAULT 0
       )
     `);
@@ -415,6 +454,7 @@ export async function initDB() {
         target_item_uuid TEXT,
         created_at TEXT,
         updated_at TEXT NOT NULL,
+        sync_status TEXT NOT NULL DEFAULT 'synced',
         is_deleted INTEGER DEFAULT 0
       )
     `);
@@ -436,7 +476,8 @@ export async function initDB() {
         created_at TEXT,
         updated_at TEXT NOT NULL,
         is_deleted INTEGER DEFAULT 0,
-        sync_dirty INTEGER DEFAULT 0
+        sync_dirty INTEGER DEFAULT 0,
+        sync_status TEXT NOT NULL DEFAULT 'synced'
       )
     `);
 
