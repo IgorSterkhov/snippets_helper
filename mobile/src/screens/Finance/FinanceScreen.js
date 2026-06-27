@@ -17,14 +17,21 @@ import ShareLinkSheet from '../../components/ShareLinkSheet';
 import SyncStatusBar from '../../components/SyncStatusBar';
 import {
   FINANCE_PLAN_KINDS,
+  applyFinanceMappingRule,
   computeFinanceTotals,
+  createFinanceMappingRule,
+  createFinanceTransactionAllocation,
   deleteFinanceItem,
   deleteFinancePlan,
   financeBandSlotForDepth,
   flattenFinanceTree,
+  getAllFinanceItems,
   getFinanceItemMoveAvailability,
   getFinanceItems,
+  getFinanceMappingRules,
   getFinancePlans,
+  getFinanceTransactionAllocations,
+  getFinanceTransactions,
   getNextFinanceItemSortOrder,
   getNextFinancePlanSortOrder,
   maxFinanceTreeDepth,
@@ -46,6 +53,11 @@ const PLAN_KIND_LABELS = {
 const ROW_SAVE_DELAY_MS = 550;
 const INDENT_STEP = 16;
 const MAX_INDENT = 64;
+const FACT_FILTERS = [
+  { value: 'all', label: 'All' },
+  { value: 'unmapped', label: 'Unmapped' },
+  { value: 'locked', label: 'Locked' },
+];
 
 function nowIso() {
   return new Date().toISOString();
@@ -115,11 +127,62 @@ function formatDueHint(item, planKind) {
   return item?.due_date || '';
 }
 
+function parseSignedMoneyToCents(value) {
+  const input = String(value || '').trim();
+  if (!input) return null;
+  const normalized = input
+    .replace(/\s+/g, '')
+    .replace(',', '.')
+    .replace(/[^\d.-]/g, '');
+  const amount = Number(normalized);
+  if (!Number.isFinite(amount)) return null;
+  return Math.round(amount * 100);
+}
+
+function createRuleConditionsFromForm({ category, description, mcc, direction, minAmount, maxAmount }) {
+  const conditions = [];
+  if (String(category || '').trim()) {
+    conditions.push({ field: 'bank_category', op: 'contains', value: String(category).trim() });
+  }
+  if (String(description || '').trim()) {
+    conditions.push({ field: 'description', op: 'contains', value: String(description).trim() });
+  }
+  if (String(mcc || '').trim()) {
+    conditions.push({ field: 'mcc', op: 'equals', value: String(mcc).trim() });
+  }
+  if (direction && direction !== 'any') {
+    conditions.push({ field: 'direction', op: 'equals', value: direction });
+  }
+  const minCents = parseSignedMoneyToCents(minAmount);
+  const maxCents = parseSignedMoneyToCents(maxAmount);
+  if (minCents != null) conditions.push({ field: 'amount_cents', op: 'gte', value: String(minCents / 100) });
+  if (maxCents != null) conditions.push({ field: 'amount_cents', op: 'lte', value: String(maxCents / 100) });
+  return conditions;
+}
+
+function transactionDirection(transaction) {
+  const amount = Number(transaction?.amount_cents) || 0;
+  if (amount < 0) return 'expense';
+  if (amount > 0) return 'income';
+  return 'any';
+}
+
 export default function FinanceScreen() {
   const { colors } = useTheme();
+  const [activeMode, setActiveMode] = useState('lists');
   const [plans, setPlans] = useState([]);
   const [activePlanUuid, setActivePlanUuid] = useState(null);
   const [items, setItems] = useState([]);
+  const [allItems, setAllItems] = useState([]);
+  const [transactions, setTransactions] = useState([]);
+  const [allocations, setAllocations] = useState([]);
+  const [mappingRules, setMappingRules] = useState([]);
+  const [factsFilter, setFactsFilter] = useState('all');
+  const [factsMonth, setFactsMonth] = useState('');
+  const [mappingTransactionUuid, setMappingTransactionUuid] = useState(null);
+  const [rulesVisible, setRulesVisible] = useState(false);
+  const [ruleSeed, setRuleSeed] = useState(null);
+  const [factsLoading, setFactsLoading] = useState(false);
   const [collapsedIds, setCollapsedIds] = useState(new Set());
   const [reorderItemUuid, setReorderItemUuid] = useState(null);
   const [editingItemUuid, setEditingItemUuid] = useState(null);
@@ -130,15 +193,19 @@ export default function FinanceScreen() {
   const itemTimers = useRef({});
   const pendingPlans = useRef({});
   const pendingItems = useRef({});
+  const activeModeRef = useRef(activeMode);
+  const activePlanUuidRef = useRef(activePlanUuid);
   const plansRef = useRef(plans);
   const itemsRef = useRef(items);
 
+  useEffect(() => { activeModeRef.current = activeMode; }, [activeMode]);
+  useEffect(() => { activePlanUuidRef.current = activePlanUuid; }, [activePlanUuid]);
   useEffect(() => { plansRef.current = plans; }, [plans]);
   useEffect(() => { itemsRef.current = items; }, [items]);
 
   const activePlan = plans.find((plan) => plan.uuid === activePlanUuid) || null;
 
-  const loadData = useCallback(async (preferredPlanUuid = activePlanUuid) => {
+  const loadData = useCallback(async (preferredPlanUuid = activePlanUuidRef.current) => {
     const nextPlans = await getFinancePlans();
     setPlans(nextPlans);
     const selectedUuid = nextPlans.some((plan) => plan.uuid === preferredPlanUuid)
@@ -150,9 +217,38 @@ export default function FinanceScreen() {
     } else {
       setItems([]);
     }
-  }, [activePlanUuid]);
+  }, []);
 
-  useFocusEffect(useCallback(() => { loadData(); }, [loadData]));
+  const loadFactsData = useCallback(async () => {
+    setFactsLoading(true);
+    try {
+      const [nextPlans, nextItems, nextTransactions, nextAllocations, nextRules] = await Promise.all([
+        getFinancePlans(),
+        getAllFinanceItems(),
+        getFinanceTransactions(),
+        getFinanceTransactionAllocations(),
+        getFinanceMappingRules(),
+      ]);
+      setPlans(nextPlans);
+      setAllItems(nextItems);
+      setTransactions(nextTransactions);
+      setAllocations(nextAllocations);
+      setMappingRules(nextRules);
+      if (!nextPlans.some((plan) => plan.uuid === activePlanUuidRef.current)) {
+        setActivePlanUuid(nextPlans[0]?.uuid || null);
+      }
+    } finally {
+      setFactsLoading(false);
+    }
+  }, []);
+
+  useFocusEffect(useCallback(() => {
+    if (activeModeRef.current === 'facts') {
+      loadFactsData();
+    } else {
+      loadData();
+    }
+  }, [loadData, loadFactsData]));
 
   useEffect(() => {
     let wasSyncing = false;
@@ -164,11 +260,14 @@ export default function FinanceScreen() {
       }
       if (wasSyncing) {
         wasSyncing = false;
-        loadData(activePlanUuid).catch((e) => console.warn('Finance reload failed:', e));
+        const loader = activeModeRef.current === 'facts'
+          ? loadFactsData()
+          : loadData(activePlanUuidRef.current);
+        loader.catch((e) => console.warn('Finance reload failed:', e));
       }
     });
     return unsubscribe;
-  }, [activePlanUuid, loadData]);
+  }, [loadData, loadFactsData]);
 
   useEffect(() => () => {
     Object.values(planTimers.current).forEach(clearTimeout);
@@ -266,7 +365,11 @@ export default function FinanceScreen() {
     try {
       await flushPendingSaves();
       await performSync();
-      await loadData(activePlanUuid);
+      if (activeModeRef.current === 'facts') {
+        await loadFactsData();
+      } else {
+        await loadData(activePlanUuidRef.current);
+      }
     } catch (e) {
       Alert.alert('Finance sync failed', String(e?.message || e));
     }
@@ -439,7 +542,35 @@ export default function FinanceScreen() {
   const flatRows = useMemo(() => flattenFinanceTree(items, { collapsedIds }), [items, collapsedIds]);
   const maxDepth = useMemo(() => maxFinanceTreeDepth(items), [items]);
   const totals = useMemo(() => computeFinanceTotals(items), [items]);
+  const allTotals = useMemo(() => computeFinanceTotals(allItems), [allItems]);
   const currency = activePlan?.currency || 'RUB';
+  const planByUuid = useMemo(() => new Map(plans.map((plan) => [plan.uuid, plan])), [plans]);
+  const itemByUuid = useMemo(() => new Map(allItems.map((item) => [item.uuid, item])), [allItems]);
+  const allocationByTransaction = useMemo(() => {
+    const map = new Map();
+    for (const allocation of allocations) {
+      if (!allocation?.transaction_uuid || allocation.is_deleted || !allocation.is_active) continue;
+      map.set(allocation.transaction_uuid, allocation);
+    }
+    return map;
+  }, [allocations]);
+  const filteredFacts = useMemo(() => transactions.filter((transaction) => {
+    if (!transaction || transaction.is_deleted) return false;
+    const allocation = allocationByTransaction.get(transaction.uuid);
+    if (factsFilter === 'unmapped' && allocation) return false;
+    if (factsFilter === 'locked' && !transaction.rules_locked) return false;
+    if (factsMonth && /^\d{4}-\d{2}$/.test(factsMonth)) {
+      return String(transaction.payment_date || '').startsWith(`${factsMonth}-`);
+    }
+    return true;
+  }), [transactions, allocationByTransaction, factsFilter, factsMonth]);
+  const unmappedCount = useMemo(
+    () => transactions.filter((transaction) => !transaction.is_deleted && !allocationByTransaction.has(transaction.uuid)).length,
+    [transactions, allocationByTransaction],
+  );
+  const mappingTransaction = mappingTransactionUuid
+    ? transactions.find((transaction) => transaction.uuid === mappingTransactionUuid)
+    : null;
   const reorderMoveState = reorderItemUuid
     ? getFinanceItemMoveAvailability(items, reorderItemUuid)
     : { up: false, down: false, left: false, right: false };
@@ -449,6 +580,68 @@ export default function FinanceScreen() {
   const editingItem = editingItemUuid
     ? items.find((item) => item.uuid === editingItemUuid && !item.is_deleted)
     : null;
+
+  const showListsMode = activeMode === 'lists';
+
+  const switchMode = async (mode) => {
+    setActiveMode(mode);
+    if (mode === 'facts') {
+      await flushPendingSaves();
+      await loadFactsData();
+    } else {
+      await loadData(activePlanUuidRef.current);
+    }
+  };
+
+  const allocationLabel = (allocation) => {
+    if (!allocation) return 'Unmapped';
+    const plan = planByUuid.get(allocation.plan_uuid);
+    const item = allocation.item_uuid ? itemByUuid.get(allocation.item_uuid) : null;
+    return [plan?.name || 'Finance list', item?.name].filter(Boolean).join(' / ');
+  };
+
+  const saveFactMapping = async ({ transaction, plan, item, rulesLocked }) => {
+    try {
+      await createFinanceTransactionAllocation({ transaction, plan, item, rulesLocked });
+      notifyLocalChange();
+      setMappingTransactionUuid(null);
+      await loadFactsData();
+    } catch (e) {
+      Alert.alert('Finance mapping failed', String(e?.message || e));
+    }
+  };
+
+  const openRuleFromFact = ({ transaction, plan, item }) => {
+    setMappingTransactionUuid(null);
+    setRuleSeed({ transaction, targetPlan: plan, targetItem: item });
+    setRulesVisible(true);
+  };
+
+  const saveRule = async (input) => {
+    try {
+      const result = await createFinanceMappingRule(input);
+      notifyLocalChange();
+      setRulesVisible(false);
+      setRuleSeed(null);
+      await loadFactsData();
+      if (result?.appliedCount) {
+        Alert.alert('Rule applied', `Mapped ${result.appliedCount} fact(s).`);
+      }
+    } catch (e) {
+      Alert.alert('Finance rule failed', String(e?.message || e));
+    }
+  };
+
+  const applyExistingRule = async (rule) => {
+    try {
+      const count = await applyFinanceMappingRule(rule, { remapAssigned: false });
+      notifyLocalChange();
+      await loadFactsData();
+      Alert.alert('Rule applied', `Mapped ${count} fact(s).`);
+    } catch (e) {
+      Alert.alert('Finance rule failed', String(e?.message || e));
+    }
+  };
 
   return (
     <KeyboardAvoidingView
@@ -464,11 +657,24 @@ export default function FinanceScreen() {
           <View style={s.headerText}>
             <Text style={[s.heading, { color: colors.text }]}>Finance</Text>
             <Text style={[s.total, { color: colors.textSecondary }]}>
-              {formatMoney(totals.grandTotal, currency)}
+              {showListsMode
+                ? formatMoney(totals.grandTotal, currency)
+                : `${filteredFacts.length} fact(s) · ${unmappedCount} unmapped`}
             </Text>
           </View>
           <View style={s.headerActions}>
-            {activePlan ? (
+            {!showListsMode ? (
+              <TouchableOpacity
+                style={[s.rulesBtn, { borderColor: colors.border, backgroundColor: colors.card }]}
+                onPress={() => {
+                  setRuleSeed(null);
+                  setRulesVisible(true);
+                }}
+              >
+                <Text style={[s.rulesBtnText, { color: colors.primary }]}>Rules</Text>
+              </TouchableOpacity>
+            ) : null}
+            {showListsMode && activePlan ? (
               <TouchableOpacity
                 style={[s.iconBtn, { borderColor: colors.border, opacity: sharePreparing ? 0.55 : 1 }]}
                 onPress={handleShare}
@@ -477,13 +683,35 @@ export default function FinanceScreen() {
                 <Text style={[s.iconText, { color: colors.primary }]}>🔗</Text>
               </TouchableOpacity>
             ) : null}
+            {showListsMode ? (
             <TouchableOpacity style={[s.addBtn, { backgroundColor: colors.primary }]} onPress={createPlan}>
               <Text style={s.addBtnText}>+</Text>
             </TouchableOpacity>
+            ) : null}
           </View>
         </View>
 
-        {plans.length ? (
+        <View style={[s.modeSwitch, { borderColor: colors.border, backgroundColor: colors.card }]}>
+          {[
+            ['lists', 'Lists'],
+            ['facts', 'Facts'],
+          ].map(([mode, label]) => (
+            <TouchableOpacity
+              key={mode}
+              style={[
+                s.modeBtn,
+                activeMode === mode && { backgroundColor: colors.primaryLight },
+              ]}
+              onPress={() => switchMode(mode).catch((e) => Alert.alert('Finance load failed', String(e?.message || e)))}
+            >
+              <Text style={[s.modeBtnText, { color: activeMode === mode ? colors.primary : colors.textSecondary }]}>
+                {label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {showListsMode && plans.length ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.planStrip}>
             {plans.map((plan) => (
               <TouchableOpacity
@@ -514,7 +742,7 @@ export default function FinanceScreen() {
           </ScrollView>
         ) : null}
 
-        {activePlan ? (
+        {showListsMode && activePlan ? (
           <>
             <View style={[s.planEditor, { borderColor: colors.border, backgroundColor: colors.card }]}>
               <TextInput
@@ -587,14 +815,32 @@ export default function FinanceScreen() {
               </View>
             )}
           </>
-        ) : (
+        ) : null}
+
+        {!showListsMode ? (
+          <FactsPanel
+            colors={colors}
+            facts={filteredFacts}
+            factsFilter={factsFilter}
+            factsMonth={factsMonth}
+            factsLoading={factsLoading}
+            allocationsByTransaction={allocationByTransaction}
+            allocationLabel={allocationLabel}
+            currencyByPlan={planByUuid}
+            onFilterChange={setFactsFilter}
+            onMonthChange={setFactsMonth}
+            onMap={(transaction) => setMappingTransactionUuid(transaction.uuid)}
+          />
+        ) : null}
+
+        {showListsMode && !activePlan ? (
           <View style={[s.emptyBox, { borderColor: colors.border }]}>
             <Text style={[s.emptyText, { color: colors.textMuted }]}>Нет финансовых списков</Text>
             <TouchableOpacity style={[s.emptyAction, { backgroundColor: colors.primary }]} onPress={createPlan}>
               <Text style={s.emptyActionText}>Создать список</Text>
             </TouchableOpacity>
           </View>
-        )}
+        ) : null}
       </ScrollView>
 
       {reorderItemUuid ? (
@@ -635,6 +881,35 @@ export default function FinanceScreen() {
           setEditingItemUuid(null);
           removeItem(item);
         }}
+      />
+
+      <MapFinanceFactSheet
+        visible={!!mappingTransaction}
+        transaction={mappingTransaction}
+        allocation={mappingTransaction ? allocationByTransaction.get(mappingTransaction.uuid) : null}
+        plans={plans}
+        items={allItems}
+        totals={allTotals.totals}
+        colors={colors}
+        onClose={() => setMappingTransactionUuid(null)}
+        onSave={saveFactMapping}
+        onCreateRule={openRuleFromFact}
+      />
+
+      <FinanceRulesSheet
+        visible={rulesVisible}
+        seed={ruleSeed}
+        rules={mappingRules}
+        plans={plans}
+        items={allItems}
+        totals={allTotals.totals}
+        colors={colors}
+        onClose={() => {
+          setRulesVisible(false);
+          setRuleSeed(null);
+        }}
+        onSave={saveRule}
+        onApplyRule={applyExistingRule}
       />
 
       <ShareLinkSheet
@@ -718,6 +993,528 @@ function FinanceRow({
       </View>
     </TouchableOpacity>
   );
+}
+
+function FactsPanel({
+  colors,
+  facts,
+  factsFilter,
+  factsMonth,
+  factsLoading,
+  allocationsByTransaction,
+  allocationLabel,
+  onFilterChange,
+  onMonthChange,
+  onMap,
+}) {
+  return (
+    <View style={s.factsRoot}>
+      <View style={s.factsFilters}>
+        {FACT_FILTERS.map((filter) => (
+          <TouchableOpacity
+            key={filter.value}
+            style={[
+              s.filterChip,
+              { borderColor: colors.border, backgroundColor: colors.card },
+              factsFilter === filter.value && { borderColor: colors.primary, backgroundColor: colors.primaryLight },
+            ]}
+            onPress={() => onFilterChange(filter.value)}
+          >
+            <Text style={[s.filterChipText, { color: factsFilter === filter.value ? colors.primary : colors.textSecondary }]}>
+              {filter.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+        <TextInput
+          style={[s.monthInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
+          value={factsMonth}
+          onChangeText={(text) => onMonthChange(String(text || '').replace(/[^\d-]/g, '').slice(0, 7))}
+          placeholder="YYYY-MM"
+          placeholderTextColor={colors.textMuted}
+        />
+      </View>
+
+      {factsLoading ? (
+        <Text style={[s.factsLoading, { color: colors.textMuted }]}>Loading...</Text>
+      ) : null}
+
+      {facts.length ? (
+        facts.map((transaction) => (
+          <FactCard
+            key={transaction.uuid}
+            transaction={transaction}
+            allocation={allocationsByTransaction.get(transaction.uuid)}
+            allocationLabel={allocationLabel}
+            colors={colors}
+            onMap={() => onMap(transaction)}
+          />
+        ))
+      ) : (
+        <View style={[s.emptyBox, { borderColor: colors.border }]}>
+          <Text style={[s.emptyText, { color: colors.textMuted }]}>No finance facts for this filter</Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
+function FactCard({ transaction, allocation, allocationLabel, colors, onMap }) {
+  const mapped = !!allocation;
+  const amountColor = Number(transaction.amount_cents) < 0 ? colors.danger : colors.success;
+  return (
+    <TouchableOpacity
+      style={[s.factCard, { borderColor: colors.border, backgroundColor: colors.card }]}
+      activeOpacity={0.88}
+      onPress={onMap}
+    >
+      <View style={s.factTopRow}>
+        <Text style={[s.factDate, { color: colors.textMuted }]}>{formatDueDate(transaction.payment_date || transaction.operation_at)}</Text>
+        <Text style={[s.factAmount, { color: amountColor }]}>{formatMoney(transaction.amount_cents, transaction.currency || 'RUB')}</Text>
+      </View>
+      <Text style={[s.factDescription, { color: colors.text }]} numberOfLines={2}>
+        {transaction.description || 'Без описания'}
+      </Text>
+      <Text style={[s.factMeta, { color: colors.textMuted }]} numberOfLines={1}>
+        {[transaction.bank_category, transaction.mcc ? `MCC ${transaction.mcc}` : '', transaction.card_mask].filter(Boolean).join(' · ')}
+      </Text>
+      <View style={s.factBottomRow}>
+        <View
+          style={[
+            s.factMappingBadge,
+            { borderColor: mapped ? colors.primary : colors.border, backgroundColor: mapped ? colors.primaryLight : colors.bgSecondary },
+          ]}
+        >
+          <Text style={[s.factMappingText, { color: mapped ? colors.primary : colors.textMuted }]} numberOfLines={1}>
+            {allocationLabel(allocation)}
+          </Text>
+        </View>
+        {transaction.rules_locked ? (
+          <Text style={[s.factLock, { color: colors.textMuted }]}>🔒</Text>
+        ) : null}
+        <TouchableOpacity style={[s.mapBtn, { backgroundColor: colors.primary }]} onPress={onMap}>
+          <Text style={s.mapBtnText}>{mapped ? 'Edit' : 'Map'}</Text>
+        </TouchableOpacity>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+function formatDueDate(value) {
+  const text = String(value || '');
+  if (/^\d{4}-\d{2}-\d{2}/.test(text)) {
+    const [year, month, day] = text.slice(0, 10).split('-');
+    return `${day}.${month}.${year}`;
+  }
+  return text;
+}
+
+function planItems(items, planUuid) {
+  return items.filter((item) => item.plan_uuid === planUuid && !item.is_deleted);
+}
+
+function terminalItemSet(items) {
+  const parents = new Set(items.map((item) => item.parent_uuid).filter(Boolean));
+  return new Set(items.filter((item) => !parents.has(item.uuid)).map((item) => item.uuid));
+}
+
+function MapFinanceFactSheet({
+  visible,
+  transaction,
+  allocation,
+  plans,
+  items,
+  totals,
+  colors,
+  onClose,
+  onSave,
+  onCreateRule,
+}) {
+  const [selectedPlanUuid, setSelectedPlanUuid] = useState('');
+  const [selectedItemUuid, setSelectedItemUuid] = useState('');
+  const [rulesLocked, setRulesLocked] = useState(false);
+
+  useEffect(() => {
+    if (!visible) return;
+    const nextPlanUuid = allocation?.plan_uuid || plans[0]?.uuid || '';
+    setSelectedPlanUuid(nextPlanUuid);
+    setSelectedItemUuid(allocation?.item_uuid || '');
+    setRulesLocked(Boolean(transaction?.rules_locked));
+  }, [visible, allocation?.uuid, allocation?.plan_uuid, allocation?.item_uuid, plans, transaction?.uuid, transaction?.rules_locked]);
+
+  if (!transaction) return null;
+
+  const selectedPlan = plans.find((plan) => plan.uuid === selectedPlanUuid) || null;
+  const selectedItem = items.find((item) => item.uuid === selectedItemUuid) || null;
+
+  const handleSave = () => {
+    if (!selectedPlan) {
+      Alert.alert('Choose finance list', 'Select a target list first.');
+      return;
+    }
+    if (!selectedItem) {
+      Alert.alert('Choose finance item', 'Select a terminal finance item first.');
+      return;
+    }
+    onSave({ transaction, plan: selectedPlan, item: selectedItem, rulesLocked });
+  };
+
+  const handleCreateRule = () => {
+    if (!selectedPlan || !selectedItem) {
+      Alert.alert('Choose target', 'Select a target list and terminal item before creating a rule.');
+      return;
+    }
+    onCreateRule({ transaction, plan: selectedPlan, item: selectedItem });
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <KeyboardAvoidingView style={s.sheetRoot} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <TouchableOpacity style={s.sheetBackdrop} activeOpacity={1} onPress={onClose} />
+        <View style={[s.sheet, s.mapSheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View style={s.sheetHandle} />
+          <View style={s.sheetHeader}>
+            <Text style={[s.sheetTitle, { color: colors.text }]}>Map finance fact</Text>
+            <Text style={[s.sheetTotal, { color: Number(transaction.amount_cents) < 0 ? colors.danger : colors.success }]}>
+              {formatMoney(transaction.amount_cents, transaction.currency || 'RUB')}
+            </Text>
+          </View>
+          <Text style={[s.factSheetDescription, { color: colors.text }]} numberOfLines={2}>
+            {transaction.description || 'Без описания'}
+          </Text>
+          <Text style={[s.factMeta, { color: colors.textMuted }]} numberOfLines={1}>
+            {[formatDueDate(transaction.payment_date), transaction.bank_category, transaction.mcc ? `MCC ${transaction.mcc}` : ''].filter(Boolean).join(' · ')}
+          </Text>
+
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.sheetPlanStrip}>
+            {plans.map((plan) => (
+              <TouchableOpacity
+                key={plan.uuid}
+                style={[
+                  s.sheetPlanChip,
+                  { borderColor: colors.border },
+                  selectedPlanUuid === plan.uuid && { borderColor: colors.primary, backgroundColor: colors.primaryLight },
+                ]}
+                onPress={() => {
+                  setSelectedPlanUuid(plan.uuid);
+                  setSelectedItemUuid('');
+                }}
+              >
+                <Text style={[s.sheetPlanChipText, { color: selectedPlanUuid === plan.uuid ? colors.primary : colors.textSecondary }]} numberOfLines={1}>
+                  {plan.name || 'Untitled'}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+
+          <TerminalItemPicker
+            colors={colors}
+            plan={selectedPlan}
+            items={items}
+            totals={totals}
+            selectedItemUuid={selectedItemUuid}
+            onSelect={setSelectedItemUuid}
+          />
+
+          <TouchableOpacity style={s.lockRow} onPress={() => setRulesLocked((value) => !value)}>
+            <Text style={[s.checkboxBox, { borderColor: colors.border, color: colors.primary }]}>{rulesLocked ? '✓' : ''}</Text>
+            <Text style={[s.lockText, { color: colors.textSecondary }]}>Keep this manual mapping unchanged when rules run</Text>
+          </TouchableOpacity>
+
+          <View style={s.sheetActions}>
+            <SmallAction label="Create rule" colors={colors} onPress={handleCreateRule} />
+            <TouchableOpacity style={[s.sheetDoneBtn, { backgroundColor: colors.primary }]} onPress={handleSave}>
+              <Text style={s.sheetDoneText}>Save mapping</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+function FinanceRulesSheet({
+  visible,
+  seed,
+  rules,
+  plans,
+  items,
+  totals,
+  colors,
+  onClose,
+  onSave,
+  onApplyRule,
+}) {
+  const [name, setName] = useState('');
+  const [category, setCategory] = useState('');
+  const [description, setDescription] = useState('');
+  const [mcc, setMcc] = useState('');
+  const [direction, setDirection] = useState('expense');
+  const [minAmount, setMinAmount] = useState('');
+  const [maxAmount, setMaxAmount] = useState('');
+  const [selectedPlanUuid, setSelectedPlanUuid] = useState('');
+  const [selectedItemUuid, setSelectedItemUuid] = useState('');
+  const [applyExisting, setApplyExisting] = useState(true);
+  const [remapAssigned, setRemapAssigned] = useState(false);
+
+  useEffect(() => {
+    if (!visible) return;
+    const transaction = seed?.transaction || null;
+    setName(transaction
+      ? [transaction.bank_category, transaction.description].filter(Boolean).join(' · ') || 'New mapping rule'
+      : 'New mapping rule');
+    setCategory(transaction?.bank_category || '');
+    setDescription(transaction?.description || '');
+    setMcc(transaction?.mcc || '');
+    setDirection(transactionDirection(transaction));
+    setMinAmount('');
+    setMaxAmount('');
+    setSelectedPlanUuid(seed?.targetPlan?.uuid || plans[0]?.uuid || '');
+    setSelectedItemUuid(seed?.targetItem?.uuid || '');
+    setApplyExisting(true);
+    setRemapAssigned(false);
+  }, [visible, seed, plans]);
+
+  const selectedPlan = plans.find((plan) => plan.uuid === selectedPlanUuid) || null;
+  const selectedItem = items.find((item) => item.uuid === selectedItemUuid) || null;
+
+  const handleSave = () => {
+    if (!selectedPlan || !selectedItem) {
+      Alert.alert('Choose target', 'Select a target list and terminal item first.');
+      return;
+    }
+    const conditions = createRuleConditionsFromForm({ category, description, mcc, direction, minAmount, maxAmount });
+    if (!conditions.length) {
+      Alert.alert('Rule condition required', 'Set at least one condition.');
+      return;
+    }
+    onSave({
+      name: name || 'New mapping rule',
+      isEnabled: true,
+      priority: (rules?.length || 0) + 1,
+      matchMode: 'all',
+      conditions,
+      targetPlan: selectedPlan,
+      targetItem: selectedItem,
+      applyExisting,
+      remapAssigned,
+    });
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <KeyboardAvoidingView style={s.sheetRoot} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <TouchableOpacity style={s.sheetBackdrop} activeOpacity={1} onPress={onClose} />
+        <View style={[s.sheet, s.rulesSheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View style={s.sheetHandle} />
+          <View style={s.sheetHeader}>
+            <Text style={[s.sheetTitle, { color: colors.text }]}>Finance mapping rules</Text>
+            <TouchableOpacity onPress={onClose}>
+              <Text style={[s.closeText, { color: colors.textMuted }]}>×</Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView style={s.rulesScroll} contentContainerStyle={s.rulesScrollContent}>
+            {rules?.length ? (
+              <View style={s.rulesList}>
+                {rules.map((rule) => (
+                  <View key={rule.uuid} style={[s.ruleRow, { borderColor: colors.border, backgroundColor: colors.bgSecondary }]}>
+                    <View style={s.ruleTextBlock}>
+                      <Text style={[s.ruleTitle, { color: colors.text }]} numberOfLines={1}>{rule.name || 'Rule'}</Text>
+                      <Text style={[s.ruleMeta, { color: colors.textMuted }]} numberOfLines={1}>
+                        {describeRule(rule)}
+                      </Text>
+                    </View>
+                    <TouchableOpacity style={[s.ruleApplyBtn, { borderColor: colors.primary }]} onPress={() => onApplyRule(rule)}>
+                      <Text style={[s.ruleApplyText, { color: colors.primary }]}>Apply</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <Text style={[s.ruleEmptyText, { color: colors.textMuted }]}>No rules yet</Text>
+            )}
+
+            <TextInput
+              style={[s.ruleInput, { color: colors.text, borderColor: colors.border }]}
+              value={name}
+              onChangeText={setName}
+              placeholder="Rule name"
+              placeholderTextColor={colors.textMuted}
+            />
+            <TextInput
+              style={[s.ruleInput, { color: colors.text, borderColor: colors.border }]}
+              value={category}
+              onChangeText={setCategory}
+              placeholder="Bank category contains"
+              placeholderTextColor={colors.textMuted}
+            />
+            <TextInput
+              style={[s.ruleInput, { color: colors.text, borderColor: colors.border }]}
+              value={description}
+              onChangeText={setDescription}
+              placeholder="Description contains"
+              placeholderTextColor={colors.textMuted}
+            />
+            <View style={s.ruleInlineFields}>
+              <TextInput
+                style={[s.ruleInput, s.ruleSmallInput, { color: colors.text, borderColor: colors.border }]}
+                value={mcc}
+                onChangeText={setMcc}
+                placeholder="MCC"
+                placeholderTextColor={colors.textMuted}
+              />
+              <TextInput
+                style={[s.ruleInput, s.ruleSmallInput, { color: colors.text, borderColor: colors.border }]}
+                value={minAmount}
+                onChangeText={setMinAmount}
+                placeholder="Min"
+                placeholderTextColor={colors.textMuted}
+                keyboardType="decimal-pad"
+              />
+              <TextInput
+                style={[s.ruleInput, s.ruleSmallInput, { color: colors.text, borderColor: colors.border }]}
+                value={maxAmount}
+                onChangeText={setMaxAmount}
+                placeholder="Max"
+                placeholderTextColor={colors.textMuted}
+                keyboardType="decimal-pad"
+              />
+            </View>
+            <View style={s.directionRow}>
+              {[
+                ['expense', 'Expense'],
+                ['income', 'Income'],
+                ['any', 'Any'],
+              ].map(([value, label]) => (
+                <TouchableOpacity
+                  key={value}
+                  style={[
+                    s.directionChip,
+                    { borderColor: colors.border },
+                    direction === value && { borderColor: colors.primary, backgroundColor: colors.primaryLight },
+                  ]}
+                  onPress={() => setDirection(value)}
+                >
+                  <Text style={[s.directionText, { color: direction === value ? colors.primary : colors.textSecondary }]}>
+                    {label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.sheetPlanStrip}>
+              {plans.map((plan) => (
+                <TouchableOpacity
+                  key={plan.uuid}
+                  style={[
+                    s.sheetPlanChip,
+                    { borderColor: colors.border },
+                    selectedPlanUuid === plan.uuid && { borderColor: colors.primary, backgroundColor: colors.primaryLight },
+                  ]}
+                  onPress={() => {
+                    setSelectedPlanUuid(plan.uuid);
+                    setSelectedItemUuid('');
+                  }}
+                >
+                  <Text style={[s.sheetPlanChipText, { color: selectedPlanUuid === plan.uuid ? colors.primary : colors.textSecondary }]} numberOfLines={1}>
+                    {plan.name || 'Untitled'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <TerminalItemPicker
+              colors={colors}
+              plan={selectedPlan}
+              items={items}
+              totals={totals}
+              selectedItemUuid={selectedItemUuid}
+              onSelect={setSelectedItemUuid}
+            />
+
+            <TouchableOpacity style={s.lockRow} onPress={() => setApplyExisting((value) => !value)}>
+              <Text style={[s.checkboxBox, { borderColor: colors.border, color: colors.primary }]}>{applyExisting ? '✓' : ''}</Text>
+              <Text style={[s.lockText, { color: colors.textSecondary }]}>Apply to currently unmapped facts after saving</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={s.lockRow} onPress={() => setRemapAssigned((value) => !value)}>
+              <Text style={[s.checkboxBox, { borderColor: colors.border, color: colors.primary }]}>{remapAssigned ? '✓' : ''}</Text>
+              <Text style={[s.lockText, { color: colors.textSecondary }]}>Also remap already assigned unlocked facts</Text>
+            </TouchableOpacity>
+          </ScrollView>
+
+          <View style={s.sheetActions}>
+            <TouchableOpacity style={[s.sheetDoneBtn, { backgroundColor: colors.primary }]} onPress={handleSave}>
+              <Text style={s.sheetDoneText}>{seed?.transaction ? 'Create & apply' : 'Create rule'}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+function TerminalItemPicker({ colors, plan, items, totals, selectedItemUuid, onSelect }) {
+  const rows = useMemo(() => {
+    if (!plan?.uuid) return [];
+    const currentItems = planItems(items, plan.uuid);
+    const terminal = terminalItemSet(currentItems);
+    return flattenFinanceTree(currentItems).map((row) => ({
+      ...row,
+      isTerminal: terminal.has(row.item.uuid),
+    }));
+  }, [items, plan?.uuid]);
+
+  if (!plan) {
+    return <Text style={[s.ruleEmptyText, { color: colors.textMuted }]}>No finance lists</Text>;
+  }
+
+  return (
+    <View style={[s.itemPicker, { borderColor: colors.border }]}>
+      <ScrollView style={s.itemPickerScroll} nestedScrollEnabled>
+        {rows.map((row) => {
+          const selected = selectedItemUuid === row.item.uuid;
+          return (
+            <TouchableOpacity
+              key={row.item.uuid}
+              disabled={!row.isTerminal}
+              style={[
+                s.itemPickRow,
+                { opacity: row.isTerminal ? 1 : 0.58 },
+                selected && { backgroundColor: colors.primaryLight },
+              ]}
+              onPress={() => row.isTerminal && onSelect(row.item.uuid)}
+            >
+              <Text
+                style={[
+                  s.itemPickName,
+                  { color: selected ? colors.primary : colors.text, paddingLeft: Math.min(row.depth * 14, 54) },
+                ]}
+                numberOfLines={1}
+              >
+                {row.hasChildren ? '▾ ' : '· '}{row.item.name || 'Без названия'}
+              </Text>
+              <Text style={[s.itemPickAmount, { color: colors.textMuted }]} numberOfLines={1}>
+                {formatMoney(totals.get(row.item.uuid) || row.item.amount_cents || 0, plan.currency || 'RUB')}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
+}
+
+function describeRule(rule) {
+  let conditions = [];
+  try {
+    const parsed = JSON.parse(rule?.conditions_json || '[]');
+    conditions = Array.isArray(parsed) ? parsed : [];
+  } catch {
+    conditions = [];
+  }
+  if (!conditions.length) return 'No conditions';
+  return conditions.map((condition) => {
+    const field = String(condition.field || '').replace(/_/g, ' ');
+    return `${field} ${condition.op || 'contains'} ${condition.value ?? ''}`.trim();
+  }).join(rule.match_mode === 'any' ? ' OR ' : ' AND ');
 }
 
 function FinanceItemEditorSheet({
@@ -887,10 +1684,15 @@ const s = StyleSheet.create({
   heading: { fontSize: 22, fontWeight: '700' },
   total: { fontSize: 13, marginTop: 2, fontWeight: '600' },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  rulesBtn: { height: 38, borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center' },
+  rulesBtnText: { fontSize: 12, fontWeight: '800' },
   iconBtn: { width: 38, height: 38, borderRadius: 8, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   iconText: { fontSize: 17, fontWeight: '700' },
   addBtn: { width: 38, height: 38, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
   addBtnText: { color: '#fff', fontSize: 24, lineHeight: 26, fontWeight: '500' },
+  modeSwitch: { flexDirection: 'row', marginHorizontal: 12, marginBottom: 6, borderWidth: 1, borderRadius: 8, padding: 3, gap: 3 },
+  modeBtn: { flex: 1, height: 32, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
+  modeBtnText: { fontSize: 12, fontWeight: '800' },
   planStrip: { paddingHorizontal: 12, paddingVertical: 6, gap: 8 },
   planChip: { width: 164, borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8 },
   planChipTitle: { fontSize: 13, fontWeight: '700' },
@@ -931,6 +1733,24 @@ const s = StyleSheet.create({
   compactTotal: { fontSize: 11.5, fontWeight: '700' },
   compactGroupTotal: { fontWeight: '800' },
   compactDirectAmount: { marginTop: 0, fontSize: 9.5, lineHeight: 10 },
+  factsRoot: { paddingTop: 4, paddingBottom: 18 },
+  factsFilters: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, paddingHorizontal: 12, paddingVertical: 8, alignItems: 'center' },
+  filterChip: { borderWidth: 1, borderRadius: 7, paddingHorizontal: 10, paddingVertical: 7 },
+  filterChipText: { fontSize: 12, fontWeight: '800' },
+  monthInput: { minWidth: 92, height: 32, borderWidth: 1, borderRadius: 7, paddingHorizontal: 9, paddingVertical: 5, fontSize: 12, fontWeight: '700' },
+  factsLoading: { paddingHorizontal: 16, paddingVertical: 6, fontSize: 12, fontWeight: '700' },
+  factCard: { borderWidth: 1, borderRadius: 8, marginHorizontal: 10, marginVertical: 4, padding: 10, gap: 5 },
+  factTopRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 },
+  factDate: { fontSize: 11, fontWeight: '700' },
+  factAmount: { fontSize: 14, fontWeight: '900' },
+  factDescription: { fontSize: 13.5, lineHeight: 17, fontWeight: '700' },
+  factMeta: { fontSize: 11, lineHeight: 14, fontWeight: '600' },
+  factBottomRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 3 },
+  factMappingBadge: { flex: 1, minWidth: 0, borderWidth: 1, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 5 },
+  factMappingText: { fontSize: 11.5, fontWeight: '800' },
+  factLock: { fontSize: 14, fontWeight: '700' },
+  mapBtn: { borderRadius: 7, paddingHorizontal: 12, paddingVertical: 7 },
+  mapBtnText: { color: '#fff', fontSize: 12, fontWeight: '900' },
   smallAction: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 9, paddingVertical: 6 },
   smallActionText: { fontSize: 12, fontWeight: '700' },
   sheetRoot: { flex: 1, justifyContent: 'flex-end' },
@@ -944,6 +1764,8 @@ const s = StyleSheet.create({
     paddingBottom: 14,
     gap: 10,
   },
+  mapSheet: { maxHeight: '88%' },
+  rulesSheet: { maxHeight: '92%' },
   sheetHandle: {
     alignSelf: 'center',
     width: 38,
@@ -964,6 +1786,35 @@ const s = StyleSheet.create({
   sheetActions: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 7 },
   sheetDoneBtn: { marginLeft: 'auto', borderRadius: 7, paddingHorizontal: 16, paddingVertical: 8 },
   sheetDoneText: { color: '#fff', fontSize: 12, fontWeight: '800' },
+  factSheetDescription: { fontSize: 13.5, lineHeight: 18, fontWeight: '800' },
+  sheetPlanStrip: { gap: 7, paddingVertical: 2 },
+  sheetPlanChip: { borderWidth: 1, borderRadius: 7, paddingHorizontal: 10, paddingVertical: 7, maxWidth: 170 },
+  sheetPlanChipText: { fontSize: 12, fontWeight: '800' },
+  itemPicker: { borderWidth: 1, borderRadius: 8, overflow: 'hidden', maxHeight: 210 },
+  itemPickerScroll: { maxHeight: 210 },
+  itemPickRow: { minHeight: 34, paddingHorizontal: 9, paddingVertical: 6, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  itemPickName: { flex: 1, minWidth: 0, fontSize: 12, fontWeight: '800' },
+  itemPickAmount: { maxWidth: 100, fontSize: 11, fontWeight: '700' },
+  lockRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 2 },
+  checkboxBox: { width: 20, height: 20, borderWidth: 1, borderRadius: 5, textAlign: 'center', lineHeight: 18, fontSize: 13, fontWeight: '900' },
+  lockText: { flex: 1, minWidth: 0, fontSize: 12, fontWeight: '600' },
+  closeText: { fontSize: 24, lineHeight: 26, fontWeight: '700' },
+  rulesScroll: { maxHeight: 540 },
+  rulesScrollContent: { gap: 8, paddingBottom: 6 },
+  rulesList: { gap: 6 },
+  ruleRow: { borderWidth: 1, borderRadius: 7, padding: 8, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  ruleTextBlock: { flex: 1, minWidth: 0 },
+  ruleTitle: { fontSize: 12.5, fontWeight: '800' },
+  ruleMeta: { marginTop: 2, fontSize: 10.5, fontWeight: '600' },
+  ruleApplyBtn: { borderWidth: 1, borderRadius: 7, paddingHorizontal: 10, paddingVertical: 6 },
+  ruleApplyText: { fontSize: 11, fontWeight: '900' },
+  ruleEmptyText: { fontSize: 12, fontWeight: '700' },
+  ruleInput: { borderWidth: 1, borderRadius: 7, paddingHorizontal: 9, paddingVertical: 7, minHeight: 36, fontSize: 12.5, fontWeight: '600' },
+  ruleInlineFields: { flexDirection: 'row', gap: 7 },
+  ruleSmallInput: { flex: 1, minWidth: 0 },
+  directionRow: { flexDirection: 'row', gap: 7 },
+  directionChip: { flex: 1, borderWidth: 1, borderRadius: 7, paddingVertical: 7, alignItems: 'center' },
+  directionText: { fontSize: 11.5, fontWeight: '800' },
   emptyBox: { margin: 16, borderWidth: 1, borderStyle: 'dashed', borderRadius: 8, padding: 20, alignItems: 'center' },
   emptyText: { fontSize: 14, marginBottom: 12 },
   emptyAction: { borderRadius: 8, paddingHorizontal: 14, paddingVertical: 10 },

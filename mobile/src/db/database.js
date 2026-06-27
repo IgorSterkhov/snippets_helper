@@ -8,6 +8,7 @@ const TASKS_INITIAL_SYNC_BACKFILL_KEY = 'tasks_initial_sync_backfill_v3';
 const PINNED_SNIPPETS_SYNC_BACKFILL_KEY = 'pinned_snippets_sync_backfill_v1';
 const FINANCE_SYNC_ENABLED_BACKFILL_KEY = 'finance_sync_enabled_backfill_v2';
 const FINANCE_SYNC_CURSOR_REPAIR_BACKFILL_KEY = 'finance_sync_cursor_repair_backfill_v1';
+const FINANCE_FACTS_SYNC_BACKFILL_KEY = 'finance_facts_sync_backfill_v1';
 
 export function getDB() {
   return db;
@@ -147,6 +148,14 @@ async function runMigrations() {
     // pull after the cursor repair so already-skipped Finance rows are fetched.
     await setLastSyncAt(null).catch(() => {});
     await setSyncMetaValue(FINANCE_SYNC_CURSOR_REPAIR_BACKFILL_KEY, new Date().toISOString()).catch(() => {});
+  }
+
+  const hasFinanceFactsBackfill = await syncMetaKeyExists(db, FINANCE_FACTS_SYNC_BACKFILL_KEY);
+  if (!hasFinanceFactsBackfill) {
+    // Finance facts/rules/allocations were added after Finance lists. Force a
+    // full pull so desktop-imported facts are visible on existing installs.
+    await setLastSyncAt(null).catch(() => {});
+    await setSyncMetaValue(FINANCE_FACTS_SYNC_BACKFILL_KEY, new Date().toISOString()).catch(() => {});
   }
 }
 
@@ -308,6 +317,84 @@ export async function initDB() {
         is_deleted INTEGER DEFAULT 0
       )
     `);
+
+    tx.executeSql(`
+      CREATE TABLE IF NOT EXISTS finance_transactions (
+        uuid TEXT PRIMARY KEY,
+        id INTEGER,
+        source TEXT NOT NULL DEFAULT 'tbank_csv',
+        source_fingerprint TEXT NOT NULL DEFAULT '',
+        import_batch_id INTEGER,
+        import_batch_uuid TEXT,
+        operation_at TEXT NOT NULL DEFAULT '',
+        payment_date TEXT NOT NULL DEFAULT '',
+        card_mask TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT '',
+        amount_cents INTEGER NOT NULL DEFAULT 0,
+        currency TEXT NOT NULL DEFAULT 'RUB',
+        operation_amount_cents INTEGER NOT NULL DEFAULT 0,
+        operation_currency TEXT NOT NULL DEFAULT 'RUB',
+        payment_amount_cents INTEGER NOT NULL DEFAULT 0,
+        payment_currency TEXT NOT NULL DEFAULT 'RUB',
+        cashback_cents INTEGER,
+        bank_category TEXT NOT NULL DEFAULT '',
+        mcc TEXT NOT NULL DEFAULT '',
+        description TEXT NOT NULL DEFAULT '',
+        bonuses_cents INTEGER,
+        invest_rounding_cents INTEGER,
+        rounded_amount_cents INTEGER,
+        raw_json TEXT NOT NULL DEFAULT '{}',
+        rules_locked INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT,
+        updated_at TEXT NOT NULL,
+        is_deleted INTEGER DEFAULT 0
+      )
+    `);
+
+    tx.executeSql(`
+      CREATE TABLE IF NOT EXISTS finance_mapping_rules (
+        uuid TEXT PRIMARY KEY,
+        id INTEGER,
+        name TEXT NOT NULL DEFAULT '',
+        is_enabled INTEGER NOT NULL DEFAULT 1,
+        priority INTEGER NOT NULL DEFAULT 0,
+        match_mode TEXT NOT NULL DEFAULT 'all',
+        conditions_json TEXT NOT NULL DEFAULT '[]',
+        target_plan_id INTEGER,
+        target_plan_uuid TEXT NOT NULL,
+        target_item_id INTEGER,
+        target_item_uuid TEXT,
+        created_at TEXT,
+        updated_at TEXT NOT NULL,
+        is_deleted INTEGER DEFAULT 0
+      )
+    `);
+
+    tx.executeSql(`
+      CREATE TABLE IF NOT EXISTS finance_transaction_allocations (
+        uuid TEXT PRIMARY KEY,
+        id INTEGER,
+        transaction_id INTEGER,
+        transaction_uuid TEXT NOT NULL,
+        plan_id INTEGER,
+        plan_uuid TEXT NOT NULL,
+        item_id INTEGER,
+        item_uuid TEXT,
+        assigned_by TEXT NOT NULL DEFAULT 'manual',
+        rule_id INTEGER,
+        rule_uuid TEXT,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT,
+        updated_at TEXT NOT NULL,
+        is_deleted INTEGER DEFAULT 0
+      )
+    `);
+
+    tx.executeSql('CREATE INDEX IF NOT EXISTS idx_mobile_finance_transactions_payment_date ON finance_transactions(payment_date, operation_at)');
+    tx.executeSql('CREATE INDEX IF NOT EXISTS idx_mobile_finance_transactions_source_fingerprint ON finance_transactions(source, source_fingerprint)');
+    tx.executeSql('CREATE INDEX IF NOT EXISTS idx_mobile_finance_allocations_transaction ON finance_transaction_allocations(transaction_uuid, is_active)');
+    tx.executeSql('CREATE INDEX IF NOT EXISTS idx_mobile_finance_allocations_plan_item ON finance_transaction_allocations(plan_uuid, item_uuid)');
+    tx.executeSql('CREATE INDEX IF NOT EXISTS idx_mobile_finance_mapping_rules_sort ON finance_mapping_rules(is_enabled, priority)');
 
     tx.executeSql(`
       CREATE TABLE IF NOT EXISTS sync_meta (

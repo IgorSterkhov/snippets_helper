@@ -1,7 +1,13 @@
 import {
+  applyFinanceMappingRule,
+  buildUpsertFinanceTransaction,
+  buildUpsertFinanceTransactionAllocation,
   buildUpsertFinanceItem,
+  buildUpsertFinanceMappingRule,
   buildUpsertFinancePlan,
   computeFinanceTotals,
+  createFinanceMappingRule,
+  createFinanceTransactionAllocation,
   deleteFinancePlan,
   financeBandSlotForDepth,
   flattenFinanceTree,
@@ -50,6 +56,41 @@ describe('financeRepo', () => {
     });
     expect(item.sql).toContain('finance_items');
     expect(item.params).toEqual(expect.arrayContaining(['item-1', 'plan-1', 'parent-1', 'Hosting', 129900, 12]));
+
+    const transaction = buildUpsertFinanceTransaction({
+      uuid: 'tx-1',
+      source: 'tbank_csv',
+      source_fingerprint: 'fingerprint-1',
+      payment_date: '2026-04-30',
+      amount_cents: -19000,
+      description: 'Т-Мобайл',
+      updated_at: '2026-06-11T10:00:00',
+    });
+    expect(transaction.sql).toContain('finance_transactions');
+    expect(transaction.params).toEqual(expect.arrayContaining(['tx-1', 'fingerprint-1', -19000, 'Т-Мобайл']));
+
+    const rule = buildUpsertFinanceMappingRule({
+      uuid: 'rule-1',
+      name: 'Mobile',
+      target_plan_uuid: 'plan-1',
+      target_item_uuid: 'item-1',
+      conditions_json: '[{"field":"description","op":"contains","value":"Т-Мобайл"}]',
+      updated_at: '2026-06-11T10:00:00',
+    });
+    expect(rule.sql).toContain('finance_mapping_rules');
+    expect(rule.params).toEqual(expect.arrayContaining(['rule-1', 'Mobile', 'plan-1', 'item-1']));
+
+    const allocation = buildUpsertFinanceTransactionAllocation({
+      uuid: 'allocation-1',
+      transaction_uuid: 'tx-1',
+      plan_uuid: 'plan-1',
+      item_uuid: 'item-1',
+      rule_uuid: 'rule-1',
+      assigned_by: 'rule',
+      updated_at: '2026-06-11T10:00:00',
+    });
+    expect(allocation.sql).toContain('finance_transaction_allocations');
+    expect(allocation.params).toEqual(expect.arrayContaining(['allocation-1', 'tx-1', 'plan-1', 'item-1', 'rule-1']));
   });
 
   test('flattenFinanceTree returns depth-first hierarchy and totals', () => {
@@ -139,6 +180,193 @@ describe('financeRepo', () => {
     expect(mockExecuteSql).toHaveBeenCalledWith(
       'UPDATE finance_items SET is_deleted = 1, updated_at = ? WHERE plan_uuid = ?',
       [expect.any(String), 'plan-1'],
+      expect.any(Function),
+      expect.any(Function),
+    );
+  });
+
+  test('createFinanceTransactionAllocation writes UUID relations and locks rules when requested', async () => {
+    await createFinanceTransactionAllocation({
+      transaction: { uuid: 'tx-1', id: 11 },
+      plan: { uuid: 'plan-1', id: 22 },
+      item: { uuid: 'item-1', id: 33 },
+      rulesLocked: true,
+    });
+
+    expect(mockExecuteSql).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE finance_transaction_allocations'),
+      [expect.any(String), 'tx-1'],
+      expect.any(Function),
+      expect.any(Function),
+    );
+    expect(mockExecuteSql).toHaveBeenCalledWith(
+      expect.stringContaining('finance_transaction_allocations'),
+      expect.arrayContaining(['tx-1', 'plan-1', 'item-1', 'manual']),
+      expect.any(Function),
+      expect.any(Function),
+    );
+    expect(mockExecuteSql).toHaveBeenCalledWith(
+      'UPDATE finance_transactions SET rules_locked = ?, updated_at = ? WHERE uuid = ?',
+      [1, expect.any(String), 'tx-1'],
+      expect.any(Function),
+      expect.any(Function),
+    );
+  });
+
+  test('applyFinanceMappingRule maps matching unlocked facts only', async () => {
+    mockExecuteSql.mockImplementation((sql, params, success) => {
+      let rows = [];
+      if (String(sql).includes('FROM finance_transactions')) {
+        rows = [
+          {
+            uuid: 'tx-match',
+            description: 'Яндекс Такси',
+            bank_category: 'Такси',
+            amount_cents: -50600,
+            rules_locked: 0,
+            is_deleted: 0,
+          },
+          {
+            uuid: 'tx-locked',
+            description: 'Яндекс Такси',
+            bank_category: 'Такси',
+            amount_cents: -23900,
+            rules_locked: 1,
+            is_deleted: 0,
+          },
+        ];
+      } else if (String(sql).includes('FROM finance_transaction_allocations')) {
+        rows = [];
+      }
+      if (success) {
+        success(mockTx, {
+          rows: {
+            length: rows.length,
+            item: (index) => rows[index],
+          },
+        });
+      }
+    });
+
+    const count = await applyFinanceMappingRule({
+      uuid: 'rule-1',
+      id: 7,
+      is_enabled: 1,
+      match_mode: 'all',
+      target_plan_uuid: 'plan-1',
+      target_plan_id: 22,
+      target_item_uuid: 'item-1',
+      target_item_id: 33,
+      conditions_json: JSON.stringify([
+        { field: 'bank_category', op: 'contains', value: 'Такси' },
+        { field: 'direction', op: 'equals', value: 'expense' },
+      ]),
+    });
+
+    expect(count).toBe(1);
+    expect(mockExecuteSql).toHaveBeenCalledWith(
+      expect.stringContaining('finance_transaction_allocations'),
+      expect.arrayContaining(['tx-match', 'plan-1', 'item-1', 'rule']),
+      expect.any(Function),
+      expect.any(Function),
+    );
+  });
+
+  test('finance rules support desktop-shaped amount range conditions', async () => {
+    mockExecuteSql.mockImplementation((sql, params, success) => {
+      let rows = [];
+      if (String(sql).includes('FROM finance_transactions')) {
+        rows = [
+          {
+            uuid: 'tx-in-range',
+            description: 'Taxi',
+            bank_category: 'Такси',
+            amount_cents: -50600,
+            rules_locked: 0,
+            is_deleted: 0,
+          },
+          {
+            uuid: 'tx-out-of-range',
+            description: 'Taxi',
+            bank_category: 'Такси',
+            amount_cents: -250000,
+            rules_locked: 0,
+            is_deleted: 0,
+          },
+        ];
+      } else if (String(sql).includes('FROM finance_transaction_allocations')) {
+        rows = [];
+      }
+      if (success) {
+        success(mockTx, {
+          rows: {
+            length: rows.length,
+            item: (index) => rows[index],
+          },
+        });
+      }
+    });
+
+    const count = await applyFinanceMappingRule({
+      uuid: 'rule-amount',
+      is_enabled: 1,
+      match_mode: 'all',
+      target_plan_uuid: 'plan-1',
+      target_item_uuid: 'item-1',
+      conditions_json: JSON.stringify([
+        { field: 'amount_cents', op: 'gte', value: '-1000' },
+        { field: 'amount_cents', op: 'lte', value: '-100' },
+      ]),
+    });
+
+    expect(count).toBe(1);
+    expect(mockExecuteSql).toHaveBeenCalledWith(
+      expect.stringContaining('finance_transaction_allocations'),
+      expect.arrayContaining(['tx-in-range', 'plan-1', 'item-1', 'rule']),
+      expect.any(Function),
+      expect.any(Function),
+    );
+  });
+
+  test('createFinanceMappingRule can apply the new rule to existing facts', async () => {
+    mockExecuteSql.mockImplementation((sql, params, success) => {
+      let rows = [];
+      if (String(sql).includes('FROM finance_transactions')) {
+        rows = [
+          {
+            uuid: 'tx-1',
+            description: 'Boosty.to',
+            bank_category: 'Цифровые товары',
+            amount_cents: -50000,
+            rules_locked: 0,
+            is_deleted: 0,
+          },
+        ];
+      } else if (String(sql).includes('FROM finance_transaction_allocations')) {
+        rows = [];
+      }
+      if (success) {
+        success(mockTx, {
+          rows: {
+            length: rows.length,
+            item: (index) => rows[index],
+          },
+        });
+      }
+    });
+
+    const result = await createFinanceMappingRule({
+      name: 'Digital subscriptions',
+      targetPlan: { uuid: 'plan-1', id: 22 },
+      targetItem: { uuid: 'item-1', id: 33 },
+      conditions: [{ field: 'bank_category', op: 'contains', value: 'Цифровые товары' }],
+      applyExisting: true,
+    });
+
+    expect(result.appliedCount).toBe(1);
+    expect(mockExecuteSql).toHaveBeenCalledWith(
+      expect.stringContaining('finance_mapping_rules'),
+      expect.arrayContaining(['Digital subscriptions', 'plan-1', 'item-1']),
       expect.any(Function),
       expect.any(Function),
     );

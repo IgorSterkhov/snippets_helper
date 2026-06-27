@@ -16,8 +16,11 @@ import {
   getModifiedTaskCheckboxesSince, getModifiedTaskLinksSince,
 } from '../db/taskRepo';
 import {
-  buildUpsertFinancePlan, buildUpsertFinanceItem,
+  buildUpsertFinancePlan, buildUpsertFinanceItem, buildUpsertFinanceTransaction,
+  buildUpsertFinanceMappingRule, buildUpsertFinanceTransactionAllocation,
   getModifiedFinancePlansSince, getModifiedFinanceItemsSince,
+  getModifiedFinanceTransactionsSince, getModifiedFinanceMappingRulesSince,
+  getModifiedFinanceTransactionAllocationsSince,
 } from '../db/financeRepo';
 
 const BUILDERS = {
@@ -32,6 +35,9 @@ const BUILDERS = {
   task_links: buildUpsertTaskLink,
   finance_plans: buildUpsertFinancePlan,
   finance_items: buildUpsertFinanceItem,
+  finance_transactions: buildUpsertFinanceTransaction,
+  finance_mapping_rules: buildUpsertFinanceMappingRule,
+  finance_transaction_allocations: buildUpsertFinanceTransactionAllocation,
 };
 
 const TABLE_ORDER = [
@@ -46,6 +52,9 @@ const TABLE_ORDER = [
   'task_links',
   'finance_plans',
   'finance_items',
+  'finance_transactions',
+  'finance_mapping_rules',
+  'finance_transaction_allocations',
 ];
 
 function shouldApplyPulledRow(table, row) {
@@ -56,6 +65,12 @@ function shouldApplyPulledRow(table, row) {
     return false;
   }
   if (table === 'finance_items' && !row.plan_uuid) {
+    return false;
+  }
+  if (table === 'finance_mapping_rules' && !row.target_plan_uuid) {
+    return false;
+  }
+  if (table === 'finance_transaction_allocations' && (!row.transaction_uuid || !row.plan_uuid)) {
     return false;
   }
   return true;
@@ -78,7 +93,7 @@ function emit(payload) {
 
 export async function countPendingChanges() {
   const since = await getLastSyncAt();
-  const [s, t, n, f, tc, ts, task, cb, links, fp, fi] = await Promise.all([
+  const [s, t, n, f, tc, ts, task, cb, links, fp, fi, ft, fr, fa] = await Promise.all([
     getModifiedSnippetsSince(since),
     getModifiedTagsSince(since),
     getModifiedNotesSince(since),
@@ -90,8 +105,11 @@ export async function countPendingChanges() {
     getModifiedTaskLinksSince(since),
     getModifiedFinancePlansSince(since),
     getModifiedFinanceItemsSince(since),
+    getModifiedFinanceTransactionsSince(since),
+    getModifiedFinanceMappingRulesSince(since),
+    getModifiedFinanceTransactionAllocationsSince(since),
   ]);
-  return s.length + t.length + n.length + f.length + tc.length + ts.length + task.length + cb.length + links.length + fp.length + fi.length;
+  return s.length + t.length + n.length + f.length + tc.length + ts.length + task.length + cb.length + links.length + fp.length + fi.length + ft.length + fr.length + fa.length;
 }
 
 async function emitPending() {
@@ -173,6 +191,12 @@ export async function performSync() {
       if (localFinancePlans.length) changes.finance_plans = localFinancePlans;
       const localFinanceItems = await getModifiedFinanceItemsSince(lastSync);
       if (localFinanceItems.length) changes.finance_items = localFinanceItems;
+      const localFinanceTransactions = await getModifiedFinanceTransactionsSince(lastSync);
+      if (localFinanceTransactions.length) changes.finance_transactions = localFinanceTransactions;
+      const localFinanceMappingRules = await getModifiedFinanceMappingRulesSince(lastSync);
+      if (localFinanceMappingRules.length) changes.finance_mapping_rules = localFinanceMappingRules;
+      const localFinanceTransactionAllocations = await getModifiedFinanceTransactionAllocationsSince(lastSync);
+      if (localFinanceTransactionAllocations.length) changes.finance_transaction_allocations = localFinanceTransactionAllocations;
 
       if (Object.keys(changes).length > 0) {
         await syncPush(changes);

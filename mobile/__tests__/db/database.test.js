@@ -77,6 +77,9 @@ describe('database', () => {
     expect(sql).toContain('CREATE TABLE IF NOT EXISTS task_links');
     expect(sql).toContain('CREATE TABLE IF NOT EXISTS finance_plans');
     expect(sql).toContain('CREATE TABLE IF NOT EXISTS finance_items');
+    expect(sql).toContain('CREATE TABLE IF NOT EXISTS finance_transactions');
+    expect(sql).toContain('CREATE TABLE IF NOT EXISTS finance_mapping_rules');
+    expect(sql).toContain('CREATE TABLE IF NOT EXISTS finance_transaction_allocations');
   });
 
   test('initDB resets sync cursor when task backfill marker is missing', async () => {
@@ -108,6 +111,12 @@ describe('database', () => {
       expect.any(Function),
       expect.any(Function),
     );
+    expect(SQLite.__mockExecuteSql).toHaveBeenCalledWith(
+      'INSERT OR REPLACE INTO sync_meta (key, value) VALUES (?, ?)',
+      ['finance_facts_sync_backfill_v1', expect.any(String)],
+      expect.any(Function),
+      expect.any(Function),
+    );
   });
 
   test('initDB keeps sync cursor when task backfill marker exists', async () => {
@@ -117,6 +126,7 @@ describe('database', () => {
       'pinned_snippets_sync_backfill_v1',
       'finance_sync_enabled_backfill_v2',
       'finance_sync_cursor_repair_backfill_v1',
+      'finance_facts_sync_backfill_v1',
     ]);
 
     await initDB();
@@ -135,6 +145,7 @@ describe('database', () => {
       'tasks_initial_sync_backfill_v3',
       'finance_sync_enabled_backfill_v2',
       'finance_sync_cursor_repair_backfill_v1',
+      'finance_facts_sync_backfill_v1',
     ]);
 
     await initDB();
@@ -159,6 +170,7 @@ describe('database', () => {
       'tasks_initial_sync_backfill_v3',
       'finance_sync_enabled_backfill_v2',
       'finance_sync_cursor_repair_backfill_v1',
+      'finance_facts_sync_backfill_v1',
     ]);
     SQLite.__mockState.tableColumns = {
       note_folders: new Set(['id']),
@@ -219,6 +231,31 @@ describe('database', () => {
     expect(SQLite.__mockExecuteSql).toHaveBeenCalledWith(
       'INSERT OR REPLACE INTO sync_meta (key, value) VALUES (?, ?)',
       ['finance_sync_cursor_repair_backfill_v1', expect.any(String)],
+      expect.any(Function),
+      expect.any(Function),
+    );
+  });
+
+  test('initDB resets sync cursor when finance facts marker is missing', async () => {
+    const SQLite = require('react-native-sqlite-storage');
+    SQLite.__mockState.syncMetaKeys = new Set([
+      'tasks_initial_sync_backfill_v3',
+      'pinned_snippets_sync_backfill_v1',
+      'finance_sync_enabled_backfill_v2',
+      'finance_sync_cursor_repair_backfill_v1',
+    ]);
+
+    await initDB();
+
+    expect(SQLite.__mockExecuteSql).toHaveBeenCalledWith(
+      'INSERT OR REPLACE INTO sync_meta (key, value) VALUES (?, ?)',
+      ['last_sync_at', null],
+      expect.any(Function),
+      expect.any(Function),
+    );
+    expect(SQLite.__mockExecuteSql).toHaveBeenCalledWith(
+      'INSERT OR REPLACE INTO sync_meta (key, value) VALUES (?, ?)',
+      ['finance_facts_sync_backfill_v1', expect.any(String)],
       expect.any(Function),
       expect.any(Function),
     );

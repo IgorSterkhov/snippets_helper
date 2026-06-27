@@ -37,6 +37,9 @@ describe('syncService', () => {
     taskRepo.buildUpsertTaskLink.mockImplementation((row) => ({ sql: 'upsert task link', params: [row.uuid] }));
     financeRepo.buildUpsertFinancePlan.mockImplementation((row) => ({ sql: 'upsert finance plan', params: [row.uuid] }));
     financeRepo.buildUpsertFinanceItem.mockImplementation((row) => ({ sql: 'upsert finance item', params: [row.uuid] }));
+    financeRepo.buildUpsertFinanceTransaction.mockImplementation((row) => ({ sql: 'upsert finance transaction', params: [row.uuid] }));
+    financeRepo.buildUpsertFinanceMappingRule.mockImplementation((row) => ({ sql: 'upsert finance mapping rule', params: [row.uuid] }));
+    financeRepo.buildUpsertFinanceTransactionAllocation.mockImplementation((row) => ({ sql: 'upsert finance allocation', params: [row.uuid] }));
     taskRepo.getModifiedTaskCategoriesSince.mockResolvedValue([]);
     taskRepo.getModifiedTaskStatusesSince.mockResolvedValue([]);
     taskRepo.getModifiedTasksSince.mockResolvedValue([]);
@@ -44,6 +47,9 @@ describe('syncService', () => {
     taskRepo.getModifiedTaskLinksSince.mockResolvedValue([]);
     financeRepo.getModifiedFinancePlansSince.mockResolvedValue([]);
     financeRepo.getModifiedFinanceItemsSince.mockResolvedValue([]);
+    financeRepo.getModifiedFinanceTransactionsSince.mockResolvedValue([]);
+    financeRepo.getModifiedFinanceMappingRulesSince.mockResolvedValue([]);
+    financeRepo.getModifiedFinanceTransactionAllocationsSince.mockResolvedValue([]);
   });
 
   test('pull applies server changes to local DB', async () => {
@@ -133,6 +139,9 @@ describe('syncService', () => {
       changes: {
         finance_plans: [{ uuid: 'plan-1', name: 'Budget', currency: 'RUB', kind: 'monthly', updated_at: '2026-06-11T10:00:00', is_deleted: false }],
         finance_items: [{ uuid: 'item-1', plan_uuid: 'plan-1', name: 'Hosting', amount_cents: 1000, updated_at: '2026-06-11T10:00:00', is_deleted: false }],
+        finance_transactions: [{ uuid: 'tx-1', source_fingerprint: 'fp-1', payment_date: '2026-04-30', amount_cents: -19000, updated_at: '2026-06-11T10:00:00', is_deleted: false }],
+        finance_mapping_rules: [{ uuid: 'rule-1', name: 'Mobile', target_plan_uuid: 'plan-1', target_item_uuid: 'item-1', conditions_json: '[]', updated_at: '2026-06-11T10:00:00', is_deleted: false }],
+        finance_transaction_allocations: [{ uuid: 'allocation-1', transaction_uuid: 'tx-1', plan_uuid: 'plan-1', item_uuid: 'item-1', updated_at: '2026-06-11T10:00:00', is_deleted: false }],
       },
       server_time: '2026-06-11T10:00:00',
     });
@@ -146,6 +155,15 @@ describe('syncService', () => {
     financeRepo.getModifiedFinanceItemsSince.mockResolvedValue([
       { uuid: 'item-local', plan_uuid: 'plan-local', name: 'Local item', updated_at: '2026-06-11T09:31:00' },
     ]);
+    financeRepo.getModifiedFinanceTransactionsSince.mockResolvedValue([
+      { uuid: 'tx-local', source_fingerprint: 'fp-local', amount_cents: -1200, updated_at: '2026-06-11T09:32:00' },
+    ]);
+    financeRepo.getModifiedFinanceMappingRulesSince.mockResolvedValue([
+      { uuid: 'rule-local', target_plan_uuid: 'plan-local', target_item_uuid: 'item-local', updated_at: '2026-06-11T09:33:00' },
+    ]);
+    financeRepo.getModifiedFinanceTransactionAllocationsSince.mockResolvedValue([
+      { uuid: 'allocation-local', transaction_uuid: 'tx-local', plan_uuid: 'plan-local', item_uuid: 'item-local', updated_at: '2026-06-11T09:34:00' },
+    ]);
     endpoints.syncPush.mockResolvedValue({ status: 'ok', accepted: 2, conflicts: [] });
 
     await performSync();
@@ -156,10 +174,22 @@ describe('syncService', () => {
     expect(financeRepo.buildUpsertFinanceItem).toHaveBeenCalledWith(
       expect.objectContaining({ uuid: 'item-1', plan_uuid: 'plan-1' }),
     );
+    expect(financeRepo.buildUpsertFinanceTransaction).toHaveBeenCalledWith(
+      expect.objectContaining({ uuid: 'tx-1' }),
+    );
+    expect(financeRepo.buildUpsertFinanceMappingRule).toHaveBeenCalledWith(
+      expect.objectContaining({ uuid: 'rule-1', target_plan_uuid: 'plan-1' }),
+    );
+    expect(financeRepo.buildUpsertFinanceTransactionAllocation).toHaveBeenCalledWith(
+      expect.objectContaining({ uuid: 'allocation-1', transaction_uuid: 'tx-1', plan_uuid: 'plan-1' }),
+    );
     expect(endpoints.syncPush).toHaveBeenCalledWith(
       expect.objectContaining({
         finance_plans: expect.arrayContaining([expect.objectContaining({ uuid: 'plan-local' })]),
         finance_items: expect.arrayContaining([expect.objectContaining({ uuid: 'item-local' })]),
+        finance_transactions: expect.arrayContaining([expect.objectContaining({ uuid: 'tx-local' })]),
+        finance_mapping_rules: expect.arrayContaining([expect.objectContaining({ uuid: 'rule-local' })]),
+        finance_transaction_allocations: expect.arrayContaining([expect.objectContaining({ uuid: 'allocation-local' })]),
       }),
     );
   });
@@ -221,6 +251,78 @@ describe('syncService', () => {
     expect(financeRepo.buildUpsertFinanceItem).toHaveBeenCalledTimes(1);
     expect(financeRepo.buildUpsertFinanceItem).toHaveBeenCalledWith(
       expect.objectContaining({ uuid: 'item-valid' }),
+    );
+  });
+
+  test('pull skips finance fact relation rows without required UUID relations', async () => {
+    syncMeta.getLastSyncAt.mockResolvedValue(null);
+    endpoints.syncPull.mockResolvedValue({
+      changes: {
+        finance_transactions: [
+          { uuid: 'tx-valid', source_fingerprint: 'fp-1', updated_at: '2026-06-11T10:00:00' },
+        ],
+        finance_mapping_rules: [
+          { uuid: 'rule-valid', target_plan_uuid: 'plan-1', updated_at: '2026-06-11T10:00:00' },
+          { uuid: 'rule-invalid', target_plan_uuid: null, updated_at: '2026-06-11T10:00:00' },
+        ],
+        finance_transaction_allocations: [
+          { uuid: 'allocation-valid', transaction_uuid: 'tx-valid', plan_uuid: 'plan-1', updated_at: '2026-06-11T10:00:00' },
+          { uuid: 'allocation-invalid-tx', transaction_uuid: null, plan_uuid: 'plan-1', updated_at: '2026-06-11T10:00:00' },
+          { uuid: 'allocation-invalid-plan', transaction_uuid: 'tx-valid', plan_uuid: null, updated_at: '2026-06-11T10:00:00' },
+        ],
+      },
+      server_time: '2026-06-11T10:00:00',
+    });
+    snippetRepo.getModifiedSnippetsSince.mockResolvedValue([]);
+    snippetRepo.getModifiedTagsSince.mockResolvedValue([]);
+    noteRepo.getModifiedNotesSince.mockResolvedValue([]);
+    noteRepo.getModifiedFoldersSince.mockResolvedValue([]);
+    endpoints.syncPush.mockResolvedValue({ status: 'ok', accepted: 0, conflicts: [] });
+
+    await performSync();
+
+    expect(financeRepo.buildUpsertFinanceTransaction).toHaveBeenCalledTimes(1);
+    expect(financeRepo.buildUpsertFinanceMappingRule).toHaveBeenCalledTimes(1);
+    expect(financeRepo.buildUpsertFinanceMappingRule).toHaveBeenCalledWith(
+      expect.objectContaining({ uuid: 'rule-valid' }),
+    );
+    expect(financeRepo.buildUpsertFinanceTransactionAllocation).toHaveBeenCalledTimes(1);
+    expect(financeRepo.buildUpsertFinanceTransactionAllocation).toHaveBeenCalledWith(
+      expect.objectContaining({ uuid: 'allocation-valid' }),
+    );
+  });
+
+  test('push sends new finance rules before allocations that reference them', async () => {
+    syncMeta.getLastSyncAt.mockResolvedValue('2026-06-27T09:00:00');
+    endpoints.syncPull.mockResolvedValue({ changes: {}, server_time: '2026-06-27T10:00:00' });
+    snippetRepo.getModifiedSnippetsSince.mockResolvedValue([]);
+    snippetRepo.getModifiedTagsSince.mockResolvedValue([]);
+    noteRepo.getModifiedNotesSince.mockResolvedValue([]);
+    noteRepo.getModifiedFoldersSince.mockResolvedValue([]);
+    financeRepo.getModifiedFinanceMappingRulesSince.mockResolvedValue([
+      { uuid: 'rule-new', target_plan_uuid: 'plan-1', target_item_uuid: 'item-1', updated_at: '2026-06-27T09:10:00' },
+    ]);
+    financeRepo.getModifiedFinanceTransactionAllocationsSince.mockResolvedValue([
+      {
+        uuid: 'allocation-new',
+        transaction_uuid: 'tx-1',
+        plan_uuid: 'plan-1',
+        item_uuid: 'item-1',
+        rule_uuid: 'rule-new',
+        updated_at: '2026-06-27T09:11:00',
+      },
+    ]);
+    endpoints.syncPush.mockResolvedValue({ status: 'ok', accepted: 2, conflicts: [] });
+
+    await performSync();
+
+    const pushed = endpoints.syncPush.mock.calls[0][0];
+    expect(Object.keys(pushed)).toEqual([
+      'finance_mapping_rules',
+      'finance_transaction_allocations',
+    ]);
+    expect(pushed.finance_transaction_allocations[0]).toEqual(
+      expect.objectContaining({ rule_uuid: 'rule-new' }),
     );
   });
 });
