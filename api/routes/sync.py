@@ -264,6 +264,7 @@ async def _prepare_active_finance_allocation(
     row_uuid: UUID,
     extra: dict,
     accepted_updated_at: datetime,
+    client_updated_at: datetime | None,
 ) -> ConflictInfo | None:
     if not bool(extra.get("is_active", True)):
         return None
@@ -286,16 +287,12 @@ async def _prepare_active_finance_allocation(
     resolution = _finance_allocation_conflict_resolution(
         active_existing,
         row_uuid,
-        accepted_updated_at,
+        client_updated_at or accepted_updated_at,
     )
 
     if resolution == "server_wins":
-        return ConflictInfo(
-            table="finance_transaction_allocations",
-            uuid=str(row_uuid),
-            server_updated_at=active_existing.updated_at,
-            resolution="server_wins",
-        )
+        extra["is_active"] = False
+        return None
 
     if resolution == "incoming_wins":
         await db.execute(
@@ -615,6 +612,7 @@ async def push(
                         row_uuid,
                         extra,
                         accepted_updated_at,
+                        client_updated,
                     )
                     if allocation_conflict:
                         conflicts.append(allocation_conflict)
@@ -640,6 +638,7 @@ async def push(
                         row_uuid,
                         extra,
                         accepted_updated_at,
+                        client_updated,
                     )
                     if allocation_conflict:
                         conflicts.append(allocation_conflict)
