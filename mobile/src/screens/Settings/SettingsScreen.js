@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, Switch, ScrollView, StyleSheet, Alert } from 'react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
 import { useTheme } from '../../theme/ThemeContext';
 import { useAuth } from '../../auth/AuthContext';
 import { isBiometricAvailable } from '../../auth/biometrics';
 import { performSync } from '../../sync/syncService';
 import { useSyncStatus } from '../../sync/useSyncStatus';
+import { getLastSyncDebug } from '../../db/syncMetaRepo';
 import { openApkDownload } from '../../updater/apkDownload';
 import { loadApkVersionStatus } from '../../updater/updateService';
 import { TASK_PREF_KEYS, loadTaskPreferences, setTaskPreference } from '../Tasks/taskPreferences';
@@ -16,13 +18,19 @@ export default function SettingsScreen() {
   const [taskPrefs, setTaskPrefs] = useState({ hideDone: false, wrapText: true });
   const [apkStatus, setApkStatus] = useState(null);
   const [apkStatusLoading, setApkStatusLoading] = useState(true);
+  const [syncDebug, setSyncDebug] = useState(null);
   const { pending, syncing } = useSyncStatus();
 
   useEffect(() => {
     isBiometricAvailable().then(setBioAvailable);
     loadTaskPreferences().then(setTaskPrefs).catch(() => {});
     refreshApkStatus();
+    refreshSyncDebug();
   }, []);
+
+  const refreshSyncDebug = async () => {
+    setSyncDebug(await getLastSyncDebug().catch(() => null));
+  };
 
   const refreshApkStatus = async () => {
     setApkStatusLoading(true);
@@ -45,10 +53,58 @@ export default function SettingsScreen() {
   const handleSync = async () => {
     try {
       await performSync();
+      await refreshSyncDebug();
       Alert.alert('Синхронизация', 'Данные синхронизированы');
     } catch (e) {
-      Alert.alert('Ошибка синхронизации', String(e?.message || e));
+      const debug = await getLastSyncDebug().catch(() => null);
+      setSyncDebug(debug);
+      showSyncError(String(e?.message || e), debug);
     }
+  };
+
+  const formatCounts = (counts = {}) => Object.entries(counts)
+    .map(([table, count]) => `${table}: ${count}`)
+    .join(', ');
+
+  const syncDebugText = (debug = syncDebug) => {
+    if (!debug) return 'Диагностика синхронизации пока отсутствует';
+    const lines = [
+      `status: ${debug.status || 'unknown'}`,
+      debug.timestamp ? `time: ${debug.timestamp}` : '',
+      debug.last_sync_at ? `last_sync_at: ${debug.last_sync_at}` : '',
+      debug.pulled_counts ? `pulled: ${formatCounts(debug.pulled_counts) || '0'}` : '',
+      debug.pushed_counts ? `pushed: ${formatCounts(debug.pushed_counts) || '0'}` : '',
+      debug.rejected_uuids && Object.keys(debug.rejected_uuids).length
+        ? `rejected: ${JSON.stringify(debug.rejected_uuids)}`
+        : '',
+      debug.conflicts && debug.conflicts.length ? `conflicts: ${JSON.stringify(debug.conflicts)}` : '',
+      debug.error ? `error: ${debug.error}` : '',
+    ].filter(Boolean);
+    return lines.join('\n');
+  };
+
+  const syncDebugLabel = () => {
+    if (!syncDebug) return 'Последняя синхронизация: нет данных';
+    const status = syncDebug.status || 'unknown';
+    const pulled = Object.values(syncDebug.pulled_counts || {}).reduce((sum, n) => sum + Number(n || 0), 0);
+    const pushed = Object.values(syncDebug.pushed_counts || {}).reduce((sum, n) => sum + Number(n || 0), 0);
+    return `Последняя синхронизация: ${status} · pulled ${pulled} · pushed ${pushed}`;
+  };
+
+  const showSyncDebug = () => {
+    const text = syncDebugText();
+    Alert.alert('Sync diagnostics', text, [
+      { text: 'Copy', onPress: () => Clipboard.setString(text) },
+      { text: 'OK' },
+    ]);
+  };
+
+  const showSyncError = (message, debug) => {
+    const text = `${message}\n\n${syncDebugText(debug)}`;
+    Alert.alert('Ошибка синхронизации', text, [
+      { text: 'Copy', onPress: () => Clipboard.setString(text) },
+      { text: 'OK' },
+    ]);
   };
 
   const handleCheckUpdate = async () => {
@@ -159,6 +215,11 @@ export default function SettingsScreen() {
           </Text>
         </TouchableOpacity>,
       )}
+      {row(syncDebugLabel(), (
+        <TouchableOpacity onPress={showSyncDebug}>
+          <Text style={{ color: colors.primary }}>Детали</Text>
+        </TouchableOpacity>
+      ))}
 
       <Text style={[s.section, { color: colors.textSecondary }]}>Обновления</Text>
       {row('Проверить обновления', (

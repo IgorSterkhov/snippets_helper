@@ -50,6 +50,7 @@ describe('syncService', () => {
     financeRepo.getModifiedFinanceTransactionsSince.mockResolvedValue([]);
     financeRepo.getModifiedFinanceMappingRulesSince.mockResolvedValue([]);
     financeRepo.getModifiedFinanceTransactionAllocationsSince.mockResolvedValue([]);
+    syncMeta.setLastSyncDebug.mockResolvedValue(undefined);
   });
 
   test('pull applies server changes to local DB', async () => {
@@ -323,6 +324,70 @@ describe('syncService', () => {
     ]);
     expect(pushed.finance_transaction_allocations[0]).toEqual(
       expect.objectContaining({ rule_uuid: 'rule-new' }),
+    );
+  });
+
+  test('full pull does not push rows that were just pulled', async () => {
+    syncMeta.getLastSyncAt.mockResolvedValue(null);
+    endpoints.syncPull.mockResolvedValue({
+      changes: {
+        shortcuts: [
+          { uuid: 's-pulled', name: 'server', value: 'v', updated_at: '2026-06-27T10:00:00', is_deleted: false },
+        ],
+        finance_transactions: [
+          { uuid: 'tx-pulled', source_fingerprint: 'fp-1', amount_cents: -19000, updated_at: '2026-06-27T10:01:00', is_deleted: false },
+        ],
+      },
+      server_time: '2026-06-27T09:59:30',
+    });
+    snippetRepo.getModifiedSnippetsSince.mockResolvedValue([
+      { uuid: 's-pulled', name: 'server', value: 'v', updated_at: '2026-06-27T10:00:00', is_deleted: 0 },
+    ]);
+    snippetRepo.getModifiedTagsSince.mockResolvedValue([]);
+    noteRepo.getModifiedNotesSince.mockResolvedValue([]);
+    noteRepo.getModifiedFoldersSince.mockResolvedValue([]);
+    financeRepo.getModifiedFinanceTransactionsSince.mockResolvedValue([
+      { uuid: 'tx-pulled', source_fingerprint: 'fp-1', amount_cents: -19000, updated_at: '2026-06-27T10:01:00', is_deleted: 0 },
+    ]);
+    endpoints.syncPush.mockResolvedValue({ status: 'ok', accepted: 0, conflicts: [] });
+
+    await performSync();
+
+    expect(endpoints.syncPush).not.toHaveBeenCalled();
+    expect(syncMeta.setLastSyncAt).toHaveBeenCalledWith('2026-06-27T10:01:00');
+    expect(syncMeta.setLastSyncDebug).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'ok',
+        pulled_counts: expect.objectContaining({ shortcuts: 1, finance_transactions: 1 }),
+        pushed_counts: {},
+      }),
+    );
+  });
+
+  test('sync surfaces rejected rows and conflicts in diagnostics', async () => {
+    syncMeta.getLastSyncAt.mockResolvedValue('2026-06-27T09:00:00');
+    endpoints.syncPull.mockResolvedValue({ changes: {}, server_time: '2026-06-27T10:00:00' });
+    snippetRepo.getModifiedSnippetsSince.mockResolvedValue([
+      { uuid: 's-local', name: 'local', value: 'v', updated_at: '2026-06-27T09:30:00', is_deleted: 0 },
+    ]);
+    snippetRepo.getModifiedTagsSince.mockResolvedValue([]);
+    noteRepo.getModifiedNotesSince.mockResolvedValue([]);
+    noteRepo.getModifiedFoldersSince.mockResolvedValue([]);
+    endpoints.syncPush.mockResolvedValue({
+      status: 'ok',
+      accepted: 0,
+      rejected_uuids: { shortcuts: ['s-local'] },
+      conflicts: [{ table: 'shortcuts', uuid: 's-local', resolution: 'server_wins' }],
+    });
+
+    await expect(performSync()).rejects.toThrow(/rejected/i);
+
+    expect(syncMeta.setLastSyncDebug).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'warning',
+        rejected_uuids: { shortcuts: ['s-local'] },
+        conflicts: [{ table: 'shortcuts', uuid: 's-local', resolution: 'server_wins' }],
+      }),
     );
   });
 });

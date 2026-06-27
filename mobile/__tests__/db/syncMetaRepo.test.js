@@ -1,4 +1,9 @@
-import { getLastSyncAt, setLastSyncAt } from '../../src/db/syncMetaRepo';
+import {
+  getLastSyncAt,
+  getLastSyncDebug,
+  setLastSyncAt,
+  setLastSyncDebug,
+} from '../../src/db/syncMetaRepo';
 import { getDB } from '../../src/db/database';
 
 jest.mock('../../src/db/database');
@@ -41,5 +46,41 @@ describe('syncMetaRepo', () => {
       expect.any(Function),
       expect.any(Function),
     );
+  });
+
+  test('setLastSyncDebug stores JSON diagnostics', async () => {
+    mockExecuteSql.mockImplementation((sql, params, success) => {
+      if (success) success(mockTx, { rows: { length: 0 } });
+    });
+
+    await setLastSyncDebug({ status: 'ok', pulled_counts: { finance_transactions: 2 } });
+
+    expect(mockExecuteSql).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT OR REPLACE'),
+      [
+        'last_sync_debug',
+        JSON.stringify({ status: 'ok', pulled_counts: { finance_transactions: 2 } }),
+      ],
+      expect.any(Function),
+      expect.any(Function),
+    );
+  });
+
+  test('getLastSyncDebug parses stored diagnostics', async () => {
+    mockExecuteSql.mockImplementation((sql, params, success) => {
+      success(mockTx, {
+        rows: {
+          length: 1,
+          item: () => ({ value: '{"status":"warning","rejected_uuids":{"finance_transactions":["tx-1"]}}' }),
+        },
+      });
+    });
+
+    const result = await getLastSyncDebug();
+
+    expect(result).toEqual({
+      status: 'warning',
+      rejected_uuids: { finance_transactions: ['tx-1'] },
+    });
   });
 });
