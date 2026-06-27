@@ -127,6 +127,7 @@ describe('database', () => {
       'finance_sync_enabled_backfill_v2',
       'finance_sync_cursor_repair_backfill_v1',
       'finance_facts_sync_backfill_v1',
+      'finance_facts_sync_repair_backfill_v2',
     ]);
 
     await initDB();
@@ -139,6 +140,32 @@ describe('database', () => {
     );
   });
 
+  test('initDB resets sync cursor when finance facts repair marker is missing', async () => {
+    const SQLite = require('react-native-sqlite-storage');
+    SQLite.__mockState.syncMetaKeys = new Set([
+      'tasks_initial_sync_backfill_v3',
+      'pinned_snippets_sync_backfill_v1',
+      'finance_sync_enabled_backfill_v2',
+      'finance_sync_cursor_repair_backfill_v1',
+      'finance_facts_sync_backfill_v1',
+    ]);
+
+    await initDB();
+
+    expect(SQLite.__mockExecuteSql).toHaveBeenCalledWith(
+      'INSERT OR REPLACE INTO sync_meta (key, value) VALUES (?, ?)',
+      ['last_sync_at', null],
+      expect.any(Function),
+      expect.any(Function),
+    );
+    expect(SQLite.__mockExecuteSql).toHaveBeenCalledWith(
+      'INSERT OR REPLACE INTO sync_meta (key, value) VALUES (?, ?)',
+      ['finance_facts_sync_repair_backfill_v2', expect.any(String)],
+      expect.any(Function),
+      expect.any(Function),
+    );
+  });
+
   test('initDB resets sync cursor when pinned snippets backfill marker is missing', async () => {
     const SQLite = require('react-native-sqlite-storage');
     SQLite.__mockState.syncMetaKeys = new Set([
@@ -146,6 +173,7 @@ describe('database', () => {
       'finance_sync_enabled_backfill_v2',
       'finance_sync_cursor_repair_backfill_v1',
       'finance_facts_sync_backfill_v1',
+      'finance_facts_sync_repair_backfill_v2',
     ]);
 
     await initDB();
@@ -171,6 +199,7 @@ describe('database', () => {
       'finance_sync_enabled_backfill_v2',
       'finance_sync_cursor_repair_backfill_v1',
       'finance_facts_sync_backfill_v1',
+      'finance_facts_sync_repair_backfill_v2',
     ]);
     SQLite.__mockState.tableColumns = {
       note_folders: new Set(['id']),
