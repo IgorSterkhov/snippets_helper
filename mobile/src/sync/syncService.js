@@ -312,3 +312,52 @@ export async function performSync() {
 
   return currentSyncPromise;
 }
+
+export async function performFullPullFromServer() {
+  if (currentSyncPromise) return currentSyncPromise;
+
+  currentSyncPromise = (async () => {
+    syncing = true;
+    emit({ type: 'syncing', value: true });
+
+    try {
+      const pending = await countPendingChanges();
+      if (pending > 0) {
+        throw new Error(`Full pull blocked: ${pending} pending local changes. Run normal sync first.`);
+      }
+
+      const pullResult = await syncPull(null);
+      const pullEntries = normalizePullEntries(pullResult.changes);
+      await applyPulledChanges(pullResult.changes);
+
+      const nextSyncAt = maxTimestamp(pullResult.server_time, pullEntries);
+      await setLastSyncAt(nextSyncAt || pullResult.server_time);
+      await setLastSyncDebug({
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        last_sync_at: nextSyncAt || pullResult.server_time,
+        forced_full_pull: true,
+        pulled_counts: countByTable(pullEntries),
+        pushed_counts: {},
+        accepted_uuids: {},
+        rejected_uuids: {},
+        conflicts: [],
+      }).catch(() => {});
+      await emitPending();
+    } catch (error) {
+      await setLastSyncDebug({
+        status: 'error',
+        timestamp: new Date().toISOString(),
+        forced_full_pull: true,
+        error: String(error?.message || error),
+      }).catch(() => {});
+      throw error;
+    } finally {
+      syncing = false;
+      currentSyncPromise = null;
+      emit({ type: 'syncing', value: false });
+    }
+  })();
+
+  return currentSyncPromise;
+}

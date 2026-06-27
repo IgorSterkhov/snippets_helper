@@ -4,7 +4,7 @@ import Clipboard from '@react-native-clipboard/clipboard';
 import { useTheme } from '../../theme/ThemeContext';
 import { useAuth } from '../../auth/AuthContext';
 import { isBiometricAvailable } from '../../auth/biometrics';
-import { performSync } from '../../sync/syncService';
+import { performFullPullFromServer, performSync } from '../../sync/syncService';
 import { useSyncStatus } from '../../sync/useSyncStatus';
 import { getLastSyncDebug } from '../../db/syncMetaRepo';
 import { openApkDownload } from '../../updater/apkDownload';
@@ -60,6 +60,29 @@ export default function SettingsScreen() {
       setSyncDebug(debug);
       showSyncError(String(e?.message || e), debug);
     }
+  };
+
+  const runForceFullPull = async () => {
+    try {
+      await performFullPullFromServer();
+      await refreshSyncDebug();
+      Alert.alert('Full pull', 'Данные заново загружены с сервера');
+    } catch (e) {
+      const debug = await getLastSyncDebug().catch(() => null);
+      setSyncDebug(debug);
+      showSyncError(String(e?.message || e), debug);
+    }
+  };
+
+  const handleForceFullPull = () => {
+    Alert.alert(
+      'Full pull from server',
+      'Приложение заново загрузит все строки с сервера без отправки локальных изменений. Если есть ожидающие отправки изменения, сначала выполните обычную синхронизацию.',
+      [
+        { text: 'Отмена', style: 'cancel' },
+        { text: 'Запустить', onPress: runForceFullPull },
+      ],
+    );
   };
 
   const formatCounts = (counts = {}) => Object.entries(counts)
@@ -215,6 +238,13 @@ export default function SettingsScreen() {
           </Text>
         </TouchableOpacity>,
       )}
+      {row('Принудительно загрузить все с сервера', (
+        <TouchableOpacity onPress={handleForceFullPull} disabled={syncing}>
+          <Text style={{ color: colors.primary }}>
+            {syncing ? 'Синхронизация…' : 'Full pull'}
+          </Text>
+        </TouchableOpacity>
+      ))}
       {row(syncDebugLabel(), (
         <TouchableOpacity onPress={showSyncDebug}>
           <Text style={{ color: colors.primary }}>Детали</Text>

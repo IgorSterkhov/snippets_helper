@@ -1,4 +1,4 @@
-import { performSync } from '../../src/sync/syncService';
+import { performFullPullFromServer, performSync } from '../../src/sync/syncService';
 import * as endpoints from '../../src/api/endpoints';
 import * as snippetRepo from '../../src/db/snippetRepo';
 import * as noteRepo from '../../src/db/noteRepo';
@@ -389,5 +389,53 @@ describe('syncService', () => {
         conflicts: [{ table: 'shortcuts', uuid: 's-local', resolution: 'server_wins' }],
       }),
     );
+  });
+
+  test('forced full pull downloads server rows without pushing local rows', async () => {
+    syncMeta.getLastSyncAt.mockResolvedValue('2026-06-27T09:00:00');
+    endpoints.syncPull.mockResolvedValue({
+      changes: {
+        finance_transactions: [
+          { uuid: 'tx-server', source_fingerprint: 'fp-server', amount_cents: -19000, updated_at: '2026-06-27T12:15:00', is_deleted: false },
+        ],
+      },
+      server_time: '2026-06-27T12:14:30',
+    });
+    snippetRepo.getModifiedSnippetsSince.mockResolvedValue([]);
+    snippetRepo.getModifiedTagsSince.mockResolvedValue([]);
+    noteRepo.getModifiedNotesSince.mockResolvedValue([]);
+    noteRepo.getModifiedFoldersSince.mockResolvedValue([]);
+
+    await performFullPullFromServer();
+
+    expect(endpoints.syncPull).toHaveBeenCalledWith(null);
+    expect(endpoints.syncPush).not.toHaveBeenCalled();
+    expect(financeRepo.buildUpsertFinanceTransaction).toHaveBeenCalledWith(
+      expect.objectContaining({ uuid: 'tx-server' }),
+    );
+    expect(syncMeta.setLastSyncAt).toHaveBeenCalledWith('2026-06-27T12:15:00');
+    expect(syncMeta.setLastSyncDebug).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'ok',
+        forced_full_pull: true,
+        pulled_counts: { finance_transactions: 1 },
+        pushed_counts: {},
+      }),
+    );
+  });
+
+  test('forced full pull refuses to run while local changes are pending', async () => {
+    syncMeta.getLastSyncAt.mockResolvedValue('2026-06-27T09:00:00');
+    snippetRepo.getModifiedSnippetsSince.mockResolvedValue([
+      { uuid: 'local-snippet', updated_at: '2026-06-27T10:00:00' },
+    ]);
+    snippetRepo.getModifiedTagsSince.mockResolvedValue([]);
+    noteRepo.getModifiedNotesSince.mockResolvedValue([]);
+    noteRepo.getModifiedFoldersSince.mockResolvedValue([]);
+
+    await expect(performFullPullFromServer()).rejects.toThrow(/pending local changes/i);
+
+    expect(endpoints.syncPull).not.toHaveBeenCalled();
+    expect(endpoints.syncPush).not.toHaveBeenCalled();
   });
 });
