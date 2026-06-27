@@ -1370,20 +1370,15 @@ function allocationTargetsGroup(allocation) {
 }
 
 function hasGroupTargetFacts() {
-  const transactionIds = new Set();
-  const transactionUuids = new Set();
   for (const transaction of state.transactions || []) {
     if (isDeletedFinanceRow(transaction)) continue;
-    const id = transactionId(transaction);
-    if (id != null) transactionIds.add(id);
-    if (transaction.uuid) transactionUuids.add(transaction.uuid);
+    const allocation = allocationForTransaction(transaction);
+    if (!allocationTargetsGroup(allocation)) continue;
+    if (!transactionMatchesDateFilter(transaction)) continue;
+    if (!transactionMatchesSearch(transaction, allocation)) continue;
+    return true;
   }
-  return activeAllocations().some((allocation) => {
-    if (!allocationTargetsGroup(allocation)) return false;
-    const id = normalizeId(allocation.transaction_id);
-    if (id != null && transactionIds.has(id)) return true;
-    return !!allocation.transaction_uuid && transactionUuids.has(allocation.transaction_uuid);
-  });
+  return false;
 }
 
 function normalizeFactsFilter() {
@@ -1396,9 +1391,24 @@ function allocationMap() {
   const map = new Map();
   for (const allocation of activeAllocations()) {
     const txId = normalizeId(allocation.transaction_id);
-    if (txId != null && !map.has(txId)) map.set(txId, allocation);
+    if (txId != null && !map.has(`id:${txId}`)) map.set(`id:${txId}`, allocation);
+    if (allocation.transaction_uuid && !map.has(`uuid:${allocation.transaction_uuid}`)) {
+      map.set(`uuid:${allocation.transaction_uuid}`, allocation);
+    }
   }
   return map;
+}
+
+function allocationForTransaction(transaction, allocations = allocationMap()) {
+  const txId = transactionId(transaction);
+  if (txId != null) {
+    const byId = allocations.get(`id:${txId}`);
+    if (byId) return byId;
+  }
+  if (transaction?.uuid) {
+    return allocations.get(`uuid:${transaction.uuid}`) || null;
+  }
+  return null;
 }
 
 function transactionMatchesDateFilter(transaction) {
@@ -1472,7 +1482,7 @@ function factRows({ applyDateFilter = true } = {}) {
   const allocations = allocationMap();
   let rows = (state.transactions || []).map((transaction) => ({
     transaction,
-    allocation: allocations.get(transactionId(transaction)) || null,
+    allocation: allocationForTransaction(transaction, allocations),
   }));
   if (state.factsFilter === 'unmapped') rows = rows.filter((row) => !row.allocation);
   if (state.factsFilter === 'locked') rows = rows.filter((row) => Boolean(row.transaction.rules_locked));
@@ -1501,10 +1511,23 @@ function factsDateFilterLabel() {
 function rerenderFactsResults() {
   const main = rootEl?.querySelector('.finance-main');
   if (!main) return;
+  const activeSearch = document.activeElement?.classList?.contains('finance-facts-search');
+  const cursor = activeSearch ? document.activeElement.selectionStart : null;
+  normalizeFactsFilter();
+  const toolbar = main.querySelector('.finance-facts-toolbar');
+  if (toolbar) toolbar.replaceWith(renderFactsToolbar());
   const summary = main.querySelector('.finance-facts-summary');
   if (summary) summary.replaceWith(renderFactsSummary());
   const table = main.querySelector('.finance-table-wrap');
   if (table) table.replaceWith(renderFactsTable());
+  if (activeSearch) {
+    const nextSearch = main.querySelector('.finance-facts-search');
+    if (nextSearch) {
+      nextSearch.focus();
+      const pos = Number.isFinite(cursor) ? cursor : nextSearch.value.length;
+      nextSearch.setSelectionRange(pos, pos);
+    }
+  }
 }
 
 function formatFactDate(value) {
@@ -2781,7 +2804,7 @@ function renderFactsSummary() {
   const income = rows
     .filter((row) => Number(row.amount_cents) > 0)
     .reduce((sum, row) => sum + (Number(row.amount_cents) || 0), 0);
-  const unmapped = rows.filter((row) => !allocations.has(transactionId(row))).length;
+  const unmapped = rows.filter((row) => !allocationForTransaction(row, allocations)).length;
   [
     ['Expenses', formatMoney(expense, 'RUB')],
     ['Income / refunds', formatMoney(income, 'RUB')],

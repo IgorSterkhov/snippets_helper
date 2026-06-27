@@ -7,8 +7,8 @@
 - **Finance Facts visibility:** the Facts search field now has its own visible
   toolbar on desktop instead of being compressed inside the header actions.
   The `Group target` diagnostic filter now appears only while there are facts
-  mapped to group rows, and mobile Finance Facts now has the same all-fields
-  search.
+  mapped to group rows in the current date/search context, and mobile Finance
+  Facts now has the same all-fields search.
 
 ## v1.23.0 (2026-06-27)
 

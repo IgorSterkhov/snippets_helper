@@ -5562,6 +5562,31 @@ async def run_tests():
             "document.querySelector('#panel-finance .finance-fact-row .finance-fact-description')?.textContent.trim() || ''"
         )
         assert group_target_fact == 'Яндекс Такси', group_target_fact
+        await cdp.eval("""(() => {
+          const select = document.querySelector('#panel-finance .finance-facts-sidebar select');
+          select.value = 'year';
+          select.dispatchEvent(new Event('change', { bubbles: true }));
+        })()""")
+        await wait_until(cdp, "!!document.querySelector('#panel-finance .finance-facts-sidebar input[type=\"number\"]')", timeout=3)
+        await cdp.eval("""(() => {
+          const input = document.querySelector('#panel-finance .finance-facts-sidebar input[type="number"]');
+          input.value = '2025';
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+        })()""")
+        await wait_until(cdp, "document.querySelectorAll('#panel-finance .finance-fact-row').length === 1", timeout=3)
+        group_filter_after_context_change = await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-facts-filter button')]
+          .some(btn => btn.textContent.includes('Group target')))()""")
+        assert not group_filter_after_context_change, 'Group target filter should hide when current date/search context has no group-target facts'
+        status_after_context_change = await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-facts-filter button')]
+          .find(btn => btn.classList.contains('active'))?.textContent.trim() || '')()""")
+        assert status_after_context_change == 'All', status_after_context_change
+        visible_after_context_change = await cdp.eval(
+            "document.querySelector('#panel-finance .finance-fact-row .finance-fact-description')?.textContent.trim() || ''"
+        )
+        assert visible_after_context_change == 'Coffee test', visible_after_context_change
+        await cdp.eval("document.querySelector('#panel-finance .finance-facts-sidebar button')?.click()")
+        await wait_until(cdp, "document.querySelectorAll('#panel-finance .finance-fact-row').length === 2", timeout=3)
 
         await cdp.eval("""(() => {
           const original = window.__TAURI__.core.invoke;

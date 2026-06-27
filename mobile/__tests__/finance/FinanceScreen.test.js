@@ -168,5 +168,8 @@ describe('FinanceScreen facts mode', () => {
     expect(screen.getAllByText('!').length).toBeGreaterThan(0);
     fireEvent.press(screen.getByText('Group target'));
     await waitFor(() => expect(screen.getByText('Т-Мобайл +7 995 644-94-38')).toBeTruthy());
+
+    fireEvent.changeText(screen.getByPlaceholderText('Search facts'), 'not matching');
+    await waitFor(() => expect(screen.queryByText('Group target')).toBeNull());
   });
 });

@@ -645,9 +645,15 @@ export default function FinanceScreen() {
     (allocation) => allocationTargetsGroupItem(allocation, groupItemUuids),
     [groupItemUuids],
   );
-  const hasGroupTargetFacts = useMemo(() => transactions.some((transaction) => (
-    transaction && !transaction.is_deleted && allocationIsGroupTarget(allocationByTransaction.get(transaction.uuid))
-  )), [transactions, allocationByTransaction, allocationIsGroupTarget]);
+  const hasGroupTargetFacts = useMemo(() => transactions.some((transaction) => {
+    if (!transaction || transaction.is_deleted) return false;
+    const allocation = allocationByTransaction.get(transaction.uuid);
+    if (!allocationIsGroupTarget(allocation)) return false;
+    if (factsMonth && /^\d{4}-\d{2}$/.test(factsMonth)) {
+      if (!String(transaction.payment_date || '').startsWith(`${factsMonth}-`)) return false;
+    }
+    return transactionMatchesFactsSearch(transaction, allocation, factsSearch, planByUuid, itemByUuid, allocationIsGroupTarget);
+  }), [transactions, allocationByTransaction, allocationIsGroupTarget, factsMonth, factsSearch, planByUuid, itemByUuid]);
   useEffect(() => {
     if (factsFilter === 'group_target' && !hasGroupTargetFacts) {
       setFactsFilter('all');
