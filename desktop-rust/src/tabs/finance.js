@@ -592,6 +592,16 @@ function injectStyles() {
   gap: 12px;
   background: linear-gradient(180deg, color-mix(in srgb, var(--bg-secondary) 74%, transparent), var(--bg-primary));
 }
+.finance-facts-toolbar {
+  min-height: 44px;
+  padding: 7px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  background: color-mix(in srgb, var(--bg-secondary) 42%, var(--bg-primary));
+}
 .finance-facts-kicker {
   color: var(--text-muted);
   font-size: 11px;
@@ -624,7 +634,10 @@ function injectStyles() {
   gap: 5px;
 }
 .finance-facts-search {
-  width: clamp(180px, 22vw, 320px);
+  width: clamp(260px, 32vw, 430px);
+  flex: 1 1 260px;
+  min-width: 240px;
+  max-width: 520px;
   height: 28px;
   border: 1px solid var(--border);
   border-radius: 7px;
@@ -1354,6 +1367,29 @@ function directPaymentsForItem(itemIdValue) {
 function allocationTargetsGroup(allocation) {
   const targetId = allocationItemId(allocation);
   return targetId != null && itemHasChildren(targetId);
+}
+
+function hasGroupTargetFacts() {
+  const transactionIds = new Set();
+  const transactionUuids = new Set();
+  for (const transaction of state.transactions || []) {
+    if (isDeletedFinanceRow(transaction)) continue;
+    const id = transactionId(transaction);
+    if (id != null) transactionIds.add(id);
+    if (transaction.uuid) transactionUuids.add(transaction.uuid);
+  }
+  return activeAllocations().some((allocation) => {
+    if (!allocationTargetsGroup(allocation)) return false;
+    const id = normalizeId(allocation.transaction_id);
+    if (id != null && transactionIds.has(id)) return true;
+    return !!allocation.transaction_uuid && transactionUuids.has(allocation.transaction_uuid);
+  });
+}
+
+function normalizeFactsFilter() {
+  if (state.factsFilter === 'group_target' && !hasGroupTargetFacts()) {
+    state.factsFilter = 'all';
+  }
 }
 
 function allocationMap() {
@@ -2193,7 +2229,9 @@ function renderMain() {
 
   main.appendChild(renderFinanceModeBar());
   if (state.activeMode === 'facts') {
+    normalizeFactsFilter();
     main.appendChild(renderFactsHeader());
+    main.appendChild(renderFactsToolbar());
     main.appendChild(renderFactsSummary());
     main.appendChild(renderFactsTable());
     return main;
@@ -2670,8 +2708,13 @@ function renderFactsHeader() {
   kicker.textContent = 'Import bank CSV files, map operations to finance lists, and lock manual assignments.';
   text.append(title, kicker);
 
-  const actions = document.createElement('div');
-  actions.className = 'finance-facts-actions';
+  header.append(text);
+  return header;
+}
+
+function renderFactsToolbar() {
+  const toolbar = document.createElement('div');
+  toolbar.className = 'finance-facts-toolbar';
   const search = document.createElement('input');
   search.className = 'finance-facts-search';
   search.type = 'search';
@@ -2682,14 +2725,18 @@ function renderFactsHeader() {
     state.factsSearch = search.value;
     rerenderFactsResults();
   });
+
+  const actions = document.createElement('div');
+  actions.className = 'finance-facts-actions';
   const filter = document.createElement('div');
   filter.className = 'finance-segment finance-facts-filter';
-  [
+  const filters = [
     { value: 'all', label: 'All' },
     { value: 'unmapped', label: 'Unmapped' },
     { value: 'locked', label: 'Locked' },
     { value: 'group_target', label: 'Group target', alert: true },
-  ].forEach(({ value, label, alert }) => {
+  ].filter((item) => item.value !== 'group_target' || hasGroupTargetFacts());
+  filters.forEach(({ value, label, alert }) => {
     const btn = document.createElement('button');
     btn.className = 'finance-segment-btn' + (state.factsFilter === value ? ' active' : '');
     btn.type = 'button';
@@ -2718,9 +2765,9 @@ function renderFactsHeader() {
   rulesBtn.type = 'button';
   rulesBtn.textContent = 'Rules';
   rulesBtn.addEventListener('click', openFinanceRulesModal);
-  actions.append(search, filter, importBtn, rulesBtn);
-  header.append(text, actions);
-  return header;
+  actions.append(importBtn, rulesBtn);
+  toolbar.append(search, filter, actions);
+  return toolbar;
 }
 
 function renderFactsSummary() {

@@ -1,6 +1,7 @@
 import React from 'react';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import FinanceScreen from '../../src/screens/Finance/FinanceScreen';
+import * as financeRepo from '../../src/db/financeRepo';
 
 jest.mock('@react-native-async-storage/async-storage', () => ({
   getItem: jest.fn().mockResolvedValue(null),
@@ -108,7 +109,29 @@ jest.mock('../../src/db/financeRepo', () => ({
 }));
 
 describe('FinanceScreen facts mode', () => {
+  beforeEach(() => {
+    financeRepo.getAllFinanceItems.mockResolvedValue([
+      { uuid: 'item-1', id: 10, plan_uuid: 'plan-1', parent_uuid: null, name: 'Подписки', amount_cents: 50000, is_deleted: 0 },
+      { uuid: 'item-2', id: 11, plan_uuid: 'plan-1', parent_uuid: 'item-1', name: 'Boosty', amount_cents: 50000, is_deleted: 0 },
+    ]);
+    financeRepo.getFinanceTransactionAllocations.mockResolvedValue([
+      {
+        uuid: 'allocation-1',
+        id: 200,
+        transaction_uuid: 'tx-1',
+        transaction_id: 100,
+        plan_uuid: 'plan-1',
+        plan_id: 1,
+        item_uuid: 'item-1',
+        item_id: 10,
+        is_active: 1,
+        is_deleted: 0,
+      },
+    ]);
+  });
+
   test('renders synced facts and opens mapping sheet', async () => {
+    financeRepo.getFinanceTransactionAllocations.mockResolvedValue([]);
     const screen = render(<FinanceScreen />);
 
     await waitFor(() => expect(screen.getByText('Facts')).toBeTruthy());
@@ -116,9 +139,23 @@ describe('FinanceScreen facts mode', () => {
 
     await waitFor(() => expect(screen.getByText('Т-Мобайл +7 995 644-94-38')).toBeTruthy());
     expect(screen.getAllByText('Unmapped').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Group target')).toBeNull();
 
-    fireEvent.press(screen.getByText('Edit'));
+    fireEvent.press(screen.getByText('Map'));
     await waitFor(() => expect(screen.getByText('Map finance fact')).toBeTruthy());
+  });
+
+  test('searches facts by any field', async () => {
+    financeRepo.getFinanceTransactionAllocations.mockResolvedValue([]);
+    const screen = render(<FinanceScreen />);
+
+    await waitFor(() => expect(screen.getByText('Facts')).toBeTruthy());
+    fireEvent.press(screen.getByText('Facts'));
+
+    await waitFor(() => expect(screen.getByPlaceholderText('Search facts')).toBeTruthy());
+    fireEvent.changeText(screen.getByPlaceholderText('Search facts'), 'boosty');
+
+    await waitFor(() => expect(screen.getByText('No finance facts for this filter')).toBeTruthy());
   });
 
   test('marks facts mapped to group items', async () => {

@@ -5,7 +5,9 @@
 2. Desktop:
    - add helper functions in `desktop-rust/src/tabs/finance.js` for item child
      lookup, direct allocation/payment lookup, and group-target detection;
-   - add `Group target` facts filter with red alert marker;
+   - add `Group target` facts filter with red alert marker, rendered only when
+     group-target facts exist;
+   - move Facts search into a dedicated visible toolbar;
    - render alert marker on facts mapped to group items;
    - route `+ child`, Tab indent, and drag/drop-inside through one guard when
      the would-be parent has direct facts or payment-calendar entries;
@@ -13,7 +15,9 @@
      facts and payments to the new or moved terminal child.
 3. Mobile:
    - mirror the helper logic in `mobile/src/screens/Finance/FinanceScreen.js`;
-   - add the `Group target` filter and alert marker;
+   - add the `Group target` filter and alert marker only when group-target
+     facts exist;
+   - add the same all-fields Facts search control used on desktop;
    - show an `Alert` before adding a child under a parent with direct facts or
      payments;
    - create the child and reassign the affected facts and payments to it;

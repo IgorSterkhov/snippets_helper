@@ -23,6 +23,11 @@ surface and help repair that state instead of silently leaving facts on a group.
   User-facing label should be short: `Group target`.
 - The filter chip/button should include a red alert marker so these facts read
   as something to fix, not as a normal category.
+- Show the `Group target` filter only while at least one active imported fact is
+  actually mapped to a group item. If that state disappears while the filter is
+  active, return the Facts view to `All`.
+- Keep Facts search visible as a first-class control, not hidden inside an
+  overloaded header action strip.
 - A fact row mapped to a group should show a small alert marker near the target
   label in both desktop and mobile Facts views.
 - When the user is about to make an item with direct facts or payment-calendar

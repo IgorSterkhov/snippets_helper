@@ -184,6 +184,7 @@ export default function FinanceScreen() {
   const [mappingRules, setMappingRules] = useState([]);
   const [factsFilter, setFactsFilter] = useState('all');
   const [factsMonth, setFactsMonth] = useState('');
+  const [factsSearch, setFactsSearch] = useState('');
   const [factsLayout, setFactsLayout] = useState('cards');
   const [mappingTransactionUuid, setMappingTransactionUuid] = useState(null);
   const [rulesVisible, setRulesVisible] = useState(false);
@@ -644,6 +645,14 @@ export default function FinanceScreen() {
     (allocation) => allocationTargetsGroupItem(allocation, groupItemUuids),
     [groupItemUuids],
   );
+  const hasGroupTargetFacts = useMemo(() => transactions.some((transaction) => (
+    transaction && !transaction.is_deleted && allocationIsGroupTarget(allocationByTransaction.get(transaction.uuid))
+  )), [transactions, allocationByTransaction, allocationIsGroupTarget]);
+  useEffect(() => {
+    if (factsFilter === 'group_target' && !hasGroupTargetFacts) {
+      setFactsFilter('all');
+    }
+  }, [factsFilter, hasGroupTargetFacts]);
   const filteredFacts = useMemo(() => transactions.filter((transaction) => {
     if (!transaction || transaction.is_deleted) return false;
     const allocation = allocationByTransaction.get(transaction.uuid);
@@ -651,10 +660,10 @@ export default function FinanceScreen() {
     if (factsFilter === 'locked' && !transaction.rules_locked) return false;
     if (factsFilter === 'group_target' && !allocationIsGroupTarget(allocation)) return false;
     if (factsMonth && /^\d{4}-\d{2}$/.test(factsMonth)) {
-      return String(transaction.payment_date || '').startsWith(`${factsMonth}-`);
+      if (!String(transaction.payment_date || '').startsWith(`${factsMonth}-`)) return false;
     }
-    return true;
-  }), [transactions, allocationByTransaction, allocationIsGroupTarget, factsFilter, factsMonth]);
+    return transactionMatchesFactsSearch(transaction, allocation, factsSearch, planByUuid, itemByUuid, allocationIsGroupTarget);
+  }), [transactions, allocationByTransaction, allocationIsGroupTarget, factsFilter, factsMonth, factsSearch, planByUuid, itemByUuid]);
   const unmappedCount = useMemo(
     () => transactions.filter((transaction) => !transaction.is_deleted && !allocationByTransaction.has(transaction.uuid)).length,
     [transactions, allocationByTransaction],
@@ -914,6 +923,8 @@ export default function FinanceScreen() {
             facts={filteredFacts}
             factsFilter={factsFilter}
             factsMonth={factsMonth}
+            factsSearch={factsSearch}
+            hasGroupTargetFacts={hasGroupTargetFacts}
             factsLayout={factsLayout}
             isWide={windowWidth >= 640}
             factsLoading={factsLoading}
@@ -923,6 +934,7 @@ export default function FinanceScreen() {
             currencyByPlan={planByUuid}
             onFilterChange={setFactsFilter}
             onMonthChange={setFactsMonth}
+            onSearchChange={setFactsSearch}
             onLayoutChange={updateFactsLayout}
             onMap={(transaction) => setMappingTransactionUuid(transaction.uuid)}
           />
@@ -1095,6 +1107,8 @@ function FactsPanel({
   facts,
   factsFilter,
   factsMonth,
+  factsSearch,
+  hasGroupTargetFacts,
   factsLayout,
   isWide,
   factsLoading,
@@ -1103,13 +1117,26 @@ function FactsPanel({
   allocationIsGroupTarget,
   onFilterChange,
   onMonthChange,
+  onSearchChange,
   onLayoutChange,
   onMap,
 }) {
+  const filters = FACT_FILTERS.filter((filter) => filter.value !== 'group_target' || hasGroupTargetFacts);
   return (
     <View style={s.factsRoot}>
+      <View style={s.factsSearchRow}>
+        <TextInput
+          style={[s.factsSearchInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
+          value={factsSearch}
+          onChangeText={onSearchChange}
+          placeholder="Search facts"
+          placeholderTextColor={colors.textMuted}
+          autoCorrect={false}
+          autoCapitalize="none"
+        />
+      </View>
       <View style={s.factsFilters}>
-        {FACT_FILTERS.map((filter) => (
+        {filters.map((filter) => (
           <TouchableOpacity
             key={filter.value}
             style={[
@@ -1340,6 +1367,43 @@ function allocationTargetsGroupItem(allocation, groupUuids) {
   return isActiveFactAllocation(allocation)
     && !!allocation.item_uuid
     && groupUuids.has(allocation.item_uuid);
+}
+
+function transactionMatchesFactsSearch(transaction, allocation, search, planByUuid, itemByUuid, allocationIsGroupTarget) {
+  const terms = String(search || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (!terms.length) return true;
+  const plan = allocation?.plan_uuid ? planByUuid.get(allocation.plan_uuid) : null;
+  const item = allocation?.item_uuid ? itemByUuid.get(allocation.item_uuid) : null;
+  const target = allocation
+    ? [plan?.name || '', item?.name || ''].filter(Boolean).join(' / ')
+    : 'Unmapped';
+  const blob = [
+    transaction?.payment_date,
+    transaction?.operation_at,
+    transaction?.card_mask,
+    transaction?.status,
+    transaction?.amount_cents,
+    transaction?.currency,
+    transaction?.operation_amount_cents,
+    transaction?.operation_currency,
+    transaction?.payment_amount_cents,
+    transaction?.payment_currency,
+    transaction?.cashback_cents,
+    transaction?.bank_category,
+    transaction?.mcc,
+    transaction?.description,
+    transaction?.bonuses_cents,
+    transaction?.invest_rounding_cents,
+    transaction?.rounded_amount_cents,
+    transaction?.source,
+    transaction?.source_fingerprint,
+    transaction?.raw_json,
+    target,
+    allocation ? 'mapped' : 'unmapped',
+    allocationIsGroupTarget(allocation) ? 'group target' : '',
+    transaction?.rules_locked ? 'locked' : 'unlocked',
+  ].filter((value) => value != null).join(' ').toLowerCase();
+  return terms.every((term) => blob.includes(term));
 }
 
 function suggestChildNameForGroupRemap(parent) {
@@ -1964,6 +2028,8 @@ const s = StyleSheet.create({
   compactGroupTotal: { fontWeight: '800' },
   compactDirectAmount: { marginTop: 0, fontSize: 9.5, lineHeight: 10 },
   factsRoot: { paddingTop: 4, paddingBottom: 18 },
+  factsSearchRow: { paddingHorizontal: 12, paddingTop: 8 },
+  factsSearchInput: { height: 34, borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, fontSize: 13, fontWeight: '700' },
   factsFilters: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, paddingHorizontal: 12, paddingVertical: 8, alignItems: 'center' },
   filterChip: { borderWidth: 1, borderRadius: 7, paddingHorizontal: 10, paddingVertical: 7, flexDirection: 'row', alignItems: 'center', gap: 5 },
   filterAlertIcon: { width: 15, height: 15, borderWidth: 1, borderRadius: 999, textAlign: 'center', fontSize: 10, lineHeight: 13, fontWeight: '900' },

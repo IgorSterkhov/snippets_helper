@@ -5330,6 +5330,39 @@ async def run_tests():
             "document.querySelector('#panel-finance .finance-fact-row .finance-fact-description')?.textContent.trim() || ''"
         )
         assert first_fact == 'Яндекс Такси', first_fact
+        facts_search_layout = await cdp.eval("""(() => {
+          const toolbar = document.querySelector('#panel-finance .finance-facts-toolbar');
+          const search = toolbar?.querySelector('.finance-facts-search');
+          const rect = search?.getBoundingClientRect();
+          return {
+            hasToolbar: !!toolbar,
+            hasSearch: !!search,
+            placeholder: search?.getAttribute('placeholder') || '',
+            width: rect ? Math.round(rect.width) : 0,
+          };
+        })()""")
+        assert facts_search_layout['hasToolbar'] and facts_search_layout['hasSearch'], facts_search_layout
+        assert facts_search_layout['placeholder'] == 'Search facts', facts_search_layout
+        assert facts_search_layout['width'] >= 240, facts_search_layout
+        group_filter_before = await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-facts-filter button')]
+          .some(btn => btn.textContent.includes('Group target')))()""")
+        assert not group_filter_before, 'Group target filter should be hidden when no facts target groups'
+        await cdp.eval("""(() => {
+          const input = document.querySelector('#panel-finance .finance-facts-toolbar .finance-facts-search');
+          input.value = 'coffee';
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        })()""")
+        await wait_until(cdp, "document.querySelectorAll('#panel-finance .finance-fact-row').length === 1", timeout=3)
+        search_fact = await cdp.eval(
+            "document.querySelector('#panel-finance .finance-fact-row .finance-fact-description')?.textContent.trim() || ''"
+        )
+        assert search_fact == 'Coffee test', search_fact
+        await cdp.eval("""(() => {
+          const input = document.querySelector('#panel-finance .finance-facts-toolbar .finance-facts-search');
+          input.value = '';
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        })()""")
+        await wait_until(cdp, "document.querySelectorAll('#panel-finance .finance-fact-row').length === 2", timeout=3)
 
         await cdp.eval("""(() => {
           const select = document.querySelector('#panel-finance .finance-facts-sidebar select');
@@ -5540,7 +5573,7 @@ async def run_tests():
             return original(command, args);
           };
         })()""")
-        await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-facts-header button')]
+        await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-facts-toolbar button')]
           .find(btn => btn.textContent.trim() === 'Import CSV').click())()""")
         await wait_until(cdp, "!!document.querySelector('.error-dialog-overlay')", timeout=4)
         import_error_details = await cdp.eval("document.querySelector('.error-dialog-details')?.textContent || ''")
@@ -5553,7 +5586,7 @@ async def run_tests():
         })()""")
         await close_modals()
 
-        await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-facts-header button')]
+        await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-facts-toolbar button')]
           .find(btn => btn.textContent.trim() === 'Import CSV').click())()""")
         await wait_until(cdp, "!!document.querySelector('.modal-overlay .finance-import-preview')", timeout=4)
         preview_text = await cdp.eval("document.querySelector('.modal-overlay .finance-import-preview')?.textContent || ''")
@@ -5583,7 +5616,7 @@ async def run_tests():
         await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-mode-bar .finance-segment-btn')]
           .find(btn => btn.textContent.trim() === 'Facts').click())()""")
         await wait_until(cdp, "!!document.querySelector('#panel-finance .finance-facts-table')", timeout=4)
-        await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-facts-header button')]
+        await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-facts-toolbar button')]
           .find(btn => btn.textContent.trim() === 'Rules').click())()""")
         await wait_until(cdp, "!!document.querySelector('.modal-overlay [data-rule-field=\"category\"]')", timeout=4)
         rules_title = await cdp.eval("document.querySelector('.modal-overlay h3')?.textContent || ''")
