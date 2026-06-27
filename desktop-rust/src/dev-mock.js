@@ -1897,6 +1897,54 @@
         user_id: 'mock-user',
       });
     },
+    async move_finance_item_direct_payments({ fromItemId, from_item_id, toItemId, to_item_id }) {
+      const sourceId = Number(fromItemId ?? from_item_id);
+      const targetId = Number(toItemId ?? to_item_id);
+      if (sourceId === targetId) return 0;
+      const items = storeGet('finance_items', []);
+      const source = items.find(item => Number(item.id) === sourceId && item.sync_status !== 'deleted');
+      const target = items.find(item => Number(item.id) === targetId && item.sync_status !== 'deleted');
+      if (!source) throw new Error('source finance item not found');
+      if (!target) throw new Error('target finance item not found');
+      if (Number(source.plan_id) !== Number(target.plan_id)) {
+        throw new Error('finance payment target must belong to the same plan');
+      }
+      const payments = storeGet('finance_payments', []);
+      const sourcePayments = payments.filter(payment =>
+        Number(payment.item_id) === sourceId && payment.sync_status !== 'deleted'
+      );
+      for (const payment of sourcePayments) {
+        const existing = payments.find(row =>
+          Number(row.plan_id) === Number(payment.plan_id)
+          && Number(row.item_id) === targetId
+          && String(row.month_key) === String(payment.month_key)
+          && row.sync_status !== 'deleted'
+        );
+        if (existing) {
+          Object.assign(existing, {
+            is_paid: Boolean(payment.is_paid),
+            paid_amount_cents: Number(payment.paid_amount_cents) || 0,
+            note: payment.note || '',
+            updated_at: now(),
+            sync_status: 'pending',
+          });
+        } else {
+          payments.push({
+            ...payment,
+            id: nextId('finance_payments'),
+            uuid: uuid(),
+            item_id: targetId,
+            created_at: now(),
+            updated_at: now(),
+            sync_status: 'pending',
+          });
+        }
+        payment.updated_at = now();
+        payment.sync_status = 'deleted';
+      }
+      storeSet('finance_payments', payments);
+      return sourcePayments.length;
+    },
     async pick_finance_csv_file() {
       return '/mock/tbank-export.csv';
     },

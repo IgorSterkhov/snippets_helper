@@ -603,6 +603,26 @@ function injectStyles() {
   align-items: center;
   gap: 6px;
 }
+.finance-alert-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, #ff6b5f 76%, var(--border));
+  background: color-mix(in srgb, #ff4d4d 22%, var(--bg-primary));
+  color: #ffb4aa;
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1;
+}
+.finance-facts-filter .finance-segment-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
 .finance-facts-search {
   width: clamp(180px, 22vw, 320px);
   height: 28px;
@@ -658,6 +678,17 @@ function injectStyles() {
 .finance-fact-description,
 .finance-fact-bank,
 .finance-fact-target {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.finance-fact-target {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.finance-fact-target-text {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1254,10 +1285,80 @@ function itemNameForAllocation(allocation) {
   return item?.name || '';
 }
 
+function isDeletedFinanceRow(row) {
+  return row?.is_deleted === true
+    || row?.is_deleted === 1
+    || row?.sync_status === 'deleted';
+}
+
+function isActiveAllocation(allocation) {
+  return !!allocation
+    && !isDeletedFinanceRow(allocation)
+    && allocation.is_active !== false
+    && allocation.is_active !== 0;
+}
+
+function financeItemsSource() {
+  return state.allItems?.length ? state.allItems : state.items;
+}
+
+function itemForIdOrUuid(idValue, uuidValue = '') {
+  const normalized = normalizeId(idValue);
+  return financeItemsSource().find((row) => (
+    (normalized != null && itemId(row) === normalized)
+    || (uuidValue && row.uuid === uuidValue)
+  )) || null;
+}
+
+function allocationItemId(allocation) {
+  const normalized = normalizeId(allocation?.item_id);
+  if (normalized != null) return normalized;
+  return itemForIdOrUuid(null, allocation?.item_uuid || '') ? itemId(itemForIdOrUuid(null, allocation?.item_uuid || '')) : null;
+}
+
+function itemChildIds(items = financeItemsSource()) {
+  const parents = new Set();
+  for (const item of items || []) {
+    if (isDeletedFinanceRow(item)) continue;
+    const parentId = normalizeId(item.parent_id);
+    if (parentId != null) parents.add(parentId);
+  }
+  return parents;
+}
+
+function itemHasChildren(itemIdValue, items = financeItemsSource()) {
+  const normalized = normalizeId(itemIdValue);
+  if (normalized == null) return false;
+  return itemChildIds(items).has(normalized);
+}
+
+function activeAllocations() {
+  return (state.allocations || []).filter(isActiveAllocation);
+}
+
+function directAllocationsForItem(itemIdValue) {
+  const normalized = normalizeId(itemIdValue);
+  if (normalized == null) return [];
+  return activeAllocations().filter((allocation) => allocationItemId(allocation) === normalized);
+}
+
+function directPaymentsForItem(itemIdValue) {
+  const normalized = normalizeId(itemIdValue);
+  if (normalized == null) return [];
+  return (state.payments || []).filter((payment) => (
+    !isDeletedFinanceRow(payment)
+    && normalizeId(payment.item_id) === normalized
+  ));
+}
+
+function allocationTargetsGroup(allocation) {
+  const targetId = allocationItemId(allocation);
+  return targetId != null && itemHasChildren(targetId);
+}
+
 function allocationMap() {
   const map = new Map();
-  for (const allocation of state.allocations || []) {
-    if (allocation?.is_active === false || allocation?.is_deleted === true) continue;
+  for (const allocation of activeAllocations()) {
     const txId = normalizeId(allocation.transaction_id);
     if (txId != null && !map.has(txId)) map.set(txId, allocation);
   }
@@ -1319,6 +1420,7 @@ function factSearchBlob(transaction, allocation) {
     transaction?.raw_json,
     target,
     allocation ? 'mapped' : 'unmapped',
+    allocationTargetsGroup(allocation) ? 'group target' : '',
     transaction?.rules_locked ? 'locked' : 'unlocked',
   ].filter((value) => value != null).join(' ').toLowerCase();
 }
@@ -1338,6 +1440,7 @@ function factRows({ applyDateFilter = true } = {}) {
   }));
   if (state.factsFilter === 'unmapped') rows = rows.filter((row) => !row.allocation);
   if (state.factsFilter === 'locked') rows = rows.filter((row) => Boolean(row.transaction.rules_locked));
+  if (state.factsFilter === 'group_target') rows = rows.filter((row) => allocationTargetsGroup(row.allocation));
   if (applyDateFilter) rows = rows.filter((row) => transactionMatchesDateFilter(row.transaction));
   rows = rows.filter((row) => transactionMatchesSearch(row.transaction, row.allocation));
   return rows.sort((a, b) =>
@@ -2582,14 +2685,23 @@ function renderFactsHeader() {
   const filter = document.createElement('div');
   filter.className = 'finance-segment finance-facts-filter';
   [
-    ['all', 'All'],
-    ['unmapped', 'Unmapped'],
-    ['locked', 'Locked'],
-  ].forEach(([value, label]) => {
+    { value: 'all', label: 'All' },
+    { value: 'unmapped', label: 'Unmapped' },
+    { value: 'locked', label: 'Locked' },
+    { value: 'group_target', label: 'Group target', alert: true },
+  ].forEach(({ value, label, alert }) => {
     const btn = document.createElement('button');
     btn.className = 'finance-segment-btn' + (state.factsFilter === value ? ' active' : '');
     btn.type = 'button';
-    btn.textContent = label;
+    if (alert) {
+      const icon = document.createElement('span');
+      icon.className = 'finance-alert-dot';
+      icon.textContent = '!';
+      btn.appendChild(icon);
+    }
+    const text = document.createElement('span');
+    text.textContent = label;
+    btn.appendChild(text);
     btn.addEventListener('click', () => {
       state.factsFilter = value;
       render();
@@ -2699,15 +2811,25 @@ function renderFactRow(transaction, allocation) {
 
   const target = document.createElement('div');
   target.className = 'finance-fact-target';
+  const targetText = document.createElement('span');
+  targetText.className = 'finance-fact-target-text';
   if (allocation) {
     const parts = [planNameForAllocation(allocation)];
     const item = itemNameForAllocation(allocation);
     if (item) parts.push(item);
-    target.textContent = parts.join(' / ');
+    targetText.textContent = parts.join(' / ');
+    if (allocationTargetsGroup(allocation)) {
+      const alert = document.createElement('span');
+      alert.className = 'finance-alert-dot finance-group-target-alert';
+      alert.textContent = '!';
+      alert.title = 'Mapped to a group item. Remap this fact to a terminal item.';
+      target.appendChild(alert);
+    }
   } else {
-    target.textContent = 'Unmapped';
+    targetText.textContent = 'Unmapped';
   }
-  target.title = target.textContent;
+  target.appendChild(targetText);
+  target.title = targetText.textContent;
 
   const stateCell = document.createElement('div');
   const badge = document.createElement('span');
@@ -3817,13 +3939,22 @@ async function indentFinanceItem(rowEl) {
   if (index <= 0) return;
   const parent = siblings[index - 1];
   const parentId = itemId(parent);
-  state.collapsed.delete(parentId);
-  saveCollapsed();
-  await call('move_finance_item', {
-    id,
+  const moved = await protectItemBecomingParent({
     parentId,
-    beforeId: null,
+    targetItemId: id,
+    confirmText: 'Indent row and move targets',
+    onConfirm: async () => {
+      state.collapsed.delete(parentId);
+      saveCollapsed();
+      await call('move_finance_item', {
+        id,
+        parentId,
+        beforeId: null,
+      });
+      return { targetItemId: id };
+    },
   });
+  if (!moved) return;
   await loadAll(state.activePlanId);
   focusFinanceRowName(id, { selectPlaceholder: true });
 }
@@ -3902,6 +4033,84 @@ async function createPlan() {
   }
 }
 
+function suggestChildNameForGroupRemap(parent) {
+  const base = String(parent?.name || '').trim();
+  return base ? `${base} details` : 'New child row';
+}
+
+async function moveDirectFinanceTargetsToTerminal({ parentId, targetItemId, allocations, payments }) {
+  const normalizedTarget = normalizeId(targetItemId);
+  if (normalizedTarget == null) throw new Error('Target finance item is missing');
+  for (const allocation of allocations || []) {
+    const txId = normalizeId(allocation.transaction_id);
+    const planIdValue = normalizeId(allocation.plan_id) ?? state.activePlanId;
+    if (txId == null || planIdValue == null) continue;
+    await call('assign_finance_transaction', {
+      transactionId: txId,
+      planId: planIdValue,
+      itemId: normalizedTarget,
+    });
+  }
+  if ((payments || []).length) {
+    await call('move_finance_item_direct_payments', {
+      fromItemId: parentId,
+      toItemId: normalizedTarget,
+    });
+  }
+}
+
+async function protectItemBecomingParent({ parentId, targetItemId, confirmText = 'Move to terminal row', onConfirm }) {
+  const normalizedParentId = normalizeId(parentId);
+  if (normalizedParentId == null || itemHasChildren(normalizedParentId)) {
+    return onConfirm();
+  }
+  const allocations = directAllocationsForItem(normalizedParentId);
+  const payments = directPaymentsForItem(normalizedParentId);
+  if (!allocations.length && !payments.length) {
+    return onConfirm();
+  }
+
+  const parent = itemForIdOrUuid(normalizedParentId);
+  const body = document.createElement('div');
+  body.className = 'finance-protection-body';
+  const intro = document.createElement('p');
+  intro.textContent = `"${parent?.name || 'This row'}" will become a group. Direct finance facts and payment-calendar entries must stay on terminal rows.`;
+  const counts = document.createElement('div');
+  counts.className = 'finance-protection-counts';
+  counts.textContent = [
+    allocations.length ? `${allocations.length} fact mapping(s)` : '',
+    payments.length ? `${payments.length} payment-calendar entr${payments.length === 1 ? 'y' : 'ies'}` : '',
+  ].filter(Boolean).join(' · ');
+  const note = document.createElement('p');
+  note.textContent = 'Continue to move these direct targets to the terminal row created by this action.';
+  body.append(intro, counts, note);
+
+  try {
+    return await showModal({
+      title: 'Move direct finance targets?',
+      body,
+      confirmText,
+      modalClassName: 'finance-facts-modal',
+      onConfirm: async () => {
+        const result = await onConfirm();
+        const resolvedTargetId = typeof targetItemId === 'function'
+          ? targetItemId(result)
+          : targetItemId;
+        await moveDirectFinanceTargetsToTerminal({
+          parentId: normalizedParentId,
+          targetItemId: resolvedTargetId,
+          allocations,
+          payments,
+        });
+        return result;
+      },
+    });
+  } catch (err) {
+    if (String(err?.message || err) === 'cancelled') return null;
+    throw err;
+  }
+}
+
 async function deleteActivePlan() {
   const plan = state.plans.find((p) => planId(p) === state.activePlanId);
   if (!plan) return;
@@ -3929,15 +4138,28 @@ async function deleteActivePlan() {
 
 async function createItem(parentId) {
   try {
-    const created = await call('create_finance_item', {
+    const parent = parentId != null ? itemForIdOrUuid(parentId) : null;
+    const protectionNeeded = parentId != null
+      && !itemHasChildren(parentId)
+      && (directAllocationsForItem(parentId).length || directPaymentsForItem(parentId).length);
+    const createAction = () => call('create_finance_item', {
       planId: state.activePlanId,
       parentId,
-      name: 'New row',
+      name: protectionNeeded ? suggestChildNameForGroupRemap(parent) : 'New row',
       amountCents: 0,
-      dueDay: null,
-      dueDate: null,
+      dueDay: protectionNeeded ? parent?.due_day ?? null : null,
+      dueDate: protectionNeeded ? parent?.due_date ?? null : null,
       note: '',
     });
+    const created = parentId != null
+      ? await protectItemBecomingParent({
+        parentId,
+        targetItemId: (result) => itemId(result),
+        confirmText: 'Create child and move targets',
+        onConfirm: createAction,
+      })
+      : await createAction();
+    if (!created) return;
     if (parentId != null) {
       state.collapsed.delete(Number(parentId));
       saveCollapsed();
@@ -3949,6 +4171,7 @@ async function createItem(parentId) {
       row?.querySelector('.finance-input')?.select();
     }, 0);
   } catch (err) {
+    if (String(err?.message || err) === 'cancelled') return;
     showToast(`Failed to create row: ${err}`, 'error');
   }
 }
@@ -4095,15 +4318,24 @@ async function onItemDragEnd() {
   if (!drag.drop) return;
   if (drag.drop.beforeId === drag.sourceId) return;
   try {
-    if (drag.drop.expandId != null) {
-      state.collapsed.delete(drag.drop.expandId);
-      saveCollapsed();
-    }
-    await call('move_finance_item', {
-      id: drag.sourceId,
+    const moved = await protectItemBecomingParent({
       parentId: drag.drop.parentId,
-      beforeId: drag.drop.beforeId,
+      targetItemId: drag.sourceId,
+      confirmText: 'Move row and move targets',
+      onConfirm: async () => {
+        if (drag.drop.expandId != null) {
+          state.collapsed.delete(drag.drop.expandId);
+          saveCollapsed();
+        }
+        await call('move_finance_item', {
+          id: drag.sourceId,
+          parentId: drag.drop.parentId,
+          beforeId: drag.drop.beforeId,
+        });
+        return { targetItemId: drag.sourceId };
+      },
     });
+    if (!moved) return;
     await loadAll(state.activePlanId);
   } catch (err) {
     showToast(`Failed to move row: ${err}`, 'error');

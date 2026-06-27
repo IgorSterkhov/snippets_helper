@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## v1.23.0 (2026-06-27)
+
+- **Finance group-target protection:** Finance Facts now highlights mappings
+  that point to rows which became groups, with a dedicated `Group target`
+  filter and red alert marker. When a terminal row with direct fact mappings or
+  payment-calendar entries is turned into a group, Finance asks to continue and
+  moves those direct targets to the new terminal child instead of leaving facts
+  on a group row.
+
 ## f-20260627-1 (2026-06-27)
 
 - **Finance Facts search and mobile mapping sync:** the desktop Facts registry

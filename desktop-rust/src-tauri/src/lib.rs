@@ -253,6 +253,7 @@ pub fn run() {
             commands::finance::delete_finance_item,
             commands::finance::list_finance_payments,
             commands::finance::upsert_finance_payment,
+            commands::finance::move_finance_item_direct_payments,
             commands::finance::pick_finance_csv_file,
             commands::finance::preview_finance_bank_csv,
             commands::finance::import_finance_bank_csv,

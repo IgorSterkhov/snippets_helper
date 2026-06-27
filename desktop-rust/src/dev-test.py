@@ -5506,6 +5506,31 @@ async def run_tests():
         }, mapped_by_rule
 
         await cdp.eval("""(() => {
+          const allocations = JSON.parse(localStorage.getItem('mock.finance_transaction_allocations') || '[]');
+          if (allocations[0]) {
+            allocations[0].item_id = 1;
+            allocations[0].updated_at = '2026-01-02T00:00:00Z';
+          }
+          localStorage.setItem('mock.finance_transaction_allocations', JSON.stringify(allocations));
+        })()""")
+        await reload_finance()
+        await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-mode-bar .finance-segment-btn')]
+          .find(btn => btn.textContent.trim() === 'Facts').click())()""")
+        await wait_until(cdp, "!!document.querySelector('#panel-finance .finance-facts-table')", timeout=4)
+        group_filter_label = await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-facts-filter button')]
+          .map(btn => btn.textContent.trim()).find(text => text.includes('Group target')) || '')()""")
+        assert 'Group target' in group_filter_label and '!' in group_filter_label, group_filter_label
+        group_marker = await cdp.eval("!!document.querySelector('#panel-finance .finance-fact-row .finance-group-target-alert')")
+        assert group_marker, 'facts mapped to group items need an alert marker'
+        await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-facts-filter button')]
+          .find(btn => btn.textContent.includes('Group target'))?.click())()""")
+        await wait_until(cdp, "document.querySelectorAll('#panel-finance .finance-fact-row').length === 1", timeout=3)
+        group_target_fact = await cdp.eval(
+            "document.querySelector('#panel-finance .finance-fact-row .finance-fact-description')?.textContent.trim() || ''"
+        )
+        assert group_target_fact == 'Яндекс Такси', group_target_fact
+
+        await cdp.eval("""(() => {
           const original = window.__TAURI__.core.invoke;
           window.__financeFactsOriginalInvoke = original;
           window.__TAURI__.core.invoke = async (command, args = {}) => {

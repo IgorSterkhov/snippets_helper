@@ -541,6 +541,17 @@ pub fn upsert_finance_payment(
 }
 
 #[tauri::command]
+pub fn move_finance_item_direct_payments(
+    state: State<DbState>,
+    from_item_id: i64,
+    to_item_id: i64,
+) -> Result<usize, String> {
+    let conn = state.lock_recover();
+    queries::move_finance_item_direct_payments(&conn, from_item_id, to_item_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn pick_finance_csv_file(app: AppHandle) -> Result<Option<String>, String> {
     let picked = tauri::async_runtime::spawn_blocking(move || {
         app.dialog()

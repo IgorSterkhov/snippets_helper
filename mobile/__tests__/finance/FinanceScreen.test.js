@@ -55,16 +55,31 @@ jest.mock('../../src/db/financeRepo', () => ({
   flattenFinanceTree: jest.fn(() => []),
   getAllFinanceItems: jest.fn().mockResolvedValue([
     { uuid: 'item-1', id: 10, plan_uuid: 'plan-1', parent_uuid: null, name: 'Подписки', amount_cents: 50000, is_deleted: 0 },
+    { uuid: 'item-2', id: 11, plan_uuid: 'plan-1', parent_uuid: 'item-1', name: 'Boosty', amount_cents: 50000, is_deleted: 0 },
   ]),
   getFinanceItemMoveAvailability: jest.fn(() => ({ up: false, down: false, left: false, right: false })),
   getFinanceItems: jest.fn().mockResolvedValue([
     { uuid: 'item-1', id: 10, plan_uuid: 'plan-1', parent_uuid: null, name: 'Подписки', amount_cents: 50000, is_deleted: 0 },
+    { uuid: 'item-2', id: 11, plan_uuid: 'plan-1', parent_uuid: 'item-1', name: 'Boosty', amount_cents: 50000, is_deleted: 0 },
   ]),
   getFinanceMappingRules: jest.fn().mockResolvedValue([]),
   getFinancePlans: jest.fn().mockResolvedValue([
     { uuid: 'plan-1', id: 1, name: 'Regular monthly', currency: 'RUB', kind: 'monthly', is_deleted: 0 },
   ]),
-  getFinanceTransactionAllocations: jest.fn().mockResolvedValue([]),
+  getFinanceTransactionAllocations: jest.fn().mockResolvedValue([
+    {
+      uuid: 'allocation-1',
+      id: 200,
+      transaction_uuid: 'tx-1',
+      transaction_id: 100,
+      plan_uuid: 'plan-1',
+      plan_id: 1,
+      item_uuid: 'item-1',
+      item_id: 10,
+      is_active: 1,
+      is_deleted: 0,
+    },
+  ]),
   getFinanceTransactions: jest.fn().mockResolvedValue([
     {
       uuid: 'tx-1',
@@ -102,7 +117,19 @@ describe('FinanceScreen facts mode', () => {
     await waitFor(() => expect(screen.getByText('Т-Мобайл +7 995 644-94-38')).toBeTruthy());
     expect(screen.getAllByText('Unmapped').length).toBeGreaterThan(0);
 
-    fireEvent.press(screen.getByText('Map'));
+    fireEvent.press(screen.getByText('Edit'));
     await waitFor(() => expect(screen.getByText('Map finance fact')).toBeTruthy());
+  });
+
+  test('marks facts mapped to group items', async () => {
+    const screen = render(<FinanceScreen />);
+
+    await waitFor(() => expect(screen.getByText('Facts')).toBeTruthy());
+    fireEvent.press(screen.getByText('Facts'));
+
+    await waitFor(() => expect(screen.getByText('Group target')).toBeTruthy());
+    expect(screen.getAllByText('!').length).toBeGreaterThan(0);
+    fireEvent.press(screen.getByText('Group target'));
+    await waitFor(() => expect(screen.getByText('Т-Мобайл +7 995 644-94-38')).toBeTruthy());
   });
 });

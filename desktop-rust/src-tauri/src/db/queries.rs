@@ -1995,6 +1995,88 @@ pub fn upsert_finance_payment(
     )
 }
 
+pub fn move_finance_item_direct_payments(
+    conn: &Connection,
+    from_item_id: i64,
+    to_item_id: i64,
+) -> Result<usize> {
+    if from_item_id == to_item_id {
+        return Ok(0);
+    }
+    let Some((from_plan_id, _from_item_uuid)) = finance_item_plan_and_uuid(conn, from_item_id)?
+    else {
+        return Err(rusqlite::Error::InvalidParameterName(
+            "source finance item not found".to_string(),
+        ));
+    };
+    let Some((to_plan_id, to_item_uuid)) = finance_item_plan_and_uuid(conn, to_item_id)? else {
+        return Err(rusqlite::Error::InvalidParameterName(
+            "target finance item not found".to_string(),
+        ));
+    };
+    if from_plan_id != to_plan_id {
+        return Err(rusqlite::Error::InvalidParameterName(
+            "finance payment target must belong to the same plan".to_string(),
+        ));
+    }
+
+    let now = now_str();
+    let tx = conn.unchecked_transaction()?;
+    let payments = {
+        let mut stmt = tx.prepare(
+            "SELECT month_key, is_paid, paid_amount_cents, note
+             FROM finance_payments
+             WHERE item_id = ?1 AND sync_status != 'deleted'
+             ORDER BY month_key ASC, id ASC",
+        )?;
+        let rows = stmt.query_map(params![from_item_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, bool>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })?;
+        rows.collect::<Result<Vec<_>>>()?
+    };
+
+    for (month_key, is_paid, paid_amount_cents, note) in payments {
+        let uuid = deterministic_finance_payment_uuid(&to_item_uuid, &month_key);
+        let is_paid_int = if is_paid { 1 } else { 0 };
+        tx.execute(
+            "INSERT INTO finance_payments
+                (plan_id, item_id, month_key, is_paid, paid_amount_cents, note,
+                 created_at, updated_at, uuid, sync_status, user_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?8, 'pending', '')
+             ON CONFLICT(plan_id, item_id, month_key) DO UPDATE SET
+                 is_paid = excluded.is_paid,
+                 paid_amount_cents = excluded.paid_amount_cents,
+                 note = excluded.note,
+                 updated_at = excluded.updated_at,
+                 uuid = excluded.uuid,
+                 sync_status = 'pending'",
+            params![
+                to_plan_id,
+                to_item_id,
+                month_key,
+                is_paid_int,
+                paid_amount_cents,
+                note,
+                now,
+                uuid
+            ],
+        )?;
+    }
+    let moved = tx.execute(
+        "UPDATE finance_payments
+         SET updated_at = ?1, sync_status = 'deleted'
+         WHERE item_id = ?2 AND sync_status != 'deleted'",
+        params![now, from_item_id],
+    )?;
+    tx.commit()?;
+    Ok(moved)
+}
+
 pub fn create_finance_import_batch(
     conn: &Connection,
     source: &str,
@@ -4627,6 +4709,38 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.to_string().contains("same plan"));
+    }
+
+    #[test]
+    fn test_move_finance_item_direct_payments_moves_to_terminal_item() {
+        let conn = init_test_db();
+        let plan_id = list_finance_plans(&conn).unwrap()[0].id.unwrap();
+        let parent =
+            create_finance_item(&conn, plan_id, None, "Subscriptions", 0, None, None, "").unwrap();
+        let child = create_finance_item(&conn, plan_id, parent.id, "Boosty", 50000, None, None, "")
+            .unwrap();
+        let parent_id = parent.id.unwrap();
+        let child_id = child.id.unwrap();
+        let payment =
+            upsert_finance_payment(&conn, plan_id, parent_id, "2026-06", true, 50000, "done")
+                .unwrap();
+
+        let moved = move_finance_item_direct_payments(&conn, parent_id, child_id).unwrap();
+
+        assert_eq!(moved, 1);
+        let payments = list_finance_payments(&conn, plan_id).unwrap();
+        assert_eq!(payments.len(), 1);
+        assert_eq!(payments[0].item_id, child_id);
+        assert_eq!(payments[0].month_key, "2026-06");
+        assert_eq!(payments[0].paid_amount_cents, 50000);
+        let parent_status: String = conn
+            .query_row(
+                "SELECT sync_status FROM finance_payments WHERE uuid = ?1",
+                params![payment.uuid],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(parent_status, "deleted");
     }
 
     #[test]

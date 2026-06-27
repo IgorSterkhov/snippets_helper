@@ -60,6 +60,7 @@ const FACT_FILTERS = [
   { value: 'all', label: 'All' },
   { value: 'unmapped', label: 'Unmapped' },
   { value: 'locked', label: 'Locked' },
+  { value: 'group_target', label: 'Group target', alert: true },
 ];
 
 function nowIso() {
@@ -443,36 +444,88 @@ export default function FinanceScreen() {
     ]);
   };
 
-  const createItem = async (parentUuid = null) => {
-    if (!activePlanUuid) return;
-    const now = nowIso();
-    const item = {
-      uuid: uuidv4(),
-      id: null,
-      plan_id: null,
-      plan_uuid: activePlanUuid,
-      parent_id: null,
-      parent_uuid: parentUuid || null,
-      name: '',
-      amount_cents: 0,
-      due_day: null,
-      due_date: null,
-      note: '',
-      sort_order: await getNextFinanceItemSortOrder(activePlanUuid, parentUuid),
-      created_at: now,
-      updated_at: now,
-      is_deleted: 0,
-    };
-    await upsertFinanceItem(item);
-    notifyLocalChange();
-    setItems((prev) => [...prev, item]);
-    if (parentUuid) {
-      setCollapsedIds((prev) => {
-        const next = new Set(prev);
-        next.delete(parentUuid);
-        return next;
+  const confirmMoveDirectFactTargets = (parent, allocationCount) => new Promise((resolve) => {
+    Alert.alert(
+      'Move direct finance facts?',
+      `"${parent?.name || 'This row'}" will become a group. ${allocationCount} direct fact mapping(s) must move to the terminal row created by this action.`,
+      [
+        { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+        { text: 'Move facts', onPress: () => resolve(true) },
+      ],
+    );
+  });
+
+  const moveDirectFactTargetsToItem = async (directAllocations, targetItem) => {
+    if (!targetItem?.uuid) throw new Error('Target finance item is missing');
+    for (const allocation of directAllocations || []) {
+      const plan = plansRef.current.find((entry) => entry.uuid === allocation.plan_uuid)
+        || plansRef.current.find((entry) => entry.uuid === activePlanUuidRef.current);
+      if (!plan || !allocation.transaction_uuid) continue;
+      await createFinanceTransactionAllocation({
+        transaction: { uuid: allocation.transaction_uuid, id: allocation.transaction_id ?? null },
+        plan,
+        item: targetItem,
       });
     }
+  };
+
+  const protectItemBecomingParent = async ({ parentUuid, targetItem, action }) => {
+    if (!parentUuid || itemHasChildren(itemsRef.current, parentUuid)) {
+      return action(false);
+    }
+    const latestAllocations = await getFinanceTransactionAllocations({ planUuid: activePlanUuidRef.current });
+    const directAllocations = directAllocationsForItemUuid(latestAllocations, parentUuid);
+    if (!directAllocations.length) {
+      return action(false);
+    }
+    const parent = itemsRef.current.find((entry) => entry.uuid === parentUuid);
+    const confirmed = await confirmMoveDirectFactTargets(parent, directAllocations.length);
+    if (!confirmed) return null;
+    const result = await action(true);
+    const resolvedTarget = typeof targetItem === 'function' ? targetItem(result) : targetItem;
+    await moveDirectFactTargetsToItem(directAllocations, resolvedTarget);
+    return result;
+  };
+
+  const createItem = async (parentUuid = null) => {
+    if (!activePlanUuid) return;
+    const parent = parentUuid ? itemsRef.current.find((entry) => entry.uuid === parentUuid) : null;
+    const createAction = async (repairDirectTargets = false) => {
+      const now = nowIso();
+      const item = {
+        uuid: uuidv4(),
+        id: null,
+        plan_id: null,
+        plan_uuid: activePlanUuid,
+        parent_id: null,
+        parent_uuid: parentUuid || null,
+        name: repairDirectTargets ? suggestChildNameForGroupRemap(parent) : '',
+        amount_cents: 0,
+        due_day: repairDirectTargets ? parent?.due_day ?? null : null,
+        due_date: repairDirectTargets ? parent?.due_date ?? null : null,
+        note: '',
+        sort_order: await getNextFinanceItemSortOrder(activePlanUuid, parentUuid),
+        created_at: now,
+        updated_at: now,
+        is_deleted: 0,
+      };
+      await upsertFinanceItem(item);
+      notifyLocalChange();
+      setItems((prev) => [...prev, item]);
+      if (parentUuid) {
+        setCollapsedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(parentUuid);
+          return next;
+        });
+      }
+      return item;
+    };
+    await protectItemBecomingParent({
+      parentUuid,
+      targetItem: (createdItem) => createdItem,
+      action: createAction,
+    });
   };
 
   const removeItem = (item) => {
@@ -518,17 +571,30 @@ export default function FinanceScreen() {
     const previous = itemsRef.current;
     const result = moveFinanceItemInTree(previous, reorderItemUuid, direction, nowIso());
     if (!result.changed.length) return;
-    setItems(result.items);
-    if (result.parentToExpand) {
-      setCollapsedIds((prev) => {
-        const next = new Set(prev);
-        next.delete(result.parentToExpand);
-        return next;
-      });
-    }
-    try {
+    const movedItem = result.changed.find((row) => row.uuid === reorderItemUuid)
+      || result.items.find((row) => row.uuid === reorderItemUuid);
+    const action = async () => {
+      setItems(result.items);
+      if (result.parentToExpand) {
+        setCollapsedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(result.parentToExpand);
+          return next;
+        });
+      }
       await upsertFinanceItems(result.changed);
       notifyLocalChange();
+      return movedItem;
+    };
+    try {
+      const moved = direction === 'right'
+        ? await protectItemBecomingParent({
+          parentUuid: movedItem?.parent_uuid || null,
+          targetItem: movedItem,
+          action,
+        })
+        : await action();
+      if (!moved) return;
     } catch (e) {
       setItems(previous);
       Alert.alert('Finance reorder failed', String(e?.message || e));
@@ -565,24 +631,30 @@ export default function FinanceScreen() {
   const currency = activePlan?.currency || 'RUB';
   const planByUuid = useMemo(() => new Map(plans.map((plan) => [plan.uuid, plan])), [plans]);
   const itemByUuid = useMemo(() => new Map(allItems.map((item) => [item.uuid, item])), [allItems]);
+  const groupItemUuids = useMemo(() => groupItemUuidSet(allItems), [allItems]);
   const allocationByTransaction = useMemo(() => {
     const map = new Map();
     for (const allocation of allocations) {
-      if (!allocation?.transaction_uuid || allocation.is_deleted || !allocation.is_active) continue;
+      if (!allocation?.transaction_uuid || !isActiveFactAllocation(allocation)) continue;
       map.set(allocation.transaction_uuid, allocation);
     }
     return map;
   }, [allocations]);
+  const allocationIsGroupTarget = useCallback(
+    (allocation) => allocationTargetsGroupItem(allocation, groupItemUuids),
+    [groupItemUuids],
+  );
   const filteredFacts = useMemo(() => transactions.filter((transaction) => {
     if (!transaction || transaction.is_deleted) return false;
     const allocation = allocationByTransaction.get(transaction.uuid);
     if (factsFilter === 'unmapped' && allocation) return false;
     if (factsFilter === 'locked' && !transaction.rules_locked) return false;
+    if (factsFilter === 'group_target' && !allocationIsGroupTarget(allocation)) return false;
     if (factsMonth && /^\d{4}-\d{2}$/.test(factsMonth)) {
       return String(transaction.payment_date || '').startsWith(`${factsMonth}-`);
     }
     return true;
-  }), [transactions, allocationByTransaction, factsFilter, factsMonth]);
+  }), [transactions, allocationByTransaction, allocationIsGroupTarget, factsFilter, factsMonth]);
   const unmappedCount = useMemo(
     () => transactions.filter((transaction) => !transaction.is_deleted && !allocationByTransaction.has(transaction.uuid)).length,
     [transactions, allocationByTransaction],
@@ -847,6 +919,7 @@ export default function FinanceScreen() {
             factsLoading={factsLoading}
             allocationsByTransaction={allocationByTransaction}
             allocationLabel={allocationLabel}
+            allocationIsGroupTarget={allocationIsGroupTarget}
             currencyByPlan={planByUuid}
             onFilterChange={setFactsFilter}
             onMonthChange={setFactsMonth}
@@ -1027,6 +1100,7 @@ function FactsPanel({
   factsLoading,
   allocationsByTransaction,
   allocationLabel,
+  allocationIsGroupTarget,
   onFilterChange,
   onMonthChange,
   onLayoutChange,
@@ -1042,9 +1116,13 @@ function FactsPanel({
               s.filterChip,
               { borderColor: colors.border, backgroundColor: colors.card },
               factsFilter === filter.value && { borderColor: colors.primary, backgroundColor: colors.primaryLight },
+              filter.alert && factsFilter !== filter.value && { borderColor: colors.danger },
             ]}
             onPress={() => onFilterChange(filter.value)}
           >
+            {filter.alert ? (
+              <Text style={[s.filterAlertIcon, { color: colors.danger, borderColor: colors.danger }]}>!</Text>
+            ) : null}
             <Text style={[s.filterChipText, { color: factsFilter === filter.value ? colors.primary : colors.textSecondary }]}>
               {filter.label}
             </Text>
@@ -1089,6 +1167,7 @@ function FactsPanel({
             transaction={transaction}
             allocation={allocationsByTransaction.get(transaction.uuid)}
             allocationLabel={allocationLabel}
+            isGroupTarget={allocationIsGroupTarget(allocationsByTransaction.get(transaction.uuid))}
             layout={factsLayout}
             isWide={isWide}
             colors={colors}
@@ -1104,7 +1183,7 @@ function FactsPanel({
   );
 }
 
-function FactCard({ transaction, allocation, allocationLabel, layout, isWide, colors, onMap }) {
+function FactCard({ transaction, allocation, allocationLabel, isGroupTarget, layout, isWide, colors, onMap }) {
   const mapped = !!allocation;
   const amountColor = Number(transaction.amount_cents) < 0 ? colors.danger : colors.success;
   if (layout === 'compact') {
@@ -1113,6 +1192,7 @@ function FactCard({ transaction, allocation, allocationLabel, layout, isWide, co
         transaction={transaction}
         allocation={allocation}
         allocationLabel={allocationLabel}
+        isGroupTarget={isGroupTarget}
         amountColor={amountColor}
         isWide={isWide}
         colors={colors}
@@ -1140,9 +1220,15 @@ function FactCard({ transaction, allocation, allocationLabel, layout, isWide, co
         <View
           style={[
             s.factMappingBadge,
-            { borderColor: mapped ? colors.primary : colors.border, backgroundColor: mapped ? colors.primaryLight : colors.bgSecondary },
+            {
+              borderColor: isGroupTarget ? colors.danger : (mapped ? colors.primary : colors.border),
+              backgroundColor: isGroupTarget ? `${colors.danger}22` : (mapped ? colors.primaryLight : colors.bgSecondary),
+            },
           ]}
         >
+          {isGroupTarget ? (
+            <Text style={[s.factAlertIcon, { color: colors.danger, borderColor: colors.danger }]}>!</Text>
+          ) : null}
           <Text style={[s.factMappingText, { color: mapped ? colors.primary : colors.textMuted }]} numberOfLines={1}>
             {allocationLabel(allocation)}
           </Text>
@@ -1158,7 +1244,7 @@ function FactCard({ transaction, allocation, allocationLabel, layout, isWide, co
   );
 }
 
-function FactCompactRow({ transaction, allocation, allocationLabel, amountColor, isWide, colors, onMap }) {
+function FactCompactRow({ transaction, allocation, allocationLabel, isGroupTarget, amountColor, isWide, colors, onMap }) {
   const mapped = !!allocation;
   const categoryParts = [
     transaction.bank_category,
@@ -1190,9 +1276,15 @@ function FactCompactRow({ transaction, allocation, allocationLabel, amountColor,
       <View
         style={[
           s.factCompactMapping,
-          { borderColor: mapped ? colors.primary : colors.border, backgroundColor: mapped ? colors.primaryLight : colors.bgSecondary },
+          {
+            borderColor: isGroupTarget ? colors.danger : (mapped ? colors.primary : colors.border),
+            backgroundColor: isGroupTarget ? `${colors.danger}22` : (mapped ? colors.primaryLight : colors.bgSecondary),
+          },
         ]}
       >
+        {isGroupTarget ? (
+          <Text style={[s.factAlertIcon, { color: colors.danger, borderColor: colors.danger }]}>!</Text>
+        ) : null}
         <Text style={[s.factCompactMappingText, { color: mapped ? colors.primary : colors.textMuted }]} numberOfLines={1}>
           {allocationLabel(allocation)}
         </Text>
@@ -1223,6 +1315,36 @@ function planItems(items, planUuid) {
 function terminalItemSet(items) {
   const parents = new Set(items.map((item) => item.parent_uuid).filter(Boolean));
   return new Set(items.filter((item) => !parents.has(item.uuid)).map((item) => item.uuid));
+}
+
+function groupItemUuidSet(items) {
+  return new Set((items || []).filter((item) => !item?.is_deleted).map((item) => item.parent_uuid).filter(Boolean));
+}
+
+function itemHasChildren(items, itemUuid) {
+  return !!itemUuid && groupItemUuidSet(items).has(itemUuid);
+}
+
+function isActiveFactAllocation(allocation) {
+  return !!allocation && !allocation.is_deleted && allocation.is_active !== false && allocation.is_active !== 0;
+}
+
+function directAllocationsForItemUuid(allocations, itemUuid) {
+  if (!itemUuid) return [];
+  return (allocations || []).filter((allocation) => (
+    isActiveFactAllocation(allocation) && allocation.item_uuid === itemUuid
+  ));
+}
+
+function allocationTargetsGroupItem(allocation, groupUuids) {
+  return isActiveFactAllocation(allocation)
+    && !!allocation.item_uuid
+    && groupUuids.has(allocation.item_uuid);
+}
+
+function suggestChildNameForGroupRemap(parent) {
+  const base = String(parent?.name || '').trim();
+  return base ? `${base} details` : 'New child row';
 }
 
 function MapFinanceFactSheet({
@@ -1843,7 +1965,8 @@ const s = StyleSheet.create({
   compactDirectAmount: { marginTop: 0, fontSize: 9.5, lineHeight: 10 },
   factsRoot: { paddingTop: 4, paddingBottom: 18 },
   factsFilters: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, paddingHorizontal: 12, paddingVertical: 8, alignItems: 'center' },
-  filterChip: { borderWidth: 1, borderRadius: 7, paddingHorizontal: 10, paddingVertical: 7 },
+  filterChip: { borderWidth: 1, borderRadius: 7, paddingHorizontal: 10, paddingVertical: 7, flexDirection: 'row', alignItems: 'center', gap: 5 },
+  filterAlertIcon: { width: 15, height: 15, borderWidth: 1, borderRadius: 999, textAlign: 'center', fontSize: 10, lineHeight: 13, fontWeight: '900' },
   filterChipText: { fontSize: 12, fontWeight: '800' },
   monthInput: { minWidth: 92, height: 32, borderWidth: 1, borderRadius: 7, paddingHorizontal: 9, paddingVertical: 5, fontSize: 12, fontWeight: '700' },
   factsLayoutSwitch: { height: 32, borderWidth: 1, borderRadius: 7, padding: 2, flexDirection: 'row', gap: 2 },
@@ -1857,8 +1980,9 @@ const s = StyleSheet.create({
   factDescription: { fontSize: 13.5, lineHeight: 17, fontWeight: '700' },
   factMeta: { fontSize: 11, lineHeight: 14, fontWeight: '600' },
   factBottomRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 3 },
-  factMappingBadge: { flex: 1, minWidth: 0, borderWidth: 1, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 5 },
-  factMappingText: { fontSize: 11.5, fontWeight: '800' },
+  factMappingBadge: { flex: 1, minWidth: 0, borderWidth: 1, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 5, flexDirection: 'row', alignItems: 'center', gap: 5 },
+  factAlertIcon: { width: 15, height: 15, borderWidth: 1, borderRadius: 999, textAlign: 'center', fontSize: 10, lineHeight: 13, fontWeight: '900' },
+  factMappingText: { flex: 1, minWidth: 0, fontSize: 11.5, fontWeight: '800' },
   factLock: { fontSize: 14, fontWeight: '700' },
   mapBtn: { borderRadius: 7, paddingHorizontal: 12, paddingVertical: 7 },
   mapBtnText: { color: '#fff', fontSize: 12, fontWeight: '900' },
@@ -1879,8 +2003,8 @@ const s = StyleSheet.create({
   factCompactAmount: { width: 92, textAlign: 'right', fontSize: 11.5, fontWeight: '900', fontVariant: ['tabular-nums'] },
   factCompactDescription: { flex: 1.4, minWidth: 90, fontSize: 12, fontWeight: '800' },
   factCompactMeta: { flex: 1, minWidth: 80, fontSize: 10.5, fontWeight: '700' },
-  factCompactMapping: { flex: 1, minWidth: 96, maxWidth: 220, borderWidth: 1, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
-  factCompactMappingText: { fontSize: 10.5, fontWeight: '800' },
+  factCompactMapping: { flex: 1, minWidth: 96, maxWidth: 220, borderWidth: 1, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3, flexDirection: 'row', alignItems: 'center', gap: 5 },
+  factCompactMappingText: { flex: 1, minWidth: 0, fontSize: 10.5, fontWeight: '800' },
   factCompactLock: { width: 16, fontSize: 12, fontWeight: '700', textAlign: 'center' },
   factCompactMapBtn: { borderRadius: 6, paddingHorizontal: 9, paddingVertical: 5 },
   smallAction: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 9, paddingVertical: 6 },
