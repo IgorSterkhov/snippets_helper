@@ -11,6 +11,7 @@ from api.models import (
     FinancePayment,
     FinancePlan,
     FinanceTransaction,
+    FinanceTransactionAllocation,
     User,
     TABLE_MODELS,
 )
@@ -90,6 +91,20 @@ def _accepted_updated_at(client_updated: datetime | None, accepted_at: datetime)
     if client_updated is None or client_updated < accepted_at:
         return accepted_at
     return client_updated
+
+
+def _finance_allocation_conflict_resolution(
+    existing_active: FinanceTransactionAllocation | None,
+    incoming_uuid,
+    incoming_updated_at: datetime,
+) -> str:
+    if existing_active is None:
+        return "no_conflict"
+    if str(existing_active.uuid) == str(incoming_uuid):
+        return "same_row"
+    if existing_active.updated_at and incoming_updated_at < existing_active.updated_at:
+        return "server_wins"
+    return "incoming_wins"
 
 
 def _pull_server_time(now: datetime | None = None) -> datetime:
@@ -241,6 +256,61 @@ async def _finance_mapping_rule_exists(
         )
     )
     return result.scalar_one_or_none() is not None
+
+
+async def _prepare_active_finance_allocation(
+    db: AsyncSession,
+    user_id: UUID,
+    row_uuid: UUID,
+    extra: dict,
+    accepted_updated_at: datetime,
+) -> ConflictInfo | None:
+    if not bool(extra.get("is_active", True)):
+        return None
+
+    transaction_uuid = _parse_optional_uuid(extra.get("transaction_uuid"))
+    if not transaction_uuid:
+        return None
+
+    with db.no_autoflush:
+        active_result = await db.execute(
+            select(FinanceTransactionAllocation).where(
+                FinanceTransactionAllocation.user_id == user_id,
+                FinanceTransactionAllocation.transaction_uuid == transaction_uuid,
+                FinanceTransactionAllocation.is_active == True,  # noqa: E712
+                FinanceTransactionAllocation.is_deleted == False,  # noqa: E712
+                FinanceTransactionAllocation.uuid != row_uuid,
+            )
+        )
+    active_existing = active_result.scalars().first()
+    resolution = _finance_allocation_conflict_resolution(
+        active_existing,
+        row_uuid,
+        accepted_updated_at,
+    )
+
+    if resolution == "server_wins":
+        return ConflictInfo(
+            table="finance_transaction_allocations",
+            uuid=str(row_uuid),
+            server_updated_at=active_existing.updated_at,
+            resolution="server_wins",
+        )
+
+    if resolution == "incoming_wins":
+        await db.execute(
+            update(FinanceTransactionAllocation)
+            .where(
+                FinanceTransactionAllocation.user_id == user_id,
+                FinanceTransactionAllocation.transaction_uuid == transaction_uuid,
+                FinanceTransactionAllocation.is_active == True,  # noqa: E712
+                FinanceTransactionAllocation.is_deleted == False,  # noqa: E712
+                FinanceTransactionAllocation.uuid != row_uuid,
+            )
+            .values(is_active=False, updated_at=accepted_updated_at)
+        )
+
+    return None
 
 
 async def _finance_plan_exists(db: AsyncSession, user_id: UUID, plan_uuid: UUID) -> bool:
@@ -538,6 +608,18 @@ async def push(
 
                 # Update existing row
                 accepted_updated_at = _accepted_updated_at(client_updated, datetime.utcnow())
+                if table_name == "finance_transaction_allocations" and not is_deleted:
+                    allocation_conflict = await _prepare_active_finance_allocation(
+                        db,
+                        user.id,
+                        row_uuid,
+                        extra,
+                        accepted_updated_at,
+                    )
+                    if allocation_conflict:
+                        conflicts.append(allocation_conflict)
+                        continue
+
                 if is_deleted:
                     existing.is_deleted = True
                     existing.updated_at = accepted_updated_at
@@ -550,12 +632,25 @@ async def push(
                 accepted += 1
                 accepted_uuids.setdefault(table_name, []).append(str(row_uuid))
             else:
+                accepted_updated_at = _accepted_updated_at(client_updated, datetime.utcnow())
+                if table_name == "finance_transaction_allocations" and not is_deleted:
+                    allocation_conflict = await _prepare_active_finance_allocation(
+                        db,
+                        user.id,
+                        row_uuid,
+                        extra,
+                        accepted_updated_at,
+                    )
+                    if allocation_conflict:
+                        conflicts.append(allocation_conflict)
+                        continue
+
                 # Insert new row
                 new_row = model(uuid=row_uuid, user_id=user.id)
                 for key, val in extra.items():
                     if hasattr(new_row, key) and key not in ("uuid", "user_id"):
                         setattr(new_row, key, val)
-                new_row.updated_at = _accepted_updated_at(client_updated, datetime.utcnow())
+                new_row.updated_at = accepted_updated_at
                 new_row.is_deleted = is_deleted
                 db.add(new_row)
                 accepted += 1

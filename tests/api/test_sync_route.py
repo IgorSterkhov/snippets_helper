@@ -1,6 +1,11 @@
 from datetime import datetime
 
-from api.routes.sync import SYNC_PULL_CURSOR_SAFETY_SECONDS, _accepted_updated_at, _pull_server_time
+from api.routes.sync import (
+    SYNC_PULL_CURSOR_SAFETY_SECONDS,
+    _accepted_updated_at,
+    _finance_allocation_conflict_resolution,
+    _pull_server_time,
+)
 
 
 def test_accepted_updated_at_promotes_old_client_timestamp_to_push_time():
@@ -29,3 +34,30 @@ def test_pull_server_time_uses_safety_lookback():
     got = _pull_server_time(now)
 
     assert (now - got).total_seconds() == SYNC_PULL_CURSOR_SAFETY_SECONDS
+
+
+class ExistingAllocation:
+    uuid = "server-allocation"
+
+    def __init__(self, updated_at):
+        self.updated_at = updated_at
+
+
+def test_finance_allocation_conflict_keeps_newer_server_assignment():
+    existing = ExistingAllocation(datetime(2026, 6, 27, 12, 10, 0))
+    incoming_updated = datetime(2026, 6, 27, 12, 0, 0)
+
+    assert _finance_allocation_conflict_resolution(existing, "incoming-allocation", incoming_updated) == "server_wins"
+
+
+def test_finance_allocation_conflict_allows_newer_incoming_assignment():
+    existing = ExistingAllocation(datetime(2026, 6, 27, 12, 0, 0))
+    incoming_updated = datetime(2026, 6, 27, 12, 10, 0)
+
+    assert _finance_allocation_conflict_resolution(existing, "incoming-allocation", incoming_updated) == "incoming_wins"
+
+
+def test_finance_allocation_conflict_accepts_same_allocation_uuid():
+    existing = ExistingAllocation(datetime(2026, 6, 27, 12, 10, 0))
+
+    assert _finance_allocation_conflict_resolution(existing, "server-allocation", datetime(2026, 6, 27, 12, 0, 0)) == "same_row"
