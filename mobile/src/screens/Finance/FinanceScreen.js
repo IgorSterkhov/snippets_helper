@@ -41,6 +41,7 @@ import {
   upsertFinanceItem,
   upsertFinanceItems,
   upsertFinancePlan,
+  updateFinanceMappingRule,
 } from '../../db/financeRepo';
 import { uuidv4 } from '../../lib/uuid';
 import { notifyLocalChange, performSync, subscribeSyncStatus } from '../../sync/syncService';
@@ -164,6 +165,25 @@ function createRuleConditionsFromForm({ category, description, mcc, direction, m
   return conditions;
 }
 
+function parseRuleConditions(rule) {
+  try {
+    const parsed = JSON.parse(rule?.conditions_json || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function conditionValue(conditions, fields, opMatcher = null) {
+  const fieldSet = new Set(Array.isArray(fields) ? fields : [fields]);
+  const condition = conditions.find((entry) => {
+    if (!fieldSet.has(String(entry.field || ''))) return false;
+    if (!opMatcher) return true;
+    return opMatcher(String(entry.op || '').toLowerCase());
+  });
+  return condition?.value == null ? '' : String(condition.value);
+}
+
 function transactionDirection(transaction) {
   const amount = Number(transaction?.amount_cents) || 0;
   if (amount < 0) return 'expense';
@@ -196,10 +216,15 @@ export default function FinanceScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [shareVisible, setShareVisible] = useState(false);
   const [sharePreparing, setSharePreparing] = useState(false);
+  const [planMenuOpen, setPlanMenuOpen] = useState(false);
+  const [kindMenuOpen, setKindMenuOpen] = useState(false);
   const planTimers = useRef({});
   const itemTimers = useRef({});
   const pendingPlans = useRef({});
   const pendingItems = useRef({});
+  const mainScrollRef = useRef(null);
+  const rowLayouts = useRef(new Map());
+  const pendingScrollItemUuid = useRef(null);
   const activeModeRef = useRef(activeMode);
   const activePlanUuidRef = useRef(activePlanUuid);
   const plansRef = useRef(plans);
@@ -488,6 +513,15 @@ export default function FinanceScreen() {
     return result;
   };
 
+  const scrollToItem = useCallback((uuid) => {
+    const y = rowLayouts.current.get(uuid);
+    if (Number.isFinite(y)) {
+      mainScrollRef.current?.scrollTo?.({ y: Math.max(y - 80, 0), animated: true });
+    } else {
+      mainScrollRef.current?.scrollToEnd?.({ animated: true });
+    }
+  }, []);
+
   const createItem = async (parentUuid = null) => {
     if (!activePlanUuid) return;
     const parent = parentUuid ? itemsRef.current.find((entry) => entry.uuid === parentUuid) : null;
@@ -522,11 +556,16 @@ export default function FinanceScreen() {
       }
       return item;
     };
-    await protectItemBecomingParent({
+    const created = await protectItemBecomingParent({
       parentUuid,
       targetItem: (createdItem) => createdItem,
       action: createAction,
     });
+    if (created?.uuid) {
+      pendingScrollItemUuid.current = created.uuid;
+      setEditingItemUuid(created.uuid);
+      requestAnimationFrame(() => scrollToItem(created.uuid));
+    }
   };
 
   const removeItem = (item) => {
@@ -647,18 +686,20 @@ export default function FinanceScreen() {
   );
   const hasGroupTargetFacts = useMemo(() => transactions.some((transaction) => {
     if (!transaction || transaction.is_deleted) return false;
-    const allocation = allocationByTransaction.get(transaction.uuid);
-    if (!allocationIsGroupTarget(allocation)) return false;
-    if (factsMonth && /^\d{4}-\d{2}$/.test(factsMonth)) {
-      if (!String(transaction.payment_date || '').startsWith(`${factsMonth}-`)) return false;
-    }
-    return transactionMatchesFactsSearch(transaction, allocation, factsSearch, planByUuid, itemByUuid, allocationIsGroupTarget);
-  }), [transactions, allocationByTransaction, allocationIsGroupTarget, factsMonth, factsSearch, planByUuid, itemByUuid]);
+    return allocationIsGroupTarget(allocationByTransaction.get(transaction.uuid));
+  }), [transactions, allocationByTransaction, allocationIsGroupTarget]);
   useEffect(() => {
     if (factsFilter === 'group_target' && !hasGroupTargetFacts) {
       setFactsFilter('all');
     }
   }, [factsFilter, hasGroupTargetFacts]);
+  const changeFactsFilter = useCallback((nextFilter) => {
+    if (nextFilter === 'group_target') {
+      setFactsSearch('');
+      setFactsMonth('');
+    }
+    setFactsFilter(nextFilter);
+  }, []);
   const filteredFacts = useMemo(() => transactions.filter((transaction) => {
     if (!transaction || transaction.is_deleted) return false;
     const allocation = allocationByTransaction.get(transaction.uuid);
@@ -725,7 +766,9 @@ export default function FinanceScreen() {
 
   const saveRule = async (input) => {
     try {
-      const result = await createFinanceMappingRule(input);
+      const result = input?.uuid
+        ? await updateFinanceMappingRule(input)
+        : await createFinanceMappingRule(input);
       notifyLocalChange();
       setRulesVisible(false);
       setRuleSeed(null);
@@ -756,6 +799,7 @@ export default function FinanceScreen() {
     >
       <SyncStatusBar />
       <ScrollView
+        ref={mainScrollRef}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
         contentContainerStyle={[s.content, reorderItemUuid ? s.contentWithToolbar : null]}
       >
@@ -850,27 +894,45 @@ export default function FinanceScreen() {
 
         {showListsMode && activePlan ? (
           <>
-            <View style={[s.planEditor, { borderColor: colors.border, backgroundColor: colors.card }]}>
+            <View style={[s.planCompactHeader, { borderColor: colors.border, backgroundColor: colors.card }]}>
               <TextInput
-                style={[s.planNameInput, { color: colors.text, borderColor: colors.border }]}
+                style={[s.planCompactName, { color: colors.text }]}
                 value={activePlan.name || ''}
                 onChangeText={(name) => patchPlan(activePlan.uuid, { name })}
                 placeholder="Название списка"
                 placeholderTextColor={colors.textMuted}
+                numberOfLines={1}
               />
-              <View style={s.planMetaRow}>
-                <TextInput
-                  style={[s.currencyInput, { color: colors.text, borderColor: colors.border }]}
-                  value={activePlan.currency || 'RUB'}
-                  onChangeText={(currencyText) => patchPlan(activePlan.uuid, { currency: currencyText })}
-                  autoCapitalize="characters"
-                  maxLength={6}
-                />
-                <TouchableOpacity style={[s.deletePlanBtn, { borderColor: colors.danger }]} onPress={removeActivePlan}>
-                  <Text style={[s.deletePlanText, { color: colors.danger }]}>🗑</Text>
-                </TouchableOpacity>
-              </View>
-              <View style={s.kindRow}>
+              <TextInput
+                style={[s.planCompactCurrency, { color: colors.textSecondary, borderColor: colors.border }]}
+                value={activePlan.currency || 'RUB'}
+                onChangeText={(currencyText) => patchPlan(activePlan.uuid, { currency: currencyText })}
+                autoCapitalize="characters"
+                maxLength={6}
+              />
+              <TouchableOpacity
+                style={[s.planKindPill, { borderColor: colors.border, backgroundColor: colors.bgSecondary }]}
+                onPress={() => {
+                  setKindMenuOpen((value) => !value);
+                  setPlanMenuOpen(false);
+                }}
+              >
+                <Text style={[s.planKindPillText, { color: colors.primary }]} numberOfLines={1}>
+                  {PLAN_KIND_LABELS[activePlan.kind] || PLAN_KIND_LABELS.monthly}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.planOverflowBtn, { borderColor: colors.border }]}
+                onPress={() => {
+                  setPlanMenuOpen((value) => !value);
+                  setKindMenuOpen(false);
+                }}
+              >
+                <Text style={[s.planOverflowText, { color: colors.textSecondary }]}>⋯</Text>
+              </TouchableOpacity>
+            </View>
+            {kindMenuOpen ? (
+              <View style={[s.planDropdown, { borderColor: colors.border, backgroundColor: colors.card }]}>
                 {FINANCE_PLAN_KINDS.map((kind) => (
                   <TouchableOpacity
                     key={kind}
@@ -879,7 +941,10 @@ export default function FinanceScreen() {
                       { borderColor: colors.border },
                       activePlan.kind === kind && { backgroundColor: colors.primaryLight, borderColor: colors.primary },
                     ]}
-                    onPress={() => patchPlan(activePlan.uuid, { kind }, { immediate: true })}
+                    onPress={() => {
+                      patchPlan(activePlan.uuid, { kind }, { immediate: true });
+                      setKindMenuOpen(false);
+                    }}
                   >
                     <Text style={[s.kindText, { color: activePlan.kind === kind ? colors.primary : colors.textSecondary }]}>
                       {PLAN_KIND_LABELS[kind]}
@@ -887,7 +952,20 @@ export default function FinanceScreen() {
                   </TouchableOpacity>
                 ))}
               </View>
-            </View>
+            ) : null}
+            {planMenuOpen ? (
+              <View style={[s.planDropdown, s.planOverflowMenu, { borderColor: colors.border, backgroundColor: colors.card }]}>
+                <TouchableOpacity style={s.planMenuItem} onPress={() => setPlanMenuOpen(false)}>
+                  <Text style={[s.planMenuText, { color: colors.textSecondary }]}>Edit inline</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={s.planMenuItem} onPress={() => {
+                  setPlanMenuOpen(false);
+                  removeActivePlan();
+                }}>
+                  <Text style={[s.planMenuText, { color: colors.danger }]}>Delete</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
 
             <View style={s.rowsHeader}>
               <Text style={[s.sectionTitle, { color: colors.textSecondary }]}>Rows</Text>
@@ -910,6 +988,13 @@ export default function FinanceScreen() {
                   isSelected={reorderItemUuid === row.item.uuid}
                   onToggleCollapse={toggleCollapse}
                   onOpenEditor={setEditingItemUuid}
+                  onLayout={(event) => {
+                    rowLayouts.current.set(row.item.uuid, event.nativeEvent.layout.y);
+                    if (pendingScrollItemUuid.current === row.item.uuid) {
+                      pendingScrollItemUuid.current = null;
+                      scrollToItem(row.item.uuid);
+                    }
+                  }}
                 />
               ))
             ) : (
@@ -938,7 +1023,7 @@ export default function FinanceScreen() {
             allocationLabel={allocationLabel}
             allocationIsGroupTarget={allocationIsGroupTarget}
             currencyByPlan={planByUuid}
-            onFilterChange={setFactsFilter}
+            onFilterChange={changeFactsFilter}
             onMonthChange={setFactsMonth}
             onSearchChange={setFactsSearch}
             onLayoutChange={updateFactsLayout}
@@ -984,7 +1069,6 @@ export default function FinanceScreen() {
         onPatchItem={patchItem}
         onAddChild={async (uuid) => {
           await createItem(uuid);
-          setEditingItemUuid(null);
         }}
         onMove={(uuid) => {
           setReorderItemUuid(uuid);
@@ -1046,6 +1130,7 @@ function FinanceRow({
   isSelected,
   onToggleCollapse,
   onOpenEditor,
+  onLayout,
 }) {
   const { item, depth, hasChildren, hiddenDescendantCount } = row;
   const bandSlot = financeBandSlotForDepth(depth, maxDepth, 'soft_first');
@@ -1060,6 +1145,7 @@ function FinanceRow({
         s.rowCard,
         { borderColor: isSelected ? colors.primary : colors.border, backgroundColor },
       ]}
+      onLayout={onLayout}
       activeOpacity={0.82}
       onPress={() => onOpenEditor(item.uuid)}
     >
@@ -1551,14 +1637,18 @@ function FinanceRulesSheet({
   const [direction, setDirection] = useState('expense');
   const [minAmount, setMinAmount] = useState('');
   const [maxAmount, setMaxAmount] = useState('');
+  const [selectedRuleUuid, setSelectedRuleUuid] = useState('');
+  const [enabled, setEnabled] = useState(true);
+  const [priority, setPriority] = useState('1');
+  const [matchMode, setMatchMode] = useState('all');
   const [selectedPlanUuid, setSelectedPlanUuid] = useState('');
   const [selectedItemUuid, setSelectedItemUuid] = useState('');
   const [applyExisting, setApplyExisting] = useState(true);
   const [remapAssigned, setRemapAssigned] = useState(false);
 
-  useEffect(() => {
-    if (!visible) return;
+  const fillFromSeed = useCallback(() => {
     const transaction = seed?.transaction || null;
+    setSelectedRuleUuid('');
     setName(transaction
       ? [transaction.bank_category, transaction.description].filter(Boolean).join(' · ') || 'New mapping rule'
       : 'New mapping rule');
@@ -1568,11 +1658,48 @@ function FinanceRulesSheet({
     setDirection(transactionDirection(transaction));
     setMinAmount('');
     setMaxAmount('');
+    setEnabled(true);
+    setPriority(String((rules?.length || 0) + 1));
+    setMatchMode('all');
     setSelectedPlanUuid(seed?.targetPlan?.uuid || plans[0]?.uuid || '');
     setSelectedItemUuid(seed?.targetItem?.uuid || '');
     setApplyExisting(true);
     setRemapAssigned(false);
-  }, [visible, seed, plans]);
+  }, [seed, plans, rules?.length]);
+
+  const fillFromRule = useCallback((rule) => {
+    if (!rule) {
+      fillFromSeed();
+      return;
+    }
+    const conditions = parseRuleConditions(rule);
+    const plan = plans.find((entry) => (
+      entry.uuid === rule.target_plan_uuid || (rule.target_plan_id != null && entry.id === rule.target_plan_id)
+    ));
+    const item = items.find((entry) => (
+      entry.uuid === rule.target_item_uuid || (rule.target_item_id != null && entry.id === rule.target_item_id)
+    ));
+    setSelectedRuleUuid(rule.uuid || '');
+    setName(rule.name || 'New mapping rule');
+    setCategory(conditionValue(conditions, ['bank_category', 'category']));
+    setDescription(conditionValue(conditions, 'description'));
+    setMcc(conditionValue(conditions, 'mcc'));
+    setDirection(conditionValue(conditions, 'direction') || 'any');
+    setMinAmount(conditionValue(conditions, ['amount_cents', 'amount'], (op) => op === 'gte' || op === '>=' || op === 'gt' || op === '>'));
+    setMaxAmount(conditionValue(conditions, ['amount_cents', 'amount'], (op) => op === 'lte' || op === '<=' || op === 'lt' || op === '<'));
+    setEnabled(rule.is_enabled !== false && rule.is_enabled !== 0);
+    setPriority(String(rule.priority ?? 0));
+    setMatchMode(rule.match_mode || 'all');
+    setSelectedPlanUuid(plan?.uuid || plans[0]?.uuid || '');
+    setSelectedItemUuid(item?.uuid || '');
+    setApplyExisting(false);
+    setRemapAssigned(false);
+  }, [fillFromSeed, items, plans]);
+
+  useEffect(() => {
+    if (!visible) return;
+    fillFromSeed();
+  }, [visible, fillFromSeed]);
 
   const selectedPlan = plans.find((plan) => plan.uuid === selectedPlanUuid) || null;
   const selectedItem = items.find((item) => item.uuid === selectedItemUuid) || null;
@@ -1587,11 +1714,14 @@ function FinanceRulesSheet({
       Alert.alert('Rule condition required', 'Set at least one condition.');
       return;
     }
+    const selectedRule = rules.find((rule) => rule.uuid === selectedRuleUuid) || null;
     onSave({
+      uuid: selectedRule?.uuid,
+      id: selectedRule?.id,
       name: name || 'New mapping rule',
-      isEnabled: true,
-      priority: (rules?.length || 0) + 1,
-      matchMode: 'all',
+      isEnabled: enabled,
+      priority: Number(priority) || 0,
+      matchMode,
       conditions,
       targetPlan: selectedPlan,
       targetItem: selectedItem,
@@ -1613,25 +1743,87 @@ function FinanceRulesSheet({
             </TouchableOpacity>
           </View>
           <ScrollView style={s.rulesScroll} contentContainerStyle={s.rulesScrollContent}>
-            {rules?.length ? (
-              <View style={s.rulesList}>
+            <View style={s.ruleSelectorBlock}>
+              <Text style={[s.ruleSectionLabel, { color: colors.textMuted }]}>Rule</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.ruleSelectorStrip}>
+                <TouchableOpacity
+                  style={[
+                    s.ruleSelectChip,
+                    { borderColor: colors.border, backgroundColor: colors.bgSecondary },
+                    !selectedRuleUuid && { borderColor: colors.primary, backgroundColor: colors.primaryLight },
+                  ]}
+                  onPress={fillFromSeed}
+                >
+                  <Text style={[s.ruleSelectChipText, { color: !selectedRuleUuid ? colors.primary : colors.textSecondary }]}>+ New</Text>
+                </TouchableOpacity>
                 {rules.map((rule) => (
-                  <View key={rule.uuid} style={[s.ruleRow, { borderColor: colors.border, backgroundColor: colors.bgSecondary }]}>
-                    <View style={s.ruleTextBlock}>
-                      <Text style={[s.ruleTitle, { color: colors.text }]} numberOfLines={1}>{rule.name || 'Rule'}</Text>
-                      <Text style={[s.ruleMeta, { color: colors.textMuted }]} numberOfLines={1}>
-                        {describeRule(rule)}
-                      </Text>
-                    </View>
-                    <TouchableOpacity style={[s.ruleApplyBtn, { borderColor: colors.primary }]} onPress={() => onApplyRule(rule)}>
-                      <Text style={[s.ruleApplyText, { color: colors.primary }]}>Apply</Text>
-                    </TouchableOpacity>
-                  </View>
+                  <TouchableOpacity
+                    key={rule.uuid}
+                    style={[
+                      s.ruleSelectChip,
+                      { borderColor: colors.border, backgroundColor: colors.bgSecondary },
+                      selectedRuleUuid === rule.uuid && { borderColor: colors.primary, backgroundColor: colors.primaryLight },
+                    ]}
+                    onPress={() => fillFromRule(rule)}
+                  >
+                    <Text style={[s.ruleSelectChipText, { color: selectedRuleUuid === rule.uuid ? colors.primary : colors.textSecondary }]} numberOfLines={1}>
+                      {rule.name || 'Rule'}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+              {selectedRuleUuid ? (
+                <TouchableOpacity
+                  style={[s.ruleApplySelected, { borderColor: colors.primary }]}
+                  onPress={() => {
+                    const selectedRule = rules.find((rule) => rule.uuid === selectedRuleUuid);
+                    if (selectedRule) onApplyRule(selectedRule);
+                  }}
+                >
+                  <Text style={[s.ruleApplyText, { color: colors.primary }]}>Apply selected rule</Text>
+                </TouchableOpacity>
+              ) : (
+                <Text style={[s.ruleEmptyText, { color: colors.textMuted }]}>
+                  {rules?.length ? 'Choose a rule to edit, or create a new one.' : 'No rules yet. Create the first rule below.'}
+                </Text>
+              )}
+            </View>
+
+            <View style={s.ruleControlRow}>
+              <TouchableOpacity
+                style={[s.lockRow, s.ruleEnabledToggle]}
+                onPress={() => setEnabled((value) => !value)}
+              >
+                <Text style={[s.checkboxBox, { borderColor: colors.border, color: colors.primary }]}>{enabled ? '✓' : ''}</Text>
+                <Text style={[s.lockText, { color: colors.textSecondary }]}>Enabled</Text>
+              </TouchableOpacity>
+              <TextInput
+                style={[s.ruleInput, s.rulePriorityInput, { color: colors.text, borderColor: colors.border }]}
+                value={priority}
+                onChangeText={(text) => setPriority(String(text || '').replace(/[^\d-]/g, '').slice(0, 4))}
+                placeholder="Priority"
+                placeholderTextColor={colors.textMuted}
+                keyboardType="number-pad"
+              />
+              <View style={s.ruleModeSegment}>
+                {[
+                  ['all', 'All'],
+                  ['any', 'Any'],
+                ].map(([value, label]) => (
+                  <TouchableOpacity
+                    key={value}
+                    style={[
+                      s.ruleModeBtn,
+                      { borderColor: colors.border },
+                      matchMode === value && { borderColor: colors.primary, backgroundColor: colors.primaryLight },
+                    ]}
+                    onPress={() => setMatchMode(value)}
+                  >
+                    <Text style={[s.ruleModeText, { color: matchMode === value ? colors.primary : colors.textSecondary }]}>{label}</Text>
+                  </TouchableOpacity>
                 ))}
               </View>
-            ) : (
-              <Text style={[s.ruleEmptyText, { color: colors.textMuted }]}>No rules yet</Text>
-            )}
+            </View>
 
             <TextInput
               style={[s.ruleInput, { color: colors.text, borderColor: colors.border }]}
@@ -1742,7 +1934,7 @@ function FinanceRulesSheet({
 
           <View style={s.sheetActions}>
             <TouchableOpacity style={[s.sheetDoneBtn, { backgroundColor: colors.primary }]} onPress={handleSave}>
-              <Text style={s.sheetDoneText}>{seed?.transaction ? 'Create & apply' : 'Create rule'}</Text>
+              <Text style={s.sheetDoneText}>{selectedRuleUuid ? 'Save rule' : seed?.transaction ? 'Create & apply' : 'Create rule'}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1997,6 +2189,29 @@ const s = StyleSheet.create({
   planChip: { width: 164, borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8 },
   planChipTitle: { fontSize: 13, fontWeight: '700' },
   planChipMeta: { fontSize: 11, marginTop: 3, fontWeight: '600' },
+  planCompactHeader: {
+    marginHorizontal: 12,
+    marginTop: 6,
+    marginBottom: 4,
+    minHeight: 42,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+  },
+  planCompactName: { flex: 1, minWidth: 0, fontSize: 14.5, fontWeight: '800', paddingVertical: 3 },
+  planCompactCurrency: { width: 58, borderWidth: 1, borderRadius: 6, paddingHorizontal: 7, paddingVertical: 5, fontSize: 11.5, fontWeight: '800', textAlign: 'center' },
+  planKindPill: { maxWidth: 112, borderWidth: 1, borderRadius: 7, paddingHorizontal: 8, paddingVertical: 6 },
+  planKindPillText: { fontSize: 11.5, fontWeight: '900' },
+  planOverflowBtn: { width: 32, height: 30, borderWidth: 1, borderRadius: 7, alignItems: 'center', justifyContent: 'center' },
+  planOverflowText: { fontSize: 18, lineHeight: 18, fontWeight: '900' },
+  planDropdown: { marginHorizontal: 12, marginTop: 0, marginBottom: 6, borderWidth: 1, borderRadius: 8, padding: 8, flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
+  planOverflowMenu: { alignSelf: 'flex-end', minWidth: 150, flexDirection: 'column' },
+  planMenuItem: { paddingHorizontal: 8, paddingVertical: 7 },
+  planMenuText: { fontSize: 12.5, fontWeight: '800' },
   planEditor: { margin: 12, marginTop: 6, borderWidth: 1, borderRadius: 8, padding: 10, gap: 8 },
   planNameInput: { borderWidth: 1, borderRadius: 7, paddingHorizontal: 10, paddingVertical: 8, fontSize: 16, fontWeight: '700' },
   planMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
@@ -2137,6 +2352,18 @@ const s = StyleSheet.create({
   ruleApplyBtn: { borderWidth: 1, borderRadius: 7, paddingHorizontal: 10, paddingVertical: 6 },
   ruleApplyText: { fontSize: 11, fontWeight: '900' },
   ruleEmptyText: { fontSize: 12, fontWeight: '700' },
+  ruleSelectorBlock: { gap: 6 },
+  ruleSectionLabel: { fontSize: 10.5, fontWeight: '900', textTransform: 'uppercase' },
+  ruleSelectorStrip: { gap: 7, paddingVertical: 1 },
+  ruleSelectChip: { maxWidth: 170, borderWidth: 1, borderRadius: 7, paddingHorizontal: 10, paddingVertical: 7 },
+  ruleSelectChipText: { fontSize: 12, fontWeight: '900' },
+  ruleApplySelected: { alignSelf: 'flex-start', borderWidth: 1, borderRadius: 7, paddingHorizontal: 10, paddingVertical: 6 },
+  ruleControlRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  ruleEnabledToggle: { flex: 1.1, minWidth: 0 },
+  rulePriorityInput: { width: 78, minHeight: 34 },
+  ruleModeSegment: { flexDirection: 'row', gap: 5 },
+  ruleModeBtn: { borderWidth: 1, borderRadius: 7, paddingHorizontal: 9, paddingVertical: 7 },
+  ruleModeText: { fontSize: 11.5, fontWeight: '900' },
   ruleInput: { borderWidth: 1, borderRadius: 7, paddingHorizontal: 9, paddingVertical: 7, minHeight: 36, fontSize: 12.5, fontWeight: '600' },
   ruleInlineFields: { flexDirection: 'row', gap: 7 },
   ruleSmallInput: { flex: 1, minWidth: 0 },

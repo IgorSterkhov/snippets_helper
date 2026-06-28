@@ -493,6 +493,20 @@ export async function initDB() {
         value TEXT
       )
     `);
+    tx.executeSql(`
+      CREATE TABLE IF NOT EXISTS sync_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        created_at TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'ok',
+        table_name TEXT,
+        row_uuid TEXT,
+        direction TEXT NOT NULL DEFAULT '',
+        action TEXT NOT NULL DEFAULT '',
+        details_json TEXT
+      )
+    `);
+    tx.executeSql('CREATE INDEX IF NOT EXISTS idx_mobile_sync_history_created ON sync_history(created_at DESC)');
+    tx.executeSql('CREATE INDEX IF NOT EXISTS idx_mobile_sync_history_row ON sync_history(table_name, row_uuid)');
   });
 
   await runMigrations();

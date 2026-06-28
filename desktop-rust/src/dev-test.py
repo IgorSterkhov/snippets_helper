@@ -5537,6 +5537,40 @@ async def run_tests():
             'allocationItemId': '2',
             'assignedBy': 'rule',
         }, mapped_by_rule
+        await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-facts-toolbar button')]
+          .find(btn => btn.textContent.trim() === 'Rules').click())()""")
+        await wait_until(cdp, "!!document.querySelector('.modal-overlay [data-rule-field=\"existing-rule\"]')", timeout=4)
+        await cdp.eval("""(() => {
+          const select = document.querySelector('.modal-overlay [data-rule-field="existing-rule"]');
+          select.value = '1';
+          select.dispatchEvent(new Event('change', { bubbles: true }));
+          const direction = document.querySelector('.modal-overlay [data-rule-field="direction"]');
+          direction.value = 'any';
+          direction.dispatchEvent(new Event('change', { bubbles: true }));
+        })()""")
+        edit_seeded_rule = await cdp.eval("""(() => ({
+          name: document.querySelector('.modal-overlay [data-rule-field="name"]')?.value || '',
+          direction: document.querySelector('.modal-overlay [data-rule-field="direction"]')?.value || '',
+          action: [...document.querySelectorAll('.modal-overlay .modal-actions button')]
+            .find(btn => btn.textContent.trim() === 'Save rule')?.textContent.trim() || '',
+        }))()""")
+        assert edit_seeded_rule['name'] == 'Такси · Яндекс Такси', edit_seeded_rule
+        assert edit_seeded_rule['direction'] == 'any', edit_seeded_rule
+        assert edit_seeded_rule['action'] == 'Save rule', edit_seeded_rule
+        await cdp.eval("""(() => [...document.querySelectorAll('.modal-overlay .modal-actions button')]
+          .find(btn => btn.textContent.trim() === 'Save rule')?.click())()""")
+        await wait_until(cdp, "!document.querySelector('.modal-overlay')", timeout=5)
+        edited_rule = await cdp.eval("""(() => {
+          const [rule] = JSON.parse(localStorage.getItem('mock.finance_mapping_rules') || '[]');
+          const conditions = JSON.parse(rule?.conditions_json || '[]');
+          return {
+            syncStatus: rule?.sync_status || '',
+            conditions,
+            hasDirection: conditions.some(condition => condition.field === 'direction'),
+          };
+        })()""")
+        assert edited_rule['syncStatus'] == 'pending', edited_rule
+        assert not edited_rule['hasDirection'], edited_rule
 
         await cdp.eval("""(() => {
           const allocations = JSON.parse(localStorage.getItem('mock.finance_transaction_allocations') || '[]');
@@ -5557,11 +5591,13 @@ async def run_tests():
         assert group_marker, 'facts mapped to group items need an alert marker'
         await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-facts-filter button')]
           .find(btn => btn.textContent.includes('Group target'))?.click())()""")
-        await wait_until(cdp, "document.querySelectorAll('#panel-finance .finance-fact-row').length === 1", timeout=3)
-        group_target_fact = await cdp.eval(
-            "document.querySelector('#panel-finance .finance-fact-row .finance-fact-description')?.textContent.trim() || ''"
-        )
-        assert group_target_fact == 'Яндекс Такси', group_target_fact
+        await wait_until(cdp, "[...document.querySelectorAll('#panel-finance .finance-facts-filter button')].some(btn => btn.classList.contains('active') && btn.textContent.includes('Group target'))", timeout=3)
+        group_target_facts = await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-fact-row .finance-fact-description')]
+          .map(cell => cell.textContent.trim()))()""")
+        assert group_target_facts == ['Яндекс Такси'], group_target_facts
+        await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-facts-filter button')]
+          .find(btn => btn.textContent.trim() === 'All')?.click())()""")
+        await wait_until(cdp, "[...document.querySelectorAll('#panel-finance .finance-facts-filter button')].some(btn => btn.classList.contains('active') && btn.textContent.trim() === 'All')", timeout=3)
         await cdp.eval("""(() => {
           const select = document.querySelector('#panel-finance .finance-facts-sidebar select');
           select.value = 'year';
@@ -5577,7 +5613,7 @@ async def run_tests():
         await wait_until(cdp, "document.querySelectorAll('#panel-finance .finance-fact-row').length === 1", timeout=3)
         group_filter_after_context_change = await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-facts-filter button')]
           .some(btn => btn.textContent.includes('Group target')))()""")
-        assert not group_filter_after_context_change, 'Group target filter should hide when current date/search context has no group-target facts'
+        assert group_filter_after_context_change, 'Group target filter should stay visible while any group-target fact exists globally'
         status_after_context_change = await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-facts-filter button')]
           .find(btn => btn.classList.contains('active'))?.textContent.trim() || '')()""")
         assert status_after_context_change == 'All', status_after_context_change
@@ -5585,6 +5621,24 @@ async def run_tests():
             "document.querySelector('#panel-finance .finance-fact-row .finance-fact-description')?.textContent.trim() || ''"
         )
         assert visible_after_context_change == 'Coffee test', visible_after_context_change
+        await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-facts-filter button')]
+          .find(btn => btn.textContent.includes('Group target'))?.click())()""")
+        await wait_until(cdp, "[...document.querySelectorAll('#panel-finance .finance-facts-filter button')].some(btn => btn.classList.contains('active') && btn.textContent.includes('Group target'))", timeout=3)
+        group_target_after_click = await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-fact-row .finance-fact-description')]
+          .map(cell => cell.textContent.trim()))()""")
+        assert group_target_after_click == ['Яндекс Такси'], group_target_after_click
+        context_after_group_click = await cdp.eval("""(() => ({
+          active: [...document.querySelectorAll('#panel-finance .finance-facts-filter button')]
+            .find(btn => btn.classList.contains('active'))?.textContent.trim() || '',
+          dateMode: document.querySelector('#panel-finance .finance-facts-sidebar select')?.value || '',
+          search: document.querySelector('#panel-finance .finance-facts-toolbar .finance-facts-search')?.value || '',
+        }))()""")
+        assert 'Group target' in context_after_group_click['active'], context_after_group_click
+        assert context_after_group_click['dateMode'] == 'all', context_after_group_click
+        assert context_after_group_click['search'] == '', context_after_group_click
+        await cdp.eval("""(() => [...document.querySelectorAll('#panel-finance .finance-facts-filter button')]
+          .find(btn => btn.textContent.trim() === 'All')?.click())()""")
+        await wait_until(cdp, "[...document.querySelectorAll('#panel-finance .finance-facts-filter button')].some(btn => btn.classList.contains('active') && btn.textContent.trim() === 'All')", timeout=3)
         await cdp.eval("document.querySelector('#panel-finance .finance-facts-sidebar button')?.click()")
         await wait_until(cdp, "document.querySelectorAll('#panel-finance .finance-fact-row').length === 2", timeout=3)
 

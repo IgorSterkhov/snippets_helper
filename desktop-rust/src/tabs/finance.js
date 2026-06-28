@@ -1374,8 +1374,6 @@ function hasGroupTargetFacts() {
     if (isDeletedFinanceRow(transaction)) continue;
     const allocation = allocationForTransaction(transaction);
     if (!allocationTargetsGroup(allocation)) continue;
-    if (!transactionMatchesDateFilter(transaction)) continue;
-    if (!transactionMatchesSearch(transaction, allocation)) continue;
     return true;
   }
   return false;
@@ -1437,6 +1435,16 @@ function normalizedFactsSearchTerms() {
     .toLowerCase()
     .split(/\s+/)
     .filter(Boolean);
+}
+
+function resetFactsDateAndSearchContext() {
+  state.factsDateMode = 'all';
+  state.factsDate = '';
+  state.factsDateFrom = '';
+  state.factsDateTo = '';
+  state.factsMonth = '';
+  state.factsYear = '';
+  state.factsSearch = '';
 }
 
 function factSearchBlob(transaction, allocation) {
@@ -2773,6 +2781,9 @@ function renderFactsToolbar() {
     text.textContent = label;
     btn.appendChild(text);
     btn.addEventListener('click', () => {
+      if (value === 'group_target') {
+        resetFactsDateAndSearchContext();
+      }
       state.factsFilter = value;
       render();
     });
@@ -3248,55 +3259,110 @@ async function toggleFactLock(transaction) {
   }
 }
 
+function selectedRuleFromBody(body) {
+  const selectedId = normalizeId(body.querySelector('[data-rule-field="existing-rule"]')?.value);
+  if (selectedId == null) return null;
+  return state.mappingRules.find((rule) => ruleId(rule) === selectedId) || null;
+}
+
+function conditionValue(conditions, fields, opMatcher = null) {
+  const fieldSet = new Set(Array.isArray(fields) ? fields : [fields]);
+  const condition = conditions.find((entry) => {
+    if (!fieldSet.has(String(entry.field || ''))) return false;
+    if (!opMatcher) return true;
+    return opMatcher(String(entry.op || '').toLowerCase());
+  });
+  return condition?.value == null ? '' : String(condition.value);
+}
+
+function populateRuleForm(body, { rule = null, seed = {}, itemSelect = null } = {}) {
+  const seedTransaction = seed.seedTransaction || null;
+  const conditions = rule ? parseRuleConditions(rule) : [];
+  const setValue = (field, value) => {
+    const input = body.querySelector(`[data-rule-field="${field}"]`);
+    if (input) input.value = value == null ? '' : String(value);
+  };
+  const setChecked = (field, value) => {
+    const input = body.querySelector(`[data-rule-field="${field}"]`);
+    if (input) input.checked = Boolean(value);
+  };
+
+  setValue('name', rule ? (rule.name || 'New mapping rule') : ruleSeedName(seedTransaction));
+  setChecked('enabled', rule ? rule.is_enabled !== false && rule.is_enabled !== 0 : true);
+  setValue('priority', rule ? (rule.priority ?? 0) : String((state.mappingRules?.length || 0) + 1));
+  setValue('match-mode', rule ? (rule.match_mode || 'all') : 'all');
+  setValue('category', rule ? conditionValue(conditions, ['bank_category', 'category']) : (seedTransaction?.bank_category || ''));
+  setValue('description', rule ? conditionValue(conditions, 'description') : (seedTransaction?.description || ''));
+  setValue('mcc', rule ? conditionValue(conditions, 'mcc') : (seedTransaction?.mcc || ''));
+  setValue('direction', rule ? (conditionValue(conditions, 'direction') || 'any') : ruleDirectionFromTransaction(seedTransaction));
+  setValue('min-amount', rule ? conditionValue(conditions, ['amount_cents', 'amount'], (op) => op === 'gte' || op === '>=' || op === 'gt' || op === '>') : '');
+  setValue('max-amount', rule ? conditionValue(conditions, ['amount_cents', 'amount'], (op) => op === 'lte' || op === '<=' || op === 'lt' || op === '<') : '');
+
+  const targetPlanId = rule ? rule.target_plan_id : (seed.targetPlanId || state.activePlanId);
+  const targetItemId = rule ? rule.target_item_id : (seed.targetItemId || null);
+  setValue('plan-id', targetPlanId || '');
+  if (itemSelect) itemSelect.setPlanId(targetPlanId, targetItemId || null);
+  setChecked('apply-existing', !rule && Boolean(seed.applyExisting));
+  setChecked('remap-assigned', false);
+}
+
 function renderExistingRulesList(body) {
   const rules = document.createElement('div');
   rules.className = 'finance-modal-note';
+  const label = document.createElement('label');
+  label.textContent = 'Existing rule';
+  label.style.display = 'block';
+  label.style.marginBottom = '4px';
+  const row = document.createElement('div');
+  row.style.display = 'grid';
+  row.style.gridTemplateColumns = 'minmax(0, 1fr) auto auto';
+  row.style.gap = '6px';
+  row.style.alignItems = 'center';
+  const select = document.createElement('select');
+  select.className = 'finance-select';
+  select.dataset.ruleField = 'existing-rule';
+  const create = document.createElement('option');
+  create.value = '';
+  create.textContent = state.mappingRules.length ? 'New rule' : 'New rule - no existing rules yet';
+  select.appendChild(create);
+  for (const rule of state.mappingRules) {
+    const option = document.createElement('option');
+    option.value = String(ruleId(rule));
+    option.textContent = `${rule.is_enabled ? '' : '[off] '}${rule.name || 'Untitled rule'}`;
+    option.title = describeRuleConditions(rule);
+    select.appendChild(option);
+  }
+  const apply = document.createElement('button');
+  apply.className = 'finance-small-btn';
+  apply.type = 'button';
+  apply.textContent = 'Apply selected';
+  apply.disabled = !state.mappingRules.length;
+  apply.addEventListener('click', async () => {
+    const selected = selectedRuleFromBody(body);
+    if (!selected) return;
+    const count = await call('apply_finance_mapping_rule', { id: ruleId(selected), remapAssigned: false });
+    showToast(`Rule applied to ${count} fact(s)`, 'success');
+    await loadAll(state.activePlanId);
+  });
+  const del = document.createElement('button');
+  del.className = 'finance-icon-btn';
+  del.type = 'button';
+  del.title = 'Delete selected rule';
+  del.textContent = '🗑';
+  del.disabled = !state.mappingRules.length;
+  del.addEventListener('click', async () => {
+    const selected = selectedRuleFromBody(body);
+    if (!selected) return;
+    await call('delete_finance_mapping_rule', { id: ruleId(selected) });
+    showToast('Rule deleted', 'success');
+    await loadAll(state.activePlanId);
+    body.replaceChildren(renderRulesModalContent(body));
+  });
+  row.append(select, apply, del);
+  rules.append(label, row);
   if (!state.mappingRules.length) {
-    rules.textContent = 'No rules yet. Create a rule below, then apply it to future imports or existing facts.';
     return rules;
   }
-  rules.textContent = 'Existing rules';
-  const list = document.createElement('div');
-  list.style.display = 'grid';
-  list.style.gap = '6px';
-  list.style.marginTop = '8px';
-  for (const rule of state.mappingRules) {
-    const row = document.createElement('div');
-    row.style.display = 'grid';
-    row.style.gridTemplateColumns = '1fr auto auto';
-    row.style.gap = '6px';
-    row.style.alignItems = 'center';
-    row.style.border = '1px solid var(--border)';
-    row.style.borderRadius = '7px';
-    row.style.padding = '7px 8px';
-    const text = document.createElement('div');
-    text.style.minWidth = '0';
-    text.textContent = `${rule.is_enabled ? '' : '[off] '}${rule.name || 'Untitled rule'} → ${planName(rule.target_plan_id)}${itemName(rule.target_item_id) ? ` / ${itemName(rule.target_item_id)}` : ''}`;
-    text.title = describeRuleConditions(rule);
-    const apply = document.createElement('button');
-    apply.className = 'finance-small-btn';
-    apply.type = 'button';
-    apply.textContent = 'Apply';
-    apply.addEventListener('click', async () => {
-      const count = await call('apply_finance_mapping_rule', { id: ruleId(rule), remapAssigned: false });
-      showToast(`Rule applied to ${count} fact(s)`, 'success');
-      await loadAll(state.activePlanId);
-    });
-    const del = document.createElement('button');
-    del.className = 'finance-icon-btn';
-    del.type = 'button';
-    del.title = 'Delete rule';
-    del.textContent = '🗑';
-    del.addEventListener('click', async () => {
-      await call('delete_finance_mapping_rule', { id: ruleId(rule) });
-      showToast('Rule deleted', 'success');
-      await loadAll(state.activePlanId);
-      body.replaceChildren(renderRulesModalContent(body));
-    });
-    row.append(text, apply, del);
-    list.appendChild(row);
-  }
-  rules.appendChild(list);
   return rules;
 }
 
@@ -3380,7 +3446,6 @@ function renderRulesModalContent(containerRef = null, seed = {}) {
     option.textContent = label;
     direction.appendChild(option);
   });
-  direction.value = ruleDirectionFromTransaction(seedTransaction);
 
   const amountLabel = document.createElement('label');
   amountLabel.textContent = 'Amount range';
@@ -3446,6 +3511,19 @@ function renderRulesModalContent(containerRef = null, seed = {}) {
     applyLabel, applyWrap,
     remapLabel, remapWrap,
   );
+  const existingRuleSelect = body.querySelector('[data-rule-field="existing-rule"]');
+  existingRuleSelect?.addEventListener('change', () => {
+    populateRuleForm(body, {
+      rule: selectedRuleFromBody(body),
+      seed,
+      itemSelect,
+    });
+  });
+  populateRuleForm(body, {
+    rule: selectedRuleFromBody(body),
+    seed,
+    itemSelect,
+  });
   return body;
 }
 
@@ -3455,13 +3533,14 @@ async function openFinanceRulesModal(seed = {}) {
     await showModal({
       title: 'Finance mapping rules',
       body,
-      confirmText: seed.seedTransaction ? 'Create and apply rule' : 'Create rule',
+      confirmText: seed.seedTransaction ? 'Create and apply rule' : 'Save rule',
       modalClassName: 'finance-facts-modal finance-rules-modal',
       onConfirm: async () => {
         const name = body.querySelector('[data-rule-field="name"]')?.value.trim() || 'New mapping rule';
         const targetItemValue = body.querySelector('[data-rule-field="item-id"]')?.value || '';
         if (!targetItemValue) throw new Error('Choose a terminal target item');
-        const rule = await call('create_finance_mapping_rule', {
+        const existingRule = selectedRuleFromBody(body);
+        const payload = {
           name,
           isEnabled: body.querySelector('[data-rule-field="enabled"]')?.checked ?? true,
           priority: Number(body.querySelector('[data-rule-field="priority"]')?.value || 0),
@@ -3469,15 +3548,18 @@ async function openFinanceRulesModal(seed = {}) {
           conditionsJson: makeRuleConditionsFromForm(body),
           targetPlanId: Number(body.querySelector('[data-rule-field="plan-id"]')?.value),
           targetItemId: Number(targetItemValue),
-        });
+        };
+        const rule = existingRule
+          ? await call('update_finance_mapping_rule', { id: ruleId(existingRule), ...payload })
+          : await call('create_finance_mapping_rule', payload);
         if (body.querySelector('[data-rule-field="apply-existing"]')?.checked) {
           const count = await call('apply_finance_mapping_rule', {
             id: ruleId(rule),
             remapAssigned: Boolean(body.querySelector('[data-rule-field="remap-assigned"]')?.checked),
           });
-          showToast(`Rule created and applied to ${count} fact(s)`, 'success');
+          showToast(`Rule saved and applied to ${count} fact(s)`, 'success');
         } else {
-          showToast('Rule created', 'success');
+          showToast(existingRule ? 'Rule saved' : 'Rule created', 'success');
         }
         await loadAll(state.activePlanId);
       },

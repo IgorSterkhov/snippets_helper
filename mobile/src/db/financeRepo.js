@@ -946,6 +946,52 @@ export async function createFinanceMappingRule({
   return { rule, appliedCount };
 }
 
+export async function updateFinanceMappingRule({
+  uuid,
+  id,
+  name,
+  isEnabled = true,
+  priority = 0,
+  matchMode = 'all',
+  conditions = [],
+  conditionsJson,
+  targetPlan,
+  targetItem,
+  applyExisting = false,
+  remapAssigned = false,
+}) {
+  if (!uuid && id == null) throw new Error('Mapping rule id is required');
+  if (!targetPlan?.uuid) throw new Error('Target finance list is required');
+  const existingResult = uuid
+    ? await query('SELECT * FROM finance_mapping_rules WHERE uuid = ? LIMIT 1', [uuid])
+    : await query('SELECT * FROM finance_mapping_rules WHERE id = ? LIMIT 1', [id]);
+  const existing = rowsToArray(existingResult)[0] || {};
+  const now = nowIso();
+  const rule = {
+    uuid: uuid || existing.uuid || uuidv4(),
+    id: id ?? existing.id ?? null,
+    name: name || existing.name || 'New mapping rule',
+    is_enabled: normalizeBool(isEnabled, true),
+    priority: Number.isFinite(Number(priority)) ? Number(priority) : 0,
+    match_mode: normalizeMatchMode(matchMode),
+    conditions_json: conditionsJson || safeJsonText(conditions),
+    target_plan_id: targetPlan.id ?? existing.target_plan_id ?? null,
+    target_plan_uuid: targetPlan.uuid,
+    target_item_id: targetItem?.id ?? existing.target_item_id ?? null,
+    target_item_uuid: targetItem?.uuid || existing.target_item_uuid || null,
+    created_at: existing.created_at || now,
+    updated_at: now,
+    is_deleted: 0,
+    sync_status: 'pending',
+  };
+  const { sql, params } = buildUpsertFinanceMappingRule(rule);
+  await query(sql, params);
+  const appliedCount = applyExisting
+    ? await applyFinanceMappingRule(rule, { remapAssigned })
+    : 0;
+  return { rule, appliedCount };
+}
+
 export async function getNextFinancePlanSortOrder() {
   const result = await query(
     'SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_order FROM finance_plans WHERE is_deleted = 0',

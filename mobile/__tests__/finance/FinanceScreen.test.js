@@ -105,6 +105,7 @@ jest.mock('../../src/db/financeRepo', () => ({
   upsertFinanceItems: jest.fn(),
   upsertFinancePlan: jest.fn(),
   createFinanceMappingRule: jest.fn().mockResolvedValue({ appliedCount: 0, rule: { uuid: 'rule-new' } }),
+  updateFinanceMappingRule: jest.fn().mockResolvedValue({ rule: { uuid: 'rule-taxi' }, appliedCount: 0 }),
   createFinanceTransactionAllocation: jest.fn().mockResolvedValue({ uuid: 'allocation-new' }),
 }));
 
@@ -170,6 +171,82 @@ describe('FinanceScreen facts mode', () => {
     await waitFor(() => expect(screen.getByText('Т-Мобайл +7 995 644-94-38')).toBeTruthy());
 
     fireEvent.changeText(screen.getByPlaceholderText('Search facts'), 'not matching');
-    await waitFor(() => expect(screen.queryByText('Group target')).toBeNull());
+    await waitFor(() => expect(screen.getByText('Group target')).toBeTruthy());
+    fireEvent.press(screen.getByText('Group target'));
+    await waitFor(() => expect(screen.getByText('Т-Мобайл +7 995 644-94-38')).toBeTruthy());
+    expect(screen.getByPlaceholderText('Search facts').props.value).toBe('');
+  });
+
+  test('edits existing mapping rule direction to any', async () => {
+    financeRepo.getFinanceMappingRules.mockResolvedValue([
+      {
+        uuid: 'rule-taxi',
+        id: 77,
+        name: 'Taxi rule',
+        is_enabled: 1,
+        priority: 3,
+        match_mode: 'all',
+        conditions_json: JSON.stringify([
+          { field: 'bank_category', op: 'contains', value: 'Такси' },
+          { field: 'direction', op: 'equals', value: 'expense' },
+        ]),
+        target_plan_uuid: 'plan-1',
+        target_plan_id: 1,
+        target_item_uuid: 'item-2',
+        target_item_id: 11,
+      },
+    ]);
+    const screen = render(<FinanceScreen />);
+
+    await waitFor(() => expect(screen.getByText('Facts')).toBeTruthy());
+    fireEvent.press(screen.getByText('Facts'));
+    await waitFor(() => expect(screen.getByText('Rules')).toBeTruthy());
+    fireEvent.press(screen.getByText('Rules'));
+
+    await waitFor(() => expect(screen.getByText('Finance mapping rules')).toBeTruthy());
+    fireEvent.press(screen.getByText('Taxi rule'));
+    fireEvent.press(screen.getAllByText('Any')[1]);
+    fireEvent.press(screen.getByText('Save rule'));
+
+    await waitFor(() => expect(financeRepo.updateFinanceMappingRule).toHaveBeenCalled());
+    const payload = financeRepo.updateFinanceMappingRule.mock.calls[0][0];
+    expect(payload.uuid).toBe('rule-taxi');
+    expect(payload.conditions.some((condition) => condition.field === 'direction')).toBe(false);
+    expect(payload.priority).toBe(3);
+  });
+});
+
+describe('FinanceScreen lists mode', () => {
+  beforeEach(() => {
+    financeRepo.flattenFinanceTree.mockImplementation((items = []) => items.map((item) => ({
+      item,
+      depth: item.parent_uuid ? 1 : 0,
+      hasChildren: false,
+      hiddenDescendantCount: 0,
+    })));
+    financeRepo.getFinanceItems.mockResolvedValue([
+      { uuid: 'item-1', id: 10, plan_uuid: 'plan-1', parent_uuid: null, name: 'Подписки', amount_cents: 50000, is_deleted: 0 },
+    ]);
+  });
+
+  test('renders compact selected list header without visible delete icon', async () => {
+    const screen = render(<FinanceScreen />);
+
+    await waitFor(() => expect(screen.getByText('Regular monthly')).toBeTruthy());
+    expect(screen.getByDisplayValue('RUB')).toBeTruthy();
+    expect(screen.getByText('Monthly')).toBeTruthy();
+    expect(screen.getByText('⋯')).toBeTruthy();
+    expect(screen.queryByText('🗑')).toBeNull();
+  });
+
+  test('opens row editor immediately after adding a row', async () => {
+    const screen = render(<FinanceScreen />);
+
+    await waitFor(() => expect(screen.getByText('Добавить строку')).toBeTruthy());
+    fireEvent.press(screen.getByText('Добавить строку'));
+
+    await waitFor(() => expect(financeRepo.upsertFinanceItem).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByText('Строка затрат')).toBeTruthy());
+    expect(screen.getByPlaceholderText('Название')).toBeTruthy();
   });
 });

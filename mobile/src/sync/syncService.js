@@ -1,6 +1,7 @@
 import { syncPull, syncPush } from '../api/endpoints';
 import { getLastSyncAt, setLastSyncAt, setLastSyncDebug } from '../db/syncMetaRepo';
 import { getDB } from '../db/database';
+import { recordSyncHistoryEvents } from '../db/syncHistoryRepo';
 import {
   buildUpsertSnippet, buildUpsertTag,
   getModifiedSnippetsSince, getModifiedTagsSince,
@@ -114,6 +115,67 @@ function countByTable(entriesOrChanges) {
   return counts;
 }
 
+function changesToEntries(changes = {}) {
+  return TABLE_ORDER
+    .filter((table) => Array.isArray(changes[table]) && changes[table].length)
+    .map((table) => [table, changes[table]]);
+}
+
+function rowHistoryEvents(entries, direction, status = 'ok', action = 'upsert') {
+  const events = [];
+  for (const [table, rows] of entries || []) {
+    for (const row of rows || []) {
+      events.push({
+        status,
+        table_name: table,
+        row_uuid: row?.uuid || null,
+        direction,
+        action,
+        details_json: JSON.stringify({
+          updated_at: row?.updated_at || null,
+          sync_status: row?.sync_status || null,
+        }),
+      });
+    }
+  }
+  return events;
+}
+
+function uuidHistoryEvents(uuidMap = {}, direction, status = 'ok', action = 'accepted') {
+  const events = [];
+  for (const [table, uuids] of Object.entries(uuidMap || {})) {
+    for (const uuid of uuids || []) {
+      events.push({
+        status,
+        table_name: table,
+        row_uuid: uuid,
+        direction,
+        action,
+      });
+    }
+  }
+  return events;
+}
+
+function conflictHistoryEvents(conflicts = []) {
+  return (conflicts || []).map((conflict) => ({
+    status: 'warning',
+    table_name: conflict.table || conflict.table_name || null,
+    row_uuid: conflict.uuid || conflict.row_uuid || null,
+    direction: 'conflict',
+    action: conflict.resolution || 'conflict',
+    details_json: JSON.stringify(conflict),
+  }));
+}
+
+async function recordHistory(events) {
+  try {
+    await recordSyncHistoryEvents(events);
+  } catch (e) {
+    // History is diagnostic only; never fail sync because recording failed.
+  }
+}
+
 function maxTimestamp(baseTimestamp, entriesOrChanges) {
   let max = baseTimestamp || null;
   const visit = (row) => {
@@ -156,6 +218,11 @@ function emit(payload) {
   for (const cb of listeners) {
     try { cb(payload); } catch (e) { /* ignore */ }
   }
+}
+
+async function saveSyncDebug(debug) {
+  await setLastSyncDebug(debug).catch(() => {});
+  emit({ type: 'debug', debug });
 }
 
 export async function countPendingChanges() {
@@ -281,7 +348,13 @@ export async function performSync() {
             rejected_uuids: pushResult.rejected_uuids || {},
             conflicts: pushResult.conflicts || [],
           };
-          await setLastSyncDebug(debug).catch(() => {});
+          await recordHistory([
+            ...rowHistoryEvents(pullEntries, 'pull', 'ok', 'upsert'),
+            ...rowHistoryEvents(changesToEntries(changes), 'push', 'warning', 'send'),
+            ...uuidHistoryEvents(debug.rejected_uuids, 'push_reject', 'warning', 'rejected'),
+            ...conflictHistoryEvents(debug.conflicts),
+          ]);
+          await saveSyncDebug(debug);
           const warningError = new Error(`Sync rejected rows or conflicts: ${JSON.stringify({
             rejected_uuids: debug.rejected_uuids,
             conflicts: debug.conflicts,
@@ -301,7 +374,12 @@ export async function performSync() {
       // 3. Update last sync time and emit pending count.
       const nextSyncAt = maxTimestamp(maxTimestamp(pullResult.server_time, pullEntries), changes);
       await setLastSyncAt(nextSyncAt || pullResult.server_time);
-      await setLastSyncDebug({
+      await recordHistory([
+        ...rowHistoryEvents(pullEntries, 'pull', 'ok', 'upsert'),
+        ...rowHistoryEvents(changesToEntries(changes), 'push', 'ok', 'send'),
+        ...uuidHistoryEvents(pushResult?.accepted_uuids || {}, 'push_accept', 'ok', 'accepted'),
+      ]);
+      await saveSyncDebug({
         status: 'ok',
         timestamp: new Date().toISOString(),
         last_sync_at: nextSyncAt || pullResult.server_time,
@@ -310,15 +388,22 @@ export async function performSync() {
         accepted_uuids: pushResult?.accepted_uuids || {},
         rejected_uuids: pushResult?.rejected_uuids || {},
         conflicts: pushResult?.conflicts || [],
-      }).catch(() => {});
+      });
       await emitPending();
     } catch (error) {
       if (!error?.syncWarning) {
-        await setLastSyncDebug({
+        const debug = {
           status: 'error',
           timestamp: new Date().toISOString(),
           error: String(error?.message || error),
-        }).catch(() => {});
+        };
+        await recordHistory([{
+          status: 'error',
+          direction: 'sync',
+          action: 'error',
+          details_json: JSON.stringify(debug),
+        }]);
+        await saveSyncDebug(debug);
       }
       throw error;
     } finally {
@@ -350,7 +435,8 @@ export async function performFullPullFromServer() {
 
       const nextSyncAt = maxTimestamp(pullResult.server_time, pullEntries);
       await setLastSyncAt(nextSyncAt || pullResult.server_time);
-      await setLastSyncDebug({
+      await recordHistory(rowHistoryEvents(pullEntries, 'full_pull', 'ok', 'upsert'));
+      await saveSyncDebug({
         status: 'ok',
         timestamp: new Date().toISOString(),
         last_sync_at: nextSyncAt || pullResult.server_time,
@@ -360,15 +446,22 @@ export async function performFullPullFromServer() {
         accepted_uuids: {},
         rejected_uuids: {},
         conflicts: [],
-      }).catch(() => {});
+      });
       await emitPending();
     } catch (error) {
-      await setLastSyncDebug({
+      const debug = {
         status: 'error',
         timestamp: new Date().toISOString(),
         forced_full_pull: true,
         error: String(error?.message || error),
-      }).catch(() => {});
+      };
+      await recordHistory([{
+        status: 'error',
+        direction: 'full_pull',
+        action: 'error',
+        details_json: JSON.stringify(debug),
+      }]);
+      await saveSyncDebug(debug);
       throw error;
     } finally {
       syncing = false;

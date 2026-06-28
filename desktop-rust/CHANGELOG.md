@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## f-20260628-1 (2026-06-28)
+
+- **Finance Facts diagnostics and mobile sync details:** the `Group target`
+  diagnostic now stays global instead of depending on the current date/search
+  filters; clicking it clears the context and jumps directly to affected facts.
+  Finance mapping rules can now be selected, edited, saved, and re-applied on
+  desktop and mobile. Mobile sync details now include a manual `Sync now`
+  action plus recent row-level sync history for pulled, pushed, accepted,
+  rejected, conflict, full-pull, and error events. The mobile Finance list
+  header is more compact, and new Finance rows open the editor immediately.
+
 ## f-20260627-2 (2026-06-27)
 
 - **Finance Facts visibility:** the Facts search field now has its own visible

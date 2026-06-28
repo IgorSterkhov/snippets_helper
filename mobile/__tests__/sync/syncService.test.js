@@ -5,6 +5,7 @@ import * as noteRepo from '../../src/db/noteRepo';
 import * as taskRepo from '../../src/db/taskRepo';
 import * as financeRepo from '../../src/db/financeRepo';
 import * as syncMeta from '../../src/db/syncMetaRepo';
+import * as syncHistory from '../../src/db/syncHistoryRepo';
 import { getDB } from '../../src/db/database';
 
 jest.mock('../../src/api/endpoints');
@@ -13,6 +14,10 @@ jest.mock('../../src/db/noteRepo');
 jest.mock('../../src/db/taskRepo');
 jest.mock('../../src/db/financeRepo');
 jest.mock('../../src/db/syncMetaRepo');
+jest.mock('../../src/db/syncHistoryRepo', () => ({
+  recordSyncHistoryEvents: jest.fn(),
+  getRecentSyncHistory: jest.fn(),
+}), { virtual: true });
 jest.mock('../../src/db/database', () => ({
   getDB: jest.fn(),
 }));
@@ -51,6 +56,8 @@ describe('syncService', () => {
     financeRepo.getModifiedFinanceMappingRulesSince.mockResolvedValue([]);
     financeRepo.getModifiedFinanceTransactionAllocationsSince.mockResolvedValue([]);
     syncMeta.setLastSyncDebug.mockResolvedValue(undefined);
+    syncHistory.recordSyncHistoryEvents.mockResolvedValue(undefined);
+    syncHistory.getRecentSyncHistory.mockResolvedValue([]);
   });
 
   test('pull applies server changes to local DB', async () => {
@@ -165,7 +172,18 @@ describe('syncService', () => {
     financeRepo.getModifiedFinanceTransactionAllocationsSince.mockResolvedValue([
       { uuid: 'allocation-local', transaction_uuid: 'tx-local', plan_uuid: 'plan-local', item_uuid: 'item-local', updated_at: '2026-06-11T09:34:00' },
     ]);
-    endpoints.syncPush.mockResolvedValue({ status: 'ok', accepted: 2, conflicts: [] });
+    endpoints.syncPush.mockResolvedValue({
+      status: 'ok',
+      accepted: 5,
+      accepted_uuids: {
+        finance_plans: ['plan-local'],
+        finance_items: ['item-local'],
+        finance_transactions: ['tx-local'],
+        finance_mapping_rules: ['rule-local'],
+        finance_transaction_allocations: ['allocation-local'],
+      },
+      conflicts: [],
+    });
 
     await performSync();
 
@@ -192,6 +210,13 @@ describe('syncService', () => {
         finance_mapping_rules: expect.arrayContaining([expect.objectContaining({ uuid: 'rule-local' })]),
         finance_transaction_allocations: expect.arrayContaining([expect.objectContaining({ uuid: 'allocation-local' })]),
       }),
+    );
+    expect(syncHistory.recordSyncHistoryEvents).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({ status: 'ok', direction: 'pull', table_name: 'finance_plans', row_uuid: 'plan-1' }),
+        expect.objectContaining({ status: 'ok', direction: 'push', table_name: 'finance_plans', row_uuid: 'plan-local' }),
+        expect.objectContaining({ status: 'ok', direction: 'push_accept', table_name: 'finance_plans' }),
+      ]),
     );
   });
 
@@ -478,6 +503,12 @@ describe('syncService', () => {
         conflicts: [{ table: 'shortcuts', uuid: 's-local', resolution: 'server_wins' }],
       }),
     );
+    expect(syncHistory.recordSyncHistoryEvents).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({ status: 'warning', direction: 'push_reject', table_name: 'shortcuts', row_uuid: 's-local' }),
+        expect.objectContaining({ status: 'warning', direction: 'conflict', table_name: 'shortcuts', row_uuid: 's-local' }),
+      ]),
+    );
   });
 
   test('forced full pull downloads server rows without pushing local rows', async () => {
@@ -510,6 +541,29 @@ describe('syncService', () => {
         pulled_counts: { finance_transactions: 1 },
         pushed_counts: {},
       }),
+    );
+    expect(syncHistory.recordSyncHistoryEvents).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({ status: 'ok', direction: 'full_pull', table_name: 'finance_transactions', row_uuid: 'tx-server' }),
+      ]),
+    );
+  });
+
+  test('sync records error diagnostics in history', async () => {
+    syncMeta.getLastSyncAt.mockResolvedValue('2026-06-27T09:00:00');
+    endpoints.syncPull.mockRejectedValue(new Error('network down'));
+
+    await expect(performSync()).rejects.toThrow(/network down/);
+
+    expect(syncHistory.recordSyncHistoryEvents).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          status: 'error',
+          direction: 'sync',
+          action: 'error',
+          details_json: expect.stringContaining('network down'),
+        }),
+      ]),
     );
   });
 
