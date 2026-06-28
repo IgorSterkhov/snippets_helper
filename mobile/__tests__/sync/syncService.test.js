@@ -389,6 +389,71 @@ describe('syncService', () => {
     expect(financeRepo.clearSyncedFinanceRows).toHaveBeenCalledWith('finance_transaction_allocations', ['allocation-dirty']);
   });
 
+  test('sync treats server-wins finance allocation conflicts as resolved stale local rows', async () => {
+    syncMeta.getLastSyncAt.mockResolvedValue('2026-06-28T18:25:00');
+    endpoints.syncPull.mockResolvedValue({ changes: {}, server_time: '2026-06-28T18:26:00' });
+    snippetRepo.getModifiedSnippetsSince.mockResolvedValue([]);
+    snippetRepo.getModifiedTagsSince.mockResolvedValue([]);
+    noteRepo.getModifiedNotesSince.mockResolvedValue([]);
+    noteRepo.getModifiedFoldersSince.mockResolvedValue([]);
+    financeRepo.getModifiedFinanceTransactionAllocationsSince.mockResolvedValue([
+      {
+        uuid: 'allocation-stale-1',
+        transaction_uuid: 'tx-taxi-1',
+        plan_uuid: 'plan-regular',
+        item_uuid: 'item-taxi',
+        updated_at: '2026-06-28T18:22:00',
+        sync_dirty: 1,
+        sync_status: 'pending',
+      },
+      {
+        uuid: 'allocation-stale-2',
+        transaction_uuid: 'tx-taxi-2',
+        plan_uuid: 'plan-regular',
+        item_uuid: 'item-taxi',
+        updated_at: '2026-06-28T18:22:30',
+        sync_dirty: 1,
+        sync_status: 'pending',
+      },
+    ]);
+    endpoints.syncPush.mockResolvedValue({
+      status: 'ok',
+      accepted: 0,
+      accepted_uuids: {},
+      rejected_uuids: {},
+      conflicts: [
+        {
+          table: 'finance_transaction_allocations',
+          uuid: 'allocation-stale-1',
+          server_updated_at: '2026-06-28T18:23:00',
+          resolution: 'server_wins',
+        },
+        {
+          table: 'finance_transaction_allocations',
+          uuid: 'allocation-stale-2',
+          server_updated_at: '2026-06-28T18:23:01',
+          resolution: 'server_wins',
+        },
+      ],
+    });
+
+    await expect(performSync()).resolves.toBeUndefined();
+
+    expect(financeRepo.clearSyncedFinanceRows).toHaveBeenCalledWith(
+      'finance_transaction_allocations',
+      ['allocation-stale-1', 'allocation-stale-2'],
+    );
+    expect(syncMeta.setLastSyncDebug).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'ok',
+        resolved_conflicts: [
+          expect.objectContaining({ uuid: 'allocation-stale-1', resolution: 'server_wins' }),
+          expect.objectContaining({ uuid: 'allocation-stale-2', resolution: 'server_wins' }),
+        ],
+      }),
+    );
+  });
+
   test('sync marks accepted finance rows synced for every finance table', async () => {
     syncMeta.getLastSyncAt.mockResolvedValue('2026-06-27T12:00:00');
     endpoints.syncPull.mockResolvedValue({ changes: {}, server_time: '2026-06-27T12:30:00' });

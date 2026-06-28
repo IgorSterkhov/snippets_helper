@@ -157,13 +157,13 @@ function uuidHistoryEvents(uuidMap = {}, direction, status = 'ok', action = 'acc
   return events;
 }
 
-function conflictHistoryEvents(conflicts = []) {
+function conflictHistoryEvents(conflicts = [], status = 'warning', actionOverride = null) {
   return (conflicts || []).map((conflict) => ({
-    status: 'warning',
+    status,
     table_name: conflict.table || conflict.table_name || null,
     row_uuid: conflict.uuid || conflict.row_uuid || null,
     direction: 'conflict',
-    action: conflict.resolution || 'conflict',
+    action: actionOverride || conflict.resolution || 'conflict',
     details_json: JSON.stringify(conflict),
   }));
 }
@@ -203,6 +203,28 @@ function hasPushWarnings(result) {
   const conflicts = result?.conflicts || [];
   return Object.values(rejected).some((rows) => Array.isArray(rows) && rows.length > 0)
     || (Array.isArray(conflicts) && conflicts.length > 0);
+}
+
+function hasRejectedUuids(rejected = {}) {
+  return Object.values(rejected || {}).some((rows) => Array.isArray(rows) && rows.length > 0);
+}
+
+function isResolvedFinanceAllocationServerWinsConflict(conflict) {
+  return String(conflict?.table || conflict?.table_name || '') === 'finance_transaction_allocations'
+    && String(conflict?.resolution || '') === 'server_wins'
+    && Boolean(conflict?.uuid || conflict?.row_uuid);
+}
+
+function conflictUuidsByTable(conflicts = []) {
+  const result = {};
+  for (const conflict of conflicts || []) {
+    const table = conflict?.table || conflict?.table_name;
+    const uuid = conflict?.uuid || conflict?.row_uuid;
+    if (!table || !uuid) continue;
+    if (!result[table]) result[table] = [];
+    result[table].push(uuid);
+  }
+  return result;
 }
 
 let syncing = false;
@@ -337,30 +359,46 @@ export async function performSync() {
       if (localFinanceTransactionAllocations.length) changes.finance_transaction_allocations = localFinanceTransactionAllocations;
 
       let pushResult = null;
+      let resolvedConflicts = [];
+      let unresolvedConflicts = [];
       if (Object.keys(changes).length > 0) {
         pushResult = await syncPush(changes);
         if (hasPushWarnings(pushResult)) {
+          const rejectedUuids = pushResult.rejected_uuids || {};
+          const pushConflicts = pushResult.conflicts || [];
+          resolvedConflicts = pushConflicts.filter(isResolvedFinanceAllocationServerWinsConflict);
+          unresolvedConflicts = pushConflicts.filter((conflict) => !isResolvedFinanceAllocationServerWinsConflict(conflict));
+          const resolvedByTable = conflictUuidsByTable(resolvedConflicts);
+          for (const [table, uuids] of Object.entries(resolvedByTable)) {
+            if (FINANCE_TABLES.has(table) && uuids.length) {
+              await clearSyncedFinanceRows(table, uuids);
+            }
+          }
           const debug = {
-            status: 'warning',
+            status: hasRejectedUuids(rejectedUuids) || unresolvedConflicts.length ? 'warning' : 'ok',
             timestamp: new Date().toISOString(),
             pulled_counts: countByTable(pullEntries),
             pushed_counts: countByTable(changes),
-            rejected_uuids: pushResult.rejected_uuids || {},
-            conflicts: pushResult.conflicts || [],
+            rejected_uuids: rejectedUuids,
+            conflicts: unresolvedConflicts,
+            resolved_conflicts: resolvedConflicts,
           };
           await recordHistory([
             ...rowHistoryEvents(pullEntries, 'pull', 'ok', 'upsert'),
-            ...rowHistoryEvents(changesToEntries(changes), 'push', 'warning', 'send'),
+            ...rowHistoryEvents(changesToEntries(changes), 'push', debug.status === 'warning' ? 'warning' : 'ok', 'send'),
             ...uuidHistoryEvents(debug.rejected_uuids, 'push_reject', 'warning', 'rejected'),
             ...conflictHistoryEvents(debug.conflicts),
+            ...conflictHistoryEvents(debug.resolved_conflicts, 'ok', 'server_wins_resolved'),
           ]);
-          await saveSyncDebug(debug);
-          const warningError = new Error(`Sync rejected rows or conflicts: ${JSON.stringify({
-            rejected_uuids: debug.rejected_uuids,
-            conflicts: debug.conflicts,
-          })}`);
-          warningError.syncWarning = true;
-          throw warningError;
+          if (debug.status === 'warning') {
+            await saveSyncDebug(debug);
+            const warningError = new Error(`Sync rejected rows or conflicts: ${JSON.stringify({
+              rejected_uuids: debug.rejected_uuids,
+              conflicts: debug.conflicts,
+            })}`);
+            warningError.syncWarning = true;
+            throw warningError;
+          }
         }
         const acceptedUuids = pushResult?.accepted_uuids || {};
         for (const table of FINANCE_TABLES) {
@@ -387,7 +425,8 @@ export async function performSync() {
         pushed_counts: countByTable(changes),
         accepted_uuids: pushResult?.accepted_uuids || {},
         rejected_uuids: pushResult?.rejected_uuids || {},
-        conflicts: pushResult?.conflicts || [],
+        conflicts: unresolvedConflicts,
+        resolved_conflicts: resolvedConflicts,
       });
       await emitPending();
     } catch (error) {
