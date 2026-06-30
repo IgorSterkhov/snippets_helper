@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v1.23.1 (2026-06-30)
+
+- **SQL Table Parser dictGet support:** the parser now recognizes typed
+  ClickHouse dictionary calls such as `dictGetInt32OrDefault` and
+  `dictGetUInt16OrDefault`, so dictionary targets like
+  `dict.product_cards_nm_short` are included in the Dicts result.
+
 ## f-20260628-1 (2026-06-28)
 
 - **Finance Facts diagnostics and mobile sync details:** the `Group target`

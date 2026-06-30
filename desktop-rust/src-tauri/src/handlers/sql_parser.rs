@@ -20,7 +20,7 @@ pub fn parse_sql(sql: &str) -> String {
     ).unwrap();
 
     let pattern_dictget = Regex::new(
-        r"(?i)dictGet\('([^']*\.[^']*)'"
+        r#"(?i)\bdictGet[A-Za-z0-9_]*\s*\(\s*['"]([^'"]*\.[^'"]*)['"]"#
     ).unwrap();
 
     let mut unique_tables = BTreeSet::new();
@@ -87,6 +87,22 @@ mod tests {
         let result = parse_sql("SELECT dictGet('db.my_dict', 'col', id) FROM db.some_table");
         assert!(result.contains("db.my_dict"), "Should find dictGet target");
         assert!(result.contains("db.some_table"), "Should find FROM table");
+        assert!(result.contains("# Dicts:"), "Should have Dicts section");
+    }
+
+    #[test]
+    fn test_parse_typed_dictget_or_default() {
+        let sql = r#"
+            SELECT dictGetInt32OrDefault('dict.product_cards_nm_short', 'seller_id', nm_id, 0) AS seller_id,
+                   dictGetUInt16OrDefault('dict.product_cards_nm_short', 'subject_id', nm_id, 0) AS subject_id
+              FROM datamart.v3_by_srid_d AS src FINAL
+        "#;
+        let result = parse_sql(sql);
+        assert!(
+            result.contains("dict.product_cards_nm_short"),
+            "Should find typed dictGet*OrDefault target: {result}"
+        );
+        assert!(result.contains("datamart.v3_by_srid_d"));
         assert!(result.contains("# Dicts:"), "Should have Dicts section");
     }
 
