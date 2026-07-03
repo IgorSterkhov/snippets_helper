@@ -2156,6 +2156,9 @@ async def run_tests():
             .filter(x => x.task_id !== 2);
           localStorage.setItem('mock.task_links', JSON.stringify([...others, ...links]));
           localStorage.setItem('mock.__seq.task_links', '211');
+          const tasks = JSON.parse(localStorage.getItem('mock.tasks') || '[]')
+            .map(x => x.id === 2 ? { ...x, tracker_url: 'https://tracker.example.com/TASK-2' } : x);
+          localStorage.setItem('mock.tasks', JSON.stringify(tasks));
           window.__mockOpenedUrls = [];
           window.__directTaskWindowOpenUrls = [];
           window.__originalOpenForTaskLinks = window.open;
@@ -2180,6 +2183,7 @@ async def run_tests():
               modal.querySelector('.modal-actions button:last-child')?.click();
             })()""")
             await wait_until(cdp, "!document.querySelector('.modal-overlay')", timeout=3)
+            await cdp.eval("import('./tabs/tasks/index.js').then(m => m.reloadTasks())")
             shelf = await wait_until(
                 cdp,
                 """(() => {
@@ -2187,8 +2191,17 @@ async def run_tests():
                     .find(x => x.querySelector('.task-title')?.textContent.includes('Regular mock task'));
                   const shelf = card?.querySelector('.task-link-shelf');
                   if (!shelf) return null;
+                  const chips = [...shelf.querySelectorAll('.task-link-chip')]
+                    .map(x => ({
+                      text: x.textContent.trim(),
+                      url: x.title,
+                      linkId: x.dataset.linkId || '',
+                      isTracker: x.classList.contains('task-link-chip-tracker'),
+                    }));
                   return {
                     text: shelf.textContent,
+                    chips,
+                    hasHeaderTracker: !!card.querySelector('.task-tracker-btn'),
                     marker: shelf.querySelector('.task-link-chip-marker')?.textContent || '',
                     color: getComputedStyle(shelf.querySelector('.task-link-chip')).borderColor,
                     beforeCheckboxes: (() => {
@@ -2203,8 +2216,31 @@ async def run_tests():
                 timeout=4,
             )
             assert 'Alpha docs' in shelf['text'] and 'Beta console' in shelf['text'], shelf
+            assert shelf['chips'][0]['isTracker'] is True, shelf
+            assert shelf['chips'][0]['text'].endswith('Tracker'), shelf
+            assert shelf['chips'][0]['url'] == 'https://tracker.example.com/TASK-2', shelf
+            assert shelf['chips'][0]['linkId'] == '', shelf
+            assert shelf['chips'][1]['text'].endswith('Alpha docs'), shelf
+            assert shelf['chips'][2]['text'].endswith('Beta console'), shelf
+            assert shelf['hasHeaderTracker'] is False, shelf
             assert shelf['marker'] == '◈', shelf
             assert shelf['beforeCheckboxes'] is True, shelf
+
+            await cdp.eval("""(() => {
+              const card = [...document.querySelectorAll('#panel-tasks .task-card')]
+                .find(x => x.querySelector('.task-title')?.textContent.includes('Regular mock task'));
+              const chip = card?.querySelector('.task-link-chip-tracker');
+              chip?.click();
+            })()""")
+            opened = await wait_until(
+                cdp,
+                """(() => {
+                  const urls = window.__mockOpenedUrls || [];
+                  return urls.includes('https://tracker.example.com/TASK-2') ? urls : null;
+                })()""",
+                timeout=3,
+            )
+            assert opened == ['https://tracker.example.com/TASK-2'], opened
 
             await cdp.eval("""(() => {
               const chip = [...document.querySelectorAll('#panel-tasks .task-link-chip')]
@@ -2219,15 +2255,15 @@ async def run_tests():
                 })()""",
                 timeout=3,
             )
-            assert opened == ['https://example.com/alpha'], opened
+            assert opened == ['https://tracker.example.com/TASK-2', 'https://example.com/alpha'], opened
 
             await cdp.eval("""(async () => {
               const shelf = [...document.querySelectorAll('#panel-tasks .task-card')]
                 .find(x => x.querySelector('.task-title')?.textContent.includes('Regular mock task'))
                 ?.querySelector('.task-link-shelf');
-              const chips = [...shelf.querySelectorAll('.task-link-chip')];
-              const from = chips[1];
-              const to = chips[0];
+              const chips = [...shelf.querySelectorAll('.task-link-chip[data-link-id]')];
+              const from = chips.find(x => x.textContent.includes('Beta console'));
+              const to = chips.find(x => x.textContent.includes('Alpha docs'));
               const fr = from.getBoundingClientRect();
               const tr = to.getBoundingClientRect();
               const sx = fr.left + fr.width / 2;
@@ -2265,6 +2301,13 @@ async def run_tests():
                 })()""",
                 timeout=3,
             )
+            shelf_after_dnd = await cdp.eval("""(() => {
+              const card = [...document.querySelectorAll('#panel-tasks .task-card')]
+                .find(x => x.querySelector('.task-title')?.textContent.includes('Regular mock task'));
+              return [...card.querySelectorAll('.task-link-shelf .task-link-chip')]
+                .map(x => x.textContent.trim());
+            })()""")
+            assert shelf_after_dnd[0].endswith('Tracker'), shelf_after_dnd
 
             await cdp.eval(
                 "[...document.querySelectorAll('.task-title')]"
@@ -2288,7 +2331,7 @@ async def run_tests():
                 cdp,
                 """(() => {
                   const urls = window.__mockOpenedUrls || [];
-                  return urls[urls.length - 1] === 'https://tracker.example.com/TASK-2' ? urls : null;
+                  return urls.filter(x => x === 'https://tracker.example.com/TASK-2').length >= 2 ? urls : null;
                 })()""",
                 timeout=3,
             )

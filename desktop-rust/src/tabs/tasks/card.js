@@ -148,19 +148,6 @@ function buildHead(task, ctx) {
     if (st) head.appendChild(buildBadge(st));
   }
 
-  // Tracker button (collapsed only)
-  if (!ctx.expanded && task.tracker_url) {
-    const trk = document.createElement('a');
-    trk.className = 'task-tracker-btn';
-    trk.href = task.tracker_url;
-    trk.target = '_blank';
-    trk.rel = 'noopener noreferrer';
-    trk.textContent = '🎫 Tracker';
-    trk.title = task.tracker_url;
-    trk.addEventListener('click', (e) => e.stopPropagation());
-    head.appendChild(trk);
-  }
-
   // Pin marker (collapsed only)
   if (!ctx.expanded && task.is_pinned) {
     head.appendChild(el('span', { text: '📌', style: 'font-size:12px' }));
@@ -327,55 +314,79 @@ function renderCollapsedLinkShelf(body, task, ctx) {
 
 function appendCollapsedLinkShelf(body, task, ctx, links) {
   if (body.querySelector('.task-link-shelf')) return;
+  const trackerUrl = String(task.tracker_url || '').trim();
   const visibleLinks = (links || []).filter(link => String(link.url || '').trim());
-  if (!visibleLinks.length) return;
+  if (!trackerUrl && !visibleLinks.length) return;
 
   const settings = ctx.state?.collapsedLinks || {};
   const shelf = el('div', { class: 'task-link-shelf' });
   shelf.style.setProperty('--task-link-chip-color', normalizeChipColor(settings.color));
 
-  for (const link of visibleLinks) {
-    const chip = document.createElement('button');
-    chip.type = 'button';
-    chip.className = 'task-link-chip';
-    chip.dataset.linkId = String(link.id);
-    chip.title = link.url;
-    chip.innerHTML = `
-      <span class="task-link-chip-marker">${escapeHtml(settings.marker || '◈')}</span>
-      <span class="task-link-chip-label">${escapeHtml(linkLabel(link))}</span>
-    `;
-    chip.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      e.preventDefault();
-      if (chip.dataset.dragSuppressClick === '1') return;
-      try {
-        await call('open_url', { url: link.url });
-      } catch (err) {
-        showToast('Open link failed: ' + err, 'error');
-      }
+  if (trackerUrl) {
+    const trackerChip = buildCollapsedLinkChip({
+      label: 'Tracker',
+      url: trackerUrl,
+      marker: settings.marker || '◈',
+      className: 'task-link-chip-tracker',
+      onOpenError: 'Open tracker failed: ',
     });
+    shelf.appendChild(trackerChip);
+  }
+
+  for (const link of visibleLinks) {
+    const chip = buildCollapsedLinkChip({
+      label: linkLabel(link),
+      url: link.url,
+      marker: settings.marker || '◈',
+      onOpenError: 'Open link failed: ',
+    });
+    chip.dataset.linkId = String(link.id);
     shelf.appendChild(chip);
   }
 
-  installWrappedChipDnd(shelf, {
-    chipSelector: '.task-link-chip',
-    datasetKey: 'linkId',
-    placeholderClass: 'task-link-chip-placeholder',
-    sourceClass: 'task-link-chip-source',
-    onReorder: async (ids) => {
-      try {
-        await call('reorder_task_links', { taskId: task.id, ids });
-        taskLinkCache.delete(task.id);
-      } catch (e) {
-        showToast('Link reorder failed: ' + e, 'error');
-      }
-    },
-  });
+  if (visibleLinks.length > 1) {
+    installWrappedChipDnd(shelf, {
+      chipSelector: '.task-link-chip[data-link-id]',
+      datasetKey: 'linkId',
+      placeholderClass: 'task-link-chip-placeholder',
+      sourceClass: 'task-link-chip-source',
+      onReorder: async (ids) => {
+        try {
+          await call('reorder_task_links', { taskId: task.id, ids });
+          taskLinkCache.delete(task.id);
+        } catch (e) {
+          showToast('Link reorder failed: ' + e, 'error');
+        }
+      },
+    });
+  }
 
   const anchor = Array.from(body.children)
     .find(child => child.classList.contains('tcb-item') || child.classList.contains('tcb-add'))
     || body.firstChild;
   body.insertBefore(shelf, anchor);
+}
+
+function buildCollapsedLinkChip({ label, url, marker, className = '', onOpenError }) {
+  const chip = document.createElement('button');
+  chip.type = 'button';
+  chip.className = ['task-link-chip', className].filter(Boolean).join(' ');
+  chip.title = url;
+  chip.innerHTML = `
+    <span class="task-link-chip-marker">${escapeHtml(marker)}</span>
+    <span class="task-link-chip-label">${escapeHtml(label)}</span>
+  `;
+  chip.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (chip.dataset.dragSuppressClick === '1') return;
+    try {
+      await call('open_url', { url });
+    } catch (err) {
+      showToast(onOpenError + err, 'error');
+    }
+  });
+  return chip;
 }
 
 async function applyMaxHeight(body) {

@@ -75,6 +75,10 @@ export function tasksCSS() {
   border-color: color-mix(in srgb, var(--task-link-chip-color, #3fb950) 72%, var(--text-muted));
   background: color-mix(in srgb, var(--task-link-chip-color, #3fb950) 18%, transparent);
 }
+.task-link-chip-tracker {
+  border-color: color-mix(in srgb, var(--task-link-chip-color, #3fb950) 68%, var(--border));
+  background: color-mix(in srgb, var(--task-link-chip-color, #3fb950) 18%, transparent);
+}
 .task-link-chip-marker {
   display: inline-grid;
   place-items: center;

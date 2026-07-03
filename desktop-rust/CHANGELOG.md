@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## f-20260703-1 (2026-07-03)
+
+- **Tasks collapsed links:** collapsed task cards now include the task Tracker
+  URL as the first chip in the optional link shelf, before auxiliary task
+  links. The old separate collapsed header Tracker button was removed to avoid
+  duplicate link controls.
+
 ## v1.23.1 (2026-06-30)
 
 - **SQL Table Parser dictGet support:** the parser now recognizes typed
