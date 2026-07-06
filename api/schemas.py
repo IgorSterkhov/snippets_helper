@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 from pydantic import BaseModel
 
 
@@ -168,6 +168,20 @@ class TelegraphPublishRequest(BaseModel):
     item_uuid: str
 
 
+class TelegraphCompleteRequest(BaseModel):
+    item_type: str
+    item_uuid: str
+    path: str
+    url: str
+    title: str
+    content_hash: str
+    views: Optional[int] = None
+    access_token: Optional[str] = None
+    short_name: Optional[str] = None
+    author_name: Optional[str] = None
+    author_url: Optional[str] = None
+
+
 class TelegraphPageResponse(BaseModel):
     item_type: str
     item_uuid: str
@@ -182,6 +196,19 @@ class TelegraphPageResponse(BaseModel):
 
 
 class TelegraphStatusResponse(BaseModel):
+    page: Optional[TelegraphPageResponse] = None
+
+
+class TelegraphPrepareResponse(BaseModel):
+    item_type: str
+    item_uuid: str
+    title: str
+    content_hash: str
+    content: list[Any]
+    short_name: str
+    author_name: str
+    author_url: str = ""
+    access_token: Optional[str] = None
     page: Optional[TelegraphPageResponse] = None
 
 

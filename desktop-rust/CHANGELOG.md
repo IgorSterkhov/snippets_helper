@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v1.24.0 (2026-07-06)
+
+- **Telegra.ph desktop publishing fallback:** the Share dialog now publishes
+  notes and snippets to Telegra.ph through the desktop native app while the sync
+  API prepares and stores the snapshot metadata. This avoids production server
+  outbound-network timeouts to `api.telegra.ph`.
+
 ## f-20260703-1 (2026-07-03)
 
 - **Tasks collapsed links:** collapsed task cards now include the task Tracker

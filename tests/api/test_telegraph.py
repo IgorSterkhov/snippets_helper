@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -177,3 +178,237 @@ def test_publish_telegraph_response_never_exposes_access_token(monkeypatch):
     assert response.url == "https://telegra.ph/Deploy-06-09"
     assert response.item_uuid == str(item_uuid)
     assert not hasattr(response, "access_token")
+
+
+def test_prepare_telegraph_returns_desktop_publish_payload(monkeypatch):
+    user_id = uuid4()
+    item_uuid = uuid4()
+    now = datetime.utcnow()
+
+    async def owned_item(*args, **kwargs):
+        return SimpleNamespace(
+            name="Deploy",
+            value="run deploy",
+            description="ship safely",
+            links="[]",
+        )
+
+    async def existing_page(*args, **kwargs):
+        return SimpleNamespace(
+            item_type="shortcut",
+            item_uuid=item_uuid,
+            url="https://telegra.ph/Deploy-06-09",
+            path="Deploy-06-09",
+            title="Deploy",
+            content_hash="old-hash",
+            views=7,
+            created_at=now,
+            updated_at=now,
+            published_at=now,
+        )
+
+    monkeypatch.setattr(share_links, "_load_owned_item", owned_item)
+    monkeypatch.setattr(share_links, "_load_telegraph_page", existing_page)
+
+    response = asyncio.run(share_links.prepare_telegraph_page(
+        share_links.TelegraphPublishRequest(item_type="shortcut", item_uuid=str(item_uuid)),
+        user=SimpleNamespace(
+            id=user_id,
+            api_key="abcdef123456",
+            telegraph_access_token="server-only-token",
+            telegraph_short_name="ister_abcdef12",
+            telegraph_author_name=None,
+            telegraph_author_url=None,
+        ),
+        db=FakeDb(),
+    ))
+
+    assert response.item_type == "shortcut"
+    assert response.item_uuid == str(item_uuid)
+    assert response.short_name == "ister_abcdef12"
+    assert response.access_token == "server-only-token"
+    assert response.title == "Deploy"
+    assert isinstance(response.content, list)
+    assert response.content_hash == content_hash(response.content)
+    assert response.page.url == "https://telegra.ph/Deploy-06-09"
+
+
+def test_complete_telegraph_stores_published_snapshot_hash(monkeypatch):
+    item_uuid = uuid4()
+
+    async def owned_item(*args, **kwargs):
+        return SimpleNamespace(
+            name="Deploy",
+            value="changed content",
+            description="",
+            links="[]",
+        )
+
+    async def no_page(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(share_links, "_load_owned_item", owned_item)
+    monkeypatch.setattr(share_links, "_load_telegraph_page", no_page)
+
+    db = FakeDb()
+    user = SimpleNamespace(
+        id=uuid4(),
+        api_key="abcdef123456",
+        telegraph_access_token=None,
+        telegraph_short_name=None,
+        telegraph_author_name=None,
+        telegraph_author_url=None,
+        telegraph_updated_at=None,
+    )
+    response = asyncio.run(share_links.complete_telegraph_page(
+        share_links.TelegraphCompleteRequest(
+            item_type="shortcut",
+            item_uuid=str(item_uuid),
+            path="Deploy-06-09",
+            url="https://telegra.ph/Deploy-06-09",
+            title="Deploy",
+            content_hash="published-hash",
+            views=1,
+            access_token="new-token",
+            short_name="ister_abcdef12",
+            author_name="Ister App",
+            author_url="",
+        ),
+        user=user,
+        db=db,
+    ))
+
+    assert response.content_hash == "published-hash"
+    assert db.added[0].content_hash == "published-hash"
+    assert user.telegraph_access_token == "new-token"
+    assert user.telegraph_short_name == "ister_abcdef12"
+
+
+def test_complete_telegraph_rejects_non_telegraph_url(monkeypatch):
+    item_uuid = uuid4()
+
+    async def owned_item(*args, **kwargs):
+        return SimpleNamespace(name="Deploy", value="run deploy", description="", links="[]")
+
+    async def no_page(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(share_links, "_load_owned_item", owned_item)
+    monkeypatch.setattr(share_links, "_load_telegraph_page", no_page)
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(share_links.complete_telegraph_page(
+            share_links.TelegraphCompleteRequest(
+                item_type="shortcut",
+                item_uuid=str(item_uuid),
+                path="Deploy-06-09",
+                url="https://example.com/Deploy-06-09",
+                title="Deploy",
+                content_hash="published-hash",
+                access_token="new-token",
+            ),
+            user=SimpleNamespace(
+                id=uuid4(),
+                api_key="abcdef123456",
+                telegraph_access_token=None,
+                telegraph_short_name=None,
+                telegraph_author_name=None,
+                telegraph_author_url=None,
+            ),
+            db=FakeDb(),
+        ))
+
+    assert exc.value.status_code == 400
+    assert "Telegra.ph URL" in exc.value.detail
+
+
+def test_complete_telegraph_rejects_noncanonical_url_and_path(monkeypatch):
+    item_uuid = uuid4()
+
+    async def owned_item(*args, **kwargs):
+        return SimpleNamespace(name="Deploy", value="run deploy", description="", links="[]")
+
+    async def no_page(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(share_links, "_load_owned_item", owned_item)
+    monkeypatch.setattr(share_links, "_load_telegraph_page", no_page)
+
+    for path, url in [
+        (" Deploy-06-09 ", "https://telegra.ph/Deploy-06-09"),
+        ("Deploy-06-09", "https://telegra.ph:443/Deploy-06-09"),
+        ("Deploy-06-09", "https://telegra.ph//Deploy-06-09"),
+    ]:
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(share_links.complete_telegraph_page(
+                share_links.TelegraphCompleteRequest(
+                    item_type="shortcut",
+                    item_uuid=str(item_uuid),
+                    path=path,
+                    url=url,
+                    title="Deploy",
+                    content_hash="published-hash",
+                    access_token="new-token",
+                ),
+                user=SimpleNamespace(
+                    id=uuid4(),
+                    api_key="abcdef123456",
+                    telegraph_access_token=None,
+                    telegraph_short_name=None,
+                    telegraph_author_name=None,
+                    telegraph_author_url=None,
+                ),
+                db=FakeDb(),
+            ))
+
+        assert exc.value.status_code == 400
+
+
+def test_complete_telegraph_rejects_existing_page_path_swap(monkeypatch):
+    item_uuid = uuid4()
+    now = datetime.utcnow()
+
+    async def owned_item(*args, **kwargs):
+        return SimpleNamespace(name="Deploy", value="run deploy", description="", links="[]")
+
+    async def existing_page(*args, **kwargs):
+        return SimpleNamespace(
+            item_type="shortcut",
+            item_uuid=item_uuid,
+            url="https://telegra.ph/Deploy-06-09",
+            path="Deploy-06-09",
+            title="Deploy",
+            content_hash="old-hash",
+            views=1,
+            created_at=now,
+            updated_at=now,
+            published_at=now,
+        )
+
+    monkeypatch.setattr(share_links, "_load_owned_item", owned_item)
+    monkeypatch.setattr(share_links, "_load_telegraph_page", existing_page)
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(share_links.complete_telegraph_page(
+            share_links.TelegraphCompleteRequest(
+                item_type="shortcut",
+                item_uuid=str(item_uuid),
+                path="Other-06-09",
+                url="https://telegra.ph/Other-06-09",
+                title="Deploy",
+                content_hash="published-hash",
+                access_token="server-only-token",
+            ),
+            user=SimpleNamespace(
+                id=uuid4(),
+                api_key="abcdef123456",
+                telegraph_access_token="server-only-token",
+                telegraph_short_name="ister_abcdef12",
+                telegraph_author_name=None,
+                telegraph_author_url=None,
+            ),
+            db=FakeDb(),
+        ))
+
+    assert exc.value.status_code == 409
+    assert "path mismatch" in exc.value.detail

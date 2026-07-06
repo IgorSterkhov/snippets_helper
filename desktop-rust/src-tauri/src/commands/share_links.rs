@@ -1,7 +1,10 @@
 use crate::db::{queries, DbState};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tauri::State;
+
+const TELEGRAPH_API_BASE: &str = "https://api.telegra.ph";
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ShareLink {
@@ -37,6 +40,55 @@ struct ShareStatusResponse {
 #[derive(Debug, Deserialize)]
 struct TelegraphStatusResponse {
     page: Option<TelegraphPage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TelegraphPrepareResponse {
+    item_type: String,
+    item_uuid: String,
+    title: String,
+    content_hash: String,
+    content: Vec<serde_json::Value>,
+    short_name: String,
+    author_name: String,
+    author_url: String,
+    access_token: Option<String>,
+    page: Option<TelegraphPage>,
+}
+
+#[derive(Debug, Serialize)]
+struct CompleteTelegraphRequest {
+    item_type: String,
+    item_uuid: String,
+    path: String,
+    url: String,
+    title: String,
+    content_hash: String,
+    views: Option<i64>,
+    access_token: Option<String>,
+    short_name: Option<String>,
+    author_name: Option<String>,
+    author_url: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TelegraphApiEnvelope<T> {
+    ok: bool,
+    result: Option<T>,
+    error: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TelegraphApiAccount {
+    access_token: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct TelegraphApiPage {
+    path: String,
+    url: String,
+    title: String,
+    views: Option<i64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -113,6 +165,110 @@ async fn parse_json<T: for<'de> Deserialize<'de>>(resp: reqwest::Response) -> Re
     resp.json::<T>()
         .await
         .map_err(|e| format!("parse response: {e}"))
+}
+
+fn telegraph_page_endpoint(existing: Option<&TelegraphPage>) -> String {
+    match existing {
+        Some(page) => format!("/editPage/{}", page.path),
+        None => "/createPage".to_string(),
+    }
+}
+
+fn telegraph_limit_chars(value: &str, limit: usize) -> String {
+    value.chars().take(limit).collect()
+}
+
+fn parse_telegraph_api_result<T: DeserializeOwned>(payload: serde_json::Value) -> Result<T, String> {
+    let envelope: TelegraphApiEnvelope<T> = serde_json::from_value(payload)
+        .map_err(|e| format!("parse Telegra.ph response: {e}"))?;
+    if !envelope.ok {
+        return Err(envelope
+            .error
+            .unwrap_or_else(|| "Telegra.ph API error".to_string()));
+    }
+    envelope
+        .result
+        .ok_or_else(|| "Telegra.ph response missing result".to_string())
+}
+
+#[cfg(test)]
+fn parse_telegraph_api_page(payload: serde_json::Value) -> Result<TelegraphApiPage, String> {
+    parse_telegraph_api_result(payload)
+}
+
+fn telegraph_http_client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(45))
+        .build()
+        .map_err(|e| format!("build Telegra.ph http client: {e}"))
+}
+
+async fn post_telegraph_form<T: DeserializeOwned>(
+    client: &reqwest::Client,
+    endpoint: &str,
+    form: Vec<(&'static str, String)>,
+) -> Result<T, String> {
+    let url = format!("{TELEGRAPH_API_BASE}{endpoint}");
+    let resp = client
+        .post(&url)
+        .form(&form)
+        .send()
+        .await
+        .map_err(|e| format_request_error("direct Telegra.ph request failed", e))?;
+    let status = resp.status();
+    let body = resp
+        .text()
+        .await
+        .map_err(|e| format!("read Telegra.ph response: {e}"))?;
+    if !status.is_success() {
+        return Err(format!("Telegra.ph HTTP {status}: {body}"));
+    }
+    let payload: serde_json::Value =
+        serde_json::from_str(&body).map_err(|e| format!("parse Telegra.ph JSON: {e}"))?;
+    parse_telegraph_api_result(payload)
+}
+
+async fn create_telegraph_account(
+    client: &reqwest::Client,
+    prepared: &TelegraphPrepareResponse,
+) -> Result<String, String> {
+    let account: TelegraphApiAccount = post_telegraph_form(
+        client,
+        "/createAccount",
+        vec![
+            ("short_name", prepared.short_name.clone()),
+            ("author_name", prepared.author_name.clone()),
+            ("author_url", prepared.author_url.clone()),
+        ],
+    )
+    .await?;
+    let token = account.access_token.trim().to_string();
+    if token.is_empty() {
+        return Err("Telegra.ph account response missing access_token".to_string());
+    }
+    Ok(token)
+}
+
+async fn publish_telegraph_direct(
+    client: &reqwest::Client,
+    prepared: &TelegraphPrepareResponse,
+    access_token: &str,
+) -> Result<TelegraphApiPage, String> {
+    let content = serde_json::to_string(&prepared.content)
+        .map_err(|e| format!("serialize Telegra.ph content: {e}"))?;
+    post_telegraph_form(
+        client,
+        &telegraph_page_endpoint(prepared.page.as_ref()),
+        vec![
+            ("access_token", access_token.to_string()),
+            ("title", telegraph_limit_chars(&prepared.title, 256)),
+            ("author_name", telegraph_limit_chars(&prepared.author_name, 128)),
+            ("author_url", telegraph_limit_chars(&prepared.author_url, 512)),
+            ("content", content),
+            ("return_content", "false".to_string()),
+        ],
+    )
+    .await
 }
 
 #[tauri::command]
@@ -195,16 +351,115 @@ pub async fn publish_telegraph_page(
     item_uuid: String,
 ) -> Result<TelegraphPage, String> {
     let (api_url, api_key, ca_cert) = sync_settings(&state)?;
-    let client = http_client(&api_url, ca_cert.as_deref(), Duration::from_secs(45))?;
-    let resp = client
-        .post(format!("{api_url}/v1/share-links/telegraph/publish"))
-        .bearer_auth(api_key)
+    let api_client = http_client(&api_url, ca_cert.as_deref(), Duration::from_secs(45))?;
+    let prepare_resp = api_client
+        .post(format!("{api_url}/v1/share-links/telegraph/prepare"))
+        .bearer_auth(&api_key)
         .json(&CreateShareRequest {
             item_type: &item_type,
             item_uuid: &item_uuid,
         })
         .send()
         .await
-        .map_err(|e| format_request_error("publish Telegra.ph page request failed", e))?;
-    parse_json(resp).await
+        .map_err(|e| format_request_error("prepare Telegra.ph page request failed", e))?;
+    let prepared: TelegraphPrepareResponse = parse_json(prepare_resp).await?;
+
+    let telegraph_client = telegraph_http_client()?;
+    let access_token = match prepared
+        .access_token
+        .as_ref()
+        .map(|token| token.trim())
+        .filter(|token| !token.is_empty())
+    {
+        Some(token) => token.to_string(),
+        None => create_telegraph_account(&telegraph_client, &prepared).await?,
+    };
+    let published = publish_telegraph_direct(&telegraph_client, &prepared, &access_token).await?;
+    let complete = CompleteTelegraphRequest {
+        item_type: prepared.item_type,
+        item_uuid: prepared.item_uuid,
+        path: published.path,
+        url: published.url,
+        title: published.title,
+        content_hash: prepared.content_hash,
+        views: published.views,
+        access_token: Some(access_token),
+        short_name: Some(prepared.short_name),
+        author_name: Some(prepared.author_name),
+        author_url: Some(prepared.author_url),
+    };
+    let complete_resp = api_client
+        .post(format!("{api_url}/v1/share-links/telegraph/complete"))
+        .bearer_auth(&api_key)
+        .json(&complete)
+        .send()
+        .await
+        .map_err(|e| format_request_error("complete Telegra.ph page request failed", e))?;
+    parse_json(complete_resp).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn sample_page() -> TelegraphPage {
+        TelegraphPage {
+            item_type: "shortcut".to_string(),
+            item_uuid: "a27d8dfc-d14b-4418-9a0a-0325e6be1448".to_string(),
+            url: "https://telegra.ph/Deploy-06-09".to_string(),
+            path: "Deploy-06-09".to_string(),
+            title: "Deploy".to_string(),
+            content_hash: "hash".to_string(),
+            views: Some(7),
+            created_at: "2026-07-06T18:00:00Z".to_string(),
+            updated_at: "2026-07-06T18:00:00Z".to_string(),
+            published_at: "2026-07-06T18:00:00Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn telegraph_page_path_uses_edit_for_existing_page() {
+        assert_eq!(
+            telegraph_page_endpoint(Some(&sample_page())),
+            "/editPage/Deploy-06-09"
+        );
+        assert_eq!(telegraph_page_endpoint(None), "/createPage");
+    }
+
+    #[test]
+    fn parse_telegraph_api_page_requires_ok_result() {
+        let parsed = parse_telegraph_api_page(json!({
+            "ok": true,
+            "result": {
+                "path": "Deploy-06-09",
+                "url": "https://telegra.ph/Deploy-06-09",
+                "title": "Deploy",
+                "views": 3
+            }
+        }))
+        .expect("valid Telegra.ph response");
+
+        assert_eq!(parsed.path, "Deploy-06-09");
+        assert_eq!(parsed.url, "https://telegra.ph/Deploy-06-09");
+        assert_eq!(parsed.title, "Deploy");
+        assert_eq!(parsed.views, Some(3));
+
+        let err = parse_telegraph_api_page(json!({
+            "ok": false,
+            "error": "ACCESS_TOKEN_INVALID"
+        }))
+        .expect_err("Telegra.ph error should be surfaced");
+        assert!(err.contains("ACCESS_TOKEN_INVALID"));
+    }
+
+    #[test]
+    fn telegraph_limit_chars_is_utf8_safe() {
+        let source = format!("{}{}", "Ж".repeat(255), "😀tail");
+        let limited = telegraph_limit_chars(&source, 256);
+
+        assert_eq!(limited.chars().count(), 256);
+        assert!(limited.ends_with('😀'));
+        assert!(!limited.contains("tail"));
+    }
 }

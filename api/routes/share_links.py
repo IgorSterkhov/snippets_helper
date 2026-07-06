@@ -27,7 +27,9 @@ from api.schemas import (
     ShareLinkRequest,
     ShareLinkResponse,
     ShareLinkStatusResponse,
+    TelegraphCompleteRequest,
     TelegraphPageResponse,
+    TelegraphPrepareResponse,
     TelegraphPublishRequest,
     TelegraphStatusResponse,
 )
@@ -187,6 +189,34 @@ def _item_telegraph_content(item_type: str, item) -> tuple[str, str]:
     return item.name or "Untitled snippet", "\n".join(parts)
 
 
+async def _build_telegraph_payload(
+    db: AsyncSession,
+    user_id: UUID,
+    item_type: str,
+    item_uuid: UUID,
+) -> tuple[str, list, str, TelegraphPage | None]:
+    item = await _load_owned_item(db, user_id, item_type, item_uuid)
+    if item is None:
+        raise HTTPException(status_code=404, detail="item not found")
+    title, markdown = _item_telegraph_content(item_type, item)
+    nodes = markdown_to_telegraph_nodes(title, markdown)
+    digest = content_hash(nodes)
+    page = await _load_telegraph_page(db, user_id, item_type, item_uuid)
+    return title, nodes, digest, page
+
+
+def _validate_telegraph_completed_page(req: TelegraphCompleteRequest, page: TelegraphPage | None) -> None:
+    path = req.path or ""
+    if not path or "/" in path or "\\" in path or any(ord(ch) < 32 for ch in path):
+        raise HTTPException(status_code=400, detail="Telegra.ph path must be a single path segment")
+    if req.url != f"https://telegra.ph/{path}":
+        raise HTTPException(status_code=400, detail="Telegra.ph URL must match https://telegra.ph/<path>")
+    if page and page.path != path:
+        raise HTTPException(status_code=409, detail="Telegraph page path mismatch")
+    if not (req.content_hash or "").strip():
+        raise HTTPException(status_code=400, detail="Telegraph content_hash is required")
+
+
 async def _ensure_telegraph_account(user: User, db: AsyncSession) -> str:
     if user.telegraph_access_token:
         return user.telegraph_access_token
@@ -260,6 +290,82 @@ async def get_telegraph_page(
     if not page:
         return TelegraphStatusResponse(page=None)
     return TelegraphStatusResponse(page=_telegraph_response(page))
+
+
+@router.post("/telegraph/prepare", response_model=TelegraphPrepareResponse)
+async def prepare_telegraph_page(
+    req: TelegraphPublishRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    item_type = _validate_telegraph_item_type(req.item_type)
+    uuid_value = _parse_uuid(req.item_uuid)
+    title, nodes, digest, page = await _build_telegraph_payload(db, user.id, item_type, uuid_value)
+    short_name = user.telegraph_short_name or telegraph_short_name(user.api_key)
+    return TelegraphPrepareResponse(
+        item_type=item_type,
+        item_uuid=str(uuid_value),
+        title=title,
+        content_hash=digest,
+        content=nodes,
+        short_name=short_name,
+        author_name=user.telegraph_author_name or TELEGRAPH_AUTHOR_NAME,
+        author_url=user.telegraph_author_url or "",
+        access_token=user.telegraph_access_token,
+        page=_telegraph_response(page) if page else None,
+    )
+
+
+@router.post("/telegraph/complete", response_model=TelegraphPageResponse)
+async def complete_telegraph_page(
+    req: TelegraphCompleteRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    item_type = _validate_telegraph_item_type(req.item_type)
+    uuid_value = _parse_uuid(req.item_uuid)
+    _title, _nodes, _digest, page = await _build_telegraph_payload(db, user.id, item_type, uuid_value)
+    _validate_telegraph_completed_page(req, page)
+
+    token = (req.access_token or "").strip()
+    if user.telegraph_access_token and token and token != user.telegraph_access_token:
+        raise HTTPException(status_code=409, detail="Telegraph account token mismatch")
+    if not user.telegraph_access_token:
+        if not token:
+            raise HTTPException(status_code=400, detail="Telegraph access token is required")
+        user.telegraph_access_token = token
+        user.telegraph_short_name = (req.short_name or telegraph_short_name(user.api_key))[:32]
+        user.telegraph_author_name = (req.author_name or TELEGRAPH_AUTHOR_NAME)[:128]
+        user.telegraph_author_url = (req.author_url or "")[:512]
+        user.telegraph_updated_at = datetime.utcnow()
+
+    now = datetime.utcnow()
+    if page:
+        page.path = req.path
+        page.url = req.url
+        page.title = req.title
+        page.content_hash = req.content_hash
+        page.views = req.views if req.views is not None else page.views
+        page.updated_at = now
+        page.published_at = now
+    else:
+        page = TelegraphPage(
+            user_id=user.id,
+            item_type=item_type,
+            item_uuid=uuid_value,
+            path=req.path,
+            url=req.url,
+            title=req.title,
+            content_hash=req.content_hash,
+            views=req.views,
+            created_at=now,
+            updated_at=now,
+            published_at=now,
+        )
+        db.add(page)
+    await db.commit()
+    await db.refresh(page)
+    return _telegraph_response(page)
 
 
 @router.post("/telegraph/publish", response_model=TelegraphPageResponse)
