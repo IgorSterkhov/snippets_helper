@@ -5,8 +5,9 @@
 
 export const FORMATTER_HELP_HTML = `
 <p><strong>SQL Formatter</strong> — приводит SQL к читаемому виду:
-разносит секции по строкам, раскладывает <code>SELECT</code>-поля по одному
-выражению на строку, переносит условия <code>WHERE</code> /
+разносит секции по строкам, раскладывает многоэлементные
+<code>WITH</code>-блоки и <code>SELECT</code>-поля по одному выражению на
+строку, переносит условия <code>WHERE</code> /
 <code>PREWHERE</code> / <code>HAVING</code> по верхнеуровневым
 <code>AND</code>/<code>OR</code> и приводит ключевые слова к одному регистру.
 Поддерживает <code>Jinja2</code>-шаблоны (<code>{{ var }}</code>,

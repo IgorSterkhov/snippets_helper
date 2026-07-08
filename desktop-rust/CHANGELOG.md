@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## v1.24.1 (2026-07-08)
+
+- **SQL Formatter WITH readability:** `Format SQL` now expands multi-item
+  `WITH` blocks one expression per line while keeping nested function
+  arguments, lambdas, strings, and `IN (...)` lists intact.
+
 ## v1.24.0 (2026-07-06)
 
 - **Telegra.ph desktop publishing fallback:** the Share dialog now publishes

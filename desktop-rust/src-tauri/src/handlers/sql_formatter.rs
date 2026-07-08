@@ -812,6 +812,26 @@ fn expand_select_line(line: &str) -> Option<Vec<String>> {
     Some(lines)
 }
 
+fn expand_with_line(line: &str) -> Option<Vec<String>> {
+    let (keyword, rest) = strip_leading_keyword(line, "with")?;
+    if rest.is_empty() {
+        return None;
+    }
+
+    let items = split_top_level_commas(rest);
+    if items.len() < 2 {
+        return None;
+    }
+
+    let mut lines = Vec::with_capacity(items.len() + 1);
+    lines.push(keyword.to_string());
+    for (idx, item) in items.iter().enumerate() {
+        let suffix = if idx + 1 < items.len() { "," } else { "" };
+        lines.push(format!("    {item}{suffix}"));
+    }
+    Some(lines)
+}
+
 fn expand_condition_line(line: &str, keyword: &str) -> Option<Vec<String>> {
     let (matched_keyword, rest) = strip_leading_keyword(line, keyword)?;
     if rest.is_empty() {
@@ -839,6 +859,10 @@ fn expand_clause_bodies(sql: &str) -> String {
             continue;
         }
         if let Some(lines) = expand_select_line(trimmed) {
+            out.extend(lines);
+            continue;
+        }
+        if let Some(lines) = expand_with_line(trimmed) {
             out.extend(lines);
             continue;
         }
@@ -1046,6 +1070,23 @@ mod tests {
         assert!(err.is_none());
         assert!(result.contains("    concat(a, ',') AS c,"));
         assert!(result.contains("    tuple(x, y) AS pair"));
+    }
+
+    #[test]
+    fn test_with_split_keeps_nested_commas_together() {
+        let (result, err) = format_sql(
+            "with cast('2026-06-08', 'Date') as _date_from, splitByChar(',', replaceRegexpAll(lower('all'), '\\s+', '')) as _business_units, (id -> multiIf(id in (1, 2), 'a,b', 'other')) as _business_unit_code select _date_from, _business_units",
+            true,
+        );
+        assert!(err.is_none());
+        assert!(result.contains("WITH\n    CAST('2026-06-08', 'Date') AS _date_from,"));
+        assert!(result.contains(
+            "    splitByChar(',', replaceRegexpAll(lower('all'), '\\s+', '')) AS _business_units,"
+        ));
+        assert!(result.contains(
+            "    (id -> multiIf(id IN (1, 2), 'a,b', 'other')) AS _business_unit_code"
+        ));
+        assert!(result.contains("SELECT\n    _date_from,\n    _business_units"));
     }
 
     #[test]
