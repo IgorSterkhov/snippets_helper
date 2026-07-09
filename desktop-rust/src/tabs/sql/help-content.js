@@ -9,7 +9,9 @@ export const FORMATTER_HELP_HTML = `
 <code>WITH</code>-блоки и <code>SELECT</code>-поля по одному выражению на
 строку, переносит условия <code>WHERE</code> /
 <code>PREWHERE</code> / <code>HAVING</code> по верхнеуровневым
-<code>AND</code>/<code>OR</code> и приводит ключевые слова к одному регистру.
+<code>AND</code>/<code>OR</code>, выравнивает ClickHouse
+<code>SETTINGS</code> по одному параметру на строку и приводит ключевые слова
+к одному регистру.
 Поддерживает <code>Jinja2</code>-шаблоны (<code>{{ var }}</code>,
 <code>{% if %}</code> — не ломаются). Отдельный режим <strong>Format
 DDL</strong> табулирует колонки <code>CREATE&nbsp;TABLE</code> и выбрасывает
@@ -68,7 +70,19 @@ WHERE
     AND u.status = 'active'
 GROUP BY u.id, u.name;</code></pre>
 
-<h4>Пример 2 — DDL с бэктиками</h4>
+<h4>Пример 2 — ClickHouse SETTINGS</h4>
+
+<h5>Вход</h5>
+<pre><code>SELECT * FROM table1 SETTINGS do_not_merge_across_partitions_select_final=1, use_skip_indexes_if_final_exact_mode=0, log_comment='004_4_pivot_order_share'</code></pre>
+
+<h5>После Format SQL (UPPER)</h5>
+<pre><code>SELECT *
+FROM table1
+SETTINGS do_not_merge_across_partitions_select_final=1,
+         use_skip_indexes_if_final_exact_mode=0,
+         log_comment='004_4_pivot_order_share'</code></pre>
+
+<h4>Пример 3 — DDL с бэктиками</h4>
 
 <h5>Вход</h5>
 <pre><code>CREATE TABLE datamart.supply (

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## v1.24.2 (2026-07-09)
+
+- **SQL Formatter SETTINGS readability:** `Format SQL` now expands ClickHouse
+  `SETTINGS` options one per line, aligning continuation rows under the first
+  option while preserving nested commas in literals and expressions.
+
 ## v1.24.1 (2026-07-08)
 
 - **SQL Formatter WITH readability:** `Format SQL` now expands multi-item

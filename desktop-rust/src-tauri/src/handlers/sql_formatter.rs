@@ -832,6 +832,30 @@ fn expand_with_line(line: &str) -> Option<Vec<String>> {
     Some(lines)
 }
 
+fn expand_settings_line(line: &str) -> Option<Vec<String>> {
+    let (keyword, rest) = strip_leading_keyword(line, "settings")?;
+    if rest.is_empty() {
+        return None;
+    }
+
+    let items = split_top_level_commas(rest);
+    if items.len() < 2 {
+        return None;
+    }
+
+    let indent = " ".repeat(keyword.len() + 1);
+    let mut lines = Vec::with_capacity(items.len());
+    for (idx, item) in items.iter().enumerate() {
+        let suffix = if idx + 1 < items.len() { "," } else { "" };
+        if idx == 0 {
+            lines.push(format!("{keyword} {item}{suffix}"));
+        } else {
+            lines.push(format!("{indent}{item}{suffix}"));
+        }
+    }
+    Some(lines)
+}
+
 fn expand_condition_line(line: &str, keyword: &str) -> Option<Vec<String>> {
     let (matched_keyword, rest) = strip_leading_keyword(line, keyword)?;
     if rest.is_empty() {
@@ -863,6 +887,10 @@ fn expand_clause_bodies(sql: &str) -> String {
             continue;
         }
         if let Some(lines) = expand_with_line(trimmed) {
+            out.extend(lines);
+            continue;
+        }
+        if let Some(lines) = expand_settings_line(trimmed) {
             out.extend(lines);
             continue;
         }
@@ -1087,6 +1115,18 @@ mod tests {
             "    (id -> multiIf(id IN (1, 2), 'a,b', 'other')) AS _business_unit_code"
         ));
         assert!(result.contains("SELECT\n    _date_from,\n    _business_units"));
+    }
+
+    #[test]
+    fn test_settings_split_aligns_top_level_options() {
+        let (result, err) = format_sql(
+            "select * from table1 settings do_not_merge_across_partitions_select_final=1, use_skip_indexes_if_final_exact_mode=0, log_comment='004,4_pivot_order_share'",
+            true,
+        );
+        assert!(err.is_none());
+        assert!(result.contains(
+            "SETTINGS do_not_merge_across_partitions_select_final=1,\n         use_skip_indexes_if_final_exact_mode=0,\n         log_comment='004,4_pivot_order_share'"
+        ));
     }
 
     #[test]
