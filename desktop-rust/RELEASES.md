@@ -153,9 +153,15 @@ git push origin "$TAG"
 ## 3. What CI does (`.github/workflows/release-desktop.yml`)
 
 ```
-v* tag:   release (macos + windows) ──► release-frontend ──► upload all
-f-* tag:  release SKIPPED             ──► release-frontend ──► upload frontend+latest.json
+v* tag:   preflight ──► create-release ──► release (macos + windows) ──► release-frontend
+f-* tag:  preflight ──► release SKIPPED ─────────────────────────────► release-frontend
+main:     preflight SKIPPED ──► release (cache-seed only)
 ```
+
+`preflight` runs the frontend browser smoke suite for both tag types. Native
+`v*` tags additionally run locked Rust check/tests on Ubuntu with disposable
+Linux sidecar stubs. A failed preflight blocks release creation and frontend
+asset packaging; the `main` cache-seed path remains independent.
 
 Key steps in `release-frontend`:
 1. Compute version = `<NATIVE>-f<sha>`. For `f-*` tags, `<NATIVE>` is read
