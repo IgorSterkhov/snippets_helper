@@ -21,7 +21,7 @@ if [ "$MODE" = "test" ]; then
   echo "→ Running cargo check + test with a read-only source mount."
   exec docker run \
     --rm \
-    -v "$(pwd):/source:ro" \
+    -v "$(git rev-parse --show-toplevel):/source:ro" \
     -v keyboard-helper-cargo:/usr/local/cargo/registry \
     -v keyboard-helper-test-target:/work/target-docker \
     -e CARGO_TARGET_DIR=/work/target-docker \
@@ -29,14 +29,14 @@ if [ "$MODE" = "test" ]; then
     bash -c '
       set -euo pipefail
       mkdir -p /work/source-copy
-      tar -C /source \
-        --exclude="./src-tauri/target*" \
-        --exclude="./target-docker" \
-        --exclude="./node_modules" \
-        --exclude="./src-tauri/gen" \
-        --exclude="./src-tauri/binaries" \
-        --exclude="./screen.png" \
-        -cf - . | tar -C /work/source-copy -xf -
+      git -c safe.directory=/source -C /source ls-files -z --cached --others --exclude-standard -- desktop-rust | \
+      sed -z "s|^desktop-rust/||" | \
+      tar -C /source/desktop-rust \
+        --null \
+        --exclude="src-tauri/binaries/*" \
+        --exclude="src-tauri/binaries" \
+        --files-from=- \
+        -cf - | tar -C /work/source-copy -xf -
       mkdir -p /work/source-copy/src-tauri/binaries
       install -m 755 /dev/null /work/source-copy/src-tauri/binaries/whisper-server-x86_64-unknown-linux-gnu
       install -m 755 /dev/null /work/source-copy/src-tauri/binaries/llama-server-x86_64-unknown-linux-gnu
