@@ -33,10 +33,10 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/f-')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
@@ -140,7 +140,7 @@ jobs:
     runs-on: ${{ matrix.platform }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Stamp bundled frontend-version.json
         shell: bash
@@ -170,7 +170,7 @@ jobs:
       - name: Cache sidecar binaries
         id: sidecars-cache
         if: (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main') && (runner.os == 'macOS' || runner.os == 'Windows')
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: desktop-rust/src-tauri/binaries
           key: sidecars-${{ runner.os }}-whisper-${{ hashFiles('desktop-rust/WHISPER_CPP_VERSION') }}-llama-${{ hashFiles('desktop-rust/LLAMA_CPP_VERSION') }}-v1
@@ -271,7 +271,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -366,7 +366,7 @@ jobs:
           mv /tmp/latest-json/latest.json ./latest.json
 
       - name: Upload assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}

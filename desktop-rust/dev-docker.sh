@@ -7,8 +7,10 @@
 #   ./dev-docker.sh test     # cargo check + test in an isolated source copy
 
 set -e
+set -o pipefail
 
-cd "$(dirname "$0")"
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+cd -- "$SCRIPT_DIR"
 
 IMAGE=keyboard-helper-dev
 CONTAINER=keyboard-helper-dev-run
@@ -16,12 +18,88 @@ CONTAINER=keyboard-helper-dev-run
 MODE="${1:-dev}"
 
 if [ "$MODE" = "test" ]; then
+  REPO_ROOT_RAW=$(git rev-parse --show-toplevel)
+  REPO_ROOT=$(realpath -e -- "$REPO_ROOT_RAW")
+  EXPECTED_SCRIPT_DIR=$(realpath -e -- "$REPO_ROOT/desktop-rust")
+  if [ ! -d "$REPO_ROOT" ] || [ -L "$REPO_ROOT" ] || [ "$SCRIPT_DIR" != "$EXPECTED_SCRIPT_DIR" ]; then
+    echo "Refusing unexpected repository root: $REPO_ROOT" >&2
+    exit 1
+  fi
+
+  MANIFEST_DIR=$(realpath -e -- /tmp)
+  if [ "$MANIFEST_DIR" != "/tmp" ] || [ ! -d "$MANIFEST_DIR" ] || [ -L "$MANIFEST_DIR" ]; then
+    echo "Refusing unexpected manifest directory: $MANIFEST_DIR" >&2
+    exit 1
+  fi
+
+  MANIFEST_PREFIX="$MANIFEST_DIR/keyboard-helper-docker-test-manifest."
+  SOURCE_MANIFEST=$(mktemp "${MANIFEST_PREFIX}XXXXXX")
+
+  manifest_path_is_safe() {
+    [ -n "${SOURCE_MANIFEST:-}" ] || return 1
+    case "$SOURCE_MANIFEST" in
+      "$MANIFEST_PREFIX"??????) ;;
+      *) return 1 ;;
+    esac
+    [ "$(realpath -e -- "$(dirname -- "$SOURCE_MANIFEST")")" = "$MANIFEST_DIR" ] || return 1
+    [ -f "$SOURCE_MANIFEST" ] && [ ! -L "$SOURCE_MANIFEST" ]
+  }
+
+  cleanup_source_manifest() {
+    [ -n "${SOURCE_MANIFEST:-}" ] || return 0
+    if ! manifest_path_is_safe; then
+      echo "Refusing to remove unexpected manifest path: $SOURCE_MANIFEST" >&2
+      return 1
+    fi
+    if ! rm -- "$SOURCE_MANIFEST"; then
+      echo "Failed to remove source manifest: $SOURCE_MANIFEST" >&2
+      return 1
+    fi
+    SOURCE_MANIFEST=
+  }
+
+  if ! manifest_path_is_safe; then
+    echo "Refusing invalid manifest path: $SOURCE_MANIFEST" >&2
+    exit 1
+  fi
+  trap cleanup_source_manifest EXIT
+
+  if ! git -C "$REPO_ROOT" ls-files -z --cached --others --exclude-standard -- desktop-rust | \
+    while IFS= read -r -d '' REPO_PATH; do
+      case "$REPO_PATH" in
+        desktop-rust/*) ;;
+        *) echo "Refusing unexpected manifest entry: $REPO_PATH" >&2; exit 1 ;;
+      esac
+
+      RELATIVE_PATH=${REPO_PATH#desktop-rust/}
+      case "$RELATIVE_PATH" in
+        ""|/*|../*|*/../*|*/..)
+          echo "Refusing unsafe manifest entry: $REPO_PATH" >&2
+          exit 1
+          ;;
+        src-tauri/binaries|src-tauri/binaries/*)
+          continue
+          ;;
+      esac
+
+      SOURCE_PATH="$REPO_ROOT/$REPO_PATH"
+      if [ -e "$SOURCE_PATH" ] || [ -L "$SOURCE_PATH" ]; then
+        printf '%s\0' "$RELATIVE_PATH"
+      fi
+    done > "$SOURCE_MANIFEST"
+  then
+    echo "Failed to build Docker source manifest." >&2
+    exit 1
+  fi
+
   echo "→ Refreshing Docker test image ($IMAGE)."
   docker build -f Dockerfile.dev -t "$IMAGE" .
   echo "→ Running cargo check + test with a read-only source mount."
-  exec docker run \
+  DOCKER_STATUS=0
+  docker run \
     --rm \
-    -v "$(git rev-parse --show-toplevel):/source:ro" \
+    --mount "type=bind,src=$REPO_ROOT,dst=/source,readonly" \
+    --mount "type=bind,src=$SOURCE_MANIFEST,dst=/source-manifest,readonly" \
     -v keyboard-helper-cargo:/usr/local/cargo/registry \
     -v keyboard-helper-test-target:/work/target-docker \
     -e CARGO_TARGET_DIR=/work/target-docker \
@@ -29,13 +107,12 @@ if [ "$MODE" = "test" ]; then
     bash -c '
       set -euo pipefail
       mkdir -p /work/source-copy
-      git -c safe.directory=/source -C /source ls-files -z --cached --others --exclude-standard -- desktop-rust | \
-      sed -z "s|^desktop-rust/||" | \
       tar -C /source/desktop-rust \
         --null \
+        --no-recursion \
         --exclude="src-tauri/binaries/*" \
         --exclude="src-tauri/binaries" \
-        --files-from=- \
+        --files-from=/source-manifest \
         -cf - | tar -C /work/source-copy -xf -
       mkdir -p /work/source-copy/src-tauri/binaries
       install -m 755 /dev/null /work/source-copy/src-tauri/binaries/whisper-server-x86_64-unknown-linux-gnu
@@ -45,7 +122,15 @@ if [ "$MODE" = "test" ]; then
       cd /work/source-copy/src-tauri
       cargo check --locked
       cargo test --locked
-    '
+    ' || DOCKER_STATUS=$?
+
+  CLEANUP_STATUS=0
+  cleanup_source_manifest || CLEANUP_STATUS=$?
+  trap - EXIT
+  if [ "$DOCKER_STATUS" -ne 0 ]; then
+    exit "$DOCKER_STATUS"
+  fi
+  exit "$CLEANUP_STATUS"
 fi
 
 if [ "$MODE" != "rebuild" ] && ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
