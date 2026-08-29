@@ -3893,6 +3893,8 @@ mod tests {
             "description": "",
             "links": "[]",
             "obsidian_note": "",
+            "is_pinned": 0,
+            "pinned_sort_order": 0,
             "updated_at": "2026-05-17T10:15:30",
             "user_id": "user-1",
             "is_deleted": false
@@ -3944,6 +3946,8 @@ mod tests {
             "description": "",
             "links": "[]",
             "obsidian_note": "",
+            "is_pinned": 0,
+            "pinned_sort_order": 0,
             "updated_at": "2026-05-17T13:00:00",
             "user_id": "user-1",
             "is_deleted": false
