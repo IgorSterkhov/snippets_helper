@@ -153,9 +153,15 @@ git push origin "$TAG"
 ## 3. What CI does (`.github/workflows/release-desktop.yml`)
 
 ```
-v* tag:   release (macos + windows) ──► release-frontend ──► upload all
-f-* tag:  release SKIPPED             ──► release-frontend ──► upload frontend+latest.json
+v* tag:   preflight ──► create-release ──► release (macos + windows) ──► release-frontend
+f-* tag:  preflight ──► release SKIPPED ─────────────────────────────► release-frontend
+main:     preflight SKIPPED ──► release (cache-seed only)
 ```
+
+`preflight` runs the frontend browser smoke suite for both tag types. Native
+`v*` tags additionally run locked Rust check/tests on Ubuntu with disposable
+Linux sidecar stubs. A failed preflight blocks release creation and frontend
+asset packaging; the `main` cache-seed path remains independent.
 
 Key steps in `release-frontend`:
 1. Compute version = `<NATIVE>-f<sha>`. For `f-*` tags, `<NATIVE>` is read
@@ -273,10 +279,15 @@ cd desktop-rust
 ./dev-docker.sh dev            # cargo tauri dev with X11 forwarding
 ./dev-docker.sh build          # AppImage production build
 ./dev-docker.sh shell          # interactive shell in the container
+./dev-docker.sh test           # cargo check + test in an isolated source copy
 ./dev-docker.sh rebuild        # rebuild the image from scratch
 ```
 Image is based on Debian bookworm + webkit2gtk-4.1 + Rust + `cargo-tauri`
 + xvfb/imagemagick/python3-pil for headless screenshot tests.
+The `test` mode mounts the repository read-only, copies it inside the disposable
+container without ignored build/cache directories, and creates Linux-only
+sidecar stubs in that copy. Generated Tauri metadata and sidecar files never
+touch the worktree.
 
 ### 4.4 `KH_FORCE_SHOW` env var
 The main window is hidden by default (user reveals with Alt+Space). Set

@@ -27,6 +27,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     sqlite3 \
     libsqlite3-dev \
+    libasound2-dev \
+    patchelf \
     dbus-x11 \
     at-spi2-core \
  && rm -rf /var/lib/apt/lists/*
