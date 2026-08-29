@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## f-20260830-1 (2026-08-30)
+
+- **Frontend OTA recovery:** republishes the v1.24.2 frontend bundle and
+  restores the missing frontend update manifest after the original release
+  job was cancelled.
+
 ## v1.24.2 (2026-07-09)
 
 - **SQL Formatter SETTINGS readability:** `Format SQL` now expands ClickHouse
