@@ -193,6 +193,12 @@ When grouping main sidebar modules:
   use `pointer-events: none`, `aria-hidden`, and `tabIndex = -1`.
 - Keep child buttons in the DOM with their usual `data-tab-id` selectors so
   tests, Ctrl+Tab, and command-driven navigation can still activate them.
+- Keep the normal string `icon` as the compatibility value for view history
+  and other non-sidebar consumers. Sidebar-only vector replacements use
+  `sidebarIcon` plus `sidebarIconTone`: `outline:<slug>` assets live under
+  `src/icons/sidebar/`, while `logo:<slug>` keeps its existing 1em geometry.
+  Apply tone to the glyph itself without a tile background, container border,
+  rounded frame, shadow, or glow.
 
 ---
 

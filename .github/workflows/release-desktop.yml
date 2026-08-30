@@ -40,6 +40,62 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Verify release history mentions current tag
+        run: |
+          set -euo pipefail
+          if ! awk -v "prefix=## ${GITHUB_REF_NAME} (" '
+            index($0, prefix) == 1 { found = 1 }
+            END { exit(found ? 0 : 1) }
+          ' desktop-rust/src/release-history.md; then
+            echo "::error file=desktop-rust/src/release-history.md::Release history has no heading for ${GITHUB_REF_NAME}"
+            exit 1
+          fi
+
+      - name: Verify native version parity
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import tomllib
+
+          expected = os.environ['GITHUB_REF_NAME'].removeprefix('v')
+          root = Path('desktop-rust')
+
+          with (root / 'src-tauri' / 'Cargo.toml').open('rb') as source:
+              cargo_version = tomllib.load(source)['package']['version']
+          with (root / 'src-tauri' / 'Cargo.lock').open('rb') as source:
+              lock_packages = tomllib.load(source)['package']
+          lock_versions = [
+              package['version']
+              for package in lock_packages
+              if package.get('name') == 'keyboard-helper'
+          ]
+          with (root / 'src-tauri' / 'tauri.conf.json').open(encoding='utf-8') as source:
+              tauri_version = json.load(source)['version']
+
+          versions = {
+              'desktop-rust/src-tauri/Cargo.toml': cargo_version,
+              'desktop-rust/src-tauri/Cargo.lock': (
+                  lock_versions[0] if len(lock_versions) == 1 else repr(lock_versions)
+              ),
+              'desktop-rust/src-tauri/tauri.conf.json': tauri_version,
+          }
+          mismatches = [
+              f'{path}={version}'
+              for path, version in versions.items()
+              if version != expected
+          ]
+          if mismatches:
+              print(
+                  f'::error::Native version mismatch for tag '
+                  f'{os.environ["GITHUB_REF_NAME"]}: ' + ', '.join(mismatches)
+              )
+              raise SystemExit(1)
+          print(f'Native version parity verified: {expected}')
+          PY
+
       - name: Install frontend smoke dependencies
         run: |
           python3 -m pip install --disable-pip-version-check websockets==15.0.1
@@ -291,9 +347,12 @@ jobs:
 
       - name: Verify release history mentions current tag
         run: |
-          set -e
-          if ! grep -Fq "$GITHUB_REF_NAME" desktop-rust/src/release-history.md; then
-            echo "::error file=desktop-rust/src/release-history.md::Release history does not mention ${GITHUB_REF_NAME}"
+          set -euo pipefail
+          if ! awk -v "prefix=## ${GITHUB_REF_NAME} (" '
+            index($0, prefix) == 1 { found = 1 }
+            END { exit(found ? 0 : 1) }
+          ' desktop-rust/src/release-history.md; then
+            echo "::error file=desktop-rust/src/release-history.md::Release history has no heading for ${GITHUB_REF_NAME}"
             exit 1
           fi
 

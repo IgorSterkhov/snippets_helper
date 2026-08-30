@@ -229,6 +229,262 @@ async def run_tests():
         assert 'v0.9.5-f1' in txt, f'got: {txt!r}'
     await check('T2 status bar shows v0.9.5-f1', t2)
 
+    # ── T2 sidebar: colored outline icon contract ───────────
+    async def t2_sidebar_colored_outline_icons():
+        await cdp.eval(
+            "document.querySelector('.tab-group-btn[data-group-id=\"dev\"]').click()"
+        )
+        await wait_until(
+            cdp,
+            """(() => {
+              const group = document.querySelector('.tab-group-btn[data-group-id="dev"]');
+              const children = document.querySelector('.tab-group-children');
+              return group?.classList.contains('expanded')
+                && children?.classList.contains('expanded')
+                && children?.getAttribute('aria-hidden') === 'false'
+                && getComputedStyle(children).opacity === '1';
+            })()""",
+            timeout=3,
+        )
+
+        result = await cdp.eval("""(async () => {
+          const readIcon = (selector) => {
+            const el = document.querySelector(selector);
+            if (!el) return null;
+            const style = getComputedStyle(el);
+            const rect = el.getBoundingClientRect();
+            const standardMask = style.maskImage || '';
+            return {
+              width: rect.width,
+              height: rect.height,
+              display: style.display,
+              visibility: style.visibility,
+              opacity: style.opacity,
+              color: style.color,
+              backgroundColor: style.backgroundColor,
+              maskImage: standardMask && standardMask !== 'none'
+                ? standardMask
+                : (style.webkitMaskImage || ''),
+              borderTopWidth: style.borderTopWidth,
+              borderRadius: style.borderRadius,
+              paddingTop: style.paddingTop,
+              filter: style.filter,
+              boxShadow: style.boxShadow,
+            };
+          };
+
+          const assetPaths = [
+            'icons/sidebar/finance.svg',
+            'icons/sidebar/dev.svg',
+            'icons/sidebar/sql.svg',
+            'icons/logos/apachesuperset.svg',
+          ];
+          const assets = {};
+          for (const path of assetPaths) {
+            const response = await fetch(path, { cache: 'no-store' });
+            const body = await response.text();
+            const doc = new DOMParser().parseFromString(body, 'image/svg+xml');
+            assets[path] = {
+              ok: response.ok,
+              hasSvg: !!doc.querySelector('svg'),
+              hasParserError: !!doc.querySelector('parsererror'),
+            };
+          }
+
+          const group = document.querySelector('.tab-group-btn[data-group-id="dev"]');
+          const children = document.querySelector('.tab-group-children');
+          const clickhouse = document.querySelector('[data-tab-id="clickhouse-docs"] .tab-icon-logo');
+          const clickhouseStyle = getComputedStyle(clickhouse);
+          const clickhouseMask = clickhouseStyle.maskImage || '';
+          return {
+            finance: readIcon('[data-tab-id="finance"] .tab-icon-outline'),
+            dev: readIcon('[data-group-id="dev"] .tab-icon-outline'),
+            sql: readIcon('[data-tab-id="sql"] .tab-icon-outline'),
+            superset: readIcon('[data-tab-id="superset"] .tab-icon-logo.tab-icon-tone-superset'),
+            assets,
+            groupBefore: {
+              expanded: group.classList.contains('expanded'),
+              hasActiveChild: group.classList.contains('has-active-child'),
+              active: group.classList.contains('active'),
+              ariaHidden: children.getAttribute('aria-hidden'),
+            },
+            clickhouse: {
+              width: clickhouseStyle.width,
+              height: clickhouseStyle.height,
+              maskImage: clickhouseMask && clickhouseMask !== 'none'
+                ? clickhouseMask
+                : (clickhouseStyle.webkitMaskImage || ''),
+              hasTone: [...clickhouse.classList].some(name => name.startsWith('tab-icon-tone-')),
+            },
+          };
+        })()""")
+
+        assert result['groupBefore'] == {
+            'expanded': True,
+            'hasActiveChild': False,
+            'active': False,
+            'ariaHidden': 'false',
+        }, result['groupBefore']
+
+        expected = {
+            'finance': ('rgb(86, 211, 100)', 'icons/sidebar/finance.svg'),
+            'dev': ('rgb(188, 140, 255)', 'icons/sidebar/dev.svg'),
+            'sql': ('rgb(88, 166, 255)', 'icons/sidebar/sql.svg'),
+            'superset': ('rgb(255, 123, 84)', 'icons/logos/apachesuperset.svg'),
+        }
+        for name, (color, asset) in expected.items():
+            icon = result[name]
+            assert icon is not None, f'{name} vector icon missing: {result!r}'
+            assert icon['width'] > 0 and icon['height'] > 0, (name, icon)
+            assert icon['display'] != 'none', (name, icon)
+            assert icon['visibility'] == 'visible', (name, icon)
+            assert icon['opacity'] == '1', (name, icon)
+            assert icon['color'] == color, (name, icon)
+            assert icon['backgroundColor'] == color, (name, icon)
+            assert asset in icon['maskImage'], (name, icon)
+            assert icon['borderTopWidth'] == '0px', (name, icon)
+            assert icon['borderRadius'] == '0px', (name, icon)
+            assert icon['paddingTop'] == '0px', (name, icon)
+            assert icon['filter'] == 'none', (name, icon)
+            assert icon['boxShadow'] == 'none', (name, icon)
+            asset_state = result['assets'][asset]
+            assert asset_state == {
+                'ok': True,
+                'hasSvg': True,
+                'hasParserError': False,
+            }, (asset, asset_state)
+
+        clickhouse = result['clickhouse']
+        assert clickhouse['width'] == '16px', clickhouse
+        assert clickhouse['height'] == '16px', clickhouse
+        assert 'icons/logos/clickhouse.svg' in clickhouse['maskImage'], clickhouse
+        assert clickhouse['hasTone'] is False, clickhouse
+
+        await cdp.eval("document.querySelector('[data-tab-id=\"finance\"]').click()")
+        await wait_until(
+            cdp,
+            """(() => (window.__keyboardHelperViewHistory || [])
+              .some(entry => entry.moduleId === 'finance' && entry.icon === '$'))()""",
+            timeout=6,
+        )
+        await wait_until(
+            cdp,
+            """(() => {
+              const style = getComputedStyle(document.querySelector('[data-tab-id="finance"]'));
+              return style.backgroundColor === 'rgb(22, 27, 34)'
+                && style.borderLeftColor === 'rgb(56, 139, 253)';
+            })()""",
+            timeout=2,
+        )
+        active_finance = await cdp.eval("""(() => {
+          const btn = document.querySelector('[data-tab-id="finance"]');
+          const icon = btn.querySelector('.tab-icon-outline');
+          const buttonStyle = getComputedStyle(btn);
+          return {
+            active: btn.classList.contains('active'),
+            backgroundColor: buttonStyle.backgroundColor,
+            borderLeftColor: buttonStyle.borderLeftColor,
+            iconColor: getComputedStyle(icon).color,
+          };
+        })()""")
+        assert active_finance == {
+            'active': True,
+            'backgroundColor': 'rgb(22, 27, 34)',
+            'borderLeftColor': 'rgb(56, 139, 253)',
+            'iconColor': 'rgb(86, 211, 100)',
+        }, active_finance
+
+        await cdp.eval(
+            "document.querySelector('.tab-group-btn[data-group-id=\"dev\"]').click()"
+        )
+        await wait_until(
+            cdp,
+            "document.querySelector('.tab-group-btn[data-group-id=\"dev\"]')?.classList.contains('expanded')",
+            timeout=3,
+        )
+        await cdp.eval("document.querySelector('[data-tab-id=\"sql\"]').click()")
+        await wait_until(
+            cdp,
+            """(() => (window.__keyboardHelperViewHistory || [])
+              .some(entry => entry.moduleId === 'sql' && entry.icon === '🗃'))()""",
+            timeout=6,
+        )
+        sql_group = await cdp.eval("""(() => {
+          const group = document.querySelector('.tab-group-btn[data-group-id="dev"]');
+          const children = document.querySelector('.tab-group-children');
+          const iconStyle = getComputedStyle(group.querySelector('.tab-icon-outline'));
+          return {
+            expanded: group.classList.contains('expanded'),
+            hasActiveChild: group.classList.contains('has-active-child'),
+            active: group.classList.contains('active'),
+            ariaHidden: children.getAttribute('aria-hidden'),
+            iconBorderTopWidth: iconStyle.borderTopWidth,
+            iconVisibility: iconStyle.visibility,
+          };
+        })()""")
+        assert sql_group == {
+            'expanded': True,
+            'hasActiveChild': True,
+            'active': False,
+            'ariaHidden': 'false',
+            'iconBorderTopWidth': '0px',
+            'iconVisibility': 'visible',
+        }, sql_group
+
+        await cdp.eval("document.querySelector('[data-tab-id=\"superset\"]').click()")
+        await wait_until(
+            cdp,
+            """(() => (window.__keyboardHelperViewHistory || [])
+              .some(entry => entry.moduleId === 'superset' && entry.icon === 'logo:apachesuperset'))()""",
+            timeout=6,
+        )
+        history = await cdp.eval("""(() => Object.fromEntries(
+          (window.__keyboardHelperViewHistory || [])
+            .filter(entry => ['finance', 'sql', 'superset'].includes(entry.moduleId))
+            .map(entry => [entry.moduleId, entry.icon])
+        ))()""")
+        assert history == {
+            'finance': '$',
+            'sql': '🗃',
+            'superset': 'logo:apachesuperset',
+        }, history
+        assert all(not icon.startswith('outline:') for icon in history.values()), history
+
+        await cdp.eval("""(() => {
+          document.dispatchEvent(new KeyboardEvent('keydown', {
+            key: 'Tab', code: 'Tab', ctrlKey: true, bubbles: true, cancelable: true
+          }));
+          document.dispatchEvent(new KeyboardEvent('keydown', {
+            key: 'Tab', code: 'Tab', ctrlKey: true, bubbles: true, cancelable: true
+          }));
+        })()""")
+        await wait_until(cdp, "!!document.querySelector('.view-history-switcher')", timeout=4)
+        switcher_text = await cdp.eval(
+            "document.querySelector('.view-history-switcher')?.textContent || ''"
+        )
+        assert 'outline:' not in switcher_text, switcher_text
+        await cdp.eval("""(() => {
+          document.dispatchEvent(new KeyboardEvent('keyup', {
+            key: 'Control', code: 'ControlLeft', bubbles: true, cancelable: true
+          }));
+        })()""")
+        await wait_until(cdp, "!document.querySelector('.view-history-switcher')", timeout=3)
+
+        await cdp.eval("document.querySelector('[data-tab-id=\"shortcuts\"]').click()")
+        await wait_until(
+            cdp,
+            "document.querySelector('[data-tab-id=\"shortcuts\"]')?.classList.contains('active')",
+            timeout=5,
+        )
+        await asyncio.sleep(0.2)
+        await cdp.eval("""(() => {
+          if (Array.isArray(window.__keyboardHelperViewHistory)) {
+            window.__keyboardHelperViewHistory.length = 0;
+          }
+        })()""")
+
+    await check('T2 sidebar colored outline icons', t2_sidebar_colored_outline_icons)
+
     # ── T2a: external links open outside the app webview ─────
     async def t2a_external_links_use_native_open_url():
         before = await cdp.eval("location.href")

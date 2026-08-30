@@ -158,10 +158,14 @@ f-* tag:  preflight ──► release SKIPPED ───────────�
 main:     preflight SKIPPED ──► release (cache-seed only)
 ```
 
-`preflight` runs the frontend browser smoke suite for both tag types. Native
-`v*` tags additionally run locked Rust check/tests on Ubuntu with disposable
-Linux sidecar stubs. A failed preflight blocks release creation and frontend
-asset packaging; the `main` cache-seed path remains independent.
+`preflight` first requires an exact `## <TAG> (` heading in the frontend Help
+release history. Native `v*` tags also require the tag version to match
+`Cargo.toml`, `Cargo.lock`, and `tauri.conf.json`. It then runs the frontend
+browser smoke suite for both tag types; native tags additionally run locked
+Rust check/tests on Ubuntu with disposable Linux sidecar stubs. A failed
+preflight blocks release creation and frontend asset packaging; the `main`
+cache-seed path remains independent. The frontend packaging job repeats the
+release-history check as defense in depth.
 
 Key steps in `release-frontend`:
 1. Compute version = `<NATIVE>-f<sha>`. For `f-*` tags, `<NATIVE>` is read

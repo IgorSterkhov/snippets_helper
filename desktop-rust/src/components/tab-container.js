@@ -1,23 +1,29 @@
 /**
  * Render a tab icon. Supports:
  *   - plain emoji/text  →  "🔖"
+ *   - sidebar outline   →  "outline:finance" (must exist under icons/sidebar/<slug>.svg)
  *   - Simple Icons logo →  "logo:apachesuperset" (must exist under icons/logos/<slug>.svg)
  */
-function renderTabIcon(icon) {
+function renderTabIcon(icon, tone = '') {
   const raw = icon || '';
-  if (raw.startsWith('logo:')) {
-    const slug = raw.slice(5).replace(/[^a-z0-9-]/gi, '');
-    const style = [
-      'display:inline-block',
-      'width:1em','height:1em',
-      'vertical-align:middle',
-      'background-color:currentColor',
-      `mask-image:url(icons/logos/${slug}.svg)`,
-      'mask-size:contain','mask-repeat:no-repeat','mask-position:center',
-      `-webkit-mask-image:url(icons/logos/${slug}.svg)`,
-      '-webkit-mask-size:contain','-webkit-mask-repeat:no-repeat','-webkit-mask-position:center',
-    ].join(';');
-    return `<span class="tab-icon tab-icon-logo" style="${style}"></span>`;
+  let kind = '';
+  let directory = '';
+  let prefixLength = 0;
+  if (raw.startsWith('outline:')) {
+    kind = 'outline';
+    directory = 'sidebar';
+    prefixLength = 8;
+  } else if (raw.startsWith('logo:')) {
+    kind = 'logo';
+    directory = 'logos';
+    prefixLength = 5;
+  }
+  if (kind) {
+    const slug = raw.slice(prefixLength).replace(/[^a-z0-9-]/gi, '');
+    const safeTone = String(tone || '').replace(/[^a-z0-9-]/gi, '');
+    const toneClass = safeTone ? ` tab-icon-tone-${safeTone}` : '';
+    const asset = `icons/${directory}/${slug}.svg`;
+    return `<span class="tab-icon tab-icon-vector tab-icon-${kind}${toneClass}" style="--tab-icon-mask:url(${asset})"></span>`;
   }
   return `<span class="tab-icon">${raw}</span>`;
 }
@@ -83,7 +89,7 @@ export class TabContainer {
     const btn = document.createElement('button');
     btn.className = `tab-btn${extraClass ? ' ' + extraClass : ''}`;
     btn.dataset.tabId = tab.id;
-    const iconHtml = renderTabIcon(tab.icon);
+    const iconHtml = renderTabIcon(tab.sidebarIcon || tab.icon, tab.sidebarIconTone);
     btn.innerHTML = `${iconHtml}<span class="tab-label">${tab.label}</span>`;
     btn.addEventListener('click', () => this.activate(tab.id));
     this.buttons[tab.id] = btn;
@@ -98,7 +104,7 @@ export class TabContainer {
     const btn = document.createElement('button');
     btn.className = 'tab-btn tab-group-btn';
     btn.dataset.groupId = group.id;
-    btn.innerHTML = `${renderTabIcon(group.icon)}<span class="tab-label">${group.label}</span>`;
+    btn.innerHTML = `${renderTabIcon(group.sidebarIcon || group.icon, group.sidebarIconTone)}<span class="tab-label">${group.label}</span>`;
     btn.addEventListener('click', () => this.toggleGroup(group.id));
     wrap.appendChild(btn);
     this.groupButtons[group.id] = btn;

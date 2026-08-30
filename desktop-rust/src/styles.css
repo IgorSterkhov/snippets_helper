@@ -84,6 +84,39 @@ body.standalone-module-window #app {
   margin-top: 2px;
 }
 
+.tab-icon-vector {
+  display: inline-block;
+  vertical-align: middle;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background-color: currentColor;
+  mask-image: var(--tab-icon-mask);
+  mask-size: contain;
+  mask-repeat: no-repeat;
+  mask-position: center;
+  -webkit-mask-image: var(--tab-icon-mask);
+  -webkit-mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+}
+
+.tab-icon-logo {
+  width: 1em;
+  height: 1em;
+}
+
+.tab-icon-outline {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+}
+
+.tab-icon-tone-finance { color: #56d364; }
+.tab-icon-tone-dev { color: #bc8cff; }
+.tab-icon-tone-sql { color: #58a6ff; }
+.tab-icon-tone-superset { color: #ff7b54; }
+
 .tab-btn:hover {
   background: var(--bg-secondary);
   color: var(--text);
@@ -119,6 +152,12 @@ body.standalone-module-window #app {
   padding: 2px 3px;
   border: 1px solid currentColor;
   border-radius: 4px;
+}
+
+.tab-group-btn .tab-icon.tab-icon-vector {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
 }
 
 .tab-group-btn::after {
@@ -187,6 +226,12 @@ body.standalone-module-window #app {
 
 .tab-group-child .tab-label {
   font-size: 8px;
+}
+
+.tab-group-child .tab-icon-outline {
+  width: 18px;
+  height: 18px;
+  flex-basis: 18px;
 }
 
 /* ── Tab Content ──────────────────────────────────────────── */

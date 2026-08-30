@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## v1.24.3 (2026-08-30)
+
+- **Colored sidebar icons:** Finance, DEV, SQL, and Superset now use distinct
+  green, purple, blue, and coral icons without extra tiles, frames, or glow.
+  Existing active states, labels, and recent-view navigation are unchanged.
+- **Safer desktop releases:** desktop release tags now run frontend smoke tests
+  before publishing assets, while full native tags also run locked Rust checks
+  and tests. The Docker test mode validates Rust/Tauri in an isolated source
+  copy so generated files cannot pollute the worktree.
+
+## f-20260830-1 (2026-08-30)
+
+- **Frontend OTA recovery:** republishes the v1.24.2 frontend bundle and
+  restores the missing frontend update manifest after the original release
+  job was cancelled.
+
 ## v1.24.2 (2026-07-09)
 
 - **SQL Formatter SETTINGS readability:** `Format SQL` now expands ClickHouse
