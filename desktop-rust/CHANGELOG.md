@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## f-20260831-1 (2026-08-31)
+
 - **Live note share refresh:** saving a note with an active public link now
   syncs the saved revision in the background, so the existing URL updates
   without being revoked or recreated.
