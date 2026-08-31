@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from datetime import datetime
 from typing import Any, Awaitable, Callable, Protocol
 
@@ -15,6 +16,37 @@ from api.deepseek_client import DeepSeekClient
 from api.models import TelegramChatBinding, TelegramProcessedMessage, User
 from api.routes.ai import build_ai_response, build_messages_for_user, user_deepseek_api_key, user_telegram_bot_token
 from api.schemas import AiChatRequest, AiContext
+
+
+class TelegramBotError(RuntimeError):
+    """Expected Telegram Bot API transport or provider failure."""
+
+
+_TELEGRAM_BOT_URL_RE = re.compile(r"(?i)(/bot)[^/\s]+(?=/)")
+_TELEGRAM_TOKEN_RE = re.compile(r"\b\d{5,}:[A-Za-z0-9_-]{20,}\b")
+_AUTHORIZATION_RE = re.compile(
+    r"(?i)\bAuthorization\s*[:=]\s*(?:Bearer\s+)?[^\s,;]+"
+)
+_BEARER_RE = re.compile(r"(?i)\bBearer\s+[^\s,;]+")
+_API_KEY_RE = re.compile(r"(?i)\bapi[_-]?key\s*[:=]\s*[^\s,;]+")
+_URI_USERINFO_RE = re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)[^\s/@]+:[^\s/@]+@")
+_PASSWORD_RE = re.compile(r"(?i)\b(password|passwd|pwd)\s*[:=]\s*[^\s,;]+")
+
+
+def sanitize_telegram_error_text(value: object, max_length: int = 300) -> str:
+    if isinstance(max_length, bool) or not isinstance(max_length, int) or max_length <= 0:
+        raise ValueError("max_length must be a positive integer")
+
+    text = str(value)
+    text = _TELEGRAM_BOT_URL_RE.sub(r"\1[REDACTED]", text)
+    text = _TELEGRAM_TOKEN_RE.sub("[REDACTED]", text)
+    text = _AUTHORIZATION_RE.sub("Authorization: [REDACTED]", text)
+    text = _BEARER_RE.sub("Bearer [REDACTED]", text)
+    text = _API_KEY_RE.sub("api_key=[REDACTED]", text)
+    text = _URI_USERINFO_RE.sub(r"\1[REDACTED]@", text)
+    text = _PASSWORD_RE.sub(r"\1=[REDACTED]", text)
+    text = " ".join(text.split())
+    return text[:max_length]
 
 
 class TelegramRepository(Protocol):
@@ -145,8 +177,10 @@ class TelegramBotApi:
                     timeout=timeout,
                 )
             except httpx.RequestError as exc:
-                raise RuntimeError(
-                    f"Telegram request failed ({type(exc).__name__}): {exc}"
+                raise TelegramBotError(
+                    sanitize_telegram_error_text(
+                        f"Telegram request failed ({type(exc).__name__}): {exc}"
+                    )
                 ) from exc
         else:
             async with httpx.AsyncClient() as client:
@@ -157,14 +191,25 @@ class TelegramBotApi:
                         timeout=timeout,
                     )
                 except httpx.RequestError as exc:
-                    raise RuntimeError(
-                        f"Telegram request failed ({type(exc).__name__}): {exc}"
+                    raise TelegramBotError(
+                        sanitize_telegram_error_text(
+                            f"Telegram request failed ({type(exc).__name__}): {exc}"
+                        )
                     ) from exc
         if response.status_code >= 400:
-            raise RuntimeError(f"Telegram HTTP {response.status_code}: {response.text[:500]}")
-        data = response.json()
+            raise TelegramBotError(sanitize_telegram_error_text(
+                f"Telegram HTTP {response.status_code}: {response.text}"
+            ))
+        try:
+            data = response.json()
+        except (TypeError, ValueError) as exc:
+            raise TelegramBotError(sanitize_telegram_error_text(
+                f"Telegram returned invalid JSON ({type(exc).__name__}): {exc}"
+            )) from exc
         if not data.get("ok", False):
-            raise RuntimeError(f"Telegram API error: {data}")
+            raise TelegramBotError(sanitize_telegram_error_text(
+                f"Telegram API error: {data}"
+            ))
         return data
 
 
