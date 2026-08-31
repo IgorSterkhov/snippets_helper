@@ -502,11 +502,20 @@ Use this pattern when an item can be exported to a third-party public page:
   section from live link controls.
 - Save and sync the source item before publishing so the API exports current
   content.
+- When an existing live share must refresh after Save, complete the local Save
+  UI first, check that the item has an active share link, then use the shared
+  background sync flow. Do not block local Save, sync unshared items, or
+  recreate the public token.
+- Send `no-store`/`no-cache` response headers for live public HTML so browsers
+  and reverse proxies cannot preserve an older revision under the stable URL.
 - Show publish failures in the shared persistent error dialog with copyable
   diagnostics; do not rely on short-lived toast messages for third-party API
   failures.
 - Convert content server-side with a strict allowlist for tags, attributes, and
   URL schemes. Interactive app-only cards should degrade to links.
+- Telegra.ph has no table nodes. Recognize Markdown tables through the same
+  parser used by live public shares, sanitize cell text before measuring it,
+  and export aligned monospaced text instead of raw pipe/separator markup.
 
 ---
 

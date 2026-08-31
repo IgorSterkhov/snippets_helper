@@ -20,3 +20,9 @@ def test_public_share_parent_csp_limits_iframe_sources():
     assert "connect-src 'none'" in csp
     assert "object-src 'none'" in csp
     assert PUBLIC_SHARE_HEADERS["X-Content-Type-Options"] == "nosniff"
+
+
+def test_public_share_headers_disable_caching_for_live_content():
+    assert PUBLIC_SHARE_HEADERS["Cache-Control"] == "no-store, no-cache, must-revalidate, max-age=0"
+    assert PUBLIC_SHARE_HEADERS["Pragma"] == "no-cache"
+    assert PUBLIC_SHARE_HEADERS["Expires"] == "0"

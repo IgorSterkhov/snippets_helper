@@ -200,6 +200,26 @@ def test_render_share_html_treats_table_only_shortcut_value_as_markdown():
     assert "<pre><code id='share-code'>" not in rendered
 
 
+def test_render_share_html_recognizes_optional_edge_pipes_and_code_span_pipes():
+    rendered = render_share_html(
+        {
+            "type": "note",
+            "title": "Table parity",
+            "content": (
+                "Name | Value\n"
+                "--- | ---:\n"
+                "escaped \\| name | 10\n"
+                "`a|b` | 2"
+            ),
+        }
+    )
+
+    assert "<table>" in rendered
+    assert "escaped | name" in rendered
+    assert "<code>a|b</code>" in rendered
+    assert '<td style="text-align:right">10</td>' in rendered
+
+
 def test_render_share_html_renders_ordered_lists_split_by_code_blocks():
     rendered = render_share_html(
         {

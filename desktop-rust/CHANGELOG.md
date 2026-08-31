@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Live note share refresh:** saving a note with an active public link now
+  syncs the saved revision in the background, so the existing URL updates
+  without being revoked or recreated.
+- **Readable Telegra.ph tables:** Markdown tables now publish as aligned
+  monospaced text instead of raw pipe/separator markup.
+
 ## v1.24.3 (2026-08-30)
 
 - **Colored sidebar icons:** Finance, DEV, SQL, and Superset now use distinct

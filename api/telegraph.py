@@ -3,11 +3,13 @@ import html
 import json
 import os
 import re
+import unicodedata
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
 import httpx
 
+from api.markdown_tables import normalize_table_cells, split_table_row, table_start_at
 from api.media_utils import public_html_base_url, public_media_base_url
 
 
@@ -24,7 +26,6 @@ FENCE_RE = re.compile(r"^[ \t]*```([A-Za-z0-9_+.#-]*)[ \t]*$")
 HEADING_RE = re.compile(r"^(#{1,4})[ \t]+(.+?)\s*$")
 UNORDERED_RE = re.compile(r"^[ \t]*[-*][ \t]+(.+?)\s*$")
 ORDERED_RE = re.compile(r"^[ \t]*(\d{1,9})[.)][ \t]+(.+?)\s*$")
-TABLE_ROW_RE = re.compile(r"^[ \t]*\|.*\|[ \t]*$")
 HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 
@@ -117,6 +118,47 @@ def _paragraph(text: str) -> dict:
     return {"tag": "p", "children": _inline_nodes(text)}
 
 
+def _display_width(text: str) -> int:
+    width = 0
+    for char in text:
+        if unicodedata.combining(char):
+            continue
+        width += 2 if unicodedata.east_asian_width(char) in {"W", "F"} else 1
+    return width
+
+
+def _pad_table_cell(text: str, width: int, alignment: str) -> str:
+    padding = max(0, width - _display_width(text))
+    if alignment == "right":
+        return " " * padding + text
+    if alignment == "center":
+        left = padding // 2
+        return " " * left + text + " " * (padding - left)
+    return text + " " * padding
+
+
+def _format_table(headers: list[str], rows: list[list[str]], alignments: list[str]) -> str:
+    width = len(headers)
+    clean_headers = [_plain_text(cell).strip() for cell in normalize_table_cells(headers, width)]
+    clean_rows = [
+        [_plain_text(cell).strip() for cell in normalize_table_cells(row, width)]
+        for row in rows
+    ]
+    column_widths = [
+        max(_display_width(row[index]) for row in [clean_headers, *clean_rows])
+        for index in range(width)
+    ]
+
+    def format_row(row: list[str]) -> str:
+        return "  ".join(
+            _pad_table_cell(row[index], column_widths[index], alignments[index])
+            for index in range(width)
+        ).rstrip()
+
+    divider = "  ".join("─" * column_width for column_width in column_widths)
+    return "\n".join([format_row(clean_headers), divider, *(format_row(row) for row in clean_rows)])
+
+
 def _split_blocks(markdown: str) -> list[tuple[str, str]]:
     lines = str(markdown or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
     blocks: list[tuple[str, str]] = []
@@ -124,7 +166,6 @@ def _split_blocks(markdown: str) -> list[tuple[str, str]]:
     code: list[str] | None = None
     list_kind: str | None = None
     list_items: list[str] = []
-    table_lines: list[str] = []
 
     def flush_paragraph():
         nonlocal paragraph
@@ -139,13 +180,9 @@ def _split_blocks(markdown: str) -> list[tuple[str, str]]:
         list_kind = None
         list_items = []
 
-    def flush_table():
-        nonlocal table_lines
-        if table_lines:
-            blocks.append(("pre", "\n".join(line.strip() for line in table_lines)))
-            table_lines = []
-
-    for line in lines:
+    index = 0
+    while index < len(lines):
+        line = lines[index]
         fence = FENCE_RE.match(line)
         if code is not None:
             if fence:
@@ -153,50 +190,63 @@ def _split_blocks(markdown: str) -> list[tuple[str, str]]:
                 code = None
             else:
                 code.append(line)
+            index += 1
             continue
         if fence:
             flush_paragraph()
             flush_list()
-            flush_table()
             code = []
+            index += 1
             continue
         if not line.strip():
             flush_paragraph()
             flush_list()
-            flush_table()
+            index += 1
+            continue
+        table = table_start_at(lines, index)
+        if table:
+            headers, alignments = table
+            rows: list[list[str]] = []
+            flush_paragraph()
+            flush_list()
+            index += 2
+            while index < len(lines):
+                if not lines[index].strip():
+                    break
+                row = split_table_row(lines[index])
+                if not row:
+                    break
+                rows.append(row)
+                index += 1
+            blocks.append(("pre", _format_table(headers, rows, alignments)))
             continue
         heading = HEADING_RE.match(line)
         if heading:
             flush_paragraph()
             flush_list()
-            flush_table()
             tag = "h3" if len(heading.group(1)) <= 2 else "h4"
             blocks.append((tag, heading.group(2)))
-            continue
-        if TABLE_ROW_RE.match(line):
-            flush_paragraph()
-            flush_list()
-            table_lines.append(line)
+            index += 1
             continue
         unordered = UNORDERED_RE.match(line)
         ordered = ORDERED_RE.match(line)
         if unordered or ordered:
             flush_paragraph()
-            flush_table()
             kind = "ul" if unordered else "ol"
             if list_kind != kind:
                 flush_list()
                 list_kind = kind
             list_items.append((unordered or ordered).group(1 if unordered else 2))
+            index += 1
             continue
         flush_list()
         paragraph.append(line)
+        index += 1
 
     if code is not None:
         blocks.append(("pre", "\n".join(code)))
     flush_paragraph()
     flush_list()
-    flush_table()
     return blocks
 
 

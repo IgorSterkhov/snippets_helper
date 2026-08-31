@@ -84,6 +84,9 @@ PUBLIC_SHARE_HEADERS = {
     "Content-Security-Policy": _public_share_csp(),
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
+    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    "Pragma": "no-cache",
+    "Expires": "0",
 }
 
 

@@ -6,6 +6,7 @@ import { attachToolbar } from '../components/md-toolbar.js';
 import { enhanceMarkdownFigures } from '../components/markdown-figures.js';
 import { installWrappedChipDnd } from '../components/wrapped-chip-dnd.js';
 import { openShareLinkModal } from '../components/share-link-modal.js';
+import { doSync } from '../components/status-bar.js';
 
 let root = null;
 let folders = [];
@@ -1235,29 +1236,54 @@ function renderEditor() {
 }
 
 async function onSaveNote() {
+  const wasExisting = Boolean(editingNote?.id);
+  let savedNoteUuid = null;
   try {
-    if (editingNote.id) {
+    if (wasExisting) {
       await call('update_note', {
         id: editingNote.id,
         title: editingNote.title,
         content: editingNote.content,
         isPinned: editingNote.is_pinned,
       });
-      showToast('Note updated', 'success');
+      savedNoteUuid = editingNote.uuid;
     } else {
       await call('create_note', {
         folderId: selectedFolderId,
         title: editingNote.title,
         content: editingNote.content,
       });
-      showToast('Note created', 'success');
     }
-    editingNote = null;
-    previewMode = false;
-    await loadNotes();
-    await loadPinnedNotes();
   } catch (e) {
     showToast('Failed to save note: ' + e, 'error');
+    return;
+  }
+
+  editingNote = null;
+  previewMode = false;
+  await loadNotes();
+  await loadPinnedNotes();
+  showToast(wasExisting ? 'Note updated' : 'Note created', 'success');
+
+  if (wasExisting && savedNoteUuid) {
+    syncSharedNoteAfterSave(savedNoteUuid);
+  }
+}
+
+async function syncSharedNoteAfterSave(itemUuid) {
+  let link;
+  try {
+    link = await call('get_share_link', { itemType: 'note', itemUuid });
+  } catch {
+    return;
+  }
+  if (!link) return;
+
+  try {
+    await doSync();
+    showToast('Public link synced', 'success');
+  } catch {
+    showToast('Note saved locally. The public link will update after the next successful sync.');
   }
 }
 

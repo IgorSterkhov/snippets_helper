@@ -2285,6 +2285,201 @@ async def run_tests():
         assert '![share-image]' in saved_content, f'saved content: {saved_content!r}'
     await check('T14f Notes share autosaves and syncs before create', t14f_notes_share_autosaves_and_syncs_before_create)
 
+    async def create_note_for_save_sync(title, *, shared=False):
+        return await cdp.eval(f"""(async () => {{
+          const note = await window.__TAURI__.core.invoke('create_note', {{
+            folderId: 1,
+            title: {json.dumps(title)},
+            content: 'Initial save-sync content'
+          }});
+          if ({str(shared).lower()}) {{
+            await window.__TAURI__.core.invoke('create_share_link', {{
+              itemType: 'note',
+              itemUuid: note.uuid
+            }});
+          }}
+          return note.uuid;
+        }})()""")
+
+    async def open_note_for_save_sync(title):
+        await close_modals()
+        await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"notes\"]').click()")
+        await wait_until(cdp, "!!document.querySelector('#panel-notes .notes-folder-item')", timeout=5)
+        await cdp.eval(
+            "[...document.querySelectorAll('#panel-notes .folder-name')]"
+            ".find(x => x.textContent.trim() === 'Inbox').click()"
+        )
+        await wait_until(
+            cdp,
+            "[...document.querySelectorAll('#panel-notes .note-card-title')]"
+            f".some(x => x.textContent.trim() === {json.dumps(title)})",
+            timeout=5,
+        )
+        await cdp.eval(
+            "[...document.querySelectorAll('#panel-notes .note-card-title')]"
+            f".find(x => x.textContent.trim() === {json.dumps(title)}).click()"
+        )
+        await wait_until(cdp, "!!document.querySelector('#panel-notes .note-toolbar')", timeout=3)
+        await cdp.eval(
+            "[...document.querySelectorAll('#panel-notes .note-toolbar button')]"
+            ".find(b => b.textContent.trim() === 'Edit').click()"
+        )
+        await wait_until(cdp, "!!document.querySelector('#panel-notes .note-content-input')", timeout=3)
+
+    async def edit_open_note(title, content):
+        await cdp.eval(f"""(() => {{
+          const title = document.querySelector('#panel-notes .note-title-input');
+          const textarea = document.querySelector('#panel-notes .note-content-input');
+          title.value = {json.dumps(title)};
+          title.dispatchEvent(new Event('input', {{ bubbles: true }}));
+          textarea.value = {json.dumps(content)};
+          textarea.dispatchEvent(new Event('input', {{ bubbles: true }}));
+          window.__mockCommandLog = [];
+          window.__mockCallSeq = 0;
+        }})()""")
+
+    async def click_note_save():
+        await cdp.eval(
+            "[...document.querySelectorAll('#panel-notes .note-actions button')]"
+            ".find(b => b.textContent.trim() === 'Save').click()"
+        )
+
+    # ── T14g: Shared Notes Save syncs existing live link ──
+    async def t14g_shared_note_save_syncs_existing_live_link():
+        source_title = 'Shared save-sync source'
+        saved_title = 'Shared save-sync edited'
+        await create_note_for_save_sync(source_title, shared=True)
+        await open_note_for_save_sync(source_title)
+        await edit_open_note(saved_title, 'Saved revision for the existing public URL')
+
+        await click_note_save()
+        await wait_until(
+            cdp,
+            "window.__mockCommandLog.some(x => x.command === 'trigger_sync')",
+            timeout=3,
+        )
+        commands = await cdp.eval("window.__mockCommandLog.map(x => x.command)")
+        assert commands.count('trigger_sync') == 1, commands
+        assert commands.index('update_note') < commands.index('trigger_sync'), commands
+        saved = await cdp.eval(
+            "JSON.parse(localStorage.getItem('mock.notes') || '[]')"
+            f".find(n => n.title === {json.dumps(saved_title)})?.content || ''"
+        )
+        assert saved == 'Saved revision for the existing public URL', saved
+    await check('T14g Shared Notes Save syncs existing live link', t14g_shared_note_save_syncs_existing_live_link)
+
+    # ── T14h: Unshared Notes Save does not run full sync ──
+    async def t14h_unshared_note_save_does_not_sync():
+        source_title = 'Unshared save-sync source'
+        saved_title = 'Unshared save-sync edited'
+        await create_note_for_save_sync(source_title)
+        await open_note_for_save_sync(source_title)
+        await edit_open_note(saved_title, 'Local-only saved revision')
+
+        await click_note_save()
+        await wait_until(cdp, "!document.querySelector('#panel-notes .note-content-input')", timeout=3)
+        await asyncio.sleep(0.3)
+        commands = await cdp.eval("window.__mockCommandLog.map(x => x.command)")
+        assert 'update_note' in commands, commands
+        assert 'trigger_sync' not in commands, commands
+    await check('T14h Unshared Notes Save does not sync', t14h_unshared_note_save_does_not_sync)
+
+    # ── T14i: Slow shared-note sync does not block local Save ──
+    async def t14i_slow_shared_note_sync_does_not_block_save():
+        source_title = 'Slow shared save-sync source'
+        await create_note_for_save_sync(source_title, shared=True)
+        await open_note_for_save_sync(source_title)
+        await edit_open_note('Slow shared save-sync edited', 'Saved before slow sync completes')
+        await cdp.eval("""(() => {
+          window.__mockSyncStarted = false;
+          window.__mockTriggerSync = () => {
+            window.__mockSyncStarted = true;
+            return new Promise(resolve => {
+              window.__resolveMockTriggerSync = () => resolve({
+                timestamp: '12:00:00',
+                push: { total: 1, pushed: { notes: 1 } },
+                pull: { total: 0, pulled: {} }
+              });
+            });
+          };
+        })()""")
+        try:
+            await click_note_save()
+            await wait_until(cdp, "window.__mockSyncStarted === true", timeout=3)
+            editor_closed = await cdp.eval("!document.querySelector('#panel-notes .note-content-input')")
+            assert editor_closed is True, 'editor must close while background sync is pending'
+            await cdp.eval("window.__resolveMockTriggerSync()")
+            await wait_until(
+                cdp,
+                "document.querySelector('.sb-label')?.textContent.includes('↑1')",
+                timeout=3,
+            )
+        finally:
+            await cdp.eval("""(() => {
+              if (window.__resolveMockTriggerSync) window.__resolveMockTriggerSync();
+              delete window.__mockTriggerSync;
+              delete window.__resolveMockTriggerSync;
+              delete window.__mockSyncStarted;
+            })()""")
+    await check('T14i Slow shared-note sync does not block Save', t14i_slow_shared_note_sync_does_not_block_save)
+
+    # ── T14j: Shared-note sync failure keeps local Save ──
+    async def t14j_shared_note_sync_failure_keeps_local_save():
+        source_title = 'Offline shared save-sync source'
+        saved_title = 'Offline shared save-sync edited'
+        await create_note_for_save_sync(source_title, shared=True)
+        await open_note_for_save_sync(source_title)
+        await edit_open_note(saved_title, 'Persist this revision while offline')
+        await cdp.eval("window.__mockTriggerSync = () => { throw new Error('offline'); }")
+        try:
+            await click_note_save()
+            await wait_until(
+                cdp,
+                "document.body.innerText.includes('saved locally') && "
+                "document.body.innerText.includes('next successful sync')",
+                timeout=3,
+            )
+            saved = await cdp.eval(
+                "JSON.parse(localStorage.getItem('mock.notes') || '[]')"
+                f".find(n => n.title === {json.dumps(saved_title)})?.content || ''"
+            )
+            assert saved == 'Persist this revision while offline', saved
+            editor_closed = await cdp.eval("!document.querySelector('#panel-notes .note-content-input')")
+            assert editor_closed is True
+        finally:
+            await cdp.eval("delete window.__mockTriggerSync")
+    await check('T14j Shared-note sync failure keeps local Save', t14j_shared_note_sync_failure_keeps_local_save)
+
+    # ── T14k: Local note write failure never starts sync ──
+    async def t14k_note_write_failure_never_starts_sync():
+        source_title = 'Failed write save-sync source'
+        await create_note_for_save_sync(source_title, shared=True)
+        await open_note_for_save_sync(source_title)
+        await edit_open_note('Failed write save-sync edited', 'Must remain in the editor')
+        await cdp.eval("""(() => {
+          window.__mockOriginalInvoke = window.__TAURI__.core.invoke;
+          window.__TAURI__.core.invoke = (command, args) => {
+            if (command === 'update_note') return Promise.reject(new Error('write failed'));
+            return window.__mockOriginalInvoke(command, args);
+          };
+        })()""")
+        try:
+            await click_note_save()
+            await wait_until(cdp, "document.body.innerText.includes('Failed to save note')", timeout=3)
+            editor_open = await cdp.eval("!!document.querySelector('#panel-notes .note-content-input')")
+            commands = await cdp.eval("window.__mockCommandLog.map(x => x.command)")
+            assert editor_open is True
+            assert 'trigger_sync' not in commands, commands
+        finally:
+            await cdp.eval("""(() => {
+              if (window.__mockOriginalInvoke) {
+                window.__TAURI__.core.invoke = window.__mockOriginalInvoke;
+              }
+              delete window.__mockOriginalInvoke;
+              [...document.querySelectorAll('.modal-overlay')].forEach(x => x.remove());
+            })()""")
+    await check('T14k Note write failure never starts sync', t14k_note_write_failure_never_starts_sync)
+
     # ── T15: Tasks Pin updates pinned chip strip ─────────────
     async def t15_tasks_pin_updates_strip():
         await cdp.eval("document.querySelector('.tab-btn[data-tab-id=\"tasks\"]').click()")

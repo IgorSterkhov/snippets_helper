@@ -8,6 +8,7 @@ import pytest
 from fastapi import HTTPException
 
 from api.routes import share_links
+from api.share_utils import render_share_html
 from api.telegraph import (
     TelegraphClient,
     TelegraphError,
@@ -99,15 +100,110 @@ def test_telegraph_converter_rejects_external_html_card_links():
     assert "example.com" not in str(nodes)
 
 
-def test_telegraph_converter_keeps_markdown_tables_readable():
+def test_telegraph_converter_formats_markdown_tables_as_aligned_pre():
     nodes = markdown_to_telegraph_nodes(
         "Ports",
-        "| Name | Port |\n|---|---:|\n| SSH | 22 |",
+        (
+            "| Назначение | Внешний порт | Внутренний адрес |\n"
+            "|:---|---:|:---|\n"
+            "| MTProxy | 7443 | 192.168.1.96 |\n"
+            "| SSH | 5555 | 192.168.1.96 |"
+        ),
     )
 
     assert nodes[0]["tag"] == "pre"
-    assert "| Name | Port |" in nodes[0]["children"][0]
-    assert "| SSH | 22 |" in nodes[0]["children"][0]
+    assert nodes[0]["children"][0] == (
+        "Назначение  Внешний порт  Внутренний адрес\n"
+        "──────────  ────────────  ────────────────\n"
+        "MTProxy             7443  192.168.1.96\n"
+        "SSH                 5555  192.168.1.96"
+    )
+
+
+def test_telegraph_converter_normalizes_cells_and_preserves_table_alignment():
+    nodes = markdown_to_telegraph_nodes(
+        "Values",
+        (
+            "Key | Center | Data\n"
+            "--- | :---: | ---:\n"
+            "escaped \\| pipe | mid | 9\n"
+            "`a|b` | x |\n"
+            "extra | y | 10 | ignored"
+        ),
+    )
+
+    assert nodes[0]["tag"] == "pre"
+    assert nodes[0]["children"][0] == (
+        "Key             Center  Data\n"
+        "──────────────  ──────  ────\n"
+        "escaped | pipe   mid       9\n"
+        "`a|b`             x\n"
+        "extra             y       10"
+    )
+
+
+def test_telegraph_converter_sanitizes_cells_before_unicode_width_measurement():
+    nodes = markdown_to_telegraph_nodes(
+        "Unicode",
+        (
+            "| Label | Value |\n"
+            "|---|---|\n"
+            "| <b>猫</b> | A&amp;B |\n"
+            "| é | 😀 |"
+        ),
+    )
+
+    assert nodes[0]["children"][0] == (
+        "Label  Value\n"
+        "─────  ─────\n"
+        "猫     A&B\n"
+        "é      😀"
+    )
+
+
+def test_telegraph_and_public_share_recognize_the_same_pipe_table():
+    markdown = (
+        "Name | Value\n"
+        "--- | ---:\n"
+        "escaped \\| name | 10\n"
+        "`a|b` | 2"
+    )
+
+    telegraph_nodes = markdown_to_telegraph_nodes("Parity", markdown)
+    public_html = render_share_html({
+        "type": "note",
+        "title": "Parity",
+        "content": markdown,
+    })
+
+    assert telegraph_nodes[0]["tag"] == "pre"
+    assert telegraph_nodes[0]["children"][0] == (
+        "Name            Value\n"
+        "──────────────  ─────\n"
+        "escaped | name     10\n"
+        "`a|b`               2"
+    )
+    assert "<table>" in public_html
+    assert "escaped | name" in public_html
+    assert "<code>a|b</code>" in public_html
+
+
+def test_telegraph_converter_does_not_treat_pipe_prose_as_table():
+    nodes = markdown_to_telegraph_nodes("Prose", "Use A | B in prose")
+
+    assert nodes == [{"tag": "p", "children": ["Use A | B in prose"]}]
+
+
+def test_telegraph_converter_keeps_table_like_fenced_code_unchanged():
+    nodes = markdown_to_telegraph_nodes(
+        "Code",
+        "```text\n| Name | Port |\n|---|---:|\n| SSH | 22 |\n```",
+    )
+
+    assert nodes == [{
+        "tag": "pre",
+        "children": ["| Name | Port |\n|---|---:|\n| SSH | 22 |"],
+    }]
 
 
 def test_telegraph_converter_truncates_utf8_safely():
