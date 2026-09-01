@@ -176,6 +176,7 @@ UNORDERED_LIST_RE = re.compile(r"^[ \t]*[-*][ \t]+(.+?)\s*$")
 ORDERED_LIST_RE = re.compile(r"^[ \t]*(\d{1,9})[.)][ \t]+(.+?)\s*$")
 SAFE_LANGUAGE_RE = re.compile(r"[^A-Za-z0-9_+.#-]")
 SAFE_HTML_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{16,}$")
+SAFE_LINE_BREAK_RE = re.compile(r"<br[ \t]*(?:/[ \t]*)?>", re.IGNORECASE)
 MARKDOWN_MARKER_RE = re.compile(
     r"!\[[^\]]*\]\([^)]+\)"
     r"|\[[^\]]+\]\([^)]+\)"
@@ -255,9 +256,14 @@ def _safe_link_url(url: str) -> bool:
 def _render_inline_markdown(text: str, references: dict[str, str] | None = None) -> str:
     tokens: list[str] = []
     refs = references or {}
+    source = text or ""
+    token_namespace = f"SHAREINLINE{secrets.token_hex(16)}TOKEN"
+    while token_namespace in source:
+        token_namespace = f"SHAREINLINE{secrets.token_hex(16)}TOKEN"
+    token_pattern = re.compile(rf"{re.escape(token_namespace)}(\d+)END")
 
     def stash(value: str) -> str:
-        token = f"SHAREINLINETOKEN{len(tokens)}END"
+        token = f"{token_namespace}{len(tokens)}END"
         tokens.append(value)
         return token
 
@@ -293,16 +299,15 @@ def _render_inline_markdown(text: str, references: dict[str, str] | None = None)
     def code_repl(match: re.Match) -> str:
         return stash(f"<code>{html.escape(match.group(1))}</code>")
 
-    marked = CODE_SPAN_RE.sub(code_repl, text or "")
+    marked = CODE_SPAN_RE.sub(code_repl, source)
     marked = IMAGE_RE.sub(image_repl, marked)
     marked = REFERENCE_LINK_RE.sub(reference_link_repl, marked)
     marked = LINK_RE.sub(link_repl, marked)
+    marked = SAFE_LINE_BREAK_RE.sub(lambda _: stash("<br>"), marked)
     rendered = html.escape(marked)
     rendered = re.sub(r"\*\*([^*\n]+)\*\*", r"<strong>\1</strong>", rendered)
     rendered = re.sub(r"(?<!\*)\*([^*\n]+)\*(?!\*)", r"<em>\1</em>", rendered)
-    for index, value in enumerate(tokens):
-        rendered = rendered.replace(f"SHAREINLINETOKEN{index}END", value)
-    return rendered
+    return token_pattern.sub(lambda match: tokens[int(match.group(1))], rendered)
 
 
 def _language_class(language: str) -> str:

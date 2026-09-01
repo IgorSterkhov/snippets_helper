@@ -126,6 +126,124 @@ def test_render_share_html_renders_note_content_as_safe_markdown():
     assert '<pre><code class="language-bash">echo hi\n</code></pre>' in rendered
 
 
+def test_render_share_html_allows_plain_br_tags_in_markdown_table_cells():
+    rendered = render_share_html(
+        {
+            "type": "note",
+            "title": "Break table",
+            "content": (
+                "Name | Details\n"
+                "--- | ---\n"
+                "Alpha | One<br>Two<BR/>Three<br />Four<br >Five<br/ >Six<bR   /   >Seven"
+            ),
+        }
+    )
+
+    assert "<td>One<br>Two<br>Three<br>Four<br>Five<br>Six<br>Seven</td>" in rendered
+    assert "&lt;br" not in rendered.lower()
+
+
+def test_render_share_html_allows_plain_br_tags_in_paragraphs_and_lists():
+    rendered = render_share_html(
+        {
+            "type": "note",
+            "title": "Break inline",
+            "content": "Alpha<br>Beta\n\n- Gamma<br />Delta",
+        }
+    )
+
+    assert "<p>Alpha<br>Beta</p>" in rendered
+    assert "<li>Gamma<br>Delta</li>" in rendered
+
+
+def test_render_share_html_keeps_br_tags_literal_inside_code():
+    rendered = render_share_html(
+        {
+            "type": "note",
+            "title": "Break code",
+            "content": "`<br>`\n\n```html\n<br>\n```",
+        }
+    )
+
+    assert "<code>&lt;br&gt;</code>" in rendered
+    assert '<pre><code class="language-html">&lt;br&gt;\n</code></pre>' in rendered
+
+
+def test_render_share_html_does_not_restore_br_tokens_inside_code_content():
+    rendered = render_share_html(
+        {
+            "type": "note",
+            "title": "Break code token",
+            "content": "`SHAREINLINETOKEN1END`<br>",
+        }
+    )
+
+    assert "<code>SHAREINLINETOKEN1END</code><br>" in rendered
+    assert "<code><br></code>" not in rendered
+
+
+def test_render_share_html_does_not_restore_br_tokens_inside_link_labels():
+    rendered = render_share_html(
+        {
+            "type": "note",
+            "title": "Break link token",
+            "content": "[SHAREINLINETOKEN1END](https://example.com)<br>",
+        }
+    )
+
+    assert ">SHAREINLINETOKEN1END</a><br>" in rendered
+    assert "><br></a>" not in rendered
+
+
+def test_render_share_html_does_not_restore_br_tokens_inside_image_captions():
+    rendered = render_share_html(
+        {
+            "type": "note",
+            "title": "Break image token",
+            "content": (
+                "![SHAREINLINETOKEN1END]"
+                "(https://ister-app.ru/snippets-media/token.webp)<br>"
+            ),
+        }
+    )
+
+    assert "<figcaption>SHAREINLINETOKEN1END</figcaption></figure><br>" in rendered
+    assert "<figcaption><br></figcaption>" not in rendered
+
+
+def test_render_share_html_rejects_attributed_and_non_br_html_tags():
+    rendered = render_share_html(
+        {
+            "type": "note",
+            "title": "Break safety",
+            "content": (
+                '<br class="gap"><br onerror="alert(1)"><br / class="gap"><brx>'
+                "<script>alert(1)</script>"
+            ),
+        }
+    )
+
+    assert "&lt;br class=&quot;gap&quot;&gt;" in rendered
+    assert "&lt;br onerror=&quot;alert(1)&quot;&gt;" in rendered
+    assert "&lt;br / class=&quot;gap&quot;&gt;" in rendered
+    assert "&lt;brx&gt;" in rendered
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in rendered
+    assert '<br class="gap">' not in rendered
+    assert '<br onerror="alert(1)">' not in rendered
+
+
+def test_render_share_html_does_not_allow_newlines_inside_br_tags():
+    rendered = render_share_html(
+        {
+            "type": "note",
+            "title": "Break newline",
+            "content": "Before<br\n>After",
+        }
+    )
+
+    assert "<p>Before&lt;br<br>&gt;After</p>" in rendered
+
+
 def test_render_share_html_renders_shortcut_value_and_description_as_safe_markdown():
     rendered = render_share_html(
         {
