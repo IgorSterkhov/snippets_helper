@@ -1,3 +1,5 @@
+from html.parser import HTMLParser
+
 from api.share_utils import (
     build_public_url,
     generate_share_token,
@@ -6,6 +8,29 @@ from api.share_utils import (
     public_shortcut_payload,
     render_share_html,
 )
+
+
+class MetaParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.meta: list[dict[str, str | None]] = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "meta":
+            self.meta.append(dict(attrs))
+
+
+def parse_meta(rendered: str) -> list[dict[str, str | None]]:
+    parser = MetaParser()
+    parser.feed(rendered)
+    return parser.meta
+
+
+def meta_content(rendered: str, key: str) -> str | None:
+    for attributes in parse_meta(rendered):
+        if attributes.get("name") == key or attributes.get("property") == key:
+            return attributes.get("content")
+    return None
 
 
 class Row:
@@ -68,6 +93,137 @@ def test_render_share_html_escapes_user_content():
     assert "<script>" not in rendered
     assert "&lt;script&gt;x&lt;/script&gt;" in rendered
     assert "&lt;b&gt;hi&lt;/b&gt;" in rendered
+
+
+def test_render_share_html_adds_clean_note_preview_metadata():
+    rendered = render_share_html(
+        {
+            "type": "note",
+            "title": "Preview note",
+            "content": (
+                "# Heading\n"
+                "Intro [relative](relative-file.md) and [reference][docs]."
+                "<br>2 < 3 > 1\n\n"
+                "Name | Value\n"
+                "--- | ---\n"
+                "Hidden | table row\n\n"
+                "```bash\nsecret command\n```\n\n"
+                "![hidden image](https://example.com/image.png)\n"
+                "**Bold**, *italic*, _underlined_, snake_case, and "
+                "`inline <meta> <br>`.\n\n"
+                "[docs]: https://example.com/docs"
+            ),
+        }
+    )
+
+    expected = (
+        "Heading Intro relative and reference. 2 < 3 > 1 Bold, italic, "
+        "underlined, snake_case, and inline <meta> <br>."
+    )
+    assert meta_content(rendered, "description") == expected
+    assert meta_content(rendered, "og:title") == "Preview note"
+    assert meta_content(rendered, "og:description") == expected
+    assert meta_content(rendered, "og:type") == "article"
+    assert meta_content(rendered, "og:site_name") == "Ister App"
+    assert "secret command" not in meta_content(rendered, "description")
+    assert "table row" not in meta_content(rendered, "description")
+    assert "example.com" not in meta_content(rendered, "description")
+
+
+def test_render_share_html_preserves_underscores_inside_identifiers():
+    content = (
+        "_italic_ snake_case_name long_snake_case_identifier "
+        "intraword__double__underscores"
+    )
+
+    rendered = render_share_html({"type": "note", "content": content})
+
+    assert meta_content(rendered, "description") == (
+        "italic snake_case_name long_snake_case_identifier "
+        "intraword__double__underscores"
+    )
+
+
+def test_render_share_html_escapes_preview_attribute_injection():
+    rendered = render_share_html(
+        {
+            "type": "note",
+            "title": 'Title "\'><script>alert(1)</script>',
+            "content": 'Lead "\'><meta property="evil" content="1"> tail',
+        }
+    )
+
+    metadata = parse_meta(rendered)
+    assert meta_content(rendered, "og:title") == 'Title "\'><script>alert(1)</script>'
+    assert meta_content(rendered, "description") == 'Lead "\'> tail'
+    assert not any(item.get("property") == "evil" for item in metadata)
+
+
+def test_render_share_html_enforces_preview_character_limit():
+    exact = "я" * 200
+    spaced = "word " * 50
+    unbroken_cyrillic = "я" * 250
+    unbroken_emoji = "🙂" * 250
+
+    assert meta_content(
+        render_share_html({"type": "note", "content": exact}), "description"
+    ) == exact
+    assert meta_content(
+        render_share_html({"type": "note", "content": spaced}), "description"
+    ) == (
+        ("word " * 40).rstrip() + "…"
+    )
+    assert len(
+        meta_content(
+            render_share_html({"type": "note", "content": spaced}), "description"
+        )
+    ) == 200
+    assert meta_content(
+        render_share_html({"type": "note", "content": unbroken_cyrillic}),
+        "description",
+    ) == ("я" * 199 + "…")
+    assert meta_content(
+        render_share_html({"type": "note", "content": unbroken_emoji}),
+        "description",
+    ) == ("🙂" * 199 + "…")
+
+
+def test_render_share_html_omits_empty_and_non_note_descriptions():
+    markup_only = render_share_html(
+        {
+            "type": "note",
+            "title": "Empty preview",
+            "content": (
+                "![image](https://example.com/image.png)\n\n"
+                "Name | Value\n--- | ---\nHidden | row\n\n"
+                "```text\nhidden\n```\n\n---\n***\n___"
+            ),
+        }
+    )
+    shortcut = render_share_html(
+        {
+            "type": "shortcut",
+            "name": "Sensitive shortcut",
+            "value": "SECRET_TOKEN=do-not-preview",
+            "description": "Also do not preview yet",
+        }
+    )
+    finance_plan = render_share_html(
+        {
+            "type": "finance_plan",
+            "title": "Private finance details",
+            "total_cents": 12345,
+            "items": [],
+        }
+    )
+
+    assert meta_content(markup_only, "description") is None
+    assert meta_content(markup_only, "og:description") is None
+    assert meta_content(shortcut, "description") is None
+    assert meta_content(shortcut, "og:description") is None
+    assert meta_content(shortcut, "og:title") == "Sensitive shortcut"
+    assert meta_content(finance_plan, "description") is None
+    assert meta_content(finance_plan, "og:description") is None
 
 
 def test_render_share_html_renders_image_markdown_as_figure_card():

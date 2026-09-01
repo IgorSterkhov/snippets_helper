@@ -177,6 +177,11 @@ ORDERED_LIST_RE = re.compile(r"^[ \t]*(\d{1,9})[.)][ \t]+(.+?)\s*$")
 SAFE_LANGUAGE_RE = re.compile(r"[^A-Za-z0-9_+.#-]")
 SAFE_HTML_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{16,}$")
 SAFE_LINE_BREAK_RE = re.compile(r"<br[ \t]*(?:/[ \t]*)?>", re.IGNORECASE)
+REFERENCE_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\[([^\]]+)\]")
+RAW_HTML_TAG_RE = re.compile(r"</?[A-Za-z][^<>]*>")
+THEMATIC_BREAK_RE = re.compile(
+    r"^[ \t]{0,3}(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})$"
+)
 MARKDOWN_MARKER_RE = re.compile(
     r"!\[[^\]]*\]\([^)]+\)"
     r"|\[[^\]]+\]\([^)]+\)"
@@ -189,6 +194,82 @@ MARKDOWN_MARKER_RE = re.compile(
     r"|`[^`\n]+`",
     re.MULTILINE,
 )
+
+
+def _share_preview_description(payload: dict, limit: int = 200) -> str:
+    if payload.get("type") != "note":
+        return ""
+
+    lines = str(payload.get("content") or "").splitlines()
+    visible_lines: list[str] = []
+    in_fence = False
+    index = 0
+
+    while index < len(lines):
+        line = lines[index]
+        if FENCE_RE.match(line):
+            in_fence = not in_fence
+            index += 1
+            continue
+        if in_fence:
+            index += 1
+            continue
+
+        if _table_start_at(lines, index):
+            index += 2
+            while index < len(lines) and _split_table_row(lines[index]) is not None:
+                index += 1
+            continue
+
+        if REFERENCE_DEF_RE.match(line):
+            index += 1
+            continue
+        if THEMATIC_BREAK_RE.match(line):
+            index += 1
+            continue
+
+        visible_lines.append(line)
+        index += 1
+
+    text = "\n".join(visible_lines)
+    code_tokens: list[str] = []
+    token_namespace = f"SHAREPREVIEW{secrets.token_hex(16)}TOKEN"
+    while token_namespace in text:
+        token_namespace = f"SHAREPREVIEW{secrets.token_hex(16)}TOKEN"
+    token_pattern = re.compile(rf"{re.escape(token_namespace)}(\d+)END")
+
+    def protect_code(match: re.Match) -> str:
+        token = f"{token_namespace}{len(code_tokens)}END"
+        code_tokens.append(match.group(1))
+        return token
+
+    text = CODE_SPAN_RE.sub(protect_code, text)
+    text = IMAGE_RE.sub("", text)
+    text = REFERENCE_IMAGE_RE.sub("", text)
+    text = REFERENCE_LINK_RE.sub(lambda match: match.group(1), text)
+    text = LINK_RE.sub(lambda match: match.group(1), text)
+    text = SAFE_LINE_BREAK_RE.sub(" ", text)
+    text = RAW_HTML_TAG_RE.sub("", text)
+    text = re.sub(r"(?m)^[ \t]*#{1,6}[ \t]+", "", text)
+    text = re.sub(r"(?m)^[ \t]*(?:[-*]|\d{1,9}[.)])[ \t]+", "", text)
+    text = re.sub(r"(?m)^[ \t]*>[ \t]?", "", text)
+    text = re.sub(r"\*\*([^*\n]+)\*\*", r"\1", text)
+    text = re.sub(r"(?<!\*)\*([^*\n]+)\*(?!\*)", r"\1", text)
+    text = re.sub(r"(?<!\w)__([^_\n]+)__(?!\w)", r"\1", text)
+    text = re.sub(r"(?<!\w)_([^_\n]+)_(?!\w)", r"\1", text)
+    text = re.sub(r"~~([^~\n]+)~~", r"\1", text)
+    text = token_pattern.sub(lambda match: code_tokens[int(match.group(1))], text)
+    text = re.sub(r"\s+", " ", text).strip()
+
+    if len(text) <= limit:
+        return text
+
+    boundary = text[:limit].rfind(" ")
+    if boundary > 0:
+        prefix = text[:boundary]
+    else:
+        prefix = text[: limit - 1]
+    return prefix.rstrip() + "…"
 
 
 def _is_safe_image_url(url: str) -> bool:
@@ -643,7 +724,15 @@ def _render_markdown(text: str) -> str:
 
 def render_share_html(payload: dict) -> str:
     title = payload.get("title") or payload.get("name") or "Shared item"
-    safe_title = html.escape(title)
+    safe_title = html.escape(str(title), quote=True)
+    description = _share_preview_description(payload)
+    safe_description = html.escape(description, quote=True)
+    description_meta = ""
+    if description:
+        description_meta = (
+            f'  <meta name="description" content="{safe_description}">\n'
+            f'  <meta property="og:description" content="{safe_description}">\n'
+        )
 
     if payload.get("type") == "finance_plan":
         body = _render_finance_share(payload)
@@ -687,6 +776,9 @@ def render_share_html(payload: dict) -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta property="og:title" content="{safe_title}">
+{description_meta}  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Ister App">
   <title>{safe_title}</title>
   <style>
     body {{ margin: 0; background: #0d1117; color: #c9d1d9; font: 15px/1.55 system-ui, -apple-system, Segoe UI, sans-serif; }}
