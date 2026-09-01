@@ -718,7 +718,7 @@
     const stamp = now();
     return {
       token,
-      public_url: `https://ister-app.ru/share/${token}`,
+      public_url: `https://ister-app.ru/share/${token}?preview=1`,
       item_type: itemType,
       item_uuid: itemUuid,
       is_active: true,

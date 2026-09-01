@@ -2119,6 +2119,10 @@ async def run_tests():
             ".find(b => b.textContent.trim() === '🔗').click()"
         )
         await wait_until(cdp, "document.body.innerText.includes('Public live link is active')", timeout=3)
+        public_url = await cdp.eval(
+            "document.querySelector('.share-link-modal > .share-link-input')?.value || ''"
+        )
+        assert public_url.endswith('?preview=1'), public_url
         await wait_until(cdp, "document.body.innerText.includes('Telegra.ph')", timeout=3)
         await cdp.eval(
             "[...document.querySelectorAll('.share-link-telegraph-actions button')]"

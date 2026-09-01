@@ -1,3 +1,6 @@
+from urllib.parse import urlsplit, urlunsplit
+
+
 def _push(api_client, changes):
     status, data = api_client.request_json("POST", "/v1/sync/push", {"changes": changes})
     assert status == 200, data
@@ -78,6 +81,10 @@ def test_share_links_live_note_and_shortcut(
     }
     if smoke_config.api_base_url.startswith("https://"):
         assert note_link["public_url"].startswith("https://"), note_link
+    note_url_parts = urlsplit(note_link["public_url"])
+    assert note_url_parts.query == "preview=1", note_link
+    assert not note_url_parts.fragment, note_link
+    legacy_note_url = urlunsplit(note_url_parts._replace(query=""))
     assert public_http.head_or_get_status(note_link["public_url"]) == 200
     status, public_note_html = public_http.request_text("GET", note_link["public_url"])
     assert status == 200, public_note_html[:300]
@@ -85,6 +92,10 @@ def test_share_links_live_note_and_shortcut(
     assert "<strong>bold</strong>" in public_note_html
     assert "<script>alert(1)</script>" not in public_note_html
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in public_note_html
+    status, legacy_note_html = public_http.request_text("GET", legacy_note_url)
+    assert status == 200, legacy_note_html[:300]
+    assert "<h2>Shared Section</h2>" in legacy_note_html
+    assert "<strong>bold</strong>" in legacy_note_html
 
     status, public_snippet = public_http.request_json(
         "GET",
@@ -99,6 +110,10 @@ def test_share_links_live_note_and_shortcut(
     assert "obsidian_note" not in public_snippet
     if smoke_config.api_base_url.startswith("https://"):
         assert snippet_link["public_url"].startswith("https://"), snippet_link
+    snippet_url_parts = urlsplit(snippet_link["public_url"])
+    assert snippet_url_parts.query == "preview=1", snippet_link
+    assert not snippet_url_parts.fragment, snippet_link
+    legacy_snippet_url = urlunsplit(snippet_url_parts._replace(query=""))
     assert public_http.head_or_get_status(snippet_link["public_url"]) == 200
     status, public_snippet_html = public_http.request_text("GET", snippet_link["public_url"])
     assert status == 200, public_snippet_html[:300]
@@ -110,6 +125,10 @@ def test_share_links_live_note_and_shortcut(
     assert '<td style="text-align:right">7443</td>' in public_snippet_html
     assert "<code>code</code>" in public_snippet_html
     assert "[1]:" not in public_snippet_html
+    status, legacy_snippet_html = public_http.request_text("GET", legacy_snippet_url)
+    assert status == 200, legacy_snippet_html[:300]
+    assert "<h3>Snippet Section</h3>" in legacy_snippet_html
+    assert "<strong>snippet bold</strong>" in legacy_snippet_html
 
     _push(
         api_client,
@@ -152,6 +171,18 @@ def test_share_links_live_note_and_shortcut(
     assert status == 200, public_snippet_v2
     assert public_snippet_v2["name"] == f"{unique_prefix}_snippet_v2"
     assert public_snippet_v2["value"] == "snippet value v2"
+
+    for public_url in (note_link["public_url"], legacy_note_url):
+        status, public_note_html_v2 = public_http.request_text("GET", public_url)
+        assert status == 200, public_note_html_v2[:300]
+        assert f"{unique_prefix}_note_v2" in public_note_html_v2
+        assert "note content v2" in public_note_html_v2
+
+    for public_url in (snippet_link["public_url"], legacy_snippet_url):
+        status, public_snippet_html_v2 = public_http.request_text("GET", public_url)
+        assert status == 200, public_snippet_html_v2[:300]
+        assert f"{unique_prefix}_snippet_v2" in public_snippet_html_v2
+        assert "snippet value v2" in public_snippet_html_v2
 
     status, _ = api_client.request_json("DELETE", f"/v1/share-links/{note_link['token']}")
     assert status == 200

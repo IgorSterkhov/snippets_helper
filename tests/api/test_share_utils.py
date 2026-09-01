@@ -47,7 +47,7 @@ def test_generate_share_token_is_url_safe_and_long():
 def test_build_public_url_uses_root_share_path():
     assert (
         build_public_url("https://ister-app.ru/snippets-api/v1/share-links", "abc")
-        == "https://ister-app.ru/share/abc"
+        == "https://ister-app.ru/share/abc?preview=1"
     )
 
 
@@ -58,7 +58,7 @@ def test_build_public_url_uses_forwarded_proto():
             "abc",
             forwarded_proto="https",
         )
-        == "https://ister-app.ru/share/abc"
+        == "https://ister-app.ru/share/abc?preview=1"
     )
 
 

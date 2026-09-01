@@ -14,7 +14,9 @@
 
 - Work in current `main` and preserve unrelated user and Claude changes.
 - Preview descriptions contain at most 200 characters including the ellipsis.
-- Metadata is derived per request; no database/API contract, dependency, desktop/mobile asset, IPC, or native version change.
+- Metadata is derived per request; there is no database, payload-schema,
+  dependency, packaged desktop/mobile asset, IPC, or native version change.
+  The existing `public_url` response value gains the stable query suffix.
 - User-controlled title and description values are escaped with `html.escape(..., quote=True)` before attribute insertion.
 - Do not add an AI summary, manual summary field, preview image, or Telegra.ph behavior.
 - Derive descriptions from note `content` only; never expose shortcut `value`
@@ -113,3 +115,80 @@
   Then create a new note share URL that Telegram has not cached, paste it into
   Telegram, and confirm the rendered card contains its title and description.
   Do not create a desktop release tag.
+
+---
+
+### Task 2: Stable Telegram Cache Version
+
+**Files:**
+- Modify: `tests/api/test_share_utils.py`
+- Modify: `tests/post_release/test_share_links_contract.py`
+- Modify: `api/share_utils.py`
+- Modify: `desktop-rust/src/dev-test.py`
+- Modify: `desktop-rust/src/dev-mock.js`
+
+**Interfaces:**
+- Consumes: `build_public_url(request_url: str, token: str, forwarded_proto: str | None = None) -> str`.
+- Produces: the same function signature, returning a stable
+  `/share/<token>?preview=1` public URL.
+
+- [x] **Step 1: Update public URL contract tests**
+
+  Change both literal `build_public_url` expectations to include
+  `?preview=1`. Keep the forwarded-protocol case so the cache suffix cannot
+  regress HTTPS handling. Extend the post-release contract to assert that both
+  note and shortcut API responses carry the exact query, and that both the
+  versioned and legacy query-free forms serve the same current content. Add a
+  desktop smoke assertion for the matching development-mock response.
+
+- [x] **Step 2: Run the focused tests and verify RED**
+
+  Run:
+
+  ```bash
+  /tmp/snippets-helper-tests-20260831/bin/python -m pytest tests/api/test_share_utils.py -q
+  cd desktop-rust/src && python3 dev-test.py
+  ```
+
+  Expected: the two URL assertions fail because `build_public_url` still
+  returns the legacy query-free path, and the browser smoke assertion fails
+  because the development mock still returns the legacy URL. Metadata tests
+  remain green. Do not run the production post-release contract before deploy.
+
+- [x] **Step 3: Add the stable cache version**
+
+  Change the final `build_public_url` return value to append the literal query
+  `?preview=1`, and make the same one-line change in `dev-mock.js`. Do not
+  derive it from timestamps, note updates, or user content, and do not change
+  route matching or payload schemas.
+
+- [x] **Step 4: Verify GREEN and regressions**
+
+  Run:
+
+  ```bash
+  /tmp/snippets-helper-tests-20260831/bin/python -m pytest tests/api/test_share_utils.py -q
+  /tmp/snippets-helper-tests-20260831/bin/python -m pytest tests/api -q
+  node --check desktop-rust/src/dev-mock.js
+  cd desktop-rust/src && python3 dev-test.py
+  git diff --check
+  ```
+
+  Expected: all tests pass with only the existing `datetime.utcnow()` warnings.
+
+- [ ] **Step 5: Review, commit, deploy, and validate cache-busted copy**
+
+  Obtain independent review with no Critical or Important findings, commit and
+  push the change on current `main`, rebuild/restart the production API, and
+  verify that the share-link API returns `?preview=1`, that both versioned and
+  legacy URLs return HTTP 200 with current content, and that Telegram renders
+  the already-confirmed preview for this distinct URL. Do not create a desktop
+  tag: `dev-mock.js` is a development-only fixture excluded from packaged OTA
+  assets. After production is restarted, run:
+
+  ```bash
+  /tmp/snippets-helper-tests-20260831/bin/python -m pytest tests/post_release/test_share_links_contract.py -q
+  ```
+
+  Expected: the production contract passes; it may skip only when smoke
+  credentials are unavailable.

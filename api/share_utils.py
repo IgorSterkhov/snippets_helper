@@ -23,7 +23,7 @@ def build_public_url(request_url: str, token: str, forwarded_proto: str | None =
         candidate = forwarded_proto.split(",", 1)[0].strip().lower()
         if candidate in {"http", "https"}:
             scheme = candidate
-    return f"{scheme}://{parsed.netloc}/share/{token}"
+    return f"{scheme}://{parsed.netloc}/share/{token}?preview=1"
 
 
 def _safe_links(raw: str | list | None) -> list[dict[str, str]]:

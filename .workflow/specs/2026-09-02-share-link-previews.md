@@ -32,6 +32,13 @@ Telegram has no explicit description to render.
 - Recompute metadata on every request from the current public payload. Existing
   live-share auto-synchronisation therefore updates the source metadata without
   changing or republishing the share URL.
+- Return newly copied public links with the stable cache-version query
+  `?preview=1`. The public route ignores this parameter, so the same URL keeps
+  serving current content after every save; the version exists only to give
+  Telegram a cache key that was not negatively cached before preview metadata
+  was introduced.
+- Keep legacy `/share/<token>` URLs valid. Users do not need to recreate or
+  republish a share; copying it again returns `/share/<token>?preview=1`.
 
 ## Non-Goals
 
@@ -41,6 +48,9 @@ Telegram has no explicit description to render.
   complete Open Graph media object with `og:image` and `og:url`.
 - No guarantee that Telegram immediately replaces a preview already cached on
   its servers. Newly generated previews must use the current page metadata.
+- Do not vary `preview=1` on every note save. A changing query would undermine
+  the stable-link workflow and is not needed because page content is rendered
+  live.
 
 ## Verification
 
@@ -57,9 +67,15 @@ Telegram has no explicit description to render.
 - A newly created, previously uncached note share pasted into Telegram displays
   the expected title and description. The existing reported URL remains useful
   for HTML inspection but may retain Telegram's cached preview temporarily.
+- `build_public_url` preserves its existing request-derived scheme/host behavior
+  and returns exactly `/share/<token>?preview=1`; requesting that URL returns
+  the same live page as the legacy query-free URL.
+- Public-origin/forwarded-host hardening is outside this cache-version change
+  and should be handled separately if the deployment trust model changes.
 
 ## Release
 
-This is an API-only public-share rendering improvement. Deploy the reviewed
-commit to the existing production API; do not create a desktop `f-*` or native
-`v*` tag because no desktop asset or IPC surface changes.
+This is an API public-share rendering improvement with a matching development
+mock update. Deploy the reviewed commit to the existing production API; do not
+create a desktop `f-*` or native `v*` tag because the mock is excluded from OTA
+assets and no packaged desktop asset or IPC surface changes.
