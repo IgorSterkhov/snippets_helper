@@ -514,8 +514,12 @@ Use this pattern when an item can be exported to a third-party public page:
 - Convert content server-side with a strict allowlist for tags, attributes, and
   URL schemes. Interactive app-only cards should degrade to links.
 - Telegra.ph has no table nodes. Recognize Markdown tables through the same
-  parser used by live public shares, sanitize cell text before measuring it,
-  and export aligned monospaced text instead of raw pipe/separator markup.
+  parser used by live public shares and sanitize cell text before measuring it.
+  Keep tables whose formatted visible width is at most 32 display columns as
+  aligned monospaced text. Render a table with a visibly non-empty body as
+  labeled vertical records when its width is greater than 32 columns or any
+  cell contains a Markdown link/safe bare URL. Keep each record atomic for size
+  truncation, omit empty fields, and preserve only safe clickable targets.
 
 ---
 

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## f-20260901-1 (2026-09-01)
+
+- **Adaptive Telegra.ph tables:** narrow Markdown tables remain compact and
+  aligned, while wide or link-bearing tables now publish as mobile-readable
+  labeled records with safe clickable links.
+
 ## f-20260831-1 (2026-08-31)
 
 - **Live note share refresh:** saving a note with an active public link now
