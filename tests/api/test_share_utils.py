@@ -1,4 +1,7 @@
 from html.parser import HTMLParser
+from pathlib import Path
+
+from PIL import Image
 
 from api.share_utils import (
     build_public_url,
@@ -47,7 +50,7 @@ def test_generate_share_token_is_url_safe_and_long():
 def test_build_public_url_uses_root_share_path():
     assert (
         build_public_url("https://ister-app.ru/snippets-api/v1/share-links", "abc")
-        == "https://ister-app.ru/share/abc?preview=1"
+        == "https://ister-app.ru/share/v2/abc"
     )
 
 
@@ -58,7 +61,7 @@ def test_build_public_url_uses_forwarded_proto():
             "abc",
             forwarded_proto="https",
         )
-        == "https://ister-app.ru/share/abc?preview=1"
+        == "https://ister-app.ru/share/v2/abc"
     )
 
 
@@ -128,6 +131,45 @@ def test_render_share_html_adds_clean_note_preview_metadata():
     assert "secret command" not in meta_content(rendered, "description")
     assert "table row" not in meta_content(rendered, "description")
     assert "example.com" not in meta_content(rendered, "description")
+
+
+def test_render_share_html_adds_escaped_complete_open_graph_urls():
+    public_url = "https://ister-app.ru/share/v2/abc?bad='\""
+    preview_image_url = "https://ister-app.ru/share/preview-card-v2.png?bad='\""
+
+    rendered = render_share_html(
+        {"type": "note", "title": "Preview", "content": "Current summary"},
+        public_url=public_url,
+        preview_image_url=preview_image_url,
+    )
+
+    metadata = parse_meta(rendered)
+    assert meta_content(rendered, "og:url") == public_url
+    assert meta_content(rendered, "og:image") == preview_image_url
+    assert meta_content(rendered, "og:image:type") == "image/png"
+    assert meta_content(rendered, "og:image:width") == "1200"
+    assert meta_content(rendered, "og:image:height") == "630"
+    assert meta_content(rendered, "og:image:alt") == "Ister App shared item"
+    assert not any(item.get("property") == "bad" for item in metadata)
+
+
+def test_share_preview_image_is_valid_1200_by_630_png():
+    image_path = (
+        Path(__file__).resolve().parents[2]
+        / "api"
+        / "static"
+        / "share-preview-v2.png"
+    )
+    assert image_path.is_file(), image_path
+
+    data = image_path.read_bytes()
+    assert data[:8] == b"\x89PNG\r\n\x1a\n"
+    assert len(data) < 1_000_000
+    with Image.open(image_path) as image:
+        image.verify()
+    with Image.open(image_path) as image:
+        image.load()
+        assert image.size == (1200, 630)
 
 
 def test_render_share_html_preserves_underscores_inside_identifiers():

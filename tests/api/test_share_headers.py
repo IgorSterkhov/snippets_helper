@@ -1,4 +1,5 @@
 from api.routes.media import HTML_RESPONSE_CSP
+from api.routes import share_links
 from api.routes.share_links import PUBLIC_SHARE_HEADERS
 
 
@@ -26,3 +27,10 @@ def test_public_share_headers_disable_caching_for_live_content():
     assert PUBLIC_SHARE_HEADERS["Cache-Control"] == "no-store, no-cache, must-revalidate, max-age=0"
     assert PUBLIC_SHARE_HEADERS["Pragma"] == "no-cache"
     assert PUBLIC_SHARE_HEADERS["Expires"] == "0"
+
+
+def test_public_preview_image_headers_are_immutable_and_nosniff():
+    assert getattr(share_links, "PUBLIC_PREVIEW_IMAGE_HEADERS", {}) == {
+        "Cache-Control": "public, max-age=31536000, immutable",
+        "X-Content-Type-Options": "nosniff",
+    }

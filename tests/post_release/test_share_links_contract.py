@@ -1,4 +1,8 @@
+from io import BytesIO
 from urllib.parse import urlsplit, urlunsplit
+from urllib.request import Request, urlopen
+
+from PIL import Image
 
 
 def _push(api_client, changes):
@@ -82,9 +86,19 @@ def test_share_links_live_note_and_shortcut(
     if smoke_config.api_base_url.startswith("https://"):
         assert note_link["public_url"].startswith("https://"), note_link
     note_url_parts = urlsplit(note_link["public_url"])
-    assert note_url_parts.query == "preview=1", note_link
+    assert note_url_parts.path == f"/share/v2/{note_link['token']}", note_link
+    assert not note_url_parts.query, note_link
     assert not note_url_parts.fragment, note_link
-    legacy_note_url = urlunsplit(note_url_parts._replace(query=""))
+    legacy_note_url = urlunsplit(
+        note_url_parts._replace(path=f"/share/{note_link['token']}")
+    )
+    preview_image_url = urlunsplit(
+        note_url_parts._replace(
+            path="/share/preview-card-v2.png",
+            query="",
+            fragment="",
+        )
+    )
     assert public_http.head_or_get_status(note_link["public_url"]) == 200
     status, public_note_html = public_http.request_text("GET", note_link["public_url"])
     assert status == 200, public_note_html[:300]
@@ -92,10 +106,43 @@ def test_share_links_live_note_and_shortcut(
     assert "<strong>bold</strong>" in public_note_html
     assert "<script>alert(1)</script>" not in public_note_html
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in public_note_html
+    assert (
+        f'<meta property="og:url" content="{note_link["public_url"]}">'
+        in public_note_html
+    )
+    assert (
+        f'<meta property="og:image" content="{preview_image_url}">'
+        in public_note_html
+    )
     status, legacy_note_html = public_http.request_text("GET", legacy_note_url)
     assert status == 200, legacy_note_html[:300]
     assert "<h2>Shared Section</h2>" in legacy_note_html
     assert "<strong>bold</strong>" in legacy_note_html
+    assert (
+        f'<meta property="og:url" content="{note_link["public_url"]}">'
+        in legacy_note_html
+    )
+
+    image_request = Request(
+        preview_image_url,
+        headers={
+            "Accept": "image/png",
+            "User-Agent": "snippets-helper-post-release-smoke/1.0",
+        },
+    )
+    with urlopen(image_request, timeout=30) as image_response:
+        image_bytes = image_response.read()
+        assert image_response.status == 200
+        assert image_response.headers.get_content_type() == "image/png"
+        assert image_response.headers["Cache-Control"] == (
+            "public, max-age=31536000, immutable"
+        )
+        assert image_response.headers["X-Content-Type-Options"] == "nosniff"
+    assert image_bytes[:8] == b"\x89PNG\r\n\x1a\n"
+    with Image.open(BytesIO(image_bytes)) as image:
+        image.load()
+        assert image.format == "PNG"
+        assert image.size == (1200, 630)
 
     status, public_snippet = public_http.request_json(
         "GET",
@@ -111,9 +158,12 @@ def test_share_links_live_note_and_shortcut(
     if smoke_config.api_base_url.startswith("https://"):
         assert snippet_link["public_url"].startswith("https://"), snippet_link
     snippet_url_parts = urlsplit(snippet_link["public_url"])
-    assert snippet_url_parts.query == "preview=1", snippet_link
+    assert snippet_url_parts.path == f"/share/v2/{snippet_link['token']}", snippet_link
+    assert not snippet_url_parts.query, snippet_link
     assert not snippet_url_parts.fragment, snippet_link
-    legacy_snippet_url = urlunsplit(snippet_url_parts._replace(query=""))
+    legacy_snippet_url = urlunsplit(
+        snippet_url_parts._replace(path=f"/share/{snippet_link['token']}")
+    )
     assert public_http.head_or_get_status(snippet_link["public_url"]) == 200
     status, public_snippet_html = public_http.request_text("GET", snippet_link["public_url"])
     assert status == 200, public_snippet_html[:300]

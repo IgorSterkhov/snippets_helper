@@ -23,7 +23,7 @@ def build_public_url(request_url: str, token: str, forwarded_proto: str | None =
         candidate = forwarded_proto.split(",", 1)[0].strip().lower()
         if candidate in {"http", "https"}:
             scheme = candidate
-    return f"{scheme}://{parsed.netloc}/share/{token}?preview=1"
+    return f"{scheme}://{parsed.netloc}/share/v2/{token}"
 
 
 def _safe_links(raw: str | list | None) -> list[dict[str, str]]:
@@ -722,7 +722,12 @@ def _render_markdown(text: str) -> str:
     return "\n".join(output)
 
 
-def render_share_html(payload: dict) -> str:
+def render_share_html(
+    payload: dict,
+    *,
+    public_url: str = "",
+    preview_image_url: str = "",
+) -> str:
     title = payload.get("title") or payload.get("name") or "Shared item"
     safe_title = html.escape(str(title), quote=True)
     description = _share_preview_description(payload)
@@ -732,6 +737,18 @@ def render_share_html(payload: dict) -> str:
         description_meta = (
             f'  <meta name="description" content="{safe_description}">\n'
             f'  <meta property="og:description" content="{safe_description}">\n'
+        )
+    open_graph_url_meta = ""
+    if public_url and preview_image_url:
+        safe_public_url = html.escape(str(public_url), quote=True)
+        safe_preview_image_url = html.escape(str(preview_image_url), quote=True)
+        open_graph_url_meta = (
+            f'  <meta property="og:url" content="{safe_public_url}">\n'
+            f'  <meta property="og:image" content="{safe_preview_image_url}">\n'
+            '  <meta property="og:image:type" content="image/png">\n'
+            '  <meta property="og:image:width" content="1200">\n'
+            '  <meta property="og:image:height" content="630">\n'
+            '  <meta property="og:image:alt" content="Ister App shared item">\n'
         )
 
     if payload.get("type") == "finance_plan":
@@ -777,7 +794,7 @@ def render_share_html(payload: dict) -> str:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta property="og:title" content="{safe_title}">
-{description_meta}  <meta property="og:type" content="article">
+{description_meta}{open_graph_url_meta}  <meta property="og:type" content="article">
   <meta property="og:site_name" content="Ister App">
   <title>{safe_title}</title>
   <style>

@@ -1,10 +1,11 @@
 from datetime import datetime
+from pathlib import Path
 from urllib.parse import urlparse
 from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -88,6 +89,14 @@ PUBLIC_SHARE_HEADERS = {
     "Pragma": "no-cache",
     "Expires": "0",
 }
+
+PUBLIC_PREVIEW_IMAGE_HEADERS = {
+    "Cache-Control": "public, max-age=31536000, immutable",
+    "X-Content-Type-Options": "nosniff",
+}
+PUBLIC_PREVIEW_IMAGE_PATH = (
+    Path(__file__).resolve().parents[1] / "static" / "share-preview-v2.png"
+)
 
 
 def _validate_item_type(item_type: str) -> str:
@@ -567,9 +576,37 @@ async def public_share_json(token: str, db: AsyncSession = Depends(get_db)):
     return await _public_payload(token, db)
 
 
+@public_router.get("/share/preview-card-v2.png", response_class=FileResponse)
+async def public_share_preview_image():
+    return FileResponse(
+        PUBLIC_PREVIEW_IMAGE_PATH,
+        media_type="image/png",
+        headers=PUBLIC_PREVIEW_IMAGE_HEADERS,
+    )
+
+
+@public_router.get("/share/v2/{token}", response_class=HTMLResponse)
 @public_router.get("/share/{token}", response_class=HTMLResponse)
-async def public_share_html(token: str, db: AsyncSession = Depends(get_db)):
+async def public_share_html(
+    token: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    public_url = build_public_url(
+        str(request.url),
+        token,
+        forwarded_proto=request.headers.get("x-forwarded-proto"),
+    )
+    parsed_public_url = urlparse(public_url)
+    preview_image_url = (
+        f"{parsed_public_url.scheme}://{parsed_public_url.netloc}"
+        "/share/preview-card-v2.png"
+    )
     return HTMLResponse(
-        render_share_html(await _public_payload(token, db)),
+        render_share_html(
+            await _public_payload(token, db),
+            public_url=public_url,
+            preview_image_url=preview_image_url,
+        ),
         headers=PUBLIC_SHARE_HEADERS,
     )
