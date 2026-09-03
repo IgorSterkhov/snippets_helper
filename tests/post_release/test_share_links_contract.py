@@ -11,6 +11,19 @@ def _push(api_client, changes):
     return data
 
 
+def _share_url_matrix(public_url, token):
+    canonical = urlsplit(public_url)
+    apex_v2 = canonical._replace(netloc="ister-app.ru")
+    apex_legacy = apex_v2._replace(path=f"/share/{token}")
+    apex_legacy_query = apex_legacy._replace(query="preview=1")
+    return (
+        public_url,
+        urlunsplit(apex_v2),
+        urlunsplit(apex_legacy),
+        urlunsplit(apex_legacy_query),
+    )
+
+
 def test_share_links_live_note_and_shortcut(
     smoke_config,
     api_client,
@@ -72,6 +85,21 @@ def test_share_links_live_note_and_shortcut(
     )
     assert status == 200, snippet_link
 
+    assert urlsplit(note_link["public_url"]).hostname == "www.ister-app.ru"
+    assert urlsplit(snippet_link["public_url"]).hostname == "www.ister-app.ru"
+    status, note_status = api_client.request_json(
+        "GET",
+        f"/v1/share-links?item_type=note&item_uuid={note_uuid}",
+    )
+    assert status == 200, note_status
+    assert note_status["link"]["public_url"] == note_link["public_url"]
+    status, snippet_status = api_client.request_json(
+        "GET",
+        f"/v1/share-links?item_type=shortcut&item_uuid={shortcut_uuid}",
+    )
+    assert status == 200, snippet_status
+    assert snippet_status["link"]["public_url"] == snippet_link["public_url"]
+
     status, public_note = public_http.request_json(
         "GET",
         f"{smoke_config.api_base_url}/v1/public/share/{note_link['token']}",
@@ -89,8 +117,8 @@ def test_share_links_live_note_and_shortcut(
     assert note_url_parts.path == f"/share/v2/{note_link['token']}", note_link
     assert not note_url_parts.query, note_link
     assert not note_url_parts.fragment, note_link
-    legacy_note_url = urlunsplit(
-        note_url_parts._replace(path=f"/share/{note_link['token']}")
+    note_html_urls = _share_url_matrix(
+        note_link["public_url"], note_link["token"]
     )
     preview_image_url = urlunsplit(
         note_url_parts._replace(
@@ -99,29 +127,22 @@ def test_share_links_live_note_and_shortcut(
             fragment="",
         )
     )
-    assert public_http.head_or_get_status(note_link["public_url"]) == 200
-    status, public_note_html = public_http.request_text("GET", note_link["public_url"])
-    assert status == 200, public_note_html[:300]
-    assert "<h2>Shared Section</h2>" in public_note_html
-    assert "<strong>bold</strong>" in public_note_html
-    assert "<script>alert(1)</script>" not in public_note_html
-    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in public_note_html
-    assert (
-        f'<meta property="og:url" content="{note_link["public_url"]}">'
-        in public_note_html
-    )
-    assert (
-        f'<meta property="og:image" content="{preview_image_url}">'
-        in public_note_html
-    )
-    status, legacy_note_html = public_http.request_text("GET", legacy_note_url)
-    assert status == 200, legacy_note_html[:300]
-    assert "<h2>Shared Section</h2>" in legacy_note_html
-    assert "<strong>bold</strong>" in legacy_note_html
-    assert (
-        f'<meta property="og:url" content="{note_link["public_url"]}">'
-        in legacy_note_html
-    )
+    for note_html_url in note_html_urls:
+        assert public_http.head_or_get_status(note_html_url) == 200
+        status, public_note_html = public_http.request_text("GET", note_html_url)
+        assert status == 200, public_note_html[:300]
+        assert "<h2>Shared Section</h2>" in public_note_html
+        assert "<strong>bold</strong>" in public_note_html
+        assert "<script>alert(1)</script>" not in public_note_html
+        assert "&lt;script&gt;alert(1)&lt;/script&gt;" in public_note_html
+        assert (
+            f'<meta property="og:url" content="{note_link["public_url"]}">'
+            in public_note_html
+        )
+        assert (
+            f'<meta property="og:image" content="{preview_image_url}">'
+            in public_note_html
+        )
 
     image_request = Request(
         preview_image_url,
@@ -161,24 +182,36 @@ def test_share_links_live_note_and_shortcut(
     assert snippet_url_parts.path == f"/share/v2/{snippet_link['token']}", snippet_link
     assert not snippet_url_parts.query, snippet_link
     assert not snippet_url_parts.fragment, snippet_link
-    legacy_snippet_url = urlunsplit(
-        snippet_url_parts._replace(path=f"/share/{snippet_link['token']}")
+    snippet_html_urls = _share_url_matrix(
+        snippet_link["public_url"], snippet_link["token"]
     )
-    assert public_http.head_or_get_status(snippet_link["public_url"]) == 200
-    status, public_snippet_html = public_http.request_text("GET", snippet_link["public_url"])
-    assert status == 200, public_snippet_html[:300]
-    assert "<h3>Snippet Section</h3>" in public_snippet_html
-    assert "<strong>snippet bold</strong>" in public_snippet_html
-    assert "href='https://example.com/ref'>DocsRef</a>" in public_snippet_html
-    assert "<table>" in public_snippet_html
-    assert "<th>Назначение</th>" in public_snippet_html
-    assert '<td style="text-align:right">7443</td>' in public_snippet_html
-    assert "<code>code</code>" in public_snippet_html
-    assert "[1]:" not in public_snippet_html
-    status, legacy_snippet_html = public_http.request_text("GET", legacy_snippet_url)
-    assert status == 200, legacy_snippet_html[:300]
-    assert "<h3>Snippet Section</h3>" in legacy_snippet_html
-    assert "<strong>snippet bold</strong>" in legacy_snippet_html
+    snippet_preview_image_url = urlunsplit(
+        snippet_url_parts._replace(
+            path="/share/preview-card-v2.png",
+            query="",
+            fragment="",
+        )
+    )
+    for snippet_html_url in snippet_html_urls:
+        assert public_http.head_or_get_status(snippet_html_url) == 200
+        status, public_snippet_html = public_http.request_text("GET", snippet_html_url)
+        assert status == 200, public_snippet_html[:300]
+        assert "<h3>Snippet Section</h3>" in public_snippet_html
+        assert "<strong>snippet bold</strong>" in public_snippet_html
+        assert "href='https://example.com/ref'>DocsRef</a>" in public_snippet_html
+        assert "<table>" in public_snippet_html
+        assert "<th>Назначение</th>" in public_snippet_html
+        assert '<td style="text-align:right">7443</td>' in public_snippet_html
+        assert "<code>code</code>" in public_snippet_html
+        assert "[1]:" not in public_snippet_html
+        assert (
+            f'<meta property="og:url" content="{snippet_link["public_url"]}">'
+            in public_snippet_html
+        )
+        assert (
+            f'<meta property="og:image" content="{snippet_preview_image_url}">'
+            in public_snippet_html
+        )
 
     _push(
         api_client,
@@ -222,17 +255,46 @@ def test_share_links_live_note_and_shortcut(
     assert public_snippet_v2["name"] == f"{unique_prefix}_snippet_v2"
     assert public_snippet_v2["value"] == "snippet value v2"
 
-    for public_url in (note_link["public_url"], legacy_note_url):
+    status, note_status_v2 = api_client.request_json(
+        "GET",
+        f"/v1/share-links?item_type=note&item_uuid={note_uuid}",
+    )
+    assert status == 200, note_status_v2
+    assert note_status_v2["link"]["public_url"] == note_link["public_url"]
+    status, snippet_status_v2 = api_client.request_json(
+        "GET",
+        f"/v1/share-links?item_type=shortcut&item_uuid={shortcut_uuid}",
+    )
+    assert status == 200, snippet_status_v2
+    assert snippet_status_v2["link"]["public_url"] == snippet_link["public_url"]
+
+    for public_url in note_html_urls:
         status, public_note_html_v2 = public_http.request_text("GET", public_url)
         assert status == 200, public_note_html_v2[:300]
         assert f"{unique_prefix}_note_v2" in public_note_html_v2
         assert "note content v2" in public_note_html_v2
+        assert (
+            f'<meta property="og:url" content="{note_link["public_url"]}">'
+            in public_note_html_v2
+        )
+        assert (
+            f'<meta property="og:image" content="{preview_image_url}">'
+            in public_note_html_v2
+        )
 
-    for public_url in (snippet_link["public_url"], legacy_snippet_url):
+    for public_url in snippet_html_urls:
         status, public_snippet_html_v2 = public_http.request_text("GET", public_url)
         assert status == 200, public_snippet_html_v2[:300]
         assert f"{unique_prefix}_snippet_v2" in public_snippet_html_v2
         assert "snippet value v2" in public_snippet_html_v2
+        assert (
+            f'<meta property="og:url" content="{snippet_link["public_url"]}">'
+            in public_snippet_html_v2
+        )
+        assert (
+            f'<meta property="og:image" content="{snippet_preview_image_url}">'
+            in public_snippet_html_v2
+        )
 
     status, _ = api_client.request_json("DELETE", f"/v1/share-links/{note_link['token']}")
     assert status == 200
@@ -241,6 +303,9 @@ def test_share_links_live_note_and_shortcut(
         f"{smoke_config.api_base_url}/v1/public/share/{note_link['token']}",
     )
     assert status == 404, revoked_note
+    for public_url in note_html_urls:
+        status, _ = public_http.request_text("GET", public_url)
+        assert status == 404, public_url
 
     status, _ = api_client.request_json("DELETE", f"/v1/share-links/{snippet_link['token']}")
     assert status == 200
@@ -249,3 +314,6 @@ def test_share_links_live_note_and_shortcut(
         f"{smoke_config.api_base_url}/v1/public/share/{snippet_link['token']}",
     )
     assert status == 404, revoked_snippet
+    for public_url in snippet_html_urls:
+        status, _ = public_http.request_text("GET", public_url)
+        assert status == 404, public_url

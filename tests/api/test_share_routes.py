@@ -27,9 +27,8 @@ def test_public_share_routes_serve_v2_legacy_and_preview_image(monkeypatch, tmp_
     monkeypatch.chdir(tmp_path)
 
     async def request_routes():
-        transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(
-            transport=transport,
+            transport=httpx.ASGITransport(app=app),
             base_url="http://preview.example",
             headers={"x-forwarded-proto": "https"},
         ) as client:
@@ -37,11 +36,43 @@ def test_public_share_routes_serve_v2_legacy_and_preview_image(monkeypatch, tmp_
             v2 = await client.get("/share/v2/abc")
             legacy = await client.get("/share/abc")
             legacy_query = await client.get("/share/abc?preview=1")
-        return image, v2, legacy, legacy_query
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://ister-app.ru",
+            headers={"x-forwarded-proto": "https"},
+        ) as apex_client:
+            apex_v2 = await apex_client.get("/share/v2/abc")
+            apex_legacy = await apex_client.get("/share/abc")
+            apex_legacy_query = await apex_client.get("/share/abc?preview=1")
+            invalid_port = await apex_client.get(
+                "/share/v2/abc", headers={"host": "ister-app.ru:notaport"}
+            )
+            out_of_range_port = await apex_client.get(
+                "/share/v2/abc", headers={"host": "ister-app.ru:70000"}
+            )
+        return (
+            image,
+            v2,
+            legacy,
+            legacy_query,
+            apex_v2,
+            apex_legacy,
+            apex_legacy_query,
+            invalid_port,
+            out_of_range_port,
+        )
 
-    image_response, v2_response, legacy_response, legacy_query_response = asyncio.run(
-        request_routes()
-    )
+    (
+        image_response,
+        v2_response,
+        legacy_response,
+        legacy_query_response,
+        apex_v2_response,
+        apex_legacy_response,
+        apex_legacy_query_response,
+        invalid_port_response,
+        out_of_range_port_response,
+    ) = asyncio.run(request_routes())
 
     assert image_response.status_code == 200
     assert image_response.headers["content-type"] == "image/png"
@@ -69,3 +100,31 @@ def test_public_share_routes_serve_v2_legacy_and_preview_image(monkeypatch, tmp_
         'content="https://preview.example/share/preview-card-v2.png">'
         in v2_response.text
     )
+
+    assert apex_v2_response.status_code == 200
+    assert apex_legacy_response.status_code == 200
+    assert apex_legacy_query_response.status_code == 200
+    assert apex_v2_response.text == apex_legacy_response.text
+    assert apex_v2_response.text == apex_legacy_query_response.text
+    assert (
+        '<meta property="og:url" '
+        'content="https://www.ister-app.ru/share/v2/abc">'
+        in apex_v2_response.text
+    )
+    assert (
+        '<meta property="og:image" '
+        'content="https://www.ister-app.ru/share/preview-card-v2.png">'
+        in apex_v2_response.text
+    )
+    for invalid_host_response in (invalid_port_response, out_of_range_port_response):
+        assert invalid_host_response.status_code == 200
+        assert (
+            '<meta property="og:url" '
+            'content="https://www.ister-app.ru/share/v2/abc">'
+            in invalid_host_response.text
+        )
+        assert (
+            '<meta property="og:image" '
+            'content="https://www.ister-app.ru/share/preview-card-v2.png">'
+            in invalid_host_response.text
+        )

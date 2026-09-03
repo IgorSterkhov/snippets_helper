@@ -2122,7 +2122,8 @@ async def run_tests():
         public_url = await cdp.eval(
             "document.querySelector('.share-link-modal > .share-link-input')?.value || ''"
         )
-        assert '/share/v2/' in public_url and '?' not in public_url, public_url
+        assert public_url.startswith('https://www.ister-app.ru/share/v2/'), public_url
+        assert '?' not in public_url, public_url
         await wait_until(cdp, "document.body.innerText.includes('Telegra.ph')", timeout=3)
         await cdp.eval(
             "[...document.querySelectorAll('.share-link-telegraph-actions button')]"

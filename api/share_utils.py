@@ -12,8 +12,24 @@ from api.markdown_tables import (
 from api.media_utils import public_html_base_url
 
 
+PRODUCTION_SHARE_HOST = "ister-app.ru"
+CANONICAL_SHARE_HOST = "www.ister-app.ru"
+
+
 def generate_share_token() -> str:
     return secrets.token_urlsafe(32)
+
+
+def _canonical_share_netloc(parsed) -> str:
+    if (parsed.hostname or "").lower() != PRODUCTION_SHARE_HOST:
+        return parsed.netloc
+    try:
+        port = parsed.port
+    except ValueError:
+        return CANONICAL_SHARE_HOST
+    if port is None:
+        return CANONICAL_SHARE_HOST
+    return f"{CANONICAL_SHARE_HOST}:{port}"
 
 
 def build_public_url(request_url: str, token: str, forwarded_proto: str | None = None) -> str:
@@ -23,7 +39,7 @@ def build_public_url(request_url: str, token: str, forwarded_proto: str | None =
         candidate = forwarded_proto.split(",", 1)[0].strip().lower()
         if candidate in {"http", "https"}:
             scheme = candidate
-    return f"{scheme}://{parsed.netloc}/share/v2/{token}"
+    return f"{scheme}://{_canonical_share_netloc(parsed)}/share/v2/{token}"
 
 
 def _safe_links(raw: str | list | None) -> list[dict[str, str]]:

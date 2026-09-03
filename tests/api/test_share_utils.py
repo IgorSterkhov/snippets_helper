@@ -50,7 +50,7 @@ def test_generate_share_token_is_url_safe_and_long():
 def test_build_public_url_uses_root_share_path():
     assert (
         build_public_url("https://ister-app.ru/snippets-api/v1/share-links", "abc")
-        == "https://ister-app.ru/share/v2/abc"
+        == "https://www.ister-app.ru/share/v2/abc"
     )
 
 
@@ -61,7 +61,48 @@ def test_build_public_url_uses_forwarded_proto():
             "abc",
             forwarded_proto="https",
         )
-        == "https://ister-app.ru/share/v2/abc"
+        == "https://www.ister-app.ru/share/v2/abc"
+    )
+
+
+def test_build_public_url_keeps_canonical_www_host():
+    assert (
+        build_public_url(
+            "https://www.ister-app.ru/snippets-api/v1/share-links", "abc"
+        )
+        == "https://www.ister-app.ru/share/v2/abc"
+    )
+
+
+def test_build_public_url_preserves_apex_port_while_canonicalizing():
+    assert (
+        build_public_url("http://ister-app.ru:8001/v1/share-links", "abc")
+        == "http://www.ister-app.ru:8001/share/v2/abc"
+    )
+
+
+def test_build_public_url_drops_nonnumeric_apex_port_while_canonicalizing():
+    assert (
+        build_public_url("https://ister-app.ru:notaport/v1/share-links", "abc")
+        == "https://www.ister-app.ru/share/v2/abc"
+    )
+
+
+def test_build_public_url_drops_out_of_range_apex_port_while_canonicalizing():
+    assert (
+        build_public_url("https://ister-app.ru:70000/v1/share-links", "abc")
+        == "https://www.ister-app.ru/share/v2/abc"
+    )
+
+
+def test_build_public_url_does_not_rewrite_other_hosts_or_subdomains():
+    assert (
+        build_public_url("http://preview.example/v1/share-links", "abc")
+        == "http://preview.example/share/v2/abc"
+    )
+    assert (
+        build_public_url("https://share.ister-app.ru/v1/share-links", "abc")
+        == "https://share.ister-app.ru/share/v2/abc"
     )
 
 
